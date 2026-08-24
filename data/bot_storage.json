@@ -1,0 +1,795 @@
+{
+  "settings": {
+    "-1004353139683": {
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "linksProtection": true,
+      "stickerProtection": true,
+      "warnLimit": 3,
+      "reportsEnabled": true,
+      "updatedAt": "2026-08-24T19:39:58.130Z"
+    },
+    "-1004356470022": {
+      "chatId": -1004356470022,
+      "chatTitle": "Lovers",
+      "linksProtection": true,
+      "stickerProtection": true,
+      "warnLimit": 3,
+      "reportsEnabled": true,
+      "updatedAt": "2026-08-24T20:28:28.756Z"
+    }
+  },
+  "warnings": [],
+  "stickerFreeUsers": [],
+  "schedules": [],
+  "logs": [
+    {
+      "id": "73knjtv",
+      "timestamp": "2026-08-24T19:39:18.049Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "action": "unfree_sticker",
+      "reason": "Admin revoked sticker exemption"
+    },
+    {
+      "id": "71ij07q",
+      "timestamp": "2026-08-24T19:39:51.224Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "action": "unfree_sticker",
+      "reason": "Admin revoked sticker exemption"
+    },
+    {
+      "id": "35hbhug",
+      "timestamp": "2026-08-24T19:39:59.487Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "action": "delete_sticker",
+      "reason": "Unauthorized sticker sent"
+    },
+    {
+      "id": "47ay0dg",
+      "timestamp": "2026-08-24T19:40:32.399Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "action": "free_sticker",
+      "reason": "Admin sticker exemption"
+    },
+    {
+      "id": "p9xi0jr",
+      "timestamp": "2026-08-24T19:40:42.206Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "action": "unfree_sticker",
+      "reason": "Admin revoked sticker exemption"
+    },
+    {
+      "id": "nkx1am3",
+      "timestamp": "2026-08-24T19:41:01.471Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "action": "unfree_sticker",
+      "reason": "Admin revoked sticker exemption"
+    },
+    {
+      "id": "f8ahjoy",
+      "timestamp": "2026-08-24T19:44:21.094Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "action": "ban",
+      "reason": "Admin ban"
+    },
+    {
+      "id": "qx5diva",
+      "timestamp": "2026-08-24T19:44:58.566Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "action": "unban",
+      "reason": "Admin unban"
+    },
+    {
+      "id": "qa5edfh",
+      "timestamp": "2026-08-24T20:14:38.237Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "groupId": -1004353139683,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "targetId": 8204962552,
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "targetTelegramStatus": "administrator",
+      "targetCustomRole": "NONE",
+      "command": "kick",
+      "action": "kick",
+      "result": "error",
+      "telegramError": "Bad Request: user is an administrator of the chat"
+    },
+    {
+      "id": "1u5iwyx",
+      "timestamp": "2026-08-24T20:15:13.280Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "groupId": -1004353139683,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "command": "demote",
+      "action": "demote",
+      "result": "denied",
+      "reason": "⚠️ Cannot demote the bot itself."
+    },
+    {
+      "id": "1r3d66z",
+      "timestamp": "2026-08-24T20:15:24.673Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "groupId": -1004353139683,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "targetId": 8204962552,
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "targetTelegramStatus": "administrator",
+      "targetCustomRole": "NONE",
+      "command": "demote",
+      "action": "demote",
+      "result": "error",
+      "telegramError": "Bad Request: CHAT_ADMIN_REQUIRED"
+    },
+    {
+      "id": "2xbo6rd",
+      "timestamp": "2026-08-24T20:24:44.642Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "groupId": -1004353139683,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "targetId": 8204962552,
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "targetTelegramStatus": "administrator",
+      "targetCustomRole": "NONE",
+      "command": "demote",
+      "action": "demote",
+      "result": "error",
+      "telegramError": "Bad Request: CHAT_ADMIN_REQUIRED"
+    },
+    {
+      "id": "5keq0zy",
+      "timestamp": "2026-08-24T20:25:49.336Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "groupId": -1004353139683,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "targetId": 8204962552,
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "targetTelegramStatus": "administrator",
+      "targetCustomRole": "NONE",
+      "command": "demote",
+      "action": "demote",
+      "result": "error",
+      "telegramError": "Bad Request: CHAT_ADMIN_REQUIRED"
+    },
+    {
+      "id": "w5syyqc",
+      "timestamp": "2026-08-24T20:25:56.639Z",
+      "chatId": -1004353139683,
+      "chatTitle": "Insta videos",
+      "groupId": -1004353139683,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "targetId": 8204962552,
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "targetTelegramStatus": "administrator",
+      "targetCustomRole": "NONE",
+      "command": "demote",
+      "action": "demote",
+      "result": "error",
+      "telegramError": "Bad Request: CHAT_ADMIN_REQUIRED"
+    },
+    {
+      "id": "pye5ix9",
+      "timestamp": "2026-08-24T20:30:02.166Z",
+      "chatId": -1004356470022,
+      "chatTitle": "Lovers",
+      "groupId": -1004356470022,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "command": "demote",
+      "action": "demote",
+      "result": "denied",
+      "reason": "❌ Cannot demote the bot itself."
+    },
+    {
+      "id": "qg52cgq",
+      "timestamp": "2026-08-24T20:30:11.664Z",
+      "chatId": -1004356470022,
+      "chatTitle": "Lovers",
+      "groupId": -1004356470022,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "command": "demote",
+      "action": "demote",
+      "result": "denied",
+      "reason": "⚠️ Cannot perform moderation actions against anonymous administrators or channels."
+    },
+    {
+      "id": "d0lokpd",
+      "timestamp": "2026-08-24T20:37:22.194Z",
+      "chatId": -1004356470022,
+      "chatTitle": "Lovers",
+      "groupId": -1004356470022,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "command": "unfree",
+      "action": "unfree_sticker",
+      "result": "success",
+      "reason": "Admin revoked sticker exemption"
+    },
+    {
+      "id": "vs4l0ty",
+      "timestamp": "2026-08-24T20:37:58.175Z",
+      "chatId": -1004356470022,
+      "chatTitle": "Lovers",
+      "groupId": -1004356470022,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "targetId": 8204962552,
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "targetTelegramStatus": "administrator",
+      "targetCustomRole": "NONE",
+      "command": "demote",
+      "action": "demote",
+      "result": "denied",
+      "reason": "⚠️ I don't have permission to modify this administrator. They may have been promoted by a higher-level administrator or are outside my admin hierarchy."
+    },
+    {
+      "id": "oz6h62g",
+      "timestamp": "2026-08-24T20:40:05.538Z",
+      "chatId": -1004356470022,
+      "chatTitle": "Lovers",
+      "groupId": -1004356470022,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "targetId": 5801492206,
+      "targetUserId": 5801492206,
+      "targetUsername": "devillove_143",
+      "targetTelegramStatus": "administrator",
+      "targetCustomRole": "NONE",
+      "command": "demote",
+      "action": "demote",
+      "result": "denied",
+      "reason": "⚠️ I don't have permission to modify this administrator. They may have been promoted by a higher-level administrator or are outside my admin hierarchy."
+    }
+  ],
+  "knownUsers": {
+    "rojloo": {
+      "userId": 8864012889,
+      "username": "Rojloo",
+      "firstName": "Vaani",
+      "groupId": -1004356470022,
+      "lastSeen": "2026-08-24T20:40:03.392Z"
+    },
+    "palindrome1551": {
+      "userId": 8204962552,
+      "username": "palindrome1551",
+      "firstName": "susss",
+      "groupId": -1004356470022,
+      "lastSeen": "2026-08-24T20:39:10.723Z"
+    },
+    "missroxie_bot": {
+      "userId": 8841013562,
+      "username": "MissRoxie_Bot",
+      "firstName": "Roxie",
+      "groupId": -1004356470022,
+      "lastSeen": "2026-08-24T20:30:01.926Z"
+    },
+    "owner_user": {
+      "userId": 1001,
+      "username": "owner_user",
+      "firstName": "OwnerUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.396Z"
+    },
+    "admin1_user": {
+      "userId": 2001,
+      "username": "admin1_user",
+      "firstName": "Admin1",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:19:21.478Z"
+    },
+    "admin2_user": {
+      "userId": 2002,
+      "username": "admin2_user",
+      "firstName": "Admin2",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:19:21.490Z"
+    },
+    "mod_user": {
+      "userId": 3001,
+      "username": "mod_user",
+      "firstName": "ModUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.392Z",
+      "customRole": "MODERATOR"
+    },
+    "member1_user": {
+      "userId": 4001,
+      "username": "member1_user",
+      "firstName": "Member1",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.397Z"
+    },
+    "testbot": {
+      "userId": 9999,
+      "username": "TestBot",
+      "firstName": "TestBot",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.396Z"
+    },
+    "test_member_alpha": {
+      "userId": 77770001,
+      "username": "test_member_alpha",
+      "firstName": "Member Alpha",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:35.499Z"
+    },
+    "test_mod_user": {
+      "userId": 77770003,
+      "username": "test_mod_user",
+      "firstName": "Mod User",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:27.330Z",
+      "customRole": "MODERATOR"
+    },
+    "second_admin": {
+      "userId": 8204969999,
+      "username": "second_admin",
+      "firstName": "Second Admin",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:31.307Z"
+    },
+    "old_handle": {
+      "userId": 55552,
+      "username": "old_handle",
+      "firstName": "User B (New Owner)",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:34.329Z"
+    },
+    "admin_promote": {
+      "userId": 2001,
+      "username": "admin_promote",
+      "firstName": "AdminWithPromote",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.395Z"
+    },
+    "recycled_handle": {
+      "userId": 8002,
+      "username": "recycled_handle",
+      "firstName": "NewUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:19:21.489Z"
+    },
+    "admin_nopromote": {
+      "userId": 2002,
+      "username": "admin_nopromote",
+      "firstName": "AdminNoPromote",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.398Z"
+    },
+    "target_editable": {
+      "userId": 2003,
+      "username": "target_editable",
+      "firstName": "TargetEditable",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.396Z"
+    },
+    "target_uneditable": {
+      "userId": 2004,
+      "username": "target_uneditable",
+      "firstName": "TargetUneditable",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.394Z"
+    },
+    "devillove_143": {
+      "userId": 5801492206,
+      "username": "devillove_143",
+      "firstName": "Devil",
+      "lastName": "Lover",
+      "groupId": -1004356470022,
+      "lastSeen": "2026-08-24T20:39:10.723Z"
+    }
+  },
+  "knownUsersById": {
+    "1001": {
+      "userId": 1001,
+      "username": "owner_user",
+      "firstName": "OwnerUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.396Z"
+    },
+    "2001": {
+      "userId": 2001,
+      "username": "admin_promote",
+      "firstName": "AdminWithPromote",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.395Z"
+    },
+    "2002": {
+      "userId": 2002,
+      "username": "admin_nopromote",
+      "firstName": "AdminNoPromote",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.398Z"
+    },
+    "2003": {
+      "userId": 2003,
+      "firstName": "TargetEditable",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.396Z",
+      "username": "target_editable"
+    },
+    "2004": {
+      "userId": 2004,
+      "username": "target_uneditable",
+      "firstName": "TargetUneditable",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.394Z"
+    },
+    "3001": {
+      "userId": 3001,
+      "username": "mod_user",
+      "firstName": "ModUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.392Z",
+      "customRole": "MODERATOR"
+    },
+    "4001": {
+      "userId": 4001,
+      "username": "member1_user",
+      "firstName": "Member1",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.397Z"
+    },
+    "4002": {
+      "userId": 4002,
+      "firstName": "NoUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.392Z"
+    },
+    "8001": {
+      "userId": 8001,
+      "firstName": "OldUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:19:21.479Z"
+    },
+    "8002": {
+      "userId": 8002,
+      "username": "recycled_handle",
+      "firstName": "NewUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:19:21.489Z"
+    },
+    "9999": {
+      "userId": 9999,
+      "username": "TestBot",
+      "firstName": "TestBot",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.396Z"
+    },
+    "55551": {
+      "userId": 55551,
+      "firstName": "User A",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:34.329Z"
+    },
+    "55552": {
+      "userId": 55552,
+      "firstName": "User B (New Owner)",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:34.329Z",
+      "username": "old_handle"
+    },
+    "77770001": {
+      "userId": 77770001,
+      "username": "test_member_alpha",
+      "firstName": "Member Alpha",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:35.499Z"
+    },
+    "77770002": {
+      "userId": 77770002,
+      "firstName": "NoUser Member",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:33.865Z"
+    },
+    "77770003": {
+      "userId": 77770003,
+      "username": "test_mod_user",
+      "firstName": "Mod User",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:27.330Z",
+      "customRole": "MODERATOR"
+    },
+    "8864012889": {
+      "id": 8864012889,
+      "username": "Rojloo",
+      "firstName": "Vaani",
+      "lastSeen": "2026-08-24T20:40:03.392Z",
+      "userId": 8864012889,
+      "groupId": -1004356470022
+    },
+    "8204962552": {
+      "id": 8204962552,
+      "username": "palindrome1551",
+      "firstName": "susss",
+      "lastSeen": "2026-08-24T20:39:10.723Z",
+      "userId": 8204962552,
+      "groupId": -1004356470022
+    },
+    "8841013562": {
+      "id": 8841013562,
+      "username": "MissRoxie_Bot",
+      "firstName": "Roxie",
+      "lastSeen": "2026-08-24T20:30:01.926Z",
+      "userId": 8841013562,
+      "groupId": -1004356470022
+    },
+    "8204969999": {
+      "userId": 8204969999,
+      "username": "second_admin",
+      "firstName": "Second Admin",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:31.307Z"
+    },
+    "5801492206": {
+      "userId": 5801492206,
+      "username": "devillove_143",
+      "firstName": "Devil",
+      "lastName": "Lover",
+      "groupId": -1004356470022,
+      "lastSeen": "2026-08-24T20:39:10.723Z"
+    }
+  },
+  "groupMembers": {
+    "-1001234567890_1001": {
+      "userId": 1001,
+      "username": "owner_user",
+      "firstName": "OwnerUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.396Z"
+    },
+    "-1001234567890_2001": {
+      "userId": 2001,
+      "username": "admin_promote",
+      "firstName": "AdminWithPromote",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.395Z"
+    },
+    "-1001234567890_2002": {
+      "userId": 2002,
+      "username": "admin_nopromote",
+      "firstName": "AdminNoPromote",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.398Z"
+    },
+    "-1001234567890_3001": {
+      "userId": 3001,
+      "username": "mod_user",
+      "firstName": "ModUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.392Z",
+      "customRole": "MODERATOR"
+    },
+    "-1001234567890_4001": {
+      "userId": 4001,
+      "username": "member1_user",
+      "firstName": "Member1",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.397Z"
+    },
+    "-1001234567890_4002": {
+      "userId": 4002,
+      "firstName": "NoUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.392Z"
+    },
+    "-1001234567890_9999": {
+      "userId": 9999,
+      "username": "TestBot",
+      "firstName": "TestBot",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.396Z"
+    },
+    "-1004353139683_8864012889": {
+      "userId": 8864012889,
+      "username": "Rojloo",
+      "firstName": "Vaani",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:26:04.229Z"
+    },
+    "-1004353139683_8204962552": {
+      "userId": 8204962552,
+      "username": "palindrome1551",
+      "firstName": "susss",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:25:47.496Z"
+    },
+    "-1004353139683_77770001": {
+      "userId": 77770001,
+      "username": "test_member_alpha",
+      "firstName": "Member Alpha",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:35.499Z"
+    },
+    "-1004353139683_77770002": {
+      "userId": 77770002,
+      "firstName": "NoUser Member",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:33.865Z"
+    },
+    "-1004353139683_77770003": {
+      "userId": 77770003,
+      "username": "test_mod_user",
+      "firstName": "Mod User",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:27.330Z",
+      "customRole": "MODERATOR"
+    },
+    "-1004353139683_8204969999": {
+      "userId": 8204969999,
+      "username": "second_admin",
+      "firstName": "Second Admin",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:31.307Z"
+    },
+    "-1004353139683_55551": {
+      "userId": 55551,
+      "firstName": "User A",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:34.329Z"
+    },
+    "-1004353139683_55552": {
+      "userId": 55552,
+      "username": "old_handle",
+      "firstName": "User B (New Owner)",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:20:34.329Z"
+    },
+    "-1004353139683_8841013562": {
+      "userId": 8841013562,
+      "username": "MissRoxie_Bot",
+      "firstName": "Roxie",
+      "groupId": -1004353139683,
+      "lastSeen": "2026-08-24T20:26:04.229Z"
+    },
+    "-1001234567890_2003": {
+      "userId": 2003,
+      "username": "target_editable",
+      "firstName": "TargetEditable",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.396Z"
+    },
+    "-1001234567890_8001": {
+      "userId": 8001,
+      "firstName": "OldUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:19:21.479Z"
+    },
+    "-1001234567890_8002": {
+      "userId": 8002,
+      "username": "recycled_handle",
+      "firstName": "NewUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:19:21.489Z"
+    },
+    "-1004356470022_8864012889": {
+      "userId": 8864012889,
+      "username": "Rojloo",
+      "firstName": "Vaani",
+      "groupId": -1004356470022,
+      "lastSeen": "2026-08-24T20:40:03.392Z"
+    },
+    "-1004356470022_8841013562": {
+      "userId": 8841013562,
+      "username": "MissRoxie_Bot",
+      "firstName": "Roxie",
+      "groupId": -1004356470022,
+      "lastSeen": "2026-08-24T20:30:01.926Z"
+    },
+    "-1001234567890_2004": {
+      "userId": 2004,
+      "username": "target_uneditable",
+      "firstName": "TargetUneditable",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T20:44:42.394Z"
+    },
+    "-1004356470022_8204962552": {
+      "userId": 8204962552,
+      "username": "palindrome1551",
+      "firstName": "susss",
+      "groupId": -1004356470022,
+      "lastSeen": "2026-08-24T20:39:10.723Z"
+    },
+    "-1004356470022_5801492206": {
+      "userId": 5801492206,
+      "username": "devillove_143",
+      "firstName": "Devil",
+      "lastName": "Lover",
+      "groupId": -1004356470022,
+      "lastSeen": "2026-08-24T20:39:10.723Z"
+    }
+  },
+  "customRoles": {
+    "-1001234567890_3001": "MODERATOR",
+    "-1004353139683_77770003": "MODERATOR",
+    "-1004353139683_77770010": "MODERATOR"
+  }
+}

@@ -1,6 +1,6 @@
 {
-  "name": "Telegram Bot Service",
-  "description": "Server-side Telegram Bot application with secure secret configuration.",
+  "name": "Telegram Group Moderation Bot",
+  "description": "Server-side Telegram Bot with complete group administration, link and sticker protection, warning engine, automated message scheduler, and moderation audit trail.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
