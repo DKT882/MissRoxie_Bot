@@ -30,6 +30,7 @@ async function runTestSuite() {
   const modId = 3001;
   const member1Id = 4001;
   const memberNoUsernameId = 4002;
+  const leftUserId = 5001;
   const botId = 9999;
   const anonAdminProxyId = 1087968824;
 
@@ -38,6 +39,13 @@ async function runTestSuite() {
     ok: true,
     result: { id: botId, is_bot: true, first_name: 'TestBot', username: 'TestBot' }
   });
+
+  // Track promoteChatMember API invocations for verification
+  let promoteCalls: Array<{ chatId: number; userId: number; permissions: any }> = [];
+  telegramApi.promoteChatMember = async (cId: number, uId: number, perms: any) => {
+    promoteCalls.push({ chatId: cId, userId: uId, permissions: perms });
+    return { ok: true };
+  };
 
   // Mock getChatMember
   const memberStatusMap: Record<number, any> = {
@@ -89,6 +97,10 @@ async function runTestSuite() {
       status: 'member',
       user: { id: memberNoUsernameId, is_bot: false, first_name: 'NoUser' }
     },
+    [leftUserId]: {
+      status: 'left',
+      user: { id: leftUserId, is_bot: false, first_name: 'LeftUser', username: 'left_user' }
+    },
     [botId]: {
       status: 'administrator',
       can_restrict_members: true,
@@ -117,6 +129,7 @@ async function runTestSuite() {
   db.cacheUser({ id: modId, username: 'mod_user', first_name: 'ModUser' }, chatId);
   db.cacheUser({ id: member1Id, username: 'member1_user', first_name: 'Member1' }, chatId);
   db.cacheUser({ id: memberNoUsernameId, first_name: 'NoUser' }, chatId);
+  db.cacheUser({ id: leftUserId, username: 'left_user', first_name: 'LeftUser' }, chatId);
 
   const makeCtx = (actorId: number, cmd: string, args: string[], replyToUser?: any, isAnon: boolean = false): CommandContext => ({
     message: {
@@ -299,9 +312,177 @@ async function runTestSuite() {
   }
 
   // ==========================================
-  // SECTION 3: OTHER MODERATION COMMANDS AUDIT
+  // SECTION 3: /PROMOTE DEDICATED TEST MATRIX (PROMOTE-01 to PROMOTE-18)
   // ==========================================
-  console.log('\n--- Section 3: Kick, Ban, Warn Verifications ---');
+  console.log('\n--- Section 3: /promote Dedicated Test Matrix ---');
+
+  // PROMOTE-01: Owner -> promote normal member -> success
+  {
+    const ctx = makeCtx(ownerId, '/promote', [], { from: memberStatusMap[member1Id].user });
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === true && res.target?.targetUserId === member1Id, 'PROMOTE-01: Owner promotes normal member -> Success');
+  }
+
+  // PROMOTE-02: Admin with can_promote_members -> promote normal member -> success
+  {
+    const ctx = makeCtx(adminWithPromoteId, '/promote', [], { from: memberStatusMap[member1Id].user });
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === true && res.target?.targetUserId === member1Id, 'PROMOTE-02: Admin with can_promote_members promotes normal member -> Success');
+  }
+
+  // PROMOTE-03: Admin without can_promote_members -> blocked
+  {
+    const ctx = makeCtx(adminWithoutPromoteId, '/promote', [], { from: memberStatusMap[member1Id].user });
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === false && res.reason?.includes('You need the "Add New Admins" administrator permission to promote members'), 'PROMOTE-03: Admin without can_promote_members -> Blocked');
+  }
+
+  // PROMOTE-04: Custom MODERATOR -> blocked
+  {
+    const ctx = makeCtx(modId, '/promote', [], { from: memberStatusMap[member1Id].user });
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === false && res.reason?.includes('You need the "Add New Admins" administrator permission to promote members'), 'PROMOTE-04: Custom MODERATOR -> Blocked');
+  }
+
+  // PROMOTE-05: Anonymous admin -> correct actor handling
+  {
+    const ctx = makeCtx(anonAdminProxyId, '/promote', ['@member1_user'], undefined, true);
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === true && res.actor?.isAnonymousAdmin === true, 'PROMOTE-05: Anonymous admin -> Correct actor handling and allowed');
+  }
+
+  // PROMOTE-06: Reply target -> correct user promoted
+  {
+    const ctx = makeCtx(adminWithPromoteId, '/promote', [], { from: memberStatusMap[member1Id].user });
+    const resolved = await TelegramMiddleware.resolveTargetUser(ctx);
+    assert(resolved.type === 'user' && resolved.userId === member1Id && resolved.source === 'reply', 'PROMOTE-06: Reply target -> Correct user resolved');
+  }
+
+  // PROMOTE-07: Username target -> correct user promoted
+  {
+    const ctx = makeCtx(adminWithPromoteId, '/promote', ['@member1_user']);
+    const resolved = await TelegramMiddleware.resolveTargetUser(ctx);
+    assert(resolved.type === 'user' && resolved.userId === member1Id && resolved.source === 'username', 'PROMOTE-07: Username target -> Correct user resolved');
+  }
+
+  // PROMOTE-08: Numeric ID target -> correct user promoted
+  {
+    const ctx = makeCtx(adminWithPromoteId, '/promote', [String(member1Id)]);
+    const resolved = await TelegramMiddleware.resolveTargetUser(ctx);
+    assert(resolved.type === 'user' && resolved.userId === member1Id && resolved.source === 'numeric_id', 'PROMOTE-08: Numeric ID target -> Correct user resolved');
+  }
+
+  // PROMOTE-09: No target -> friendly error
+  {
+    const ctx = makeCtx(adminWithPromoteId, '/promote', []);
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === false && (res.reason?.includes('identify that user') || res.reason?.includes('reply to the target')), 'PROMOTE-09: No target -> Friendly error');
+  }
+
+  // PROMOTE-10: Target already administrator -> blocked
+  {
+    const ctx = makeCtx(adminWithPromoteId, '/promote', ['@admin_nopromote']);
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === false && res.reason?.includes('That user is already an administrator'), 'PROMOTE-10: Target already administrator -> Blocked');
+  }
+
+  // PROMOTE-11: Target is group owner -> blocked
+  {
+    const ctx = makeCtx(adminWithPromoteId, '/promote', ['@owner_user']);
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === false && res.reason?.includes('That user is already the group owner'), 'PROMOTE-11: Target is group owner -> Blocked');
+  }
+
+  // PROMOTE-12: Target is bot -> blocked
+  {
+    const ctx = makeCtx(ownerId, '/promote', [], { from: memberStatusMap[botId].user });
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === false && res.reason?.includes('Cannot promote the bot itself'), 'PROMOTE-12: Target is bot -> Blocked');
+  }
+
+  // PROMOTE-13: Actor promotes themselves -> blocked
+  {
+    const ctx = makeCtx(adminWithPromoteId, '/promote', [String(adminWithPromoteId)]);
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === false && res.reason?.includes('You cannot promote yourself'), 'PROMOTE-13: Actor promotes themselves -> Blocked');
+  }
+
+  // PROMOTE-14: Target left group -> blocked
+  {
+    const ctx = makeCtx(ownerId, '/promote', ['@left_user']);
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === false && res.reason?.includes('not currently a member of this group'), 'PROMOTE-14: Target left group -> Blocked');
+  }
+
+  // PROMOTE-15: Bot lacks can_promote_members -> blocked
+  {
+    // Temporarily remove bot's can_promote_members permission
+    const origBotPerm = memberStatusMap[botId].can_promote_members;
+    memberStatusMap[botId].can_promote_members = false;
+
+    const ctx = makeCtx(ownerId, '/promote', ['@member1_user']);
+    const res = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+    assert(res.allowed === false && res.reason?.includes('needs the "Add New Admins" administrator permission to promote members'), 'PROMOTE-15: Bot lacking can_promote_members -> Blocked');
+
+    // Restore bot permission
+    memberStatusMap[botId].can_promote_members = origBotPerm;
+  }
+
+  // PROMOTE-16: Telegram rejects promotion -> friendly mapped error
+  {
+    const err1 = mapTelegramError('promote', 'Bad Request: CANNOT_PROMOTE_USER', 400);
+    const err2 = mapTelegramError('promote', 'Bad Request: RIGHT_FORBIDDEN', 400);
+    const err3 = mapTelegramError('promote', 'Bad Request: CHAT_ADMIN_REQUIRED', 400);
+    assert(
+      err1.includes('Telegram rejected the promotion') &&
+      err2.includes('Telegram rejected the promotion') &&
+      err3.includes('requires the "Add New Admins" administrator permission'),
+      'PROMOTE-16: Telegram rejects promotion -> Friendly mapped errors'
+    );
+  }
+
+  // PROMOTE-17 & PROMOTE-18: promoteChatMember API call & permissions profile verification
+  {
+    promoteCalls = [];
+    const targetUserId = member1Id;
+    const permissions = {
+      is_anonymous: false,
+      can_manage_chat: false,
+      can_post_messages: false,
+      can_edit_messages: false,
+      can_delete_messages: true,
+      can_manage_video_chats: true,
+      can_restrict_members: true,
+      can_promote_members: false,
+      can_change_info: false,
+      can_invite_users: true,
+      can_pin_messages: true,
+      can_manage_topics: true,
+      can_post_stories: false,
+      can_edit_stories: false,
+      can_delete_stories: false
+    };
+
+    const res = await telegramApi.promoteChatMember(chatId, targetUserId, permissions);
+    assert(res.ok === true && promoteCalls.length === 1, 'PROMOTE-17: Promotion API execution succeeds');
+
+    const call = promoteCalls[0];
+    assert(
+      call.userId === targetUserId &&
+      call.permissions.can_promote_members === false &&
+      call.permissions.can_delete_messages === true &&
+      call.permissions.can_restrict_members === true &&
+      call.permissions.can_invite_users === true &&
+      call.permissions.can_pin_messages === true &&
+      call.permissions.can_manage_topics === true,
+      'PROMOTE-18: Promoted administrator has can_promote_members === false and standard admin permissions'
+    );
+  }
+
+  // ==========================================
+  // SECTION 4: OTHER MODERATION COMMANDS AUDIT
+  // ==========================================
+  console.log('\n--- Section 4: Kick, Ban, Warn Verifications ---');
 
   // Kicking/Banning/Warning by Admin with can_restrict_members
   {

@@ -327,6 +327,69 @@
       "action": "demote",
       "result": "denied",
       "reason": "⚠️ I don't have permission to modify this administrator. They may have been promoted by a higher-level administrator or are outside my admin hierarchy."
+    },
+    {
+      "id": "gskxevr",
+      "timestamp": "2026-08-24T20:54:11.862Z",
+      "chatId": -1004356470022,
+      "chatTitle": "Lovers",
+      "groupId": -1004356470022,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "targetId": 8204962552,
+      "targetUserId": 8204962552,
+      "targetUsername": "palindrome1551",
+      "targetTelegramStatus": "administrator",
+      "targetCustomRole": "NONE",
+      "command": "demote",
+      "action": "demote",
+      "result": "denied",
+      "reason": "⚠️ I don't have permission to modify this administrator. They may have been promoted by a higher-level administrator or are outside my admin hierarchy."
+    },
+    {
+      "id": "orb1fxp",
+      "timestamp": "2026-08-24T20:55:05.248Z",
+      "chatId": -1004356470022,
+      "chatTitle": "Lovers",
+      "groupId": -1004356470022,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "targetId": 5801492206,
+      "targetUserId": 5801492206,
+      "targetUsername": "devillove_143",
+      "targetTelegramStatus": "administrator",
+      "targetCustomRole": "NONE",
+      "command": "demote",
+      "action": "demote",
+      "result": "denied",
+      "reason": "⚠️ I don't have permission to modify this administrator. They may have been promoted by a higher-level administrator or are outside my admin hierarchy."
+    },
+    {
+      "id": "0dpossx",
+      "timestamp": "2026-08-24T20:55:27.652Z",
+      "chatId": -1004356470022,
+      "chatTitle": "Lovers",
+      "groupId": -1004356470022,
+      "actorId": 8864012889,
+      "actorUsername": "Rojloo",
+      "actorRole": "OWNER",
+      "adminUserId": 8864012889,
+      "adminUsername": "@Rojloo",
+      "targetId": 5801492206,
+      "targetUserId": 5801492206,
+      "targetUsername": "devillove_143",
+      "targetTelegramStatus": "member",
+      "targetCustomRole": "NONE",
+      "command": "demote",
+      "action": "demote",
+      "result": "denied",
+      "reason": "❌ That user is not currently an administrator."
     }
   ],
   "knownUsers": {
@@ -334,15 +397,15 @@
       "userId": 8864012889,
       "username": "Rojloo",
       "firstName": "Vaani",
-      "groupId": -1004356470022,
-      "lastSeen": "2026-08-24T20:40:03.392Z"
+      "groupId": 8864012889,
+      "lastSeen": "2026-08-24T20:56:45.361Z"
     },
     "palindrome1551": {
       "userId": 8204962552,
       "username": "palindrome1551",
       "firstName": "susss",
       "groupId": -1004356470022,
-      "lastSeen": "2026-08-24T20:39:10.723Z"
+      "lastSeen": "2026-08-24T20:54:10.924Z"
     },
     "missroxie_bot": {
       "userId": 8841013562,
@@ -356,7 +419,7 @@
       "username": "owner_user",
       "firstName": "OwnerUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.396Z"
+      "lastSeen": "2026-08-24T21:04:13.320Z"
     },
     "admin1_user": {
       "userId": 2001,
@@ -377,7 +440,7 @@
       "username": "mod_user",
       "firstName": "ModUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.392Z",
+      "lastSeen": "2026-08-24T21:04:13.316Z",
       "customRole": "MODERATOR"
     },
     "member1_user": {
@@ -385,14 +448,14 @@
       "username": "member1_user",
       "firstName": "Member1",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.397Z"
+      "lastSeen": "2026-08-24T21:04:13.323Z"
     },
     "testbot": {
       "userId": 9999,
       "username": "TestBot",
       "firstName": "TestBot",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.396Z"
+      "lastSeen": "2026-08-24T21:04:13.321Z"
     },
     "test_member_alpha": {
       "userId": 77770001,
@@ -428,7 +491,7 @@
       "username": "admin_promote",
       "firstName": "AdminWithPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.395Z"
+      "lastSeen": "2026-08-24T21:04:13.319Z"
     },
     "recycled_handle": {
       "userId": 8002,
@@ -442,21 +505,21 @@
       "username": "admin_nopromote",
       "firstName": "AdminNoPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.398Z"
+      "lastSeen": "2026-08-24T21:04:13.323Z"
     },
     "target_editable": {
       "userId": 2003,
       "username": "target_editable",
       "firstName": "TargetEditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.396Z"
+      "lastSeen": "2026-08-24T21:04:13.320Z"
     },
     "target_uneditable": {
       "userId": 2004,
       "username": "target_uneditable",
       "firstName": "TargetUneditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.394Z"
+      "lastSeen": "2026-08-24T21:04:13.318Z"
     },
     "devillove_143": {
       "userId": 5801492206,
@@ -465,6 +528,13 @@
       "lastName": "Lover",
       "groupId": -1004356470022,
       "lastSeen": "2026-08-24T20:39:10.723Z"
+    },
+    "left_user": {
+      "userId": 5001,
+      "username": "left_user",
+      "firstName": "LeftUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T21:04:13.316Z"
     }
   },
   "knownUsersById": {
@@ -473,27 +543,27 @@
       "username": "owner_user",
       "firstName": "OwnerUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.396Z"
+      "lastSeen": "2026-08-24T21:04:13.320Z"
     },
     "2001": {
       "userId": 2001,
       "username": "admin_promote",
       "firstName": "AdminWithPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.395Z"
+      "lastSeen": "2026-08-24T21:04:13.319Z"
     },
     "2002": {
       "userId": 2002,
       "username": "admin_nopromote",
       "firstName": "AdminNoPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.398Z"
+      "lastSeen": "2026-08-24T21:04:13.323Z"
     },
     "2003": {
       "userId": 2003,
       "firstName": "TargetEditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.396Z",
+      "lastSeen": "2026-08-24T21:04:13.320Z",
       "username": "target_editable"
     },
     "2004": {
@@ -501,14 +571,14 @@
       "username": "target_uneditable",
       "firstName": "TargetUneditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.394Z"
+      "lastSeen": "2026-08-24T21:04:13.318Z"
     },
     "3001": {
       "userId": 3001,
       "username": "mod_user",
       "firstName": "ModUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.392Z",
+      "lastSeen": "2026-08-24T21:04:13.316Z",
       "customRole": "MODERATOR"
     },
     "4001": {
@@ -516,13 +586,20 @@
       "username": "member1_user",
       "firstName": "Member1",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.397Z"
+      "lastSeen": "2026-08-24T21:04:13.323Z"
     },
     "4002": {
       "userId": 4002,
       "firstName": "NoUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.392Z"
+      "lastSeen": "2026-08-24T21:04:13.316Z"
+    },
+    "5001": {
+      "userId": 5001,
+      "username": "left_user",
+      "firstName": "LeftUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T21:04:13.316Z"
     },
     "8001": {
       "userId": 8001,
@@ -542,7 +619,7 @@
       "username": "TestBot",
       "firstName": "TestBot",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.396Z"
+      "lastSeen": "2026-08-24T21:04:13.321Z"
     },
     "55551": {
       "userId": 55551,
@@ -582,15 +659,15 @@
       "id": 8864012889,
       "username": "Rojloo",
       "firstName": "Vaani",
-      "lastSeen": "2026-08-24T20:40:03.392Z",
+      "lastSeen": "2026-08-24T20:56:45.361Z",
       "userId": 8864012889,
-      "groupId": -1004356470022
+      "groupId": 8864012889
     },
     "8204962552": {
       "id": 8204962552,
       "username": "palindrome1551",
       "firstName": "susss",
-      "lastSeen": "2026-08-24T20:39:10.723Z",
+      "lastSeen": "2026-08-24T20:54:10.924Z",
       "userId": 8204962552,
       "groupId": -1004356470022
     },
@@ -624,28 +701,28 @@
       "username": "owner_user",
       "firstName": "OwnerUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.396Z"
+      "lastSeen": "2026-08-24T21:04:13.320Z"
     },
     "-1001234567890_2001": {
       "userId": 2001,
       "username": "admin_promote",
       "firstName": "AdminWithPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.395Z"
+      "lastSeen": "2026-08-24T21:04:13.319Z"
     },
     "-1001234567890_2002": {
       "userId": 2002,
       "username": "admin_nopromote",
       "firstName": "AdminNoPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.398Z"
+      "lastSeen": "2026-08-24T21:04:13.323Z"
     },
     "-1001234567890_3001": {
       "userId": 3001,
       "username": "mod_user",
       "firstName": "ModUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.392Z",
+      "lastSeen": "2026-08-24T21:04:13.316Z",
       "customRole": "MODERATOR"
     },
     "-1001234567890_4001": {
@@ -653,20 +730,20 @@
       "username": "member1_user",
       "firstName": "Member1",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.397Z"
+      "lastSeen": "2026-08-24T21:04:13.323Z"
     },
     "-1001234567890_4002": {
       "userId": 4002,
       "firstName": "NoUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.392Z"
+      "lastSeen": "2026-08-24T21:04:13.316Z"
     },
     "-1001234567890_9999": {
       "userId": 9999,
       "username": "TestBot",
       "firstName": "TestBot",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.396Z"
+      "lastSeen": "2026-08-24T21:04:13.321Z"
     },
     "-1004353139683_8864012889": {
       "userId": 8864012889,
@@ -735,7 +812,7 @@
       "username": "target_editable",
       "firstName": "TargetEditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.396Z"
+      "lastSeen": "2026-08-24T21:04:13.320Z"
     },
     "-1001234567890_8001": {
       "userId": 8001,
@@ -755,7 +832,7 @@
       "username": "Rojloo",
       "firstName": "Vaani",
       "groupId": -1004356470022,
-      "lastSeen": "2026-08-24T20:40:03.392Z"
+      "lastSeen": "2026-08-24T20:55:42.914Z"
     },
     "-1004356470022_8841013562": {
       "userId": 8841013562,
@@ -769,14 +846,14 @@
       "username": "target_uneditable",
       "firstName": "TargetUneditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-24T20:44:42.394Z"
+      "lastSeen": "2026-08-24T21:04:13.318Z"
     },
     "-1004356470022_8204962552": {
       "userId": 8204962552,
       "username": "palindrome1551",
       "firstName": "susss",
       "groupId": -1004356470022,
-      "lastSeen": "2026-08-24T20:39:10.723Z"
+      "lastSeen": "2026-08-24T20:54:10.924Z"
     },
     "-1004356470022_5801492206": {
       "userId": 5801492206,
@@ -785,6 +862,20 @@
       "lastName": "Lover",
       "groupId": -1004356470022,
       "lastSeen": "2026-08-24T20:39:10.723Z"
+    },
+    "8864012889_8864012889": {
+      "userId": 8864012889,
+      "username": "Rojloo",
+      "firstName": "Vaani",
+      "groupId": 8864012889,
+      "lastSeen": "2026-08-24T20:56:45.361Z"
+    },
+    "-1001234567890_5001": {
+      "userId": 5001,
+      "username": "left_user",
+      "firstName": "LeftUser",
+      "groupId": -1001234567890,
+      "lastSeen": "2026-08-24T21:04:13.316Z"
     }
   },
   "customRoles": {

@@ -154,7 +154,7 @@ export interface ModerationLog {
   adminUserId?: number;
   adminUsername?: string;
   command?: string;
-  action: 'kick' | 'ban' | 'unban' | 'demote' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change';
+  action: 'kick' | 'ban' | 'unban' | 'demote' | 'promote' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change';
   result?: 'success' | 'denied' | 'error';
   telegramError?: string;
   reason?: string;

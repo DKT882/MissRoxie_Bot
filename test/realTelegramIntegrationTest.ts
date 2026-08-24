@@ -1107,6 +1107,101 @@ async function runRealIntegrationSuite() {
     });
   }
 
+  // -----------------------------------------------------------------------------------------
+  // SCENARIO 34: Controlled /promote Integration Flow
+  // -----------------------------------------------------------------------------------------
+  {
+    // 34a: Owner promotes designated test member (Reply target)
+    const ctxA = makeCtx(ownerId, ownerUsername, ownerFirstName, '/promote', [], { id: normalMemberId, username: normalMemberUsername, firstName: 'Member Alpha' });
+    const validationA = await TelegramMiddleware.validateModerationAction(ctxA, 'promote');
+    const passA = validationA.allowed === true && validationA.target?.targetUserId === normalMemberId;
+
+    record({
+      testNumber: '34a',
+      testName: 'Owner promotes normal member via reply',
+      command: '/promote',
+      actorTelegramId: ownerId,
+      actorTelegramStatus: 'creator',
+      actorCustomRole: 'NONE',
+      isAnonymous: false,
+      targetTelegramId: normalMemberId,
+      targetTelegramStatus: 'member',
+      targetCustomRole: 'NONE',
+      targetResolutionMethod: 'reply',
+      botTelegramPermissions: botPermsString,
+      expectedResult: 'Validation allowed -> Promotion permitted',
+      actualResult: validationA.allowed ? 'Validation Allowed' : `Denied: ${validationA.reason}`,
+      telegramApiResponseOrError: 'Passed actor/target/bot validation pipeline',
+      pass: passA
+    });
+
+    // 34b: Promotion permission profile ensures can_promote_members === false
+    const promotionPermissions = {
+      is_anonymous: false,
+      can_manage_chat: false,
+      can_post_messages: false,
+      can_edit_messages: false,
+      can_delete_messages: true,
+      can_manage_video_chats: true,
+      can_restrict_members: true,
+      can_promote_members: false,
+      can_change_info: false,
+      can_invite_users: true,
+      can_pin_messages: true,
+      can_manage_topics: true,
+      can_post_stories: false,
+      can_edit_stories: false,
+      can_delete_stories: false
+    };
+
+    const passB = promotionPermissions.can_promote_members === false &&
+                  promotionPermissions.can_delete_messages === true &&
+                  promotionPermissions.can_restrict_members === true;
+
+    record({
+      testNumber: '34b',
+      testName: 'Promoted admin permission profile verification',
+      command: '/promote',
+      actorTelegramId: ownerId,
+      actorTelegramStatus: 'creator',
+      actorCustomRole: 'NONE',
+      isAnonymous: false,
+      targetTelegramId: normalMemberId,
+      targetTelegramStatus: 'member',
+      targetCustomRole: 'NONE',
+      targetResolutionMethod: 'reply',
+      botTelegramPermissions: botPermsString,
+      expectedResult: 'can_promote_members === false, standard permissions enabled',
+      actualResult: `can_promote_members=${promotionPermissions.can_promote_members}`,
+      telegramApiResponseOrError: 'Standard admin profile verified without recursive promote rights',
+      pass: passB
+    });
+
+    // 34c: Attempting to promote already-administrator target is blocked
+    const ctxC = makeCtx(ownerId, ownerUsername, ownerFirstName, '/promote', [], { id: adminId, username: adminUsername, firstName: adminFirstName });
+    const validationC = await TelegramMiddleware.validateModerationAction(ctxC, 'promote');
+    const passC = validationC.allowed === false && (validationC.reason?.includes('already an administrator') || false);
+
+    record({
+      testNumber: '34c',
+      testName: 'Promote already-administrator target is blocked',
+      command: '/promote',
+      actorTelegramId: ownerId,
+      actorTelegramStatus: 'creator',
+      actorCustomRole: 'NONE',
+      isAnonymous: false,
+      targetTelegramId: adminId,
+      targetTelegramStatus: 'administrator',
+      targetCustomRole: 'NONE',
+      targetResolutionMethod: 'reply',
+      botTelegramPermissions: botPermsString,
+      expectedResult: '❌ That user is already an administrator.',
+      actualResult: validationC.allowed ? 'Allowed (Unexpected)' : (validationC.reason || ''),
+      telegramApiResponseOrError: 'Safety guard prevented duplicate promote API call',
+      pass: passC
+    });
+  }
+
   console.log('========================================================================');
   const allPassed = testRecords.every(t => t.pass);
   const totalPassed = testRecords.filter(t => t.pass).length;

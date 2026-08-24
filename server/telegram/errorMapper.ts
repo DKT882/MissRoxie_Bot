@@ -15,9 +15,12 @@ export function mapTelegramError(
 
   const desc = rawDescription.toUpperCase();
 
-  // 1. Demotion specific restrictions (Telegram only permits demoting admins promoted by the bot itself)
+  // 1. Demotion / Promotion specific restrictions
   if (action === 'demote' && (desc.includes('DEMOTE') || desc.includes('USER_ADMIN_INVALID') || desc.includes('CANNOT_RESTRICT_ADMIN') || (desc.includes('NOT_ENOUGH_RIGHTS') && !desc.includes('CHAT_ADMIN_REQUIRED')))) {
     return '⚠️ The bot cannot demote this administrator because they were appointed by the group owner or another administrator.';
+  }
+  if (action === 'promote' && (desc.includes('CANNOT_PROMOTE') || desc.includes('RIGHT_FORBIDDEN') || desc.includes('ADMIN_RANK_INVALID') || desc.includes('NOT_ENOUGH_RIGHTS_TO_PROMOTE'))) {
+    return '⚠️ Telegram rejected the promotion. The bot may lack sufficient administrative rights to promote this member.';
   }
 
   // 2. Missing bot admin permissions in the group

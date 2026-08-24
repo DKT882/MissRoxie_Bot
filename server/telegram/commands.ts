@@ -21,6 +21,9 @@ export class CommandHandler {
       case '/unban':
         await this.handleUnban(ctx);
         return true;
+      case '/promote':
+        await this.handlePromote(ctx);
+        return true;
       case '/demote':
         await this.handleDemote(ctx);
         return true;
@@ -413,6 +416,128 @@ export class CommandHandler {
         target,
         command: 'demote',
         action: 'demote',
+        result: 'error',
+        telegramError: res.description
+      });
+
+      await telegramApi.sendMessage(ctx.chatId, friendlyError, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+  }
+
+  // ==========================================
+  // 4b. PROMOTE COMMAND
+  // ==========================================
+  private static async handlePromote(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'promote');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'promote',
+          action: 'promote',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot promote this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    const meRes = await telegramApi.getMe();
+    const botId = meRes.result?.id || 0;
+    const botMember = await TelegramMiddleware.getTargetMember(ctx.chatId, botId);
+
+    // Safe debug logging for [Promote]
+    console.log('[Promote]', {
+      actorId: actor.actorUserId,
+      actorRole: actor.actorRole,
+      actorStatus: actor.actorStatus,
+      actorCanPromoteMembers: actor.canPromoteMembers,
+      targetId: target.targetUserId,
+      targetStatus: target.targetStatus,
+      botStatus: botMember?.status,
+      botCanPromoteMembers: botMember?.can_promote_members
+    });
+
+    const res = await telegramApi.promoteChatMember(ctx.chatId, target.targetUserId, {
+      is_anonymous: false,
+      can_manage_chat: false,
+      can_post_messages: false,
+      can_edit_messages: false,
+      can_delete_messages: true,
+      can_manage_video_chats: true,
+      can_restrict_members: true,
+      can_promote_members: false,
+      can_change_info: false,
+      can_invite_users: true,
+      can_pin_messages: true,
+      can_manage_topics: true,
+      can_post_stories: false,
+      can_edit_stories: false,
+      can_delete_stories: false
+    });
+
+    const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
+
+    if (res.ok) {
+      // Step 9: Post-promotion verification with getChatMember()
+      const verifyRes = await telegramApi.getChatMember(ctx.chatId, target.targetUserId);
+      if (!verifyRes.ok || !verifyRes.result || verifyRes.result.status !== 'administrator') {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor,
+          target,
+          command: 'promote',
+          action: 'promote',
+          result: 'error',
+          reason: 'Telegram did not confirm administrator status after promoteChatMember'
+        });
+
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `⚠️ Promotion was attempted, but I could not verify that the user became an administrator.`,
+          { reply_to_message_id: ctx.message.message_id }
+        );
+        return;
+      }
+
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'promote',
+        action: 'promote',
+        result: 'success',
+        reason: 'User promoted to standard administrator'
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `✅ <b>${targetTag} has been promoted to administrator.</b>`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      const friendlyError = mapTelegramError('promote', res.description, res.error_code);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'promote',
+        action: 'promote',
         result: 'error',
         telegramError: res.description
       });
@@ -1034,10 +1159,11 @@ export class CommandHandler {
     let helpText =
       `🛡️ <b>Telegram Moderation & Admin Commands:</b>\n\n` +
       `<b>👑 Member Management (Admins):</b>\n` +
+      `• <code>/promote @user</code> - Promote a member to administrator\n` +
+      `• <code>/demote @user</code> - Revoke admin rights\n` +
       `• <code>/kick @user</code> - Remove member from group\n` +
       `• <code>/ban @user [reason]</code> - Ban member from group\n` +
-      `• <code>/unban @user</code> - Unban user\n` +
-      `• <code>/demote @user</code> - Revoke admin rights (Owner only)\n\n` +
+      `• <code>/unban @user</code> - Unban user\n\n` +
       `<b>⚠️ Warning System:</b>\n` +
       `• <code>/warn @user [reason]</code> - Issue warning\n` +
       `• <code>/warnings [@user]</code> - View active warnings\n` +
