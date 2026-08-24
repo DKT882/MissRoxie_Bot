@@ -55,12 +55,51 @@ export interface TelegramMessage {
   new_chat_title?: string;
 }
 
+export interface InlineKeyboardButton {
+  text: string;
+  callback_data?: string;
+  url?: string;
+}
+
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][];
+}
+
+export interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  inline_message_id?: string;
+  chat_instance?: string;
+  data?: string;
+  game_short_name?: string;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
   edited_message?: TelegramMessage;
   channel_post?: TelegramMessage;
   edited_channel_post?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
+}
+
+export interface AdminPermissions {
+  is_anonymous: boolean;
+  can_manage_chat: boolean;
+  can_delete_messages: boolean;
+  can_manage_video_chats: boolean;
+  can_restrict_members: boolean;
+  can_promote_members: boolean;
+  can_change_info: boolean;
+  can_invite_users: boolean;
+  can_pin_messages: boolean;
+  can_manage_topics: boolean;
+  can_post_messages: boolean;
+  can_edit_messages: boolean;
+  can_post_stories: boolean;
+  can_edit_stories: boolean;
+  can_delete_stories: boolean;
 }
 
 export interface TelegramChatMember {
@@ -77,6 +116,9 @@ export interface TelegramChatMember {
   can_change_info?: boolean;
   can_invite_users?: boolean;
   can_pin_messages?: boolean;
+  can_manage_topics?: boolean;
+  can_post_messages?: boolean;
+  can_edit_messages?: boolean;
   can_post_stories?: boolean;
   can_edit_stories?: boolean;
   can_delete_stories?: boolean;
@@ -154,7 +196,7 @@ export interface ModerationLog {
   adminUserId?: number;
   adminUsername?: string;
   command?: string;
-  action: 'kick' | 'ban' | 'unban' | 'demote' | 'promote' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change';
+  action: 'kick' | 'ban' | 'unban' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change';
   result?: 'success' | 'denied' | 'error';
   telegramError?: string;
   reason?: string;

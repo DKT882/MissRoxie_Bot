@@ -53,6 +53,7 @@ export class TelegramApi {
       reply_to_message_id?: number;
       parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
       disable_web_page_preview?: boolean;
+      reply_markup?: any;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     return this.call('sendMessage', {
@@ -60,7 +61,46 @@ export class TelegramApi {
       text,
       parse_mode: options?.parse_mode || 'HTML',
       reply_to_message_id: options?.reply_to_message_id,
-      disable_web_page_preview: options?.disable_web_page_preview ?? true
+      disable_web_page_preview: options?.disable_web_page_preview ?? true,
+      reply_markup: options?.reply_markup
+    });
+  }
+
+  public async editMessageText(
+    chatId: number | string,
+    messageId: number,
+    text: string,
+    options?: {
+      parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
+      disable_web_page_preview?: boolean;
+      reply_markup?: any;
+    }
+  ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
+    return this.call('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      parse_mode: options?.parse_mode || 'HTML',
+      disable_web_page_preview: options?.disable_web_page_preview ?? true,
+      reply_markup: options?.reply_markup
+    });
+  }
+
+  public async answerCallbackQuery(
+    callbackQueryId: string,
+    options?: {
+      text?: string;
+      show_alert?: boolean;
+      url?: string;
+      cache_time?: number;
+    }
+  ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
+    return this.call('answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      text: options?.text,
+      show_alert: options?.show_alert,
+      url: options?.url,
+      cache_time: options?.cache_time
     });
   }
 

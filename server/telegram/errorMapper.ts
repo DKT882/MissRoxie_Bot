@@ -5,7 +5,7 @@
  */
 
 export function mapTelegramError(
-  action: 'kick' | 'ban' | 'unban' | 'demote' | 'warn' | 'restrict' | 'delete' | 'promote' | 'general',
+  action: 'kick' | 'ban' | 'unban' | 'demote' | 'warn' | 'restrict' | 'delete' | 'promote' | 'permissions' | 'general',
   rawDescription?: string,
   errorCode?: number
 ): string {
@@ -15,7 +15,10 @@ export function mapTelegramError(
 
   const desc = rawDescription.toUpperCase();
 
-  // 1. Demotion / Promotion specific restrictions
+  // 1. Demotion / Promotion / Permission editing specific restrictions
+  if (action === 'permissions' && (desc.includes('CANNOT_EDIT') || desc.includes('CANNOT_EDIT_THIS_USER') || desc.includes('USER_ADMIN_INVALID') || desc.includes('RIGHT_FORBIDDEN') || desc.includes('NOT_ENOUGH_RIGHTS'))) {
+    return '❌ Telegram does not allow Roxie to modify this administrator.';
+  }
   if (action === 'demote' && (desc.includes('DEMOTE') || desc.includes('USER_ADMIN_INVALID') || desc.includes('CANNOT_RESTRICT_ADMIN') || (desc.includes('NOT_ENOUGH_RIGHTS') && !desc.includes('CHAT_ADMIN_REQUIRED')))) {
     return '⚠️ The bot cannot demote this administrator because they were appointed by the group owner or another administrator.';
   }
@@ -32,7 +35,7 @@ export function mapTelegramError(
     desc.includes('NEED_ADMIN_RIGHTS') ||
     desc.includes('BOT_CHATS_DISABLED')
   ) {
-    if (action === 'demote' || action === 'promote') {
+    if (action === 'demote' || action === 'promote' || action === 'permissions') {
       return '❌ The bot requires the "Add New Admins" administrator permission to modify admin rights.';
     }
     if (action === 'delete') {

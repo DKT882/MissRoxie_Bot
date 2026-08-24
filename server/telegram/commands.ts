@@ -1,12 +1,27 @@
 import { telegramApi } from './api.js';
-import { TelegramMiddleware, CommandContext } from './middleware.js';
+import { TelegramMiddleware, CommandContext, RoleRank } from './middleware.js';
 import { db } from '../db/storage.js';
 import { ModerationService } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { mapTelegramError } from './errorMapper.js';
+import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember } from './types.js';
+
+interface PermissionEditorSession {
+  chatId: number;
+  targetUserId: number;
+  targetUsername?: string;
+  targetFirstName?: string;
+  actorUserId: number;
+  initialPermissions: AdminPermissions;
+  currentPermissions: AdminPermissions;
+  confirmingPromote?: boolean;
+  messageId?: number;
+  createdAt: number;
+}
 
 export class CommandHandler {
   private static sayCooldowns: Map<number, number> = new Map();
+  public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
   public static async handleCommand(ctx: CommandContext): Promise<boolean> {
     const cmd = ctx.command.toLowerCase().split('@')[0]; // strip bot username if present, e.g. /ban@MissRoxie_Bot
@@ -26,6 +41,9 @@ export class CommandHandler {
         return true;
       case '/demote':
         await this.handleDemote(ctx);
+        return true;
+      case '/permissions':
+        await this.handlePermissions(ctx);
         return true;
       case '/warn':
         await this.handleWarn(ctx);
@@ -546,6 +564,352 @@ export class CommandHandler {
         reply_to_message_id: ctx.message.message_id
       });
     }
+  }
+
+  // ==========================================
+  // 4c. PERMISSION EDITOR COMMAND (/permissions)
+  // ==========================================
+  private static async handlePermissions(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'permissions');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'permissions',
+          action: 'permissions',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot view or edit permissions for this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    // Fetch LIVE target ChatMemberAdministrator to inspect permissions
+    const liveTarget = await TelegramMiddleware.getTargetMember(ctx.chatId, target.targetUserId);
+    if (!liveTarget || liveTarget.status !== 'administrator') {
+      await telegramApi.sendMessage(ctx.chatId, '❌ That user is not currently an administrator.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    if (liveTarget.can_be_edited === false) {
+      await telegramApi.sendMessage(ctx.chatId, '❌ Telegram does not allow Roxie to modify this administrator.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const initialPermissions = extractAdminPermissions(liveTarget);
+    const currentPermissions = { ...initialPermissions };
+
+    const sessionKey = `${ctx.chatId}:${target.targetUserId}`;
+    const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
+
+    this.permissionSessions.set(sessionKey, {
+      chatId: ctx.chatId,
+      targetUserId: target.targetUserId,
+      targetUsername: target.targetUsername,
+      targetFirstName: target.targetUser?.first_name,
+      actorUserId: actor.actorUserId,
+      initialPermissions,
+      currentPermissions,
+      confirmingPromote: false,
+      createdAt: Date.now()
+    });
+
+    const { text, reply_markup } = renderPermissionEditorUI(
+      targetTag,
+      target.targetUserId,
+      currentPermissions,
+      false,
+      ctx.chatId
+    );
+
+    const sent = await telegramApi.sendMessage(ctx.chatId, text, {
+      reply_to_message_id: ctx.message.message_id,
+      reply_markup
+    });
+
+    if (sent.ok && sent.result?.message_id) {
+      const sess = this.permissionSessions.get(sessionKey);
+      if (sess) {
+        sess.messageId = sent.result.message_id;
+      }
+    }
+  }
+
+  // ==========================================
+  // 4d. CALLBACK QUERY HANDLER (Interactive Permissions UI)
+  // ==========================================
+  public static async handleCallbackQuery(query: TelegramCallbackQuery): Promise<boolean> {
+    if (!query.data || !query.data.startsWith('p:')) {
+      return false;
+    }
+
+    // Acknowledge callback immediately to dismiss Telegram client spinner
+    await telegramApi.answerCallbackQuery(query.id);
+
+    const parts = query.data.split(':');
+    if (parts.length < 4) return false;
+
+    const chatId = Number(parts[1]);
+    const targetUserId = Number(parts[2]);
+    const action = parts[3];
+
+    // 1. Validate chat ID against message
+    if (query.message && query.message.chat.id !== chatId) {
+      await telegramApi.answerCallbackQuery(query.id, {
+        text: '❌ Callback is invalid for this chat.',
+        show_alert: true
+      });
+      return true;
+    }
+
+    // 2. Verify actor authorization live from Telegram
+    const actorMember = await TelegramMiddleware.getTargetMember(chatId, query.from.id);
+    const isOwner = actorMember?.status === 'creator';
+    const isAdmin = actorMember?.status === 'administrator';
+    const canPromote = actorMember?.can_promote_members === true;
+
+    if (!isOwner && !(isAdmin && canPromote)) {
+      await telegramApi.answerCallbackQuery(query.id, {
+        text: '❌ You need the "Add New Admins" administrator permission to edit administrator permissions.',
+        show_alert: true
+      });
+      return true;
+    }
+
+    // 3. Verify Bot Capabilities live from Telegram
+    const meRes = await telegramApi.getMe();
+    const botId = meRes.result?.id || 0;
+    const botMember = await TelegramMiddleware.getTargetMember(chatId, botId);
+    if (botMember?.status !== 'administrator' || botMember?.can_promote_members !== true) {
+      await telegramApi.answerCallbackQuery(query.id, {
+        text: '❌ The bot needs the "Add New Admins" administrator permission to modify administrator rights.',
+        show_alert: true
+      });
+      return true;
+    }
+
+    // 4. Verify Target live from Telegram
+    const targetMember = await TelegramMiddleware.getTargetMember(chatId, targetUserId);
+    if (!targetMember || targetMember.status !== 'administrator') {
+      await telegramApi.answerCallbackQuery(query.id, {
+        text: '❌ That user is no longer an administrator.',
+        show_alert: true
+      });
+      return true;
+    }
+
+    if (targetMember.can_be_edited === false) {
+      await telegramApi.answerCallbackQuery(query.id, {
+        text: '❌ Telegram does not allow Roxie to modify this administrator.',
+        show_alert: true
+      });
+      return true;
+    }
+
+    const sessionKey = `${chatId}:${targetUserId}`;
+    let session = this.permissionSessions.get(sessionKey);
+    const targetName = targetMember.user?.username
+      ? `@${targetMember.user.username}`
+      : (targetMember.user?.first_name || `User ${targetUserId}`);
+
+    if (!session) {
+      const livePerms = extractAdminPermissions(targetMember);
+      session = {
+        chatId,
+        targetUserId,
+        targetUsername: targetMember.user?.username,
+        targetFirstName: targetMember.user?.first_name,
+        actorUserId: query.from.id,
+        initialPermissions: livePerms,
+        currentPermissions: { ...livePerms },
+        confirmingPromote: false,
+        createdAt: Date.now()
+      };
+      this.permissionSessions.set(sessionKey, session);
+    }
+
+    // Handle Action
+    if (action === 'close') {
+      this.permissionSessions.delete(sessionKey);
+      if (query.message?.message_id) {
+        await telegramApi.deleteMessage(chatId, query.message.message_id);
+      }
+      return true;
+    }
+
+    if (action === 'del') {
+      session.currentPermissions.can_delete_messages = !session.currentPermissions.can_delete_messages;
+    } else if (action === 'rest') {
+      session.currentPermissions.can_restrict_members = !session.currentPermissions.can_restrict_members;
+    } else if (action === 'pin') {
+      session.currentPermissions.can_pin_messages = !session.currentPermissions.can_pin_messages;
+    } else if (action === 'info') {
+      session.currentPermissions.can_change_info = !session.currentPermissions.can_change_info;
+    } else if (action === 'vid') {
+      session.currentPermissions.can_manage_video_chats = !session.currentPermissions.can_manage_video_chats;
+    } else if (action === 'prom') {
+      if (!session.currentPermissions.can_promote_members) {
+        session.confirmingPromote = true;
+      } else {
+        session.currentPermissions.can_promote_members = false;
+      }
+    } else if (action === 'conf_prom') {
+      session.currentPermissions.can_promote_members = true;
+      session.confirmingPromote = false;
+    } else if (action === 'canc_prom') {
+      session.confirmingPromote = false;
+    } else if (action === 'inv') {
+      session.currentPermissions.can_invite_users = !session.currentPermissions.can_invite_users;
+    } else if (action === 'top') {
+      session.currentPermissions.can_manage_topics = !session.currentPermissions.can_manage_topics;
+    } else if (action === 'post') {
+      session.currentPermissions.can_post_messages = !session.currentPermissions.can_post_messages;
+    } else if (action === 'edit') {
+      session.currentPermissions.can_edit_messages = !session.currentPermissions.can_edit_messages;
+    } else if (action === 'save') {
+      // SAVE BEHAVIOR
+      // 1. Stale state check: Compare initial snapshot against live target status on Telegram
+      const livePermsNow = extractAdminPermissions(targetMember);
+      if (!arePermissionsEqual(session.initialPermissions, livePermsNow)) {
+        this.permissionSessions.delete(sessionKey);
+        if (query.message?.message_id) {
+          await telegramApi.editMessageText(
+            chatId,
+            query.message.message_id,
+            `⚠️ <b>Administrator permissions changed while you were editing.</b>\nPlease reopen the permission editor using /permissions.`,
+            { parse_mode: 'HTML' }
+          );
+        }
+        return true;
+      }
+
+      // 2. Call promoteChatMember
+      const promoteRes = await telegramApi.promoteChatMember(chatId, targetUserId, session.currentPermissions);
+
+      if (!promoteRes.ok) {
+        const friendlyError = mapTelegramError('permissions', promoteRes.description, promoteRes.error_code);
+
+        // Refresh session with live state
+        const refreshedMember = await TelegramMiddleware.getTargetMember(chatId, targetUserId);
+        const refreshedPerms = extractAdminPermissions(refreshedMember);
+        session.initialPermissions = refreshedPerms;
+        session.currentPermissions = { ...refreshedPerms };
+        session.confirmingPromote = false;
+
+        TelegramMiddleware.logAudit({
+          chatId,
+          actor: {
+            actorUserId: query.from.id,
+            actorUsername: query.from.username,
+            actorDisplayName: query.from.first_name,
+            actorRole: isOwner ? 'OWNER' : 'ADMIN',
+            actorRank: isOwner ? RoleRank.OWNER : RoleRank.ADMIN,
+            isAnonymousAdmin: false,
+            actorStatus: actorMember?.status || 'administrator',
+            canPromoteMembers: canPromote,
+            actorMember: actorMember || null,
+            customRole: 'NONE'
+          },
+          command: 'permissions',
+          action: 'permissions',
+          result: 'error',
+          telegramError: promoteRes.description,
+          details: `Telegram API error: ${friendlyError}`
+        });
+
+        await telegramApi.answerCallbackQuery(query.id, {
+          text: friendlyError,
+          show_alert: true
+        });
+
+        const { text, reply_markup } = renderPermissionEditorUI(
+          targetName,
+          targetUserId,
+          session.currentPermissions,
+          false,
+          chatId
+        );
+        if (query.message?.message_id) {
+          await telegramApi.editMessageText(chatId, query.message.message_id, text, { reply_markup });
+        }
+        return true;
+      }
+
+      // 3. Re-fetch target using getChatMember() to verify
+      const verifyRes = await telegramApi.getChatMember(chatId, targetUserId);
+      if (verifyRes.ok && verifyRes.result) {
+        const verifiedPerms = extractAdminPermissions(verifyRes.result);
+        console.log('[AdminPermissions]', {
+          chatId,
+          actorId: query.from.id,
+          targetId: targetUserId,
+          permissionsChanged: session.currentPermissions,
+          oldValue: session.initialPermissions,
+          newValue: verifiedPerms,
+          result: 'success'
+        });
+      }
+
+      TelegramMiddleware.logAudit({
+        chatId,
+        actor: {
+          actorUserId: query.from.id,
+          actorUsername: query.from.username,
+          actorDisplayName: query.from.first_name,
+          actorRole: isOwner ? 'OWNER' : 'ADMIN',
+          actorRank: isOwner ? RoleRank.OWNER : RoleRank.ADMIN,
+          isAnonymousAdmin: false,
+          actorStatus: actorMember?.status || 'administrator',
+          canPromoteMembers: canPromote,
+          actorMember: actorMember || null,
+          customRole: 'NONE'
+        },
+        command: 'permissions',
+        action: 'permissions',
+        result: 'success',
+        details: `Successfully updated administrator permissions for ${targetName}`
+      });
+
+      this.permissionSessions.delete(sessionKey);
+      if (query.message?.message_id) {
+        await telegramApi.editMessageText(
+          chatId,
+          query.message.message_id,
+          `✅ <b>Administrator permissions updated for ${targetName}.</b>`,
+          { parse_mode: 'HTML' }
+        );
+      }
+      return true;
+    }
+
+    // Refresh UI for toggles
+    const { text, reply_markup } = renderPermissionEditorUI(
+      targetName,
+      targetUserId,
+      session.currentPermissions,
+      session.confirmingPromote || false,
+      chatId
+    );
+
+    if (query.message?.message_id) {
+      await telegramApi.editMessageText(chatId, query.message.message_id, text, { reply_markup });
+    }
+
+    return true;
   }
 
   // ==========================================
@@ -1161,6 +1525,7 @@ export class CommandHandler {
       `<b>👑 Member Management (Admins):</b>\n` +
       `• <code>/promote @user</code> - Promote a member to administrator\n` +
       `• <code>/demote @user</code> - Revoke admin rights\n` +
+      `• <code>/permissions @user</code> - View and edit administrator permissions\n` +
       `• <code>/kick @user</code> - Remove member from group\n` +
       `• <code>/ban @user [reason]</code> - Ban member from group\n` +
       `• <code>/unban @user</code> - Unban user\n\n` +
@@ -1190,6 +1555,121 @@ export class CommandHandler {
 
     await telegramApi.sendMessage(ctx.chatId, helpText);
   }
+}
+
+function extractAdminPermissions(member: TelegramChatMember | undefined | null): AdminPermissions {
+  return {
+    is_anonymous: Boolean(member?.is_anonymous),
+    can_manage_chat: Boolean(member?.can_manage_chat),
+    can_delete_messages: Boolean(member?.can_delete_messages),
+    can_manage_video_chats: Boolean(member?.can_manage_video_chats),
+    can_restrict_members: Boolean(member?.can_restrict_members),
+    can_promote_members: Boolean(member?.can_promote_members),
+    can_change_info: Boolean(member?.can_change_info),
+    can_invite_users: Boolean(member?.can_invite_users),
+    can_pin_messages: Boolean(member?.can_pin_messages),
+    can_manage_topics: Boolean(member?.can_manage_topics),
+    can_post_messages: Boolean(member?.can_post_messages),
+    can_edit_messages: Boolean(member?.can_edit_messages),
+    can_post_stories: Boolean(member?.can_post_stories),
+    can_edit_stories: Boolean(member?.can_edit_stories),
+    can_delete_stories: Boolean(member?.can_delete_stories)
+  };
+}
+
+function arePermissionsEqual(a: AdminPermissions, b: AdminPermissions): boolean {
+  return (
+    a.is_anonymous === b.is_anonymous &&
+    a.can_manage_chat === b.can_manage_chat &&
+    a.can_delete_messages === b.can_delete_messages &&
+    a.can_manage_video_chats === b.can_manage_video_chats &&
+    a.can_restrict_members === b.can_restrict_members &&
+    a.can_promote_members === b.can_promote_members &&
+    a.can_change_info === b.can_change_info &&
+    a.can_invite_users === b.can_invite_users &&
+    a.can_pin_messages === b.can_pin_messages &&
+    a.can_manage_topics === b.can_manage_topics &&
+    a.can_post_messages === b.can_post_messages &&
+    a.can_edit_messages === b.can_edit_messages &&
+    a.can_post_stories === b.can_post_stories &&
+    a.can_edit_stories === b.can_edit_stories &&
+    a.can_delete_stories === b.can_delete_stories
+  );
+}
+
+function renderPermissionEditorUI(
+  targetName: string,
+  targetUserId: number,
+  perms: AdminPermissions,
+  confirmingPromote: boolean,
+  chatId: number
+): { text: string; reply_markup: InlineKeyboardMarkup } {
+  if (confirmingPromote) {
+    const text =
+      `⚠️ <b>Add New Admins</b>\n\n` +
+      `This allows this administrator to promote other administrators.\n\n` +
+      `Are you sure you want to enable this permission?`;
+    const reply_markup: InlineKeyboardMarkup = {
+      inline_keyboard: [
+        [
+          { text: '❌ Cancel', callback_data: `p:${chatId}:${targetUserId}:canc_prom` },
+          { text: '✅ Confirm', callback_data: `p:${chatId}:${targetUserId}:conf_prom` }
+        ]
+      ]
+    };
+    return { text, reply_markup };
+  }
+
+  const text =
+    `⚙️ <b>ADMIN PERMISSIONS</b>\n\n` +
+    `👤 <b>${targetName}</b> (ID: <code>${targetUserId}</code>)\n\n` +
+    `🗑️ Delete Messages       ${perms.can_delete_messages ? '✅' : '❌'}\n` +
+    `🚫 Ban / Restrict Users   ${perms.can_restrict_members ? '✅' : '❌'}\n` +
+    `📌 Pin Messages           ${perms.can_pin_messages ? '✅' : '❌'}\n` +
+    `✏️ Change Group Info      ${perms.can_change_info ? '✅' : '❌'}\n` +
+    `📞 Manage Video Chats     ${perms.can_manage_video_chats ? '✅' : '❌'}\n` +
+    `👥 Add New Admins         ${perms.can_promote_members ? '✅' : '❌'}\n` +
+    `🔗 Invite Users           ${perms.can_invite_users ? '✅' : '❌'}\n` +
+    `💬 Manage Topics          ${perms.can_manage_topics ? '✅' : '❌'}\n` +
+    `📢 Post Messages          ${perms.can_post_messages ? '✅' : '❌'}\n` +
+    `✍️ Edit Messages          ${perms.can_edit_messages ? '✅' : '❌'}\n\n` +
+    `<i>Tap the buttons below to toggle permissions, then press <b>SAVE</b>. Telegram remains the final authority over administrator permissions.</i>`;
+
+  const btn = (label: string, enabled: boolean, actionKey: string) => ({
+    text: `${label} ${enabled ? '✅' : '❌'}`,
+    callback_data: `p:${chatId}:${targetUserId}:${actionKey}`
+  });
+
+  const reply_markup: InlineKeyboardMarkup = {
+    inline_keyboard: [
+      [
+        btn('🗑 Delete', perms.can_delete_messages, 'del'),
+        btn('🚫 Restrict', perms.can_restrict_members, 'rest')
+      ],
+      [
+        btn('📌 Pin', perms.can_pin_messages, 'pin'),
+        btn('✏️ Info', perms.can_change_info, 'info')
+      ],
+      [
+        btn('📞 Video', perms.can_manage_video_chats, 'vid'),
+        btn('👥 Promote', perms.can_promote_members, 'prom')
+      ],
+      [
+        btn('🔗 Invite', perms.can_invite_users, 'inv'),
+        btn('💬 Topics', perms.can_manage_topics, 'top')
+      ],
+      [
+        btn('📢 Post Msgs', perms.can_post_messages, 'post'),
+        btn('✍️ Edit Msgs', perms.can_edit_messages, 'edit')
+      ],
+      [
+        { text: '💾 SAVE PERMISSIONS', callback_data: `p:${chatId}:${targetUserId}:save` },
+        { text: '❌ Close', callback_data: `p:${chatId}:${targetUserId}:close` }
+      ]
+    ]
+  };
+
+  return { text, reply_markup };
 }
 
 function escapeHtml(text: string): string {

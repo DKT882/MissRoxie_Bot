@@ -99,7 +99,7 @@ export class TelegramBotManager {
         const data = await telegramApi.getUpdates(
           this.lastUpdateId ? this.lastUpdateId + 1 : undefined,
           20,
-          ['message', 'edited_message']
+          ['message', 'edited_message', 'callback_query']
         );
 
         if (!data.ok) {
@@ -122,6 +122,8 @@ export class TelegramBotManager {
               await this.handleMessage(update.message);
             } else if (update.edited_message) {
               await this.handleMessage(update.edited_message);
+            } else if (update.callback_query) {
+              await CommandHandler.handleCallbackQuery(update.callback_query);
             }
           }
         }

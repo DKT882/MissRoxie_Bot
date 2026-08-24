@@ -466,7 +466,7 @@ export class TelegramMiddleware {
    */
   public static async validateModerationAction(
     ctx: CommandContext,
-    action: 'kick' | 'ban' | 'unban' | 'demote' | 'promote' | 'warn'
+    action: 'kick' | 'ban' | 'unban' | 'demote' | 'promote' | 'permissions' | 'warn'
   ): Promise<ValidationResult> {
     // 1. Group Check
     if (!this.isGroup(ctx.message)) {
@@ -477,7 +477,7 @@ export class TelegramMiddleware {
     const actor = await this.resolveActor(ctx);
 
     // 3. Validate Actor's Telegram Permissions
-    if (action === 'demote' || action === 'promote') {
+    if (action === 'demote' || action === 'promote' || action === 'permissions') {
       const canActorManageAdmins =
         actor.actorRole === 'OWNER' ||
         actor.isAnonymousAdmin ||
@@ -488,6 +488,8 @@ export class TelegramMiddleware {
           allowed: false,
           reason: action === 'promote'
             ? '❌ You need the "Add New Admins" administrator permission to promote members.'
+            : action === 'permissions'
+            ? '❌ You need the "Add New Admins" administrator permission to edit administrator permissions.'
             : '❌ You need the "Add New Admins" administrator permission to demote administrators.',
           actor
         };
@@ -512,6 +514,8 @@ export class TelegramMiddleware {
         allowed: false,
         reason: action === 'promote'
           ? '❌ Anonymous administrators and channels cannot be used as promotion targets.'
+          : action === 'permissions'
+          ? '❌ Anonymous administrators and channels cannot have their permissions edited.'
           : '⚠️ Cannot perform moderation actions against anonymous administrators or channels.',
         actor
       };
@@ -520,7 +524,7 @@ export class TelegramMiddleware {
     if (resolvedTarget.type !== 'user') {
       return {
         allowed: false,
-        reason: action === 'promote' && (!resolvedTarget.error || resolvedTarget.error.includes('reply'))
+        reason: (action === 'promote' || action === 'permissions') && (!resolvedTarget.error || resolvedTarget.error.includes('reply'))
           ? '❌ I couldn\'t identify that user. Reply to their message or provide a valid Telegram ID.'
           : resolvedTarget.error,
         actor
@@ -539,6 +543,8 @@ export class TelegramMiddleware {
           ? '❌ Cannot demote the bot itself.'
           : action === 'promote'
           ? '❌ Cannot promote the bot itself.'
+          : action === 'permissions'
+          ? '❌ Roxie\'s permissions cannot be edited through this command.'
           : `⚠️ Cannot ${action} the bot itself.`,
         actor
       };
@@ -549,6 +555,8 @@ export class TelegramMiddleware {
         allowed: false,
         reason: action === 'promote'
           ? '❌ Anonymous administrators and channels cannot be used as promotion targets.'
+          : action === 'permissions'
+          ? '❌ Anonymous administrators and channels cannot have their permissions edited.'
           : `⚠️ Cannot ${action} anonymous administrators or the group itself.`,
         actor
       };
@@ -561,6 +569,8 @@ export class TelegramMiddleware {
           ? '❌ You cannot demote yourself.'
           : action === 'promote'
           ? '❌ You cannot promote yourself.'
+          : action === 'permissions'
+          ? '❌ You cannot edit your own permissions.'
           : '⚠️ Safety check: actor and target are the same user. Please reply to the target user\'s message.',
         actor
       };
@@ -602,7 +612,7 @@ export class TelegramMiddleware {
       source: resolvedTarget.source
     };
 
-    // 7. Group Owner cannot be demoted or moderated by anyone
+    // 7. Group Owner cannot be demoted or moderated or edited by anyone
     if (targetRole === 'OWNER' || targetStatus === 'creator') {
       return {
         allowed: false,
@@ -610,14 +620,16 @@ export class TelegramMiddleware {
           ? '❌ The group owner cannot be demoted.'
           : action === 'promote'
           ? '❌ That user is already the group owner.'
+          : action === 'permissions'
+          ? '❌ The group owner cannot have their permissions edited.'
           : '⚠️ I can\'t remove or moderate the group owner.',
         actor,
         target
       };
     }
 
-    // 8. Target Administrator Status for Demotion / Promotion
-    if (action === 'demote') {
+    // 8. Target Administrator Status for Demotion / Promotion / Permissions
+    if (action === 'demote' || action === 'permissions') {
       if (targetStatus !== 'administrator') {
         return {
           allowed: false,
@@ -645,8 +657,8 @@ export class TelegramMiddleware {
       }
     }
 
-    // 9. Non-Demote/Promote Hierarchy Comparison (Actor must strictly outrank Target for kick/ban/warn)
-    if (action !== 'demote' && action !== 'promote' && actor.actorRank <= targetRank) {
+    // 9. Non-Demote/Promote/Permissions Hierarchy Comparison (Actor must strictly outrank Target for kick/ban/warn)
+    if (action !== 'demote' && action !== 'promote' && action !== 'permissions' && actor.actorRank <= targetRank) {
       if (targetRole === 'ADMIN') {
         return {
           allowed: false,
@@ -673,13 +685,15 @@ export class TelegramMiddleware {
 
     // 10. Fetch Bot ChatMember & Verify Bot Telegram Capabilities
     if (action !== 'warn') {
-      const requiredBotPerm = (action === 'demote' || action === 'promote') ? 'can_promote_members' : 'can_restrict_members';
+      const requiredBotPerm = (action === 'demote' || action === 'promote' || action === 'permissions') ? 'can_promote_members' : 'can_restrict_members';
       const botCheck = await this.checkBotPermissions(ctx.chatId, requiredBotPerm);
       if (!botCheck.allowed) {
         return {
           allowed: false,
           reason: action === 'promote'
             ? '❌ The bot needs the "Add New Admins" administrator permission to promote members.'
+            : action === 'permissions'
+            ? '❌ The bot needs the "Add New Admins" administrator permission to modify administrator rights.'
             : botCheck.reason,
           actor,
           target
@@ -687,12 +701,14 @@ export class TelegramMiddleware {
       }
     }
 
-    // 11. Target Editability (can_be_edited) Check for Demotion
-    if (action === 'demote' && targetMember && targetMember.status === 'administrator') {
+    // 11. Target Editability (can_be_edited) Check for Demotion & Permissions
+    if ((action === 'demote' || action === 'permissions') && targetMember && targetMember.status === 'administrator') {
       if (targetMember.can_be_edited === false) {
         return {
           allowed: false,
-          reason: '⚠️ I don\'t have permission to modify this administrator. They may have been promoted by a higher-level administrator or are outside my admin hierarchy.',
+          reason: action === 'permissions'
+            ? '❌ Telegram does not allow Roxie to modify this administrator.'
+            : '⚠️ I don\'t have permission to modify this administrator. They may have been promoted by a higher-level administrator or are outside my admin hierarchy.',
           actor,
           target
         };
