@@ -131,7 +131,9 @@ export interface TelegramMessage {
   forward_from?: TelegramUser;
   forward_from_chat?: TelegramChat;
   forward_date?: number;
+  forward_sender_name?: string;
   forward_origin?: any;
+  reply_markup?: any;
   new_chat_members?: TelegramUser[];
   left_chat_member?: TelegramUser;
   new_chat_title?: string;

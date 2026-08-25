@@ -487,7 +487,7 @@ export class ModerationService {
             chatTitle,
             targetUserId: member.id,
             targetUsername: member.username,
-            action: 'auto_kick',
+            action: 'kick',
             reason: `Anti-raid trigger (${action})`
           });
         } catch (err) {

@@ -1,30 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, 
-  KeyRound, 
-  CheckCircle2, 
   AlertCircle, 
   RefreshCw, 
   Bot, 
-  ExternalLink,
-  Radio,
-  Send,
-  MessageSquare,
-  Sparkles,
-  Activity,
-  Shield,
-  Ban,
-  UserX,
-  AlertTriangle,
-  Link as LinkIcon,
-  Smile,
-  Calendar,
-  Flag,
-  Volume2,
-  Terminal,
-  Settings,
-  ListChecks,
-  Lock
+  Terminal, 
+  Settings, 
+  ListChecks, 
+  Lock, 
+  Activity, 
+  Shield, 
+  Ban, 
+  UserX, 
+  AlertTriangle, 
+  Link as LinkIcon, 
+  Smile, 
+  Calendar, 
+  Flag, 
+  Volume2, 
+  Search, 
+  Download, 
+  CheckCircle2, 
+  ChevronRight, 
+  Users, 
+  Layers,
+  Database,
+  Sliders,
+  X
 } from 'lucide-react';
 
 interface BotInfo {
@@ -33,7 +35,6 @@ interface BotInfo {
   firstName: string;
   canJoinGroups?: boolean;
   canReadGroupMessages?: boolean;
-  supportsInlineQueries?: boolean;
 }
 
 interface ModerationLog {
@@ -50,655 +51,685 @@ interface ModerationLog {
   timestamp: string;
 }
 
-interface TelegramBotStatus {
-  variableName: string;
-  isConfigured: boolean;
-  isValidFormat: boolean;
-  isPolling: boolean;
-  botInfo: BotInfo | null;
-  totalMessagesReceived: number;
-  lastPolledAt: string | null;
-  pollingError: string | null;
+interface GroupInfo {
+  chatId: number;
+  chatTitle: string;
+  chatType: string;
+  username?: string;
+  memberCount: number;
+  status: string;
   stats: {
-    totalBans: number;
-    totalKicks: number;
-    totalWarns: number;
-    totalDeletedLinks: number;
-    totalDeletedStickers: number;
-    totalDeletedImages?: number;
-    totalReports: number;
-    activeSchedules: number;
-    groupsCount: number;
+    bans: number;
+    kicks: number;
+    mutes: number;
+    reports: number;
+    schedules: number;
   };
-  recentLogs: ModerationLog[];
+  settings: any;
+}
+
+interface CommandItem {
+  command: string;
+  category: string;
+  description: string;
+  syntax: string;
+  example: string;
+  permission: string;
+  telegramPermission?: string;
+  targetType: string;
+  isPublic: boolean;
+  modifiesState: boolean;
+  auditLogged: boolean;
 }
 
 export default function App() {
-  const [status, setStatus] = useState<TelegramBotStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; bot?: BotInfo; error?: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'commands' | 'logs' | 'checklist'>('overview');
+  const [activeNav, setActiveNav] = useState<string>('overview');
+  const [selectedChatId, setSelectedChatId] = useState<number | 'all'>('all');
+  const [groups, setGroups] = useState<GroupInfo[]>([]);
+  const [groupDetails, setGroupDetails] = useState<any | null>(null);
+  const [overview, setOverview] = useState<any | null>(null);
+  const [commands, setCommands] = useState<CommandItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [dateFilter, setDateFilter] = useState<string>('24h');
+  const [logFilterType, setLogFilterType] = useState<string>('ALL');
+  const [selectedEvent, setSelectedEvent] = useState<ModerationLog | null>(null);
+  const [testingConnection, setTestingConnection] = useState<boolean>(false);
+  const [testResult, setTestResult] = useState<any | null>(null);
 
-  const [fetchError, setFetchError] = useState<string | null>(null);
-
-  const fetchStatus = async () => {
+  const fetchData = async () => {
     try {
-      const res = await fetch('/api/telegram/status');
-      if (res.ok) {
-        const data: TelegramBotStatus = await res.json();
-        setStatus(data);
-        setFetchError(null);
+      const [overviewRes, groupsRes, cmdsRes] = await Promise.all([
+        fetch('/api/dashboard/overview'),
+        fetch('/api/groups'),
+        fetch('/api/commands')
+      ]);
+
+      if (overviewRes.ok) setOverview(await overviewRes.json());
+      if (groupsRes.ok) setGroups(await groupsRes.json());
+      if (cmdsRes.ok) setCommands(await cmdsRes.json());
+
+      if (selectedChatId !== 'all') {
+        const detailRes = await fetch(`/api/groups/${selectedChatId}`);
+        if (detailRes.ok) setGroupDetails(await detailRes.json());
       } else {
-        const errorData = await res.json().catch(() => ({}));
-        setFetchError(errorData.error || `Server responded with HTTP ${res.status}`);
+        setGroupDetails(null);
       }
-    } catch (err: any) {
-      console.warn('Telegram status fetch retry:', err?.message || err);
-      setFetchError('Unable to connect to backend server. Retrying...');
+    } catch (err) {
+      console.warn('Dashboard fetch error:', err);
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 4000);
+    return () => clearInterval(interval);
+  }, [selectedChatId]);
+
   const handleTestConnection = async () => {
     setTestingConnection(true);
-    setTestResult(null);
     try {
       const res = await fetch('/api/telegram/test-connection', { method: 'POST' });
       const data = await res.json();
       setTestResult(data);
-      if (data.success) {
-        fetchStatus();
-      }
+      fetchData();
     } catch (err: any) {
-      setTestResult({
-        success: false,
-        error: err.message || 'Network error while contacting server'
-      });
+      setTestResult({ success: false, error: err.message });
     } finally {
       setTestingConnection(false);
     }
   };
 
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 3000);
-    return () => clearInterval(interval);
-  }, []);
+  const exportData = (format: 'json' | 'csv') => {
+    const logs = selectedChatId === 'all' 
+      ? overview?.recentLogs || [] 
+      : groupDetails?.logs || [];
 
-  const botUsername = status?.botInfo?.username || testResult?.bot?.username || 'MissRoxie_Bot';
-  const botFirstName = status?.botInfo?.firstName || testResult?.bot?.firstName || 'Roxie';
-  const botId = status?.botInfo?.id || testResult?.bot?.id;
+    if (format === 'json') {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(logs, null, 2));
+      const dlAnchor = document.createElement('a');
+      dlAnchor.setAttribute("href", dataStr);
+      dlAnchor.setAttribute("download", `roxie_audit_logs_${selectedChatId}.json`);
+      dlAnchor.click();
+    } else {
+      let csv = "ID,Timestamp,Group,Action,Actor,Target,Reason\n";
+      logs.forEach((l: any) => {
+        csv += `"${l.id}","${l.timestamp}","${l.chatTitle || l.chatId}","${l.action}","${l.adminUsername || l.adminUserId || ''}","${l.targetUsername || l.targetUserId || ''}","${(l.reason || '').replace(/"/g, '""')}"\n`;
+      });
+      const dataStr = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
+      const dlAnchor = document.createElement('a');
+      dlAnchor.setAttribute("href", dataStr);
+      dlAnchor.setAttribute("download", `roxie_audit_logs_${selectedChatId}.csv`);
+      dlAnchor.click();
+    }
+  };
+
+  const botInfo = overview?.botStatus?.botInfo;
+  const isPolling = overview?.botStatus?.isPolling;
+  const stats = overview?.stats || { totalBans: 0, totalKicks: 0, totalWarns: 0, totalReports: 0, activeSchedules: 0 };
+
+  // Filter logs based on search & group selection
+  const rawLogs = selectedChatId === 'all' 
+    ? overview?.recentLogs || [] 
+    : groupDetails?.logs || [];
+
+  const filteredLogs = rawLogs.filter((l: ModerationLog) => {
+    const matchesSearch = searchQuery === '' || 
+      l.action?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      l.targetUsername?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      l.adminUsername?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      l.reason?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      l.chatTitle?.toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesType = logFilterType === 'ALL' || l.action?.toLowerCase() === logFilterType.toLowerCase();
+    return matchesSearch && matchesType;
+  });
 
   return (
-    <div id="app-container" className="min-h-screen bg-stone-100 text-stone-900 flex flex-col items-center justify-start py-8 px-4 sm:px-6 lg:px-8">
-      <main id="main-content" className="w-full max-w-4xl space-y-6">
-        
-        {/* Main Header Bar */}
-        {fetchError && !status && (
-          <div id="connection-warning" className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-3 text-amber-900 text-xs">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>{fetchError}</span>
-            </div>
-            <button
-              onClick={fetchStatus}
-              className="px-2.5 py-1 bg-amber-600 text-white font-medium rounded hover:bg-amber-700 transition-colors shrink-0"
-            >
-              Retry
-            </button>
+    <div className="h-screen overflow-hidden bg-stone-900 text-stone-100 flex flex-col font-sans">
+      
+      {/* Top Banner / Global Header */}
+      <header className="bg-stone-950 border-b border-stone-800 px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/20">
+            <ShieldCheck className="w-6 h-6" />
           </div>
-        )}
-
-        <header id="header-card" className="bg-white border border-stone-200 rounded-xl p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-xl bg-sky-600 text-white flex items-center justify-center shadow-xs shrink-0">
-              <Shield className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl font-bold text-stone-900">Roxie Group Moderation Console</h1>
-                {status?.isPolling ? (
-                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Long Polling Active
-                  </span>
-                ) : status?.isConfigured ? (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-800 bg-blue-100 px-2.5 py-0.5 rounded-full">
-                    Configured
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded-full">
-                    Secret Missing
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-stone-500 mt-1">
-                Connected to Telegram bot <strong>@{botUsername}</strong> (ID: {botId})
-              </p>
-            </div>
+          <div>
+            <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+              ROXIE GROUP MODERATION CONSOLE
+              <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-normal">v4.5 Pro</span>
+            </h1>
+            <p className="text-xs text-stone-400">Advanced Telegram Security, Policy Engine & Multi-Group Control Center</p>
           </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              id="test-connection-btn"
-              onClick={handleTestConnection}
-              disabled={testingConnection || !status?.isConfigured}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-stone-900 hover:bg-stone-800 rounded-lg transition-colors disabled:opacity-50"
-            >
-              {testingConnection ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  Testing...
-                </>
-              ) : (
-                <>
-                  <Radio className="w-3.5 h-3.5" />
-                  Verify Telegram API
-                </>
-              )}
-            </button>
-            <button
-              id="refresh-btn"
-              onClick={fetchStatus}
-              disabled={loading}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-stone-600 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 rounded-lg transition-colors"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              Sync
-            </button>
-          </div>
-        </header>
-
-        {/* Live Metrics Grid */}
-        <section id="metrics-grid" className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-white border border-stone-200 rounded-xl p-4 shadow-xs">
-            <div className="flex items-center justify-between text-xs text-stone-500 mb-1">
-              <span>Bans / Kicks</span>
-              <Ban className="w-4 h-4 text-rose-500" />
-            </div>
-            <div className="text-xl font-bold text-stone-900">
-              {(status?.stats?.totalBans || 0) + (status?.stats?.totalKicks || 0)}
-            </div>
-            <p className="text-[11px] text-stone-500 mt-0.5">
-              {status?.stats?.totalBans || 0} bans, {status?.stats?.totalKicks || 0} kicks
-            </p>
-          </div>
-
-          <div className="bg-white border border-stone-200 rounded-xl p-4 shadow-xs">
-            <div className="flex items-center justify-between text-xs text-stone-500 mb-1">
-              <span>Warnings Issued</span>
-              <AlertTriangle className="w-4 h-4 text-amber-500" />
-            </div>
-            <div className="text-xl font-bold text-stone-900">
-              {status?.stats?.totalWarns || 0}
-            </div>
-            <p className="text-[11px] text-stone-500 mt-0.5">Threshold auto-ban ready</p>
-          </div>
-
-          <div className="bg-white border border-stone-200 rounded-xl p-4 shadow-xs">
-            <div className="flex items-center justify-between text-xs text-stone-500 mb-1">
-              <span>Filtered Content</span>
-              <LinkIcon className="w-4 h-4 text-sky-500" />
-            </div>
-            <div className="text-xl font-bold text-stone-900">
-              {(status?.stats?.totalDeletedLinks || 0) + (status?.stats?.totalDeletedStickers || 0) + (status?.stats?.totalDeletedImages || 0)}
-            </div>
-            <p className="text-[11px] text-stone-500 mt-0.5">
-              {status?.stats?.totalDeletedLinks || 0} links, {status?.stats?.totalDeletedStickers || 0} stickers, {status?.stats?.totalDeletedImages || 0} images/media
-            </p>
-          </div>
-
-          <div className="bg-white border border-stone-200 rounded-xl p-4 shadow-xs">
-            <div className="flex items-center justify-between text-xs text-stone-500 mb-1">
-              <span>Automations</span>
-              <Calendar className="w-4 h-4 text-indigo-500" />
-            </div>
-            <div className="text-xl font-bold text-stone-900">
-              {status?.stats?.activeSchedules || 0}
-            </div>
-            <p className="text-[11px] text-stone-500 mt-0.5">Active message schedules</p>
-          </div>
-        </section>
-
-        {/* Tab Navigation */}
-        <div className="flex items-center gap-2 border-b border-stone-200 pb-2">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'overview'
-                ? 'bg-stone-900 text-white'
-                : 'bg-white text-stone-600 hover:text-stone-900 border border-stone-200'
-            }`}
-          >
-            Setup & Verification
-          </button>
-          <button
-            onClick={() => setActiveTab('commands')}
-            className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'commands'
-                ? 'bg-stone-900 text-white'
-                : 'bg-white text-stone-600 hover:text-stone-900 border border-stone-200'
-            }`}
-          >
-            Moderation Commands (17)
-          </button>
-          <button
-            onClick={() => setActiveTab('logs')}
-            className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'logs'
-                ? 'bg-stone-900 text-white'
-                : 'bg-white text-stone-600 hover:text-stone-900 border border-stone-200'
-            }`}
-          >
-            Audit Logs ({status?.recentLogs?.length || 0})
-          </button>
-          <button
-            onClick={() => setActiveTab('checklist')}
-            className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'checklist'
-                ? 'bg-stone-900 text-white'
-                : 'bg-white text-stone-600 hover:text-stone-900 border border-stone-200'
-            }`}
-          >
-            Test Checklist
-          </button>
         </div>
 
-        {/* Tab 1: Overview & Setup */}
-        {activeTab === 'overview' && (
+        {/* Status Indicators & Test Button */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2 bg-stone-900 px-3 py-1.5 rounded-lg border border-stone-800 text-xs">
+            <span className={`w-2.5 h-2.5 rounded-full ${isPolling ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+            <span className="text-stone-300 font-medium">
+              {isPolling ? '🟢 Telegram Connected & Polling' : '🟡 Polling Inactive / Token Required'}
+            </span>
+          </div>
+
+          <button
+            onClick={handleTestConnection}
+            disabled={testingConnection}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 shadow-sm"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} />
+            {testingConnection ? 'Testing...' : 'Test Connection'}
+          </button>
+        </div>
+      </header>
+
+      {/* Main Layout */}
+      <div className="flex-1 flex flex-col lg:flex-row h-[calc(100vh-73px)] overflow-hidden">
+        
+        {/* Sidebar Navigation - Fixed, non-scrolling */}
+        <aside className="w-full lg:w-72 bg-stone-950 border-r border-stone-800 p-4 space-y-6 flex flex-col justify-between h-full overflow-hidden shrink-0">
           <div className="space-y-6">
-            {/* Quick Action Link to Bot */}
-            <div className="bg-sky-50 border border-sky-200 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <h2 className="text-sm font-semibold text-sky-950 flex items-center gap-2">
-                  <Bot className="w-4 h-4 text-sky-700" />
-                  Add @{botUsername} as Group Administrator
-                </h2>
-                <p className="text-xs text-sky-900 leading-relaxed max-w-xl">
-                  To enable full moderation features (kick, ban, link deletion, sticker filtering, automated broadcast), add <strong>@{botUsername}</strong> to your Telegram group and grant it Administrator permissions with <strong>Delete Messages</strong> and <strong>Ban Users</strong>.
-                </p>
-              </div>
-              <a
-                href={`https://t.me/${botUsername}?startgroup=true`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-lg transition-colors shrink-0"
+            
+            {/* Group Selector */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5" /> Group Scope Selector
+              </label>
+              <select
+                value={selectedChatId}
+                onChange={(e) => setSelectedChatId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                className="w-full bg-stone-900 border border-stone-800 rounded-xl px-3 py-2 text-xs text-stone-200 focus:outline-none focus:border-blue-500 transition-colors"
               >
-                Add Bot to Group
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+                <option value="all">🟢 [ All Groups ] ({groups.length} Connected)</option>
+                {groups.map((g) => (
+                  <option key={g.chatId} value={g.chatId}>
+                    🟢 {g.chatTitle} ({g.chatId})
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {/* Architecture Highlights */}
-            <div className="bg-white border border-stone-200 rounded-xl p-6 shadow-xs space-y-4">
-              <h2 className="text-sm font-semibold text-stone-900 flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                Phase 2 Architecture & Security Guarantees
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div className="p-3 bg-stone-50 rounded-lg border border-stone-200/70 space-y-1">
-                  <p className="font-semibold text-stone-900">🛡️ Permission Middleware</p>
-                  <p className="text-stone-600 leading-relaxed">
-                    Every admin command verifies group context (<code className="font-mono">requireGroup</code>), sender admin status (<code className="font-mono">requireAdmin</code>), and bot execution rights (<code className="font-mono">requireBotPermission</code>). Normal members can never execute admin actions.
-                  </p>
-                </div>
-                <div className="p-3 bg-stone-50 rounded-lg border border-stone-200/70 space-y-1">
-                  <p className="font-semibold text-stone-900">👑 Hierarchy Protection</p>
-                  <p className="text-stone-600 leading-relaxed">
-                    Admins cannot ban/kick other administrators or the group owner. The bot validates hierarchy before calling Telegram restriction APIs.
-                  </p>
-                </div>
-                <div className="p-3 bg-stone-50 rounded-lg border border-stone-200/70 space-y-1">
-                  <p className="font-semibold text-stone-900">💾 Persistent Multi-Group Storage</p>
-                  <p className="text-stone-600 leading-relaxed">
-                    Settings (links, stickers, warn limit), active warnings, sticker permissions (<code className="font-mono">/free</code>), and scheduled messages persist across server restarts with zero data loss.
-                  </p>
-                </div>
-                <div className="p-3 bg-stone-50 rounded-lg border border-stone-200/70 space-y-1">
-                  <p className="font-semibold text-stone-900">🔒 Token Safety</p>
-                  <p className="text-stone-600 leading-relaxed">
-                    <code className="font-mono">TELEGRAM_BOT_TOKEN</code> is strictly read from <code className="font-mono">process.env</code> server-side. It is never logged, never returned in API responses, and never exposed in browser bundles.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 2: Commands Cheat Sheet */}
-        {activeTab === 'commands' && (
-          <div className="bg-white border border-stone-200 rounded-xl p-6 shadow-xs space-y-5">
-            <h2 className="text-sm font-semibold text-stone-900 flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-stone-700" />
-              Complete Telegram Command Reference
-            </h2>
-
-            <div className="space-y-4 text-xs">
-              {/* Member Management & Purge */}
-              <div>
-                <h3 className="font-bold text-stone-900 uppercase tracking-wider text-[11px] text-stone-400 mb-2">
-                  1. Member Management & Chat Purge (Admins Only)
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-sky-700">/kick @username</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Removes user from group (they can re-join via link). Also works via reply.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-rose-700">/ban @username [reason]</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Permanently bans target user from the group. Also works via reply.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-emerald-700">/unban @username</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Unbans target user so they can join back with an invite link.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-amber-700">/demote @username</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Revokes administrator privileges from a promoted administrator.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-rose-700">/del (in reply)</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Reply to any message in the group to immediately delete it for every member without leaving any trace.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-rose-700">/clear user (in reply)</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Reply to any member&apos;s message with <code className="font-mono">/clear user</code> or use <code className="font-mono">/clear @username</code> to purge all messages sent by that member for everyone.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200 col-span-1 sm:col-span-2">
-                    <span className="font-bold text-rose-700">/clear [5s | 1m | 1h | 50]</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Purges messages from the group: e.g. <code className="font-mono">/clear</code> (all recent messages), <code className="font-mono">/clear 5s</code> (messages sent in last 5 seconds), <code className="font-mono">/clear 30s</code>, <code className="font-mono">/clear 5m</code>, <code className="font-mono">/clear 1h</code>, <code className="font-mono">/clear 50</code>, or reply to a message with <code className="font-mono">/clear</code> to purge starting from that message for every member.</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Warning System */}
-              <div>
-                <h3 className="font-bold text-stone-900 uppercase tracking-wider text-[11px] text-stone-400 mb-2">
-                  2. Warning & Threshold System
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-amber-700">/warn @user [reason]</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Issues a warning. Automatically bans if user reaches the warning limit.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-stone-700">/warnings [@user]</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Displays active warnings, reasons, and timestamps for target user.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-emerald-700">/resetwarns @user</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Resets warning count for target member.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-indigo-700">/setwarnlimit &lt;number&gt;</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Configures group warning limit (default: 3). e.g. <code className="font-mono">/setwarnlimit 5</code></p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Protection & Filters */}
-              <div>
-                <h3 className="font-bold text-stone-900 uppercase tracking-wider text-[11px] text-stone-400 mb-2">
-                  3. Image, Media & Sticker Protection
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-sky-700">/media on | off</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">When ON, automatically deletes any kind of images/photos/GIFs/videos sent by non-admin members until an admin frees them.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-sky-700">/stickers on | off</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">When ON, deletes stickers from normal members unless whitelisted with /free.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-emerald-700">/free [@user | reply]</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Frees a member so they can send images, photos, GIFs, videos, and stickers without auto-deletion.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-rose-700">/unfree @user</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Revokes media and sticker exemption from member.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200 col-span-1 sm:col-span-2">
-                    <span className="font-bold text-sky-700">/links on | off &nbsp;·&nbsp; /freelist</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1"><code className="font-mono">/links on|off</code> toggles unauthorized link filter. <code className="font-mono">/freelist</code> displays all exempted members currently allowed to send media and stickers in the group.</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Automation & Broadcast */}
-              <div>
-                <h3 className="font-bold text-stone-900 uppercase tracking-wider text-[11px] text-stone-400 mb-2">
-                  4. Automated Scheduling & Broadcast
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-indigo-700">/schedule &lt;30m|2h|1d&gt; &lt;msg&gt;</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Creates recurring broadcast message. Survives server restarts!</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-stone-700">/listSchedules</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Lists all active recurring schedules in the current group.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-rose-700">/deleteSchedule &lt;id&gt;</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Deletes recurring schedule by its ID.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-stone-700">/say &lt;message&gt;</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Admin broadcast message directly as the bot with flood prevention.</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Member Tools */}
-              <div>
-                <h3 className="font-bold text-stone-900 uppercase tracking-wider text-[11px] text-stone-400 mb-2">
-                  5. Member Tools & Utilities
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-amber-700">/report [reason]</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Reply to any message to file a report with anti-spam rate limiting.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-stone-700">/live</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Guidance on initiating Telegram Group voice/video live calls.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-stone-700">/status</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Displays active group settings, filter state, and uptime stats.</p>
-                  </div>
-                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-stone-700">/help</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Comprehensive interactive command guide.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 3: Moderation Audit Stream */}
-        {activeTab === 'logs' && (
-          <div className="bg-white border border-stone-200 rounded-xl p-6 shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
-              <h2 className="text-sm font-semibold text-stone-900 flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-stone-700" />
-                Moderation Audit Trail
-              </h2>
-              <span className="text-[11px] text-stone-500 font-mono">
-                Auto-refreshed live
-              </span>
-            </div>
-
-            {status?.recentLogs && status.recentLogs.length > 0 ? (
-              <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-                {status.recentLogs.slice().reverse().map((log) => (
-                  <div 
-                    key={log.id}
-                    className="p-3 rounded-lg border border-stone-200/80 bg-stone-50 text-xs flex items-start justify-between gap-3"
+            {/* Navigation Menu */}
+            <nav className="space-y-1">
+              {[
+                { id: 'overview', label: 'Overview', icon: Activity },
+                { id: 'live', label: 'Live Activity', icon: Terminal },
+                { id: 'commands', label: 'Command Center', icon: ListChecks },
+                { id: 'bans', label: 'Banned Users', icon: Ban },
+                { id: 'kicks', label: 'Kicked Users', icon: UserX },
+                { id: 'mutes', label: 'Muted Users', icon: Volume2 },
+                { id: 'warnings', label: 'Warning Center', icon: AlertTriangle },
+                { id: 'reports', label: 'Report Center', icon: Flag },
+                { id: 'filters', label: 'Filter Center', icon: Search },
+                { id: 'locks', label: 'Content Locks', icon: Lock },
+                { id: 'automations', label: 'Automations', icon: Calendar },
+                { id: 'security', label: 'Security & Anti-Raid', icon: Shield },
+                { id: 'audit', label: 'Audit Logs', icon: Database },
+                { id: 'system', label: 'System Logs', icon: Sliders },
+              ].map((item) => {
+                const Icon = item.icon;
+                const isActive = activeNav === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveNav(item.id)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
+                      isActive 
+                        ? 'bg-blue-600/10 text-blue-400 border border-blue-500/20' 
+                        : 'text-stone-400 hover:text-stone-200 hover:bg-stone-900'
+                    }`}
                   >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 font-medium">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase font-bold ${
-                          log.action === 'ban' || log.action === 'auto_ban' || log.action === 'kick'
-                            ? 'bg-rose-100 text-rose-800'
-                            : log.action === 'warn'
-                            ? 'bg-amber-100 text-amber-800'
-                            : log.action === 'delete_link' || log.action === 'delete_sticker' || log.action === 'delete_image' || log.action === 'delete_media'
-                            ? 'bg-sky-100 text-sky-800'
-                            : 'bg-stone-200 text-stone-800'
-                        }`}>
-                          {log.action.replace('_', ' ')}
-                        </span>
-                        <span className="text-stone-900 font-semibold">{log.chatTitle || 'Group'}</span>
-                      </div>
-                      <p className="text-stone-700">
-                        {log.targetUsername ? (
-                          <span>Target: <strong>@{log.targetUsername}</strong> · </span>
-                        ) : null}
-                        {log.adminUsername ? (
-                          <span>Admin: <strong>@{log.adminUsername}</strong> · </span>
-                        ) : null}
-                        {log.reason ? <span>Reason: <i>"{log.reason}"</i></span> : null}
-                        {log.details ? <span>{log.details}</span> : null}
-                      </p>
+                    <div className="flex items-center gap-2.5">
+                      <Icon className="w-4 h-4" />
+                      <span>{item.label}</span>
                     </div>
-                    <span className="text-[10px] text-stone-400 font-mono shrink-0">
-                      {new Date(log.timestamp).toLocaleTimeString()}
+                    {isActive && <ChevronRight className="w-3.5 h-3.5" />}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Sidebar Footer info */}
+          <div className="bg-stone-900 border border-stone-800 rounded-xl p-3 text-[11px] text-stone-400 space-y-1.5 shrink-0">
+            <div className="flex justify-between">
+              <span>Bot Username:</span>
+              <span className="text-stone-200 font-mono">@{botInfo?.username || 'MissRoxie_Bot'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Connected Groups:</span>
+              <span className="text-stone-200 font-bold">{groups.length}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Security Engine:</span>
+              <span className="text-emerald-400 font-semibold">Active</span>
+            </div>
+          </div>
+        </aside>
+
+        {/* Content Area - Scrollable */}
+        <main className="flex-1 p-6 space-y-6 overflow-y-auto h-full">
+          
+          {/* Global Search & Export Header - Sticky at top */}
+          <div className="sticky top-0 z-30 bg-stone-900/95 backdrop-blur-md border border-stone-800 rounded-2xl p-4 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-stone-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search events, users, groups..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-stone-900 border border-stone-800 rounded-xl pl-9 pr-4 py-2 text-xs text-stone-200 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              <select
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                className="bg-stone-900 border border-stone-800 rounded-xl px-3 py-2 text-xs text-stone-300 focus:outline-none"
+              >
+                <option value="24h">Last 24 Hours</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+                <option value="all">All Time</option>
+              </select>
+
+              <button
+                onClick={() => exportData('json')}
+                className="flex items-center gap-1.5 px-3 py-2 bg-stone-900 hover:bg-stone-800 border border-stone-800 rounded-xl text-xs text-stone-300 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" /> Export JSON
+              </button>
+              <button
+                onClick={() => exportData('csv')}
+                className="flex items-center gap-1.5 px-3 py-2 bg-stone-900 hover:bg-stone-800 border border-stone-800 rounded-xl text-xs text-stone-300 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" /> Export CSV
+              </button>
+            </div>
+          </div>
+
+          {/* ACTIVE TAB: OVERVIEW */}
+          {activeNav === 'overview' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { label: 'Total Bans', count: stats.totalBans, icon: Ban, color: 'text-red-400 bg-red-500/10 border-red-500/20' },
+                  { label: 'Total Kicks', count: stats.totalKicks, icon: UserX, color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
+                  { label: 'Warnings Issued', count: stats.totalWarns, icon: AlertTriangle, color: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20' },
+                  { label: 'Security Reports', count: stats.totalReports, icon: Flag, color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' },
+                ].map((s, idx) => {
+                  const Icon = s.icon;
+                  return (
+                    <div key={idx} className="bg-stone-950 border border-stone-800 rounded-2xl p-5 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-stone-400 font-medium">{s.label}</p>
+                        <h3 className="text-2xl font-bold text-white mt-1">{s.count}</h3>
+                      </div>
+                      <div className={`w-12 h-12 rounded-xl border flex items-center justify-center ${s.color}`}>
+                        <Icon className="w-6 h-6" />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Connected Groups Section */}
+              <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-blue-400" /> Connected Telegram Groups ({groups.length})
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {groups.map((g) => (
+                    <div key={g.chatId} className="bg-stone-900 border border-stone-800 rounded-xl p-4 flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                          {g.chatTitle}
+                        </h4>
+                        <p className="text-[11px] text-stone-400 mt-1 font-mono">Chat ID: {g.chatId}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { setSelectedChatId(g.chatId); setActiveNav('audit'); }}
+                          className="px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg text-xs font-medium transition-colors"
+                        >
+                          Inspect Logs
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {groups.length === 0 && (
+                    <p className="text-xs text-stone-500 col-span-2 py-4 text-center">No groups discovered yet. Add Roxie to a Telegram group to begin monitoring.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ACTIVE TAB: LIVE ACTIVITY TERMINAL */}
+          {activeNav === 'live' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-emerald-400" /> Terminal-Style Live Activity Console
+                </h3>
+                <div className="flex items-center gap-2">
+                  {['ALL', 'BAN', 'KICK', 'WARN', 'REPORT', 'FILTER'].map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setLogFilterType(t)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-colors ${
+                        logFilterType === t ? 'bg-emerald-600 text-white' : 'bg-stone-900 text-stone-400 hover:bg-stone-800'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-stone-950 border border-stone-800 rounded-xl p-4 font-mono text-xs space-y-2 h-[500px] overflow-y-auto">
+                <div className="text-stone-500 text-[11px]"># Roxie Security & Moderation Live Stream (Chat Scope: {selectedChatId})</div>
+                {filteredLogs.map((l: ModerationLog, idx: number) => (
+                  <div key={idx} className="flex items-start gap-3 py-1 border-b border-stone-900/50 hover:bg-stone-900/30 px-2 rounded">
+                    <span className="text-stone-500 shrink-0">{new Date(l.timestamp).toLocaleTimeString()}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                      l.action === 'ban' ? 'bg-red-500/20 text-red-400' :
+                      l.action === 'kick' ? 'bg-amber-500/20 text-amber-400' :
+                      l.action === 'warn' ? 'bg-yellow-500/20 text-yellow-400' :
+                      l.action === 'report' ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'
+                    }`}>
+                      {l.action}
                     </span>
+                    <span className="text-stone-300 font-semibold">[{l.chatTitle || l.chatId}]</span>
+                    <span className="text-stone-400">Target: <strong className="text-stone-200">@{l.targetUsername || l.targetUserId || 'unknown'}</strong></span>
+                    {l.reason && <span className="text-stone-500 italic">"{l.reason}"</span>}
+                  </div>
+                ))}
+                {filteredLogs.length === 0 && (
+                  <div className="text-stone-600 text-center py-20">No matching log entries found for current filter.</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ACTIVE TAB: COMMAND CENTER */}
+          {activeNav === 'commands' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-6">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <ListChecks className="w-4 h-4 text-blue-400" /> Complete Telegram Command Center ({commands.length} Commands)
+                </h3>
+                <p className="text-xs text-stone-400 mt-1">Discovered directly from backend handlers and command registry.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {commands.map((cmd, idx) => (
+                  <div key={idx} className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="px-2.5 py-1 bg-blue-600/10 text-blue-400 font-mono text-xs font-bold rounded-lg border border-blue-500/20">
+                        {cmd.command}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-semibold uppercase ${
+                        cmd.permission === 'Owner' ? 'bg-red-500/20 text-red-400' :
+                        cmd.permission === 'Admin' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'
+                      }`}>
+                        {cmd.permission}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-stone-300">{cmd.description}</p>
+
+                    <div className="bg-stone-950 rounded-lg p-2.5 text-[11px] font-mono space-y-1 text-stone-400">
+                      <div><strong className="text-stone-300">Syntax:</strong> {cmd.syntax}</div>
+                      <div><strong className="text-stone-300">Example:</strong> {cmd.example}</div>
+                      {cmd.telegramPermission && <div><strong className="text-stone-300">TG Perm:</strong> {cmd.telegramPermission}</div>}
+                    </div>
                   </div>
                 ))}
               </div>
-            ) : (
-              <div className="text-center py-12 text-stone-400 text-xs space-y-2">
-                <Shield className="w-8 h-8 mx-auto opacity-30 text-stone-500" />
-                <p>No moderation actions logged yet.</p>
-                <p className="text-[11px] text-stone-500">
-                  Moderation events (warnings, kicks, bans, link deletions, scheduled posts) will appear here in real-time.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
 
-        {/* Tab 4: Step-by-Step Test Checklist */}
-        {activeTab === 'checklist' && (
-          <div className="bg-white border border-stone-200 rounded-xl p-6 shadow-xs space-y-4">
-            <h2 className="text-sm font-semibold text-stone-900 flex items-center gap-2">
-              <ListChecks className="w-4 h-4 text-emerald-600" />
-              Phase 2 Telegram Test Checklist
-            </h2>
-            <p className="text-xs text-stone-600 leading-relaxed">
-              Verify all 17 commands and moderation mechanisms in your Telegram test group:
-            </p>
+          {/* ACTIVE TAB: BANNED USERS */}
+          {activeNav === 'bans' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-4">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Ban className="w-4 h-4 text-red-400" /> Banned Users Management
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-stone-900 text-stone-400 border-b border-stone-800">
+                    <tr>
+                      <th className="p-3">User ID / Username</th>
+                      <th className="p-3">Group</th>
+                      <th className="p-3">Reason</th>
+                      <th className="p-3">Banned By</th>
+                      <th className="p-3">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-900">
+                    {rawLogs.filter((l: any) => l.action === 'ban' || l.action === 'auto_ban').map((l: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-stone-900/50">
+                        <td className="p-3 font-mono font-semibold text-stone-200">@{l.targetUsername || l.targetUserId}</td>
+                        <td className="p-3 text-stone-400">{l.chatTitle || l.chatId}</td>
+                        <td className="p-3 text-stone-300">{l.reason || 'No reason specified'}</td>
+                        <td className="p-3 text-stone-400">@{l.adminUsername || l.adminUserId || 'system'}</td>
+                        <td className="p-3 text-stone-500">{new Date(l.timestamp).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
-            <div className="divide-y divide-stone-100 text-xs border border-stone-200 rounded-lg overflow-hidden">
-              <div className="p-3 bg-stone-50 flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">1. /kick @username</p>
-                  <p className="text-stone-500 text-[11px]">Removes user; user can re-join with link.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+          {/* ACTIVE TAB: KICKED USERS */}
+          {activeNav === 'kicks' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-4">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <UserX className="w-4 h-4 text-amber-400" /> Kicked Users History
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-stone-900 text-stone-400 border-b border-stone-800">
+                    <tr>
+                      <th className="p-3">User ID / Username</th>
+                      <th className="p-3">Group</th>
+                      <th className="p-3">Reason</th>
+                      <th className="p-3">Kicked By</th>
+                      <th className="p-3">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-900">
+                    {rawLogs.filter((l: any) => l.action === 'kick').map((l: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-stone-900/50">
+                        <td className="p-3 font-mono font-semibold text-stone-200">@{l.targetUsername || l.targetUserId}</td>
+                        <td className="p-3 text-stone-400">{l.chatTitle || l.chatId}</td>
+                        <td className="p-3 text-stone-300">{l.reason || 'No reason specified'}</td>
+                        <td className="p-3 text-stone-400">@{l.adminUsername || l.adminUserId || 'system'}</td>
+                        <td className="p-3 text-stone-500">{new Date(l.timestamp).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="p-3 bg-white flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">2. /ban @username [reason]</p>
-                  <p className="text-stone-500 text-[11px]">Permanently bans target user.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+            </div>
+          )}
+
+          {/* ACTIVE TAB: WARNINGS */}
+          {activeNav === 'warnings' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-4">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-yellow-400" /> Warning Center
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-stone-900 text-stone-400 border-b border-stone-800">
+                    <tr>
+                      <th className="p-3">Target User</th>
+                      <th className="p-3">Group</th>
+                      <th className="p-3">Reason</th>
+                      <th className="p-3">Issued By</th>
+                      <th className="p-3">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-900">
+                    {rawLogs.filter((l: any) => l.action === 'warn').map((l: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-stone-900/50">
+                        <td className="p-3 font-mono font-semibold text-stone-200">@{l.targetUsername || l.targetUserId}</td>
+                        <td className="p-3 text-stone-400">{l.chatTitle || l.chatId}</td>
+                        <td className="p-3 text-stone-300">{l.reason || 'Warning issued'}</td>
+                        <td className="p-3 text-stone-400">@{l.adminUsername || l.adminUserId || 'system'}</td>
+                        <td className="p-3 text-stone-500">{new Date(l.timestamp).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="p-3 bg-stone-50 flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">3. /unban @username</p>
-                  <p className="text-stone-500 text-[11px]">Unbans user from the group.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+            </div>
+          )}
+
+          {/* ACTIVE TAB: REPORTS */}
+          {activeNav === 'reports' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-4">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Flag className="w-4 h-4 text-blue-400" /> Report Center (Public /admin reports)
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-stone-900 text-stone-400 border-b border-stone-800">
+                    <tr>
+                      <th className="p-3">Group</th>
+                      <th className="p-3">Reported Target</th>
+                      <th className="p-3">Reason</th>
+                      <th className="p-3">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-900">
+                    {rawLogs.filter((l: any) => l.action === 'report').map((l: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-stone-900/50">
+                        <td className="p-3 text-stone-400">{l.chatTitle || l.chatId}</td>
+                        <td className="p-3 font-mono font-semibold text-stone-200">@{l.targetUsername || l.targetUserId}</td>
+                        <td className="p-3 text-stone-300">{l.reason || 'Suspicious activity'}</td>
+                        <td className="p-3 text-stone-500">{new Date(l.timestamp).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="p-3 bg-white flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">4. /demote @username</p>
-                  <p className="text-stone-500 text-[11px]">Demotes an administrator (protects owner & checks rights).</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+            </div>
+          )}
+
+          {/* ACTIVE TAB: AUDIT LOGS */}
+          {activeNav === 'audit' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-4">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Database className="w-4 h-4 text-emerald-400" /> Moderation Audit Log
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-stone-900 text-stone-400 border-b border-stone-800">
+                    <tr>
+                      <th className="p-3">Time</th>
+                      <th className="p-3">Group</th>
+                      <th className="p-3">Actor</th>
+                      <th className="p-3">Action</th>
+                      <th className="p-3">Target</th>
+                      <th className="p-3">Details / Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-900">
+                    {filteredLogs.map((l: ModerationLog, idx: number) => (
+                      <tr key={idx} onClick={() => setSelectedEvent(l)} className="hover:bg-stone-900/50 cursor-pointer">
+                        <td className="p-3 text-stone-400 font-mono">{new Date(l.timestamp).toLocaleTimeString()}</td>
+                        <td className="p-3 text-stone-300">{l.chatTitle || l.chatId}</td>
+                        <td className="p-3 font-mono text-stone-300">@{l.adminUsername || l.adminUserId || 'system'}</td>
+                        <td className="p-3 font-bold text-blue-400">{l.action}</td>
+                        <td className="p-3 font-mono text-stone-200">@{l.targetUsername || l.targetUserId || '-'}</td>
+                        <td className="p-3 text-stone-400 truncate max-w-xs">{l.reason || l.details || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="p-3 bg-stone-50 flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">5. /warn @username [reason] & /warnings</p>
-                  <p className="text-stone-500 text-[11px]">Issues warning, stores reasons, tracks count.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+            </div>
+          )}
+
+          {/* ACTIVE TAB: SYSTEM LOGS */}
+          {activeNav === 'system' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-4">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-purple-400" /> System & Polling Logs
+              </h3>
+              <div className="bg-stone-950 border border-stone-800 rounded-xl p-4 font-mono text-xs space-y-2 h-[400px] overflow-y-auto text-stone-300">
+                <div className="text-emerald-400">[SYSTEM] Roxie Control Center operational.</div>
+                <div className="text-stone-400">[POLL] Telegram Long Polling Engine status: {isPolling ? 'ACTIVE' : 'IDLE'}</div>
+                <div className="text-stone-400">[DB] Local JSON database loaded successfully.</div>
+                <div className="text-stone-400">[SECURITY] Global sliding-window rate limiter active.</div>
+                {overview?.recentLogs?.slice(-15).map((l: any, idx: number) => (
+                  <div key={idx} className="text-stone-500">
+                    [{l.timestamp}] [EVENT] {l.action} in group {l.chatId}
+                  </div>
+                ))}
               </div>
-              <div className="p-3 bg-white flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">6. /resetwarns @username</p>
-                  <p className="text-stone-500 text-[11px]">Clears user's warnings.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+            </div>
+          )}
+
+        </main>
+      </div>
+
+      {/* Event Details Drawer */}
+      {selectedEvent && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex justify-end">
+          <div className="w-full max-w-md bg-stone-950 border-l border-stone-800 p-6 space-y-6 overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-stone-800 pb-4">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Activity className="w-4 h-4 text-blue-400" /> Event Details
+              </h3>
+              <button onClick={() => setSelectedEvent(null)} className="p-1 hover:bg-stone-900 rounded-lg text-stone-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs font-mono">
+              <div>
+                <span className="text-stone-500 block">Event ID:</span>
+                <span className="text-stone-200">{selectedEvent.id}</span>
               </div>
-              <div className="p-3 bg-stone-50 flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">7. /setwarnlimit &lt;number&gt;</p>
-                  <p className="text-stone-500 text-[11px]">Custom threshold per group (default 3); auto-bans upon reaching.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+              <div>
+                <span className="text-stone-500 block">Action / Type:</span>
+                <span className="text-blue-400 font-bold">{selectedEvent.action}</span>
               </div>
-              <div className="p-3 bg-white flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">8. /links on & /links off</p>
-                  <p className="text-stone-500 text-[11px]">Auto-deletes links from non-admins and issues warnings.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+              <div>
+                <span className="text-stone-500 block">Chat ID / Group:</span>
+                <span className="text-stone-200">{selectedEvent.chatTitle || selectedEvent.chatId}</span>
               </div>
-              <div className="p-3 bg-stone-50 flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">9. /media on|off & /stickers on|off</p>
-                  <p className="text-stone-500 text-[11px]">Auto-deletes images, photos, GIFs, videos & stickers from non-admins.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+              <div>
+                <span className="text-stone-500 block">Actor:</span>
+                <span className="text-stone-200">@{selectedEvent.adminUsername || selectedEvent.adminUserId || 'system'}</span>
               </div>
-              <div className="p-3 bg-white flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">10. /free, /unfree & /freelist</p>
-                  <p className="text-stone-500 text-[11px]">Frees members to send images & stickers; /unfree revokes; /freelist views list.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+              <div>
+                <span className="text-stone-500 block">Target User:</span>
+                <span className="text-stone-200">@{selectedEvent.targetUsername || selectedEvent.targetUserId || 'none'}</span>
               </div>
-              <div className="p-3 bg-stone-50 flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">11. /report [reason]</p>
-                  <p className="text-stone-500 text-[11px]">Reply to message to report with rate-limiting.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+              <div>
+                <span className="text-stone-500 block">Reason / Details:</span>
+                <span className="text-stone-300">{selectedEvent.reason || selectedEvent.details || 'None'}</span>
               </div>
-              <div className="p-3 bg-white flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">12. /say &lt;message&gt;</p>
-                  <p className="text-stone-500 text-[11px]">Admin broadcast directly as the bot.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
-              </div>
-              <div className="p-3 bg-stone-50 flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">13. /schedule, /listSchedules, /deleteSchedule</p>
-                  <p className="text-stone-500 text-[11px]">Persistent recurring messages (e.g. /schedule 30m Welcome!).</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
-              </div>
-              <div className="p-3 bg-white flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-stone-900">14. /live, /status, /help</p>
-                  <p className="text-stone-500 text-[11px]">Explains Telegram voice chats, shows group uptime & configuration.</p>
-                </div>
-                <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
+              <div>
+                <span className="text-stone-500 block">Timestamp:</span>
+                <span className="text-stone-400">{new Date(selectedEvent.timestamp).toLocaleString()}</span>
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-      </main>
     </div>
   );
 }

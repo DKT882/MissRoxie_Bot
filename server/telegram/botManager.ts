@@ -5,6 +5,7 @@ import { CommandHandler, registerBotCommands } from './commands.js';
 import { ModerationService } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { TelegramMiddleware, CommandContext } from './middleware.js';
+import { RateLimiterService } from './rateLimiter.js';
 
 function escapeHtml(text: string): string {
   return text
@@ -160,6 +161,7 @@ export class TelegramBotManager {
     this.totalMessagesReceived++;
 
     const chatId = message.chat?.id;
+    const userId = message.from?.id;
 
     // Track message for group /clear purge capabilities
     if (chatId && message.message_id) {
@@ -170,12 +172,29 @@ export class TelegramBotManager {
     if (message.from) {
       db.cacheUser(message.from, chatId);
     }
+
+    // Global per-user rate limiter check
+    if (chatId && userId) {
+      const rateCheck = await RateLimiterService.checkAndRecord(message, chatId, userId);
+      if (!rateCheck.allowed) {
+        return;
+      }
+    }
     if (message.reply_to_message?.from) {
       db.cacheUser(message.reply_to_message.from, chatId);
     }
     if (message.new_chat_members && Array.isArray(message.new_chat_members)) {
       for (const newMember of message.new_chat_members) {
         db.cacheUser(newMember, chatId);
+      }
+      const raidTriggered = await ModerationService.handleAntiRaid(chatId, message.new_chat_members, message.chat.title);
+      if (!raidTriggered) {
+        const me = await telegramApi.getMe();
+        for (const newMember of message.new_chat_members) {
+          if (newMember.id !== me.result?.id) {
+            await ModerationService.handleCaptchaOnJoin(chatId, newMember, message.chat.title);
+          }
+        }
       }
     }
     if (message.left_chat_member) {
@@ -195,6 +214,10 @@ export class TelegramBotManager {
         }
       }
     }
+
+    // 0. Check Hashtag Notes Shortcuts (#notename)
+    const shortcutHandled = await ModerationService.handleNotesShortcut(message);
+    if (shortcutHandled) return;
 
     // 1. Process Welcome and Goodbye messages
     await ModerationService.handleWelcomeAndGoodbye(message);
@@ -277,28 +300,34 @@ export class TelegramBotManager {
     const chatTitle = chatMemberUpdate.chat.title || 'the group';
 
     // Member joined via invite link or approval
-    if (newStatus === 'member' && oldStatus !== 'member' && settings.welcomeEnabled && user) {
+    if (newStatus === 'member' && oldStatus !== 'member' && user) {
       const me = await telegramApi.getMe();
       if (user.id !== me.result?.id) {
-        const firstName = user.first_name || 'Member';
-        const lastName = user.last_name || '';
-        const displayName = user.first_name || (user.username ? `@${user.username}` : `User ${user.id}`);
-        const username = user.username ? `@${user.username}` : displayName;
-        const mention = `<a href="tg://user?id=${user.id}">${escapeHtml(displayName)}</a>`;
-        const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
+        const raidTriggered = await ModerationService.handleAntiRaid(chatId, [user], chatTitle);
+        if (!raidTriggered) {
+          const captchaTriggered = await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);
+          if (!captchaTriggered && settings.welcomeEnabled) {
+            const firstName = user.first_name || 'Member';
+            const lastName = user.last_name || '';
+            const displayName = user.first_name || (user.username ? `@${user.username}` : `User ${user.id}`);
+            const username = user.username ? `@${user.username}` : displayName;
+            const mention = `<a href="tg://user?id=${user.id}">${escapeHtml(displayName)}</a>`;
+            const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
 
-        const text = template
-          .replace(/{first_name}/gi, firstName)
-          .replace(/{last_name}/gi, lastName)
-          .replace(/{user}/gi, displayName)
-          .replace(/{name}/gi, displayName)
-          .replace(/{username}/gi, username)
-          .replace(/{mention}/gi, mention)
-          .replace(/{chat_title}/gi, chatTitle)
-          .replace(/{chat}/gi, chatTitle)
-          .replace(/{id}/gi, String(user.id));
+            const text = template
+              .replace(/{first_name}/gi, firstName)
+              .replace(/{last_name}/gi, lastName)
+              .replace(/{user}/gi, displayName)
+              .replace(/{name}/gi, displayName)
+              .replace(/{username}/gi, username)
+              .replace(/{mention}/gi, mention)
+              .replace(/{chat_title}/gi, chatTitle)
+              .replace(/{chat}/gi, chatTitle)
+              .replace(/{id}/gi, String(user.id));
 
-        await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
+            await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
+          }
+        }
       }
     }
   }

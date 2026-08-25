@@ -18,8 +18,18 @@ export class ContentPolicyEngine {
     userId: number
   ): Promise<ContentPolicyEvaluation> {
     // Check Actor Hierarchy (Admins / Owners bypass locks)
-    const actor = await TelegramMiddleware.resolveActor(chatId, userId, message.sender_chat);
-    if (actor.rank >= RoleRank.MODERATOR) {
+    const ctx = {
+      message,
+      chatId,
+      chatTitle: message.chat.title || 'Chat',
+      sender: message.from || { id: userId, is_bot: false, first_name: 'User' },
+      isAnonymousAdmin: Boolean(message.sender_chat && message.sender_chat.id === chatId),
+      adminDisplayName: message.from?.first_name || 'User',
+      args: [],
+      command: ''
+    };
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank >= RoleRank.MODERATOR) {
       return { decision: 'ADMIN_BYPASS' };
     }
 

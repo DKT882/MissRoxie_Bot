@@ -3,6 +3,8 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { telegramBot } from './server/telegram.js';
+import { db } from './server/db/storage.js';
+import { COMMAND_CATALOG } from './server/telegram/commandCatalog.js';
 
 dotenv.config();
 
@@ -64,6 +66,114 @@ async function startServer() {
     } catch (err: any) {
       console.error('Error getting logs:', err);
       res.status(500).json({ error: err.message || 'Internal Server Error' });
+    }
+  });
+
+  // === PHASE 5 DASHBOARD & CONTROL CENTER APIs ===
+
+  // 1. Get command catalog
+  app.get('/api/commands', (req, res) => {
+    try {
+      res.json(COMMAND_CATALOG);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. Get all connected groups
+  app.get('/api/groups', (req, res) => {
+    try {
+      const settings = (db as any).data?.settings || {};
+      const groups = Object.entries(settings).map(([chatIdStr, s]: [string, any]) => {
+        const chatId = Number(chatIdStr);
+        const groupLogs = db.getGroupLogs(chatId, 100);
+        const bans = groupLogs.filter(l => l.action === 'ban' || l.action === 'auto_ban').length;
+        const kicks = groupLogs.filter(l => l.action === 'kick').length;
+        const mutes = groupLogs.filter(l => l.action === 'mute').length;
+        const warnings = db.getUserWarnings ? 0 : 0; // calculated aggregate if needed
+        const reports = groupLogs.filter(l => l.action === 'report').length;
+        const schedules = db.getGroupSchedules(chatId).length;
+
+        return {
+          chatId,
+          chatTitle: s.chatTitle || `Group ${chatId}`,
+          chatType: chatId < 0 ? 'supergroup' : 'private',
+          username: s.username || undefined,
+          memberCount: s.memberCount || 1,
+          status: 'Active',
+          stats: {
+            bans,
+            kicks,
+            mutes,
+            reports,
+            schedules
+          },
+          settings: s
+        };
+      });
+      res.json(groups);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 3. Get comprehensive details for a specific group
+  app.get('/api/groups/:chatId', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const settings = db.getGroupSettings(chatId);
+      const logs = db.getGroupLogs(chatId, 100);
+      const schedules = db.getGroupSchedules(chatId);
+      const notes = db.getAllNotes(chatId);
+      const approvedUsers = db.getApprovedUsers(chatId);
+      const freedUsers = db.getFreedUsers(chatId);
+      const locks = db.getLocks(chatId);
+      const filters = db.getFilters(chatId);
+      const linksWhitelist = db.getLinkWhitelist(chatId);
+
+      const bans = logs.filter(l => l.action === 'ban' || l.action === 'auto_ban');
+      const kicks = logs.filter(l => l.action === 'kick');
+      const mutes = logs.filter(l => l.action === 'mute');
+      const reports = logs.filter(l => l.action === 'report');
+
+      res.json({
+        chatId,
+        chatTitle: settings.chatTitle || `Group ${chatId}`,
+        settings,
+        locks,
+        filters,
+        linksWhitelist,
+        bans,
+        kicks,
+        mutes,
+        reports,
+        schedules,
+        notes,
+        approvedUsers,
+        freedUsers,
+        logs
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. Get global dashboard overview
+  app.get('/api/dashboard/overview', (req, res) => {
+    try {
+      const stats = db.getStats();
+      const recentLogs = db.getRecentLogs(50);
+      const settings = (db as any).data?.settings || {};
+      const groupsCount = Object.keys(settings).length;
+
+      res.json({
+        stats,
+        groupsCount,
+        recentLogs,
+        botStatus: telegramBot.getStatus()
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

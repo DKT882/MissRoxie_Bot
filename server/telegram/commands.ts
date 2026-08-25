@@ -46,7 +46,13 @@ export const ADMIN_COMMANDS: BotCommand[] = [
   { command: 'listschedules', description: 'List all active scheduled messages' },
   { command: 'deleteschedule', description: 'Delete a scheduled message by ID' },
   { command: 'live', description: 'Group video and live stream info' },
-  { command: 'report', description: 'Report a message to group administrators' }
+  { command: 'report', description: 'Report a message to group administrators' },
+  { command: 'note', description: 'Create or update a group note' },
+  { command: 'getnote', description: 'Retrieve a group note' },
+  { command: 'notes', description: 'List all available group notes' },
+  { command: 'delnote', description: 'Delete a group note' },
+  { command: 'exportconfig', description: 'Export group configuration as JSON' },
+  { command: 'importconfig', description: 'Import group configuration from JSON' }
 ];
 
 export async function registerBotCommands(): Promise<{
@@ -97,7 +103,7 @@ export class CommandHandler {
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
   public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
-    '/report'
+    '/report', '/getnote', '/notes'
   ]);
 
   public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
@@ -118,6 +124,7 @@ export class CommandHandler {
     '/adminlog', '/modlog', '/logs',
     '/free', '/unfree', '/freelist', '/freed',
     '/say', '/schedule', '/listschedules', '/deleteschedule',
+    '/note', '/delnote', '/exportconfig', '/importconfig',
     '/live', '/start', '/ping', '/status', '/settings', '/help'
   ]);
 
@@ -345,6 +352,24 @@ export class CommandHandler {
         return true;
       case '/report':
         await this.handleReport(ctx);
+        return true;
+      case '/note':
+        await this.handleNote(ctx);
+        return true;
+      case '/getnote':
+        await this.handleGetNote(ctx);
+        return true;
+      case '/notes':
+        await this.handleNotesList(ctx);
+        return true;
+      case '/delnote':
+        await this.handleDelNote(ctx);
+        return true;
+      case '/exportconfig':
+        await this.handleExportConfig(ctx);
+        return true;
+      case '/importconfig':
+        await this.handleImportConfig(ctx);
         return true;
       case '/start':
         await this.handleStart(ctx);
@@ -3925,6 +3950,223 @@ export class CommandHandler {
       `• <code>/ping</code> — Check bot responsiveness`;
 
     await telegramApi.sendMessage(ctx.chatId, helpText);
+  }
+
+  private static async handleNote(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Administrator permission required to create or update notes.</b>', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const name = ctx.args[0]?.toLowerCase()?.trim();
+    const content = ctx.args.slice(1).join(' ').trim();
+
+    if (!name || !content) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Usage:</b> <code>/note <name> <content></code>', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    db.saveNote(ctx.chatId, name, content, ctx.sender.id, ctx.adminDisplayName);
+
+    db.addLog({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      targetUserId: ctx.sender.id,
+      targetUsername: ctx.sender.username,
+      action: 'warn',
+      reason: `Saved note #${name}`
+    });
+
+    await telegramApi.sendMessage(ctx.chatId, `✅ <b>Note <code>#${name}</code> saved successfully!</b>\nTrigger in chat with <code>#${name}</code> or view with <code>/getnote ${name}</code>`, {
+      reply_to_message_id: ctx.message.message_id
+    });
+  }
+
+  private static async handleGetNote(ctx: CommandContext) {
+    const name = ctx.args[0]?.toLowerCase()?.trim();
+    if (!name) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Usage:</b> <code>/getnote <name></code>', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const note = db.getNote(ctx.chatId, name);
+    if (!note) {
+      await telegramApi.sendMessage(ctx.chatId, `⚠️ Note <code>#${name}</code> not found in this group.`, {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const formattedContent = note.content
+      .replace(/{user}/gi, ctx.sender.first_name || 'User')
+      .replace(/{chat}/gi, ctx.chatTitle || 'Chat');
+
+    await telegramApi.sendMessage(ctx.chatId, formattedContent, {
+      reply_to_message_id: ctx.message.message_id
+    });
+  }
+
+  private static async handleNotesList(ctx: CommandContext) {
+    const notes = db.getAllNotes(ctx.chatId);
+    if (!notes || notes.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, 'ℹ️ <b>No notes configured in this chat.</b>\nAdmins can add notes with <code>/note <name> <content></code>.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const noteLines = notes
+      .map((n, i) => `${i + 1}. <b>#${n.name}</b> (by ${n.savedByUsername || 'Admin'})`)
+      .join('\n');
+
+    await telegramApi.sendMessage(ctx.chatId, `📚 <b>Group Notes (${notes.length})</b>\n\n${noteLines}\n\n<i>Retrieve with <code>/getnote <name></code> or shortcut <code>#<name></code></i>`, {
+      reply_to_message_id: ctx.message.message_id
+    });
+  }
+
+  private static async handleDelNote(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Administrator permission required to delete notes.</b>', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const name = ctx.args[0]?.toLowerCase()?.trim();
+    if (!name) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Usage:</b> <code>/delnote <name></code>', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const note = db.getNote(ctx.chatId, name);
+    if (!note) {
+      await telegramApi.sendMessage(ctx.chatId, `⚠️ Note <code>#${name}</code> does not exist.`, {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    db.deleteNote(ctx.chatId, name);
+
+    db.addLog({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      targetUserId: ctx.sender.id,
+      targetUsername: ctx.sender.username,
+      action: 'warn',
+      reason: `Deleted note #${name}`
+    });
+
+    await telegramApi.sendMessage(ctx.chatId, `✅ <b>Note <code>#${name}</code> has been deleted.</b>`, {
+      reply_to_message_id: ctx.message.message_id
+    });
+  }
+
+  private static async handleExportConfig(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Administrator permission required to export configuration.</b>', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const config = db.exportGroupConfig(ctx.chatId);
+    const jsonStr = JSON.stringify(config, null, 2);
+
+    db.addLog({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      targetUserId: ctx.sender.id,
+      targetUsername: ctx.sender.username,
+      action: 'warn',
+      reason: 'Exported group configuration'
+    });
+
+    const chunkLimit = 3500;
+    if (jsonStr.length <= chunkLimit) {
+      await telegramApi.sendMessage(ctx.chatId, `📦 <b>Group Configuration Backup</b>\n<pre>${escapeHtml(jsonStr)}</pre>`, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `📦 <b>Group Configuration Backup</b>\nConfig exported successfully (${jsonStr.length} bytes).`, {
+        reply_to_message_id: ctx.message.message_id
+      });
+      await telegramApi.sendMessage(ctx.chatId, `<pre>${escapeHtml(jsonStr.slice(0, chunkLimit))}</pre>`);
+    }
+  }
+
+  private static async handleImportConfig(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Administrator permission required to import configuration.</b>', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    let jsonText = ctx.args.join(' ').trim();
+    if (!jsonText && ctx.message.reply_to_message) {
+      jsonText = (ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption || '').trim();
+    }
+
+    if (!jsonText) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Usage:</b> Reply to a JSON configuration message with <code>/importconfig</code> or provide JSON data.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    if (jsonText.startsWith('```json')) {
+      jsonText = jsonText.slice(7);
+    } else if (jsonText.startsWith('```')) {
+      jsonText = jsonText.slice(3);
+    }
+    if (jsonText.endsWith('```')) {
+      jsonText = jsonText.slice(0, -3);
+    }
+    jsonText = jsonText.trim();
+
+    let parsedConfig: any;
+    try {
+      parsedConfig = JSON.parse(jsonText);
+    } catch (err: any) {
+      await telegramApi.sendMessage(ctx.chatId, `❌ <b>Invalid JSON format:</b> ${escapeHtml(err.message)}`, {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const res = db.importGroupConfig(ctx.chatId, parsedConfig, ctx.sender.id);
+    if (!res.ok) {
+      await telegramApi.sendMessage(ctx.chatId, `❌ <b>Configuration Import Rejected:</b> ${escapeHtml(res.message)}`, {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    db.addLog({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      targetUserId: ctx.sender.id,
+      targetUsername: ctx.sender.username,
+      action: 'warn',
+      reason: `Imported group configuration (${res.appliedCount} items applied)`
+    });
+
+    await telegramApi.sendMessage(ctx.chatId, `✅ <b>Configuration Imported Successfully!</b>\nApplied ${res.appliedCount} settings, filters, and notes to this chat.`, {
+      reply_to_message_id: ctx.message.message_id
+    });
   }
 }
 
