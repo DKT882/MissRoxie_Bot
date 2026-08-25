@@ -65,6 +65,7 @@ interface TelegramBotStatus {
     totalWarns: number;
     totalDeletedLinks: number;
     totalDeletedStickers: number;
+    totalDeletedImages?: number;
     totalReports: number;
     activeSchedules: number;
     groupsCount: number;
@@ -79,15 +80,22 @@ export default function App() {
   const [testResult, setTestResult] = useState<{ success: boolean; bot?: BotInfo; error?: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'commands' | 'logs' | 'checklist'>('overview');
 
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
   const fetchStatus = async () => {
     try {
       const res = await fetch('/api/telegram/status');
       if (res.ok) {
         const data: TelegramBotStatus = await res.json();
         setStatus(data);
+        setFetchError(null);
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        setFetchError(errorData.error || `Server responded with HTTP ${res.status}`);
       }
-    } catch (err) {
-      console.error('Failed to fetch bot status:', err);
+    } catch (err: any) {
+      console.warn('Telegram status fetch retry:', err?.message || err);
+      setFetchError('Unable to connect to backend server. Retrying...');
     } finally {
       setLoading(false);
     }
@@ -128,6 +136,21 @@ export default function App() {
       <main id="main-content" className="w-full max-w-4xl space-y-6">
         
         {/* Main Header Bar */}
+        {fetchError && !status && (
+          <div id="connection-warning" className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-3 text-amber-900 text-xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>{fetchError}</span>
+            </div>
+            <button
+              onClick={fetchStatus}
+              className="px-2.5 py-1 bg-amber-600 text-white font-medium rounded hover:bg-amber-700 transition-colors shrink-0"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         <header id="header-card" className="bg-white border border-stone-200 rounded-xl p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-12 h-12 rounded-xl bg-sky-600 text-white flex items-center justify-center shadow-xs shrink-0">
@@ -220,10 +243,10 @@ export default function App() {
               <LinkIcon className="w-4 h-4 text-sky-500" />
             </div>
             <div className="text-xl font-bold text-stone-900">
-              {(status?.stats?.totalDeletedLinks || 0) + (status?.stats?.totalDeletedStickers || 0)}
+              {(status?.stats?.totalDeletedLinks || 0) + (status?.stats?.totalDeletedStickers || 0) + (status?.stats?.totalDeletedImages || 0)}
             </div>
             <p className="text-[11px] text-stone-500 mt-0.5">
-              {status?.stats?.totalDeletedLinks || 0} links, {status?.stats?.totalDeletedStickers || 0} stickers
+              {status?.stats?.totalDeletedLinks || 0} links, {status?.stats?.totalDeletedStickers || 0} stickers, {status?.stats?.totalDeletedImages || 0} images/media
             </p>
           </div>
 
@@ -353,10 +376,10 @@ export default function App() {
             </h2>
 
             <div className="space-y-4 text-xs">
-              {/* Member Management */}
+              {/* Member Management & Purge */}
               <div>
                 <h3 className="font-bold text-stone-900 uppercase tracking-wider text-[11px] text-stone-400 mb-2">
-                  1. Member Management (Admins Only)
+                  1. Member Management & Chat Purge (Admins Only)
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
                   <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
@@ -374,6 +397,18 @@ export default function App() {
                   <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
                     <span className="font-bold text-amber-700">/demote @username</span>
                     <p className="font-sans text-[11px] text-stone-600 mt-1">Revokes administrator privileges from a promoted administrator.</p>
+                  </div>
+                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
+                    <span className="font-bold text-rose-700">/del (in reply)</span>
+                    <p className="font-sans text-[11px] text-stone-600 mt-1">Reply to any message in the group to immediately delete it for every member without leaving any trace.</p>
+                  </div>
+                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
+                    <span className="font-bold text-rose-700">/clear user (in reply)</span>
+                    <p className="font-sans text-[11px] text-stone-600 mt-1">Reply to any member&apos;s message with <code className="font-mono">/clear user</code> or use <code className="font-mono">/clear @username</code> to purge all messages sent by that member for everyone.</p>
+                  </div>
+                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200 col-span-1 sm:col-span-2">
+                    <span className="font-bold text-rose-700">/clear [5s | 1m | 1h | 50]</span>
+                    <p className="font-sans text-[11px] text-stone-600 mt-1">Purges messages from the group: e.g. <code className="font-mono">/clear</code> (all recent messages), <code className="font-mono">/clear 5s</code> (messages sent in last 5 seconds), <code className="font-mono">/clear 30s</code>, <code className="font-mono">/clear 5m</code>, <code className="font-mono">/clear 1h</code>, <code className="font-mono">/clear 50</code>, or reply to a message with <code className="font-mono">/clear</code> to purge starting from that message for every member.</p>
                   </div>
                 </div>
               </div>
@@ -406,12 +441,12 @@ export default function App() {
               {/* Protection & Filters */}
               <div>
                 <h3 className="font-bold text-stone-900 uppercase tracking-wider text-[11px] text-stone-400 mb-2">
-                  3. Link & Sticker Protection
+                  3. Image, Media & Sticker Protection
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
                   <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
-                    <span className="font-bold text-sky-700">/links on | off</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">When ON, deletes unauthorized links from normal members and warns them.</p>
+                    <span className="font-bold text-sky-700">/media on | off</span>
+                    <p className="font-sans text-[11px] text-stone-600 mt-1">When ON, automatically deletes any kind of images/photos/GIFs/videos sent by non-admin members until an admin frees them.</p>
                   </div>
                   <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
                     <span className="font-bold text-sky-700">/stickers on | off</span>
@@ -419,11 +454,15 @@ export default function App() {
                   </div>
                   <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
                     <span className="font-bold text-emerald-700">/free [@user | reply]</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Grants a member sticker exemption so their stickers aren't deleted.</p>
+                    <p className="font-sans text-[11px] text-stone-600 mt-1">Frees a member so they can send images, photos, GIFs, videos, and stickers without auto-deletion.</p>
                   </div>
                   <div className="p-2.5 bg-stone-50 rounded border border-stone-200">
                     <span className="font-bold text-rose-700">/unfree @user</span>
-                    <p className="font-sans text-[11px] text-stone-600 mt-1">Revokes sticker exemption from user.</p>
+                    <p className="font-sans text-[11px] text-stone-600 mt-1">Revokes media and sticker exemption from member.</p>
+                  </div>
+                  <div className="p-2.5 bg-stone-50 rounded border border-stone-200 col-span-1 sm:col-span-2">
+                    <span className="font-bold text-sky-700">/links on | off &nbsp;·&nbsp; /freelist</span>
+                    <p className="font-sans text-[11px] text-stone-600 mt-1"><code className="font-mono">/links on|off</code> toggles unauthorized link filter. <code className="font-mono">/freelist</code> displays all exempted members currently allowed to send media and stickers in the group.</p>
                   </div>
                 </div>
               </div>
@@ -508,7 +547,7 @@ export default function App() {
                             ? 'bg-rose-100 text-rose-800'
                             : log.action === 'warn'
                             ? 'bg-amber-100 text-amber-800'
-                            : log.action === 'delete_link' || log.action === 'delete_sticker'
+                            : log.action === 'delete_link' || log.action === 'delete_sticker' || log.action === 'delete_image' || log.action === 'delete_media'
                             ? 'bg-sky-100 text-sky-800'
                             : 'bg-stone-200 text-stone-800'
                         }`}>
@@ -615,15 +654,15 @@ export default function App() {
               </div>
               <div className="p-3 bg-stone-50 flex items-center justify-between">
                 <div>
-                  <p className="font-semibold text-stone-900">9. /stickers on & /stickers off</p>
-                  <p className="text-stone-500 text-[11px]">Auto-deletes stickers from normal members.</p>
+                  <p className="font-semibold text-stone-900">9. /media on|off & /stickers on|off</p>
+                  <p className="text-stone-500 text-[11px]">Auto-deletes images, photos, GIFs, videos & stickers from non-admins.</p>
                 </div>
                 <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
               </div>
               <div className="p-3 bg-white flex items-center justify-between">
                 <div>
-                  <p className="font-semibold text-stone-900">10. /free & /unfree</p>
-                  <p className="text-stone-500 text-[11px]">Grants / revokes sticker exemption for trusted members.</p>
+                  <p className="font-semibold text-stone-900">10. /free, /unfree & /freelist</p>
+                  <p className="text-stone-500 text-[11px]">Frees members to send images & stickers; /unfree revokes; /freelist views list.</p>
                 </div>
                 <span className="font-mono text-[11px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ready</span>
               </div>

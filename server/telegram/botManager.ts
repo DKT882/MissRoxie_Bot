@@ -1,7 +1,7 @@
 import { telegramApi } from './api.js';
 import { TelegramMessage, TelegramUpdate, TelegramUser, TelegramBotStatus } from './types.js';
 import { db } from '../db/storage.js';
-import { CommandHandler } from './commands.js';
+import { CommandHandler, registerBotCommands } from './commands.js';
 import { ModerationService } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { TelegramMiddleware, CommandContext } from './middleware.js';
@@ -78,6 +78,11 @@ export class TelegramBotManager {
       // Delete webhook to allow long polling
       await telegramApi.deleteWebhook();
 
+      // Register admin-only command visibility with Telegram
+      await registerBotCommands().catch((err) => {
+        console.warn('Failed to register bot commands on startup:', err);
+      });
+
       // Start message scheduler
       messageScheduler.start();
     } catch (err: any) {
@@ -144,6 +149,11 @@ export class TelegramBotManager {
 
     const chatId = message.chat?.id;
 
+    // Track message for group /clear purge capabilities
+    if (chatId && message.message_id) {
+      db.trackMessage(chatId, message.message_id, message.date, message.from?.id);
+    }
+
     // Cache all encountered users in storage for reliable username and ID resolution
     if (message.from) {
       db.cacheUser(message.from, chatId);
@@ -174,11 +184,9 @@ export class TelegramBotManager {
       }
     }
 
-    // Check sticker protection first if message contains sticker
-    if (message.sticker) {
-      const intercepted = await ModerationService.handleStickerProtection(message);
-      if (intercepted) return;
-    }
+    // Check image, media & sticker protection if message contains media/stickers
+    const mediaIntercepted = await ModerationService.handleMediaAndStickerProtection(message);
+    if (mediaIntercepted) return;
 
     // Check link protection on text or captions
     const textOrCaption = message.text || message.caption;

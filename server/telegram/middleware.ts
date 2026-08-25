@@ -28,6 +28,12 @@ export type ResolvedTarget =
   | { type: 'sender_chat'; id: number; source: 'reply' }
   | { type: 'none'; error: string; source: 'none' };
 
+export interface AdminAuthResult {
+  allowed: boolean;
+  reason?: string;
+  actor?: ActorResolution;
+}
+
 export interface ActorResolution {
   actorUserId: number;
   actorUsername?: string;
@@ -118,8 +124,11 @@ export class TelegramMiddleware {
    * Completely separated from target resolution.
    */
   public static async resolveActor(ctx: CommandContext): Promise<ActorResolution> {
-    // 1. Anonymous Administrator
-    if (ctx.isAnonymousAdmin || this.isAnonymousAdminMessage(ctx.message, ctx.chatId)) {
+    // 1. Anonymous Administrator - must strictly match current group chatId
+    const senderChatMatches = ctx.message.sender_chat ? ctx.message.sender_chat.id === ctx.chatId : true;
+    const isAnon = (ctx.isAnonymousAdmin && senderChatMatches) || this.isAnonymousAdminMessage(ctx.message, ctx.chatId);
+
+    if (isAnon && senderChatMatches) {
       return {
         actorUserId: 1087968824,
         actorUsername: undefined,
@@ -218,21 +227,56 @@ export class TelegramMiddleware {
   }
 
   /**
-   * Helper to verify actor is at least an admin or moderator.
+   * CENTRAL ADMIN AUTHORIZATION
+   * Checks whether the actor is an OWNER, ADMINISTRATOR, or valid ANONYMOUS ADMIN in a group.
    */
-  public static async requireAdmin(ctx: CommandContext, silent: boolean = false): Promise<boolean> {
-    const actor = await this.resolveActor(ctx);
-    if (actor.actorRank < RoleRank.ADMIN) {
+  public static async requireAdmin(
+    ctx: CommandContext,
+    silent: boolean = false
+  ): Promise<AdminAuthResult> {
+    // 1. Group Check
+    if (!this.isGroup(ctx.message)) {
+      const reason = '❌ Roxie moderation commands are available only inside groups.';
       if (!silent) {
-        await telegramApi.sendMessage(
-          ctx.chatId,
-          '⛔ <b>Access Denied:</b> You must be a group administrator to use this command.',
-          { reply_to_message_id: ctx.message.message_id }
-        );
+        await telegramApi.sendMessage(ctx.chatId, reason, {
+          reply_to_message_id: ctx.message?.message_id
+        });
       }
-      return false;
+      return {
+        allowed: false,
+        reason
+      };
     }
-    return true;
+
+    // 2. Resolve Actor
+    const actor = await this.resolveActor(ctx);
+
+    // 3. Evaluate Authorization
+    const isAuthorized =
+      actor.isAnonymousAdmin ||
+      actor.actorRole === 'OWNER' ||
+      actor.actorStatus === 'creator' ||
+      actor.actorRole === 'ADMIN' ||
+      actor.actorStatus === 'administrator';
+
+    if (!isAuthorized) {
+      const reason = '❌ This bot is available only to group administrators.';
+      if (!silent) {
+        await telegramApi.sendMessage(ctx.chatId, reason, {
+          reply_to_message_id: ctx.message?.message_id
+        });
+      }
+      return {
+        allowed: false,
+        reason,
+        actor
+      };
+    }
+
+    return {
+      allowed: true,
+      actor
+    };
   }
 
   public static async requireModeratorOrAdmin(ctx: CommandContext, silent: boolean = false): Promise<boolean> {
@@ -241,7 +285,7 @@ export class TelegramMiddleware {
       if (!silent) {
         await telegramApi.sendMessage(
           ctx.chatId,
-          '⛔ <b>Access Denied:</b> You must be a moderator or administrator to use this command.',
+          '❌ This bot is available only to group administrators.',
           { reply_to_message_id: ctx.message.message_id }
         );
       }
@@ -470,7 +514,7 @@ export class TelegramMiddleware {
   ): Promise<ValidationResult> {
     // 1. Group Check
     if (!this.isGroup(ctx.message)) {
-      return { allowed: false, reason: 'This command can only be used inside a group.' };
+      return { allowed: false, reason: '❌ Roxie moderation commands are available only inside groups.' };
     }
 
     // 2. Resolve Actor
@@ -495,13 +539,10 @@ export class TelegramMiddleware {
         };
       }
     } else {
-      const minRequiredRank = action === 'warn' ? RoleRank.MODERATOR : RoleRank.ADMIN;
-      if (actor.actorRank < minRequiredRank) {
+      if (actor.actorRank < RoleRank.ADMIN) {
         return {
           allowed: false,
-          reason: action === 'warn'
-            ? '⛔ <b>Access Denied:</b> You must be a moderator or administrator to issue warnings.'
-            : '⛔ <b>Access Denied:</b> You must be a group administrator to use this command.',
+          reason: '❌ This bot is available only to group administrators.',
           actor
         };
       }

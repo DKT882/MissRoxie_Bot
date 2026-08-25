@@ -79,48 +79,97 @@ export class ModerationService {
   }
 
   /**
-   * Automatic Sticker Protection Handler.
-   * Returns true if sticker was intercepted and deleted.
+   * Automatic Image, Media & Sticker Protection Handler.
+   * Intercepts and deletes images, photos, GIFs, videos, and stickers sent by non-admin members until freed.
+   * Returns true if message was intercepted and deleted.
    */
-  public static async handleStickerProtection(message: TelegramMessage): Promise<boolean> {
+  public static async handleMediaAndStickerProtection(message: TelegramMessage): Promise<boolean> {
     if (!TelegramMiddleware.isGroup(message)) return false;
-    if (!message.sticker) return false;
+
+    // Detect media types
+    const hasSticker = Boolean(message.sticker);
+    const hasPhoto = Boolean(message.photo && message.photo.length > 0);
+    const hasAnimation = Boolean(message.animation);
+    const hasVideo = Boolean(message.video || message.video_note);
+    const hasImageDoc = Boolean(
+      message.document &&
+      (message.document.mime_type?.startsWith('image/') ||
+       message.document.mime_type?.startsWith('video/') ||
+       message.document.file_name?.match(/\.(jpe?g|png|webp|gif|bmp|heic|svg|mp4|mov)$/i))
+    );
+
+    const isImage = hasPhoto || (hasImageDoc && message.document?.mime_type?.startsWith('image/'));
+    const isGif = hasAnimation || (hasImageDoc && message.document?.mime_type?.includes('gif'));
+    const isVideo = hasVideo || (hasImageDoc && message.document?.mime_type?.startsWith('video/'));
+
+    if (!hasSticker && !hasPhoto && !hasAnimation && !hasVideo && !hasImageDoc) {
+      return false;
+    }
 
     const chatId = message.chat.id;
     const settings = db.getGroupSettings(chatId, message.chat.title);
-    if (!settings.stickerProtection) return false;
 
-    // Check if sender is admin (including anonymous admin)
+    // If sticker, check stickerProtection; if image/video/media, check mediaProtection
+    if (hasSticker && !settings.stickerProtection) return false;
+    if ((hasPhoto || hasAnimation || hasVideo || hasImageDoc) && !settings.mediaProtection) return false;
+
+    // Check if sender is an admin (including anonymous admin)
     const isAdmin = await TelegramMiddleware.isAdmin(chatId, message.from?.id, message);
     if (isAdmin) return false;
 
     if (!message.from) return false;
 
-    // Check if sender has been /free-d
-    const isFree = db.isUserStickerFree(chatId, message.from.id);
+    // Check if sender has been freed (/free) by an admin
+    const isFree = db.isUserMediaFree(chatId, message.from.id);
     if (isFree) return false;
 
-    // Delete the sticker
+    // Delete the unauthorized media/sticker
     await telegramApi.deleteMessage(chatId, message.message_id);
+    db.untrackMessages(chatId, [message.message_id]);
 
     const username = message.from.username ? `@${message.from.username}` : message.from.first_name;
+
+    let mediaTypeLabel = 'media';
+    let actionType: 'delete_sticker' | 'delete_image' | 'delete_media' = 'delete_media';
+
+    if (hasSticker) {
+      mediaTypeLabel = 'sticker';
+      actionType = 'delete_sticker';
+    } else if (isImage) {
+      mediaTypeLabel = 'image';
+      actionType = 'delete_image';
+    } else if (isGif) {
+      mediaTypeLabel = 'GIF';
+      actionType = 'delete_media';
+    } else if (isVideo) {
+      mediaTypeLabel = 'video';
+      actionType = 'delete_media';
+    }
 
     db.addLog({
       chatId,
       chatTitle: message.chat.title,
       targetUserId: message.from.id,
       targetUsername: message.from.username,
-      action: 'delete_sticker',
-      reason: 'Unauthorized sticker sent'
+      action: actionType,
+      reason: `Unauthorized ${mediaTypeLabel} sent by non-admin member`
     });
 
     await telegramApi.sendMessage(
       chatId,
-      `🚫 <b>Stickers are disabled for normal members in this group.</b>\n` +
-      `👤 ${username}, your sticker was removed. (Admins can enable with <code>/free</code>)`
+      `🚫 <b>${capitalize(mediaTypeLabel)}s are restricted in this group.</b>\n` +
+      `👤 ${username}, your ${mediaTypeLabel} was automatically removed.\n` +
+      `<i>(An administrator can grant you permission using <code>/free</code>)</i>`
     );
 
     return true;
+  }
+
+  /**
+   * Backward-compatible Sticker Protection Handler.
+   */
+  public static async handleStickerProtection(message: TelegramMessage): Promise<boolean> {
+    return this.handleMediaAndStickerProtection(message);
   }
 
   /**
@@ -229,4 +278,9 @@ function escapeHtml(text: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function capitalize(str: string): string {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
 }

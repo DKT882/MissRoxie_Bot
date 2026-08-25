@@ -4,7 +4,69 @@ import { db } from '../db/storage.js';
 import { ModerationService } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { mapTelegramError } from './errorMapper.js';
-import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember } from './types.js';
+import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand } from './types.js';
+
+export const ADMIN_COMMANDS: BotCommand[] = [
+  { command: 'help', description: 'Show all administrator & moderation commands' },
+  { command: 'status', description: 'View bot status and group configuration' },
+  { command: 'ping', description: 'Check bot responsiveness' },
+  { command: 'del', description: 'Delete replied message for all group members' },
+  { command: 'clear', description: 'Purge messages (e.g. /clear, /clear 5s, /clear 1m, /clear @user)' },
+  { command: 'promote', description: 'Promote a member to administrator' },
+  { command: 'demote', description: 'Demote an administrator to regular member' },
+  { command: 'permissions', description: 'View and edit administrator permissions' },
+  { command: 'kick', description: 'Remove a member from the group' },
+  { command: 'ban', description: 'Ban a member from the group' },
+  { command: 'unban', description: 'Unban a member from the group' },
+  { command: 'warn', description: 'Issue a warning to a member' },
+  { command: 'warnings', description: 'View warnings for a member' },
+  { command: 'resetwarns', description: 'Clear warnings for a member' },
+  { command: 'setwarnlimit', description: 'Set warning threshold before auto-ban' },
+  { command: 'setmod', description: 'Assign bot moderator role' },
+  { command: 'delmod', description: 'Remove bot moderator role' },
+  { command: 'links', description: 'Toggle link protection filter' },
+  { command: 'media', description: 'Toggle image & media protection filter' },
+  { command: 'stickers', description: 'Toggle sticker protection filter' },
+  { command: 'free', description: 'Allow member to send images & stickers' },
+  { command: 'unfree', description: 'Revoke image & sticker permission from member' },
+  { command: 'freelist', description: 'List all members exempted to send images & stickers' },
+  { command: 'say', description: 'Broadcast announcement as the bot' },
+  { command: 'schedule', description: 'Schedule a recurring message' },
+  { command: 'listschedules', description: 'List all active scheduled messages' },
+  { command: 'deleteschedule', description: 'Delete a scheduled message by ID' },
+  { command: 'live', description: 'Group video and live stream info' },
+  { command: 'report', description: 'Report a message to group administrators' }
+];
+
+export async function registerBotCommands(): Promise<{
+  adminCommandsSet: boolean;
+  defaultCommandsCleared: boolean;
+  errors?: string[];
+}> {
+  const errors: string[] = [];
+
+  // 1. Register admin commands for all_chat_administrators scope
+  const adminRes = await telegramApi.setMyCommands(ADMIN_COMMANDS, {
+    type: 'all_chat_administrators'
+  });
+  if (!adminRes.ok) {
+    errors.push(`Failed to set admin commands: ${adminRes.description}`);
+  }
+
+  // 2. Clear default scope commands so normal members see NO auto-complete commands
+  const defaultRes = await telegramApi.setMyCommands([], {
+    type: 'default'
+  });
+  if (!defaultRes.ok) {
+    errors.push(`Failed to clear default commands: ${defaultRes.description}`);
+  }
+
+  return {
+    adminCommandsSet: adminRes.ok,
+    defaultCommandsCleared: defaultRes.ok,
+    errors: errors.length > 0 ? errors : undefined
+  };
+}
 
 interface PermissionEditorSession {
   chatId: number;
@@ -26,7 +88,32 @@ export class CommandHandler {
   public static async handleCommand(ctx: CommandContext): Promise<boolean> {
     const cmd = ctx.command.toLowerCase().split('@')[0]; // strip bot username if present, e.g. /ban@MissRoxie_Bot
 
+    const handledCommands = new Set([
+      '/clear', '/del', '/delete', '/kick', '/ban', '/unban', '/promote', '/demote', '/permissions',
+      '/warn', '/warnings', '/resetwarns', '/setwarnlimit',
+      '/setmod', '/delmod', '/links', '/media', '/images', '/stickers', '/free', '/unfree', '/freelist', '/freed',
+      '/report', '/say', '/schedule', '/listschedules', '/deleteschedule',
+      '/live', '/start', '/ping', '/status', '/help'
+    ]);
+
+    if (!handledCommands.has(cmd)) {
+      return false;
+    }
+
+    // Centrally enforce admin-only requirement on ALL Roxie commands
+    const auth = await TelegramMiddleware.requireAdmin(ctx);
+    if (!auth.allowed) {
+      return true; // Command was handled (denial notice dispatched)
+    }
+
     switch (cmd) {
+      case '/del':
+      case '/delete':
+        await this.handleDel(ctx);
+        return true;
+      case '/clear':
+        await this.handleClear(ctx);
+        return true;
       case '/kick':
         await this.handleKick(ctx);
         return true;
@@ -66,14 +153,22 @@ export class CommandHandler {
       case '/links':
         await this.handleLinksSetting(ctx);
         return true;
+      case '/media':
+      case '/images':
+        await this.handleMediaSetting(ctx);
+        return true;
       case '/stickers':
         await this.handleStickersSetting(ctx);
         return true;
       case '/free':
-        await this.handleFreeSticker(ctx);
+        await this.handleFree(ctx);
         return true;
       case '/unfree':
-        await this.handleUnfreeSticker(ctx);
+        await this.handleUnfree(ctx);
+        return true;
+      case '/freelist':
+      case '/freed':
+        await this.handleFreeList(ctx);
         return true;
       case '/report':
         await this.handleReport(ctx);
@@ -1205,7 +1300,63 @@ export class CommandHandler {
   }
 
   // ==========================================
-  // 9. STICKER PROTECTION SETTING
+  // 9. MEDIA & IMAGE PROTECTION SETTING
+  // ==========================================
+  private static async handleMediaSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const currentSettings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { mediaProtection: true });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'media',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Media & image protection enabled'
+      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '🛡️ <b>Image & Media Protection is now ON.</b>\n' +
+        'Images, photos, GIFs, and videos from normal members will be automatically deleted until an admin frees them with <code>/free</code>.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { mediaProtection: false });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'media',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Media & image protection disabled'
+      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '🔓 <b>Image & Media Protection is now OFF.</b>\nAll group members may send photos and media freely.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>Image & Media Protection Status:</b> ${currentSettings.mediaProtection ? '🟢 ON' : '🔴 OFF'}\n\n` +
+        `Usage:\n` +
+        `• <code>/media on</code> — Enable auto-deletion of images/media from un-freed members\n` +
+        `• <code>/media off</code> — Allow all members to send images/media`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+  }
+
+  // ==========================================
+  // 10. STICKER PROTECTION SETTING
   // ==========================================
   private static async handleStickersSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
@@ -1226,7 +1377,11 @@ export class CommandHandler {
         result: 'success',
         details: 'Sticker protection enabled'
       });
-      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Sticker Protection is now ON.</b>\nNormal members cannot send stickers unless whitelisted with <code>/free</code>.');
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '🛡️ <b>Sticker Protection is now ON.</b>\nNormal members cannot send stickers unless whitelisted with <code>/free</code>.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
     } else if (arg === 'off') {
       db.updateGroupSettings(ctx.chatId, { stickerProtection: false });
       TelegramMiddleware.logAudit({
@@ -1238,19 +1393,24 @@ export class CommandHandler {
         result: 'success',
         details: 'Sticker protection disabled'
       });
-      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Sticker Protection is now OFF.</b>\nAll members may send stickers.');
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '🔓 <b>Sticker Protection is now OFF.</b>\nAll members may send stickers.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
     } else {
       await telegramApi.sendMessage(
         ctx.chatId,
-        `ℹ️ <b>Sticker Protection Status:</b> ${currentSettings.stickerProtection ? '🟢 ON' : '🔴 OFF'}\n\nUsage: <code>/stickers on</code> or <code>/stickers off</code>`
+        `ℹ️ <b>Sticker Protection Status:</b> ${currentSettings.stickerProtection ? '🟢 ON' : '🔴 OFF'}\n\nUsage: <code>/stickers on</code> or <code>/stickers off</code>`,
+        { reply_to_message_id: ctx.message.message_id }
       );
     }
   }
 
   // ==========================================
-  // 10. /FREE & /UNFREE STICKER SYSTEM
+  // 11. /FREE, /UNFREE & /FREELIST (IMAGES & STICKERS)
   // ==========================================
-  private static async handleFreeSticker(ctx: CommandContext) {
+  private static async handleFree(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
     if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
 
@@ -1258,14 +1418,16 @@ export class CommandHandler {
     const target = await TelegramMiddleware.resolveTargetUser(ctx);
 
     if (target.type !== 'user') {
-      const err = target.type === 'none' ? target.error : '⚠️ Cannot grant sticker exemptions to channels or anonymous admins.';
-      await telegramApi.sendMessage(ctx.chatId, err || '⚠️ Please reply to a member or specify @username to allow stickers.', {
-        reply_to_message_id: ctx.message.message_id
-      });
+      const err = target.type === 'none' ? target.error : '⚠️ Cannot grant exemptions to channels or anonymous admins.';
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        err || '⚠️ <b>Usage:</b> Reply to a member or specify <code>/free @username</code> to allow them to send images & stickers.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
       return;
     }
 
-    db.grantStickerPermission(ctx.chatId, target.userId, actor.actorUserId, target.user?.username);
+    db.grantMediaPermission(ctx.chatId, target.userId, actor.actorUserId, target.user?.username);
     const targetTag = target.user?.username ? `@${target.user.username}` : (target.user?.first_name || `User ${target.userId}`);
 
     TelegramMiddleware.logAudit({
@@ -1275,15 +1437,18 @@ export class CommandHandler {
       command: 'free',
       action: 'free_sticker',
       result: 'success',
-      reason: 'Admin sticker exemption'
+      reason: 'Admin media & sticker exemption granted'
     });
 
-    await telegramApi.sendMessage(ctx.chatId, `✅ <b>${targetTag} can now send stickers.</b>`, {
-      reply_to_message_id: ctx.message.message_id
-    });
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `🔓 <b>Member Freed!</b>\n\n` +
+      `✅ <b>${targetTag}</b> is now free to send <b>images, photos, GIFs, and stickers</b> in this group.`,
+      { reply_to_message_id: ctx.message.message_id }
+    );
   }
 
-  private static async handleUnfreeSticker(ctx: CommandContext) {
+  private static async handleUnfree(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
     if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
 
@@ -1291,14 +1456,16 @@ export class CommandHandler {
     const target = await TelegramMiddleware.resolveTargetUser(ctx);
 
     if (target.type !== 'user') {
-      const err = target.type === 'none' ? target.error : '⚠️ Cannot revoke sticker exemptions for channels or anonymous admins.';
-      await telegramApi.sendMessage(ctx.chatId, err || '⚠️ Please reply to a member or specify @username to revoke sticker access.', {
-        reply_to_message_id: ctx.message.message_id
-      });
+      const err = target.type === 'none' ? target.error : '⚠️ Cannot revoke exemptions for channels or anonymous admins.';
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        err || '⚠️ <b>Usage:</b> Reply to a member or specify <code>/unfree @username</code> to revoke image & sticker permissions.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
       return;
     }
 
-    const removed = db.revokeStickerPermission(ctx.chatId, target.userId);
+    const removed = db.revokeMediaPermission(ctx.chatId, target.userId);
     const targetTag = target.user?.username ? `@${target.user.username}` : (target.user?.first_name || `User ${target.userId}`);
 
     TelegramMiddleware.logAudit({
@@ -1308,18 +1475,50 @@ export class CommandHandler {
       command: 'unfree',
       action: 'unfree_sticker',
       result: 'success',
-      reason: 'Admin revoked sticker exemption'
+      reason: 'Admin revoked media & sticker exemption'
     });
 
     if (removed) {
-      await telegramApi.sendMessage(ctx.chatId, `🔒 <b>Sticker exemption removed for ${targetTag}.</b>`, {
-        reply_to_message_id: ctx.message.message_id
-      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🔒 <b>Exemption Revoked</b>\n\n` +
+        `<b>${targetTag}</b> is no longer permitted to send images or stickers. Any photos, images, GIFs, or stickers sent by this member will be automatically removed.`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
     } else {
-      await telegramApi.sendMessage(ctx.chatId, `ℹ️ <b>${targetTag}</b> was not on the sticker exempt list.`, {
-        reply_to_message_id: ctx.message.message_id
-      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>${targetTag}</b> was not on the freed exemptions list.`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
     }
+  }
+
+  private static async handleFreeList(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const freedUsers = db.getFreedUsers(ctx.chatId);
+    if (freedUsers.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        'ℹ️ <b>No members currently on the Freed list.</b>\n\n' +
+        'All normal members have images and stickers restricted until an administrator frees them with <code>/free</code>.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    const userLines = freedUsers
+      .map((u, i) => `${i + 1}. <b>${u.username ? `@${u.username}` : `User ID <code>${u.userId}</code>`}</b> (Freed: ${new Date(u.grantedAt).toLocaleDateString()})`)
+      .join('\n');
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `🔓 <b>Freed Members (${freedUsers.length})</b>\n<i>Allowed to send images, photos, GIFs & stickers:</i>\n\n${userLines}\n\n` +
+      `<i>Revoke with <code>/unfree @username</code></i>`,
+      { reply_to_message_id: ctx.message.message_id }
+    );
   }
 
   // ==========================================
@@ -1462,6 +1661,225 @@ export class CommandHandler {
   }
 
   // ==========================================
+  // 14. DELETE SINGLE REPLIED MESSAGE (/del, /delete)
+  // ==========================================
+  private static async handleDel(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    // Must be replying to a message
+    if (!ctx.message.reply_to_message?.message_id) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '⚠️ <b>Reply Required</b>\n\nPlease reply to any message you want to delete for all group members with <code>/del</code>.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    // Check bot's delete permission
+    const botCheck = await TelegramMiddleware.checkBotPermissions(ctx.chatId, 'can_delete_messages');
+    if (!botCheck.allowed) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '❌ I need the <b>Delete Messages</b> administrator permission to remove messages.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    const targetMsgId = ctx.message.reply_to_message.message_id;
+    const cmdMsgId = ctx.message.message_id;
+
+    // Delete target replied message and command message simultaneously
+    await Promise.allSettled([
+      telegramApi.deleteMessage(ctx.chatId, targetMsgId),
+      telegramApi.deleteMessage(ctx.chatId, cmdMsgId)
+    ]);
+
+    db.untrackMessages(ctx.chatId, [targetMsgId, cmdMsgId]);
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'del',
+      action: 'clear',
+      result: 'success',
+      details: `Deleted replied message #${targetMsgId} and command #${cmdMsgId}`
+    });
+  }
+
+  // ==========================================
+  // 15. CLEAR MESSAGES (/clear)
+  // ==========================================
+  private static async handleClear(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    // Check bot's delete permission
+    const botCheck = await TelegramMiddleware.checkBotPermissions(ctx.chatId, 'can_delete_messages');
+    if (!botCheck.allowed) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '❌ I need the <b>Delete Messages</b> administrator permission to clear group messages.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    let messageIdsToDelete: number[] = [];
+    let scopeDescription = 'all recent messages';
+
+    const firstArg = ctx.args[0]?.trim().toLowerCase();
+    const isReply = Boolean(ctx.message.reply_to_message?.message_id);
+    const replyTargetUserId = ctx.message.reply_to_message?.from?.id;
+    const replyTargetUsername = ctx.message.reply_to_message?.from?.username;
+
+    // Mode 1: Reply to a user with /clear user or /clear all or /clear member
+    if (isReply && replyTargetUserId && (firstArg === 'user' || firstArg === 'member' || firstArg === 'all')) {
+      messageIdsToDelete = db.getMessagesByUser(ctx.chatId, replyTargetUserId, ctx.message.message_id, 100);
+      const userLabel = replyTargetUsername ? `@${replyTargetUsername}` : (ctx.message.reply_to_message?.from?.first_name || `User ID ${replyTargetUserId}`);
+      scopeDescription = `from member ${userLabel}`;
+    }
+    // Mode 2: Reply to a message with /clear this or /clear 1
+    else if (isReply && (firstArg === 'this' || firstArg === '1')) {
+      const targetId = ctx.message.reply_to_message!.message_id;
+      messageIdsToDelete = [targetId, ctx.message.message_id];
+      scopeDescription = `(replied message #${targetId})`;
+    }
+    // Mode 3: Target user by username: e.g. /clear @spammer
+    else if (firstArg && firstArg.startsWith('@')) {
+      const usernameClean = firstArg.replace(/^@/, '');
+      const cached = db.findUserByUsername(usernameClean);
+      if (cached) {
+        messageIdsToDelete = db.getMessagesByUser(ctx.chatId, cached.userId, ctx.message.message_id, 100);
+        scopeDescription = `from member @${usernameClean}`;
+      } else {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `⚠️ Member <b>@${usernameClean}</b> has not been seen in this group yet.`,
+          { reply_to_message_id: ctx.message.message_id }
+        );
+        return;
+      }
+    }
+    // Mode 4: Range purge from replied message to current message: /clear (when replying)
+    else if (isReply && (!firstArg || firstArg === 'purge')) {
+      const fromId = ctx.message.reply_to_message!.message_id;
+      const toId = ctx.message.message_id;
+      messageIdsToDelete = db.getMessagesInRange(ctx.chatId, fromId, toId);
+      scopeDescription = `from message #${fromId} to #${toId}`;
+    }
+    // Mode 5: Duration / Count / Timing options (e.g. /clear 5s, /clear 1m, /clear 50)
+    else if (ctx.args.length > 0) {
+      const arg = ctx.args.join(' ').trim();
+      const parsedDuration = parseClearDuration(arg);
+      const parsedCount = parseClearCount(arg);
+
+      if (parsedDuration) {
+        messageIdsToDelete = db.getMessagesByDuration(ctx.chatId, parsedDuration.seconds, ctx.message.message_id);
+        scopeDescription = `sent in the last ${parsedDuration.formatted}`;
+      } else if (parsedCount !== null) {
+        messageIdsToDelete = db.getMessagesByCount(ctx.chatId, parsedCount, ctx.message.message_id);
+        scopeDescription = `(last ${parsedCount} messages)`;
+      } else {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          '⚠️ <b>Invalid Clear Option</b>\n\n' +
+          '<b>Supported Timing, Range & Member Formats:</b>\n' +
+          '• <code>/clear</code> — Clear all recent messages\n' +
+          '• <code>/del</code> <i>(in reply)</i> — Delete single replied message for all members\n' +
+          '• <i>(Reply)</i> <code>/clear</code> — Purge all messages from replied message to now\n' +
+          '• <i>(Reply)</i> <code>/clear user</code> — Purge all messages from this specific member\n' +
+          '• <code>/clear @username</code> — Purge all messages from specified member\n' +
+          '• <code>/clear 5s</code> / <code>30s</code> — Clear messages sent in last 5s / 30s\n' +
+          '• <code>/clear 1m</code> / <code>5m</code> / <code>15m</code> — Clear messages from last 1m / 5m / 15m\n' +
+          '• <code>/clear 1h</code> / <code>2h</code> / <code>1d</code> — Clear messages from last 1 hour / 2 hours / 1 day\n' +
+          '• <code>/clear 20</code> / <code>50</code> — Clear specified count of messages',
+          { reply_to_message_id: ctx.message.message_id }
+        );
+        return;
+      }
+    } else {
+      // Default: /clear with no arguments clears all tracked recent messages
+      messageIdsToDelete = db.getAllTrackedMessagesToClear(ctx.chatId, ctx.message.message_id, 100);
+      scopeDescription = 'all recent messages';
+    }
+
+    // Ensure the /clear command message itself is included
+    if (!messageIdsToDelete.includes(ctx.message.message_id)) {
+      messageIdsToDelete.push(ctx.message.message_id);
+    }
+
+    const uniqueIds = Array.from(new Set(messageIdsToDelete)).sort((a, b) => a - b);
+
+    if (uniqueIds.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        'ℹ️ No messages found to clear for the specified timeframe or member.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    let deletedCount = 0;
+    const successfullyDeletedIds: number[] = [];
+
+    // Delete in batches of 100 via deleteMessages API (Telegram 7.0+)
+    const batchSize = 100;
+    for (let i = 0; i < uniqueIds.length; i += batchSize) {
+      const batch = uniqueIds.slice(i, i + batchSize);
+      const bulkRes = await telegramApi.deleteMessages(ctx.chatId, batch);
+
+      if (bulkRes.ok) {
+        deletedCount += batch.length;
+        successfullyDeletedIds.push(...batch);
+      } else {
+        // Fallback to deleteMessage individually
+        const results = await Promise.allSettled(
+          batch.map((id) => telegramApi.deleteMessage(ctx.chatId, id))
+        );
+        for (let j = 0; j < results.length; j++) {
+          const res = results[j];
+          if (res.status === 'fulfilled' && res.value.ok) {
+            deletedCount++;
+            successfullyDeletedIds.push(batch[j]);
+          }
+        }
+      }
+    }
+
+    // Untrack deleted messages from memory buffer
+    db.untrackMessages(ctx.chatId, successfullyDeletedIds);
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'clear',
+      action: 'clear',
+      result: 'success',
+      details: `Purged ${deletedCount} messages (${scopeDescription})`
+    });
+
+    // Send confirmation and self-destruct after 4 seconds
+    const confirmRes = await telegramApi.sendMessage(
+      ctx.chatId,
+      `🧹 <b>Cleared ${deletedCount} message${deletedCount === 1 ? '' : 's'}</b> ${scopeDescription}.\n<i>(This notification will self-destruct in 4s)</i>`
+    );
+
+    if (confirmRes.ok && confirmRes.result?.message_id) {
+      const confirmId = confirmRes.result.message_id;
+      setTimeout(() => {
+        telegramApi.deleteMessage(ctx.chatId, confirmId).catch(() => {});
+      }, 4000);
+    }
+  }
+
+  // ==========================================
   // 14. GROUP LIVE / CALL INFO
   // ==========================================
   private static async handleLive(ctx: CommandContext) {
@@ -1511,6 +1929,7 @@ export class CommandHandler {
       text +=
         `\n👥 <b>Group Settings (${ctx.chatTitle}):</b>\n` +
         `• Link Protection: <b>${settings.linksProtection ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
+        `• Media/Image Protection: <b>${settings.mediaProtection ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
         `• Sticker Protection: <b>${settings.stickerProtection ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
         `• Warn Limit: <b>${settings.warnLimit} warns = Ban</b>\n` +
         `• Active Schedules: <b>${schedules}</b>\n`;
@@ -1520,41 +1939,94 @@ export class CommandHandler {
   }
 
   private static async handleHelp(ctx: CommandContext) {
-    let helpText =
-      `🛡️ <b>Telegram Moderation & Admin Commands:</b>\n\n` +
-      `<b>👑 Member Management (Admins):</b>\n` +
-      `• <code>/promote @user</code> - Promote a member to administrator\n` +
-      `• <code>/demote @user</code> - Revoke admin rights\n` +
-      `• <code>/permissions @user</code> - View and edit administrator permissions\n` +
-      `• <code>/kick @user</code> - Remove member from group\n` +
-      `• <code>/ban @user [reason]</code> - Ban member from group\n` +
-      `• <code>/unban @user</code> - Unban user\n\n` +
-      `<b>⚠️ Warning System:</b>\n` +
-      `• <code>/warn @user [reason]</code> - Issue warning\n` +
-      `• <code>/warnings [@user]</code> - View active warnings\n` +
-      `• <code>/resetwarns @user</code> - Clear warnings\n` +
-      `• <code>/setwarnlimit &lt;number&gt;</code> - Set threshold for auto-ban (default: 3)\n\n` +
-      `<b>🛡️ Roles & Permissions:</b>\n` +
-      `• <code>/setmod @user</code> - Assign custom bot moderator role\n` +
-      `• <code>/delmod @user</code> - Remove custom bot moderator role\n` +
-      `• <code>/free @user</code> - Grant sticker exemption\n` +
-      `• <code>/unfree @user</code> - Revoke sticker exemption\n\n` +
-      `<b>⚙️ Filter Settings:</b>\n` +
-      `• <code>/links on|off</code> - Toggle URL/link filter\n` +
-      `• <code>/stickers on|off</code> - Toggle sticker filter\n\n` +
-      `<b>📢 Automation & Communication:</b>\n` +
-      `• <code>/say &lt;message&gt;</code> - Broadcast message as bot\n` +
-      `• <code>/schedule &lt;30m|2h|1d&gt; &lt;msg&gt;</code> - Schedule recurring message\n` +
-      `• <code>/listSchedules</code> - View active schedules\n` +
-      `• <code>/deleteSchedule &lt;id&gt;</code> - Delete a schedule\n` +
-      `• <code>/live</code> - Live video/audio chat info\n\n` +
-      `<b>🚨 Member Tools:</b>\n` +
-      `• <code>/report [reason]</code> (reply to message) - Report to admins\n` +
-      `• <code>/status</code> - View group & bot configuration\n` +
-      `• <code>/ping</code> - Check responsiveness`;
+    const helpText =
+      `🛡️ <b>Roxie Administrator Command Toolkit</b>\n` +
+      `<i>🔒 All commands are restricted to group administrators.</i>\n\n` +
+      `🛡️ <b>ADMINISTRATION</b>\n` +
+      `• <code>/promote @user</code> — Promote a member to administrator\n` +
+      `• <code>/demote @user</code> — Revoke administrator privileges\n` +
+      `• <code>/permissions @user</code> — View & edit administrator permissions\n` +
+      `• <code>/setmod @user</code> — Assign bot moderator role\n` +
+      `• <code>/delmod @user</code> — Remove bot moderator role\n\n` +
+      `🔨 <b>MODERATION & PURGE</b>\n` +
+      `• <code>/del</code> — (Reply) Delete replied message for all members\n` +
+      `• <code>/clear [5s|1m|1h|num]</code> — Purge messages by timing, count, or all\n` +
+      `• <code>/clear user</code> — (Reply) Purge all messages from replied member\n` +
+      `• <code>/kick @user</code> — Remove member from group\n` +
+      `• <code>/ban @user [reason]</code> — Ban member permanently\n` +
+      `• <code>/unban @user</code> — Unban member\n` +
+      `• <code>/warn @user [reason]</code> — Warn member (auto-ban on limit)\n` +
+      `• <code>/warnings [@user]</code> — View active warnings\n` +
+      `• <code>/resetwarns @user</code> — Clear all warnings for member\n\n` +
+      `⚙️ <b>PROTECTION & PERMISSIONS</b>\n` +
+      `• <code>/media on|off</code> — Toggle image/photo/media protection\n` +
+      `• <code>/stickers on|off</code> — Toggle sticker filter\n` +
+      `• <code>/free @user</code> — Allow member to send images & stickers\n` +
+      `• <code>/unfree @user</code> — Revoke image & sticker permission\n` +
+      `• <code>/freelist</code> — List all exempted/freed members\n` +
+      `• <code>/links on|off</code> — Toggle automatic link filter\n` +
+      `• <code>/setwarnlimit &lt;num&gt;</code> — Set threshold for auto-ban\n\n` +
+      `📢 <b>COMMUNICATION</b>\n` +
+      `• <code>/say &lt;message&gt;</code> — Broadcast message as bot\n` +
+      `• <code>/schedule &lt;interval&gt; &lt;msg&gt;</code> — Schedule recurring broadcast\n` +
+      `• <code>/listschedules</code> — List active scheduled messages\n` +
+      `• <code>/deleteschedule &lt;id&gt;</code> — Remove scheduled broadcast\n` +
+      `• <code>/live</code> — Live stream & voice chat info\n\n` +
+      `🛠️ <b>TOOLS</b>\n` +
+      `• <code>/report [reason]</code> — (Reply) Forward report to admins\n` +
+      `• <code>/status</code> — View group & bot operational status\n` +
+      `• <code>/ping</code> — Check bot responsiveness`;
 
     await telegramApi.sendMessage(ctx.chatId, helpText);
   }
+}
+
+export function parseClearDuration(input: string): { seconds: number; formatted: string } | null {
+  if (!input) return null;
+  const str = input.trim().toLowerCase();
+
+  // Pattern: "5s", "5 sec", "5 secs", "5seconds", etc.
+  const secMatch = str.match(/^(\d+)\s*(s|sec|secs|seconds?)$/i);
+  if (secMatch) {
+    const s = parseInt(secMatch[1], 10);
+    if (s > 0) return { seconds: s, formatted: `${s}s` };
+  }
+
+  // Pattern: "5m", "5 min", "5 mins", "5minutes", etc.
+  const minMatch = str.match(/^(\d+)\s*(m|min|mins|minutes?)$/i);
+  if (minMatch) {
+    const m = parseInt(minMatch[1], 10);
+    if (m > 0) return { seconds: m * 60, formatted: `${m}m` };
+  }
+
+  // Pattern: "1h", "2 hr", "2 hrs", "2hours", etc.
+  const hrMatch = str.match(/^(\d+)\s*(h|hr|hrs|hours?)$/i);
+  if (hrMatch) {
+    const h = parseInt(hrMatch[1], 10);
+    if (h > 0) return { seconds: h * 3600, formatted: `${h}h` };
+  }
+
+  // Pattern: "1d", "2 day", "2 days", etc. (clamped to 48 hours maximum)
+  const dayMatch = str.match(/^(\d+)\s*(d|day|days?)$/i);
+  if (dayMatch) {
+    const d = parseInt(dayMatch[1], 10);
+    if (d > 0) {
+      const clampedSec = Math.min(d * 86400, 48 * 3600);
+      return { seconds: clampedSec, formatted: `${d}d` };
+    }
+  }
+
+  return null;
+}
+
+export function parseClearCount(input: string): number | null {
+  if (/^\d+$/.test(input.trim())) {
+    const num = parseInt(input.trim(), 10);
+    if (num > 0) {
+      return Math.min(num, 100);
+    }
+  }
+  return null;
 }
 
 function extractAdminPermissions(member: TelegramChatMember | undefined | null): AdminPermissions {

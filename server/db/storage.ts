@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { GroupSettings, WarningRecord, StickerFreeUser, ScheduledMessage, ModerationLog, CachedMember } from '../telegram/types.js';
+import { GroupSettings, WarningRecord, StickerFreeUser, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage } from '../telegram/types.js';
 
 interface DatabaseSchema {
   settings: Record<number, GroupSettings>;
@@ -251,6 +251,7 @@ class StorageManager {
         chatTitle: chatTitle || undefined,
         linksProtection: true,
         stickerProtection: true,
+        mediaProtection: true,
         warnLimit: 3,
         reportsEnabled: true,
         updatedAt: new Date().toISOString()
@@ -301,9 +302,13 @@ class StorageManager {
     return removed;
   }
 
-  // --- Sticker Permissions (/free & /unfree) ---
+  // --- Media & Sticker Permissions (/free & /unfree) ---
   public isUserStickerFree(chatId: number, userId: number): boolean {
     return this.data.stickerFreeUsers.some((u) => u.chatId === chatId && u.userId === userId);
+  }
+
+  public isUserMediaFree(chatId: number, userId: number): boolean {
+    return this.isUserStickerFree(chatId, userId);
   }
 
   public grantStickerPermission(chatId: number, userId: number, grantedBy: number, username?: string): void {
@@ -319,6 +324,10 @@ class StorageManager {
     }
   }
 
+  public grantMediaPermission(chatId: number, userId: number, grantedBy: number, username?: string): void {
+    this.grantStickerPermission(chatId, userId, grantedBy, username);
+  }
+
   public revokeStickerPermission(chatId: number, userId: number): boolean {
     const initialCount = this.data.stickerFreeUsers.length;
     this.data.stickerFreeUsers = this.data.stickerFreeUsers.filter(
@@ -329,6 +338,14 @@ class StorageManager {
       this.scheduleSave();
     }
     return removed;
+  }
+
+  public revokeMediaPermission(chatId: number, userId: number): boolean {
+    return this.revokeStickerPermission(chatId, userId);
+  }
+
+  public getFreedUsers(chatId: number): StickerFreeUser[] {
+    return this.data.stickerFreeUsers.filter((u) => u.chatId === chatId);
   }
 
   // --- Scheduled Messages ---
@@ -393,12 +410,134 @@ class StorageManager {
     return this.data.logs.slice(-limit);
   }
 
+  // --- Chat Message Tracking for /clear ---
+  private trackedMessages: Record<number, TrackedChatMessage[]> = {};
+
+  public trackMessage(chatId: number, messageId: number, date: number, userId?: number): void {
+    if (!chatId || !messageId) return;
+    if (!this.trackedMessages[chatId]) {
+      this.trackedMessages[chatId] = [];
+    }
+
+    const list = this.trackedMessages[chatId];
+    // Check if already tracked
+    if (list.some((m) => m.messageId === messageId)) return;
+
+    list.push({
+      messageId,
+      chatId,
+      date: date || Math.floor(Date.now() / 1000),
+      userId
+    });
+
+    // Prune messages older than 48 hours (Telegram deletion limit) and cap at 1000 messages
+    const cutoff48h = Math.floor(Date.now() / 1000) - 48 * 3600;
+    this.trackedMessages[chatId] = list
+      .filter((m) => m.date >= cutoff48h)
+      .slice(-1000);
+  }
+
+  public untrackMessages(chatId: number, messageIds: number[]): void {
+    if (!this.trackedMessages[chatId] || !messageIds || messageIds.length === 0) return;
+    const idSet = new Set(messageIds);
+    this.trackedMessages[chatId] = this.trackedMessages[chatId].filter((m) => !idSet.has(m.messageId));
+  }
+
+  public getTrackedMessages(chatId: number): TrackedChatMessage[] {
+    return this.trackedMessages[chatId] || [];
+  }
+
+  public getMessagesByDuration(chatId: number, durationSeconds: number, upToMessageId?: number): number[] {
+    const list = this.trackedMessages[chatId] || [];
+    const nowSec = Math.floor(Date.now() / 1000);
+    const cutoff = nowSec - durationSeconds;
+
+    const matchedIds: number[] = [];
+    for (const m of list) {
+      if (m.date >= cutoff && (!upToMessageId || m.messageId <= upToMessageId)) {
+        matchedIds.push(m.messageId);
+      }
+    }
+
+    // Always include upToMessageId if provided
+    if (upToMessageId && !matchedIds.includes(upToMessageId)) {
+      matchedIds.push(upToMessageId);
+    }
+
+    return Array.from(new Set(matchedIds)).sort((a, b) => a - b);
+  }
+
+  public getMessagesByCount(chatId: number, count: number, upToMessageId?: number): number[] {
+    const list = (this.trackedMessages[chatId] || [])
+      .filter((m) => !upToMessageId || m.messageId <= upToMessageId);
+
+    const idsFromBuffer = list.slice(-count).map((m) => m.messageId);
+    const result = new Set<number>(idsFromBuffer);
+
+    // If upToMessageId is present and buffer has fewer than count, scan sequential previous IDs
+    if (upToMessageId) {
+      result.add(upToMessageId);
+      let currentId = upToMessageId - 1;
+      while (result.size < count && currentId > 0 && (upToMessageId - currentId) <= count) {
+        result.add(currentId);
+        currentId--;
+      }
+    }
+
+    return Array.from(result).sort((a, b) => a - b);
+  }
+
+  public getMessagesInRange(chatId: number, fromMessageId: number, toMessageId: number): number[] {
+    const minId = Math.min(fromMessageId, toMessageId);
+    const maxId = Math.max(fromMessageId, toMessageId);
+
+    const result: number[] = [];
+    for (let id = minId; id <= maxId; id++) {
+      result.push(id);
+    }
+    return result;
+  }
+
+  public getMessagesByUser(chatId: number, userId: number, upToMessageId?: number, maxCount: number = 100): number[] {
+    const list = this.trackedMessages[chatId] || [];
+    const matchedIds = list
+      .filter((m) => m.userId === userId && (!upToMessageId || m.messageId <= upToMessageId))
+      .map((m) => m.messageId);
+
+    return matchedIds.slice(-maxCount).sort((a, b) => a - b);
+  }
+
+  public getAllTrackedMessagesToClear(chatId: number, upToMessageId?: number, maxCount: number = 100): number[] {
+    const list = this.trackedMessages[chatId] || [];
+    const ids = list
+      .filter((m) => !upToMessageId || m.messageId <= upToMessageId)
+      .map((m) => m.messageId);
+
+    const result = new Set<number>(ids.slice(-maxCount));
+
+    if (upToMessageId) {
+      result.add(upToMessageId);
+      // If buffer is relatively empty, generate sequential IDs back up to maxCount
+      if (result.size < maxCount) {
+        let curr = upToMessageId - 1;
+        const targetSize = Math.min(maxCount, 50);
+        while (result.size < targetSize && curr > 0 && (upToMessageId - curr) <= targetSize) {
+          result.add(curr);
+          curr--;
+        }
+      }
+    }
+
+    return Array.from(result).sort((a, b) => a - b);
+  }
+
   public getStats() {
     const totalBans = this.data.logs.filter((l) => l.action === 'ban' || l.action === 'auto_ban').length;
     const totalKicks = this.data.logs.filter((l) => l.action === 'kick').length;
     const totalWarns = this.data.logs.filter((l) => l.action === 'warn').length;
     const totalDeletedLinks = this.data.logs.filter((l) => l.action === 'delete_link').length;
     const totalDeletedStickers = this.data.logs.filter((l) => l.action === 'delete_sticker').length;
+    const totalDeletedImages = this.data.logs.filter((l) => l.action === 'delete_image' || l.action === 'delete_media').length;
     const totalReports = this.data.logs.filter((l) => l.action === 'report').length;
     const activeSchedules = this.data.schedules.length;
     const groupsCount = Object.keys(this.data.settings).length;
@@ -409,6 +548,7 @@ class StorageManager {
       totalWarns,
       totalDeletedLinks,
       totalDeletedStickers,
+      totalDeletedImages,
       totalReports,
       activeSchedules,
       groupsCount

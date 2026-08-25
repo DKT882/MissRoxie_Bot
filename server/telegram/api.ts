@@ -1,4 +1,4 @@
-import { TelegramChatMember, TelegramUser } from './types.js';
+import { TelegramChatMember, TelegramUser, BotCommand, BotCommandScope } from './types.js';
 
 export class TelegramApi {
   private getToken(): string {
@@ -111,6 +111,16 @@ export class TelegramApi {
     });
   }
 
+  public async deleteMessages(chatId: number | string, messageIds: number[]): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    if (!messageIds || messageIds.length === 0) {
+      return { ok: true, result: true };
+    }
+    return this.call('deleteMessages', {
+      chat_id: chatId,
+      message_ids: messageIds
+    });
+  }
+
   public async banChatMember(
     chatId: number | string,
     userId: number,
@@ -193,6 +203,28 @@ export class TelegramApi {
   ): Promise<{ ok: boolean; result?: TelegramChatMember[]; description?: string; error_code?: number }> {
     return this.call<TelegramChatMember[]>('getChatAdministrators', {
       chat_id: chatId
+    });
+  }
+
+  public async setMyCommands(
+    commands: BotCommand[],
+    scope?: BotCommandScope,
+    language_code?: string
+  ): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    return this.call('setMyCommands', {
+      commands,
+      scope: scope || undefined,
+      language_code: language_code || undefined
+    });
+  }
+
+  public async deleteMyCommands(
+    scope?: BotCommandScope,
+    language_code?: string
+  ): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    return this.call('deleteMyCommands', {
+      scope: scope || undefined,
+      language_code: language_code || undefined
     });
   }
 }

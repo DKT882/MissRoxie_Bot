@@ -137,7 +137,7 @@ async function runPermissionEditorTests() {
   };
 
   db.cacheUser({ id: adminTargetEditableId, username: 'target_editable', first_name: 'TargetEditable' }, chatId);
-  db.setCustomRole(chatId, modId, 'MODERATOR', ownerId);
+  db.setCustomRole(chatId, modId, 'MODERATOR');
 
   const makeCtx = (
     senderId: number,
@@ -464,7 +464,7 @@ async function runPermissionEditorTests() {
     await CommandHandler.handleCallbackQuery(cancelPromoteQuery);
     assert(
       session.currentPermissions.can_promote_members === false &&
-      session.confirmingPromote === false,
+      !session.confirmingPromote,
       'PERM-23: Cancelling can_promote_members confirmation keeps state false'
     );
   }

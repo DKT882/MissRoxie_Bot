@@ -50,6 +50,46 @@ export interface TelegramMessage {
   caption?: string;
   caption_entities?: TelegramMessageEntity[];
   sticker?: TelegramSticker;
+  photo?: Array<{
+    file_id: string;
+    file_unique_id: string;
+    width: number;
+    height: number;
+    file_size?: number;
+  }>;
+  animation?: {
+    file_id: string;
+    file_unique_id: string;
+    width: number;
+    height: number;
+    duration: number;
+    mime_type?: string;
+    file_name?: string;
+    file_size?: number;
+  };
+  document?: {
+    file_id: string;
+    file_unique_id: string;
+    file_name?: string;
+    mime_type?: string;
+    file_size?: number;
+  };
+  video?: {
+    file_id: string;
+    file_unique_id: string;
+    width: number;
+    height: number;
+    duration: number;
+    mime_type?: string;
+    file_name?: string;
+    file_size?: number;
+  };
+  video_note?: {
+    file_id: string;
+    file_unique_id: string;
+    length: number;
+    duration: number;
+  };
   new_chat_members?: TelegramUser[];
   left_chat_member?: TelegramUser;
   new_chat_title?: string;
@@ -83,6 +123,20 @@ export interface TelegramUpdate {
   edited_channel_post?: TelegramMessage;
   callback_query?: TelegramCallbackQuery;
 }
+
+export interface BotCommand {
+  command: string;
+  description: string;
+}
+
+export type BotCommandScope =
+  | { type: 'default' }
+  | { type: 'all_private_chats' }
+  | { type: 'all_group_chats' }
+  | { type: 'all_chat_administrators' }
+  | { type: 'chat'; chat_id: number | string }
+  | { type: 'chat_administrators'; chat_id: number | string }
+  | { type: 'chat_member'; chat_id: number | string; user_id: number };
 
 export interface AdminPermissions {
   is_anonymous: boolean;
@@ -129,6 +183,7 @@ export interface GroupSettings {
   chatTitle?: string;
   linksProtection: boolean; // default true
   stickerProtection: boolean; // default true
+  mediaProtection: boolean; // default true (images, GIFs, photos, media)
   warnLimit: number; // default 3
   reportsEnabled: boolean; // default true
   updatedAt: string;
@@ -153,6 +208,8 @@ export interface StickerFreeUser {
   grantedBy: number;
   grantedAt: string;
 }
+
+export type MediaFreeUser = StickerFreeUser;
 
 export interface ScheduledMessage {
   id: string;
@@ -180,6 +237,13 @@ export interface CachedMember {
   customRole?: 'MODERATOR' | 'NONE';
 }
 
+export interface TrackedChatMessage {
+  messageId: number;
+  chatId: number;
+  date: number; // Unix timestamp in seconds or ms
+  userId?: number;
+}
+
 export interface ModerationLog {
   id: string;
   chatId: number;
@@ -196,7 +260,7 @@ export interface ModerationLog {
   adminUserId?: number;
   adminUsername?: string;
   command?: string;
-  action: 'kick' | 'ban' | 'unban' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change';
+  action: 'kick' | 'ban' | 'unban' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'delete_image' | 'delete_media' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'clear' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change';
   result?: 'success' | 'denied' | 'error';
   telegramError?: string;
   reason?: string;
@@ -219,6 +283,7 @@ export interface TelegramBotStatus {
     totalWarns: number;
     totalDeletedLinks: number;
     totalDeletedStickers: number;
+    totalDeletedImages: number;
     totalReports: number;
     activeSchedules: number;
     groupsCount: number;

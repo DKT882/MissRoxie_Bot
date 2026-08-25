@@ -12,34 +12,59 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Health check
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
   // API Route: Check Telegram Bot status safely (never exposes token)
   app.get('/api/telegram/status', (req, res) => {
-    const status = telegramBot.getStatus();
-    res.json(status);
+    try {
+      const status = telegramBot.getStatus();
+      res.json(status);
+    } catch (err: any) {
+      console.error('Error getting Telegram status:', err);
+      res.status(500).json({ error: err.message || 'Internal Server Error' });
+    }
   });
 
   // API Route: Test Telegram Bot connection via getMe
   app.post('/api/telegram/test-connection', async (req, res) => {
-    const result = await telegramBot.testConnection();
-    if (result.success) {
-      // If polling wasn't running, start it now
-      telegramBot.startPolling().catch(() => {});
-      return res.json(result);
-    } else {
-      return res.status(400).json(result);
+    try {
+      const result = await telegramBot.testConnection();
+      if (result.success) {
+        // If polling wasn't running, start it now
+        telegramBot.startPolling().catch(() => {});
+        return res.json(result);
+      } else {
+        return res.status(400).json(result);
+      }
+    } catch (err: any) {
+      console.error('Error testing Telegram connection:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
     }
   });
 
   // API Route: Explicitly trigger / restart polling
   app.post('/api/telegram/polling/start', async (req, res) => {
-    await telegramBot.startPolling();
-    res.json(telegramBot.getStatus());
+    try {
+      await telegramBot.startPolling();
+      res.json(telegramBot.getStatus());
+    } catch (err: any) {
+      console.error('Error starting polling:', err);
+      res.status(500).json({ error: err.message || 'Internal Server Error' });
+    }
   });
 
   // API Route: Get moderation audit logs
   app.get('/api/telegram/logs', (req, res) => {
-    const status = telegramBot.getStatus();
-    res.json(status.recentLogs);
+    try {
+      const status = telegramBot.getStatus();
+      res.json(status.recentLogs || []);
+    } catch (err: any) {
+      console.error('Error getting logs:', err);
+      res.status(500).json({ error: err.message || 'Internal Server Error' });
+    }
   });
 
   // Automatically initiate bot polling if TELEGRAM_BOT_TOKEN is present
