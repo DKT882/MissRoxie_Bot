@@ -324,9 +324,9 @@ export class TelegramMiddleware {
   /**
    * STEP 2 — CENTRALIZED TARGET RESOLUTION
    * Strict Priority:
-   * 1. Replied Message
-   * 2. Explicit Numeric User ID
-   * 3. @username using local group/global cache
+   * 1. Explicit Numeric User ID or @username in arguments (highest specificity)
+   * 2. Replied Message (if no explicit target argument given)
+   * 3. Fallback to username string in arguments lookup in cache
    *
    * NEVER falls back to actor. NEVER guesses.
    */
@@ -334,7 +334,60 @@ export class TelegramMiddleware {
     const effectiveArgs = args || ctx.args;
     const cleanCmd = ctx.command.toLowerCase().split('@')[0];
 
-    // 1. PRIMARY: Reply to a message
+    // 1. Check if first argument is an EXPLICIT target (@username or numeric user ID)
+    if (effectiveArgs && effectiveArgs.length > 0) {
+      const firstArg = effectiveArgs[0].trim();
+
+      // Explicit numeric user ID
+      if (/^\d{3,16}$/.test(firstArg)) {
+        const userId = parseInt(firstArg, 10);
+        const cached = db.findUserById(userId, ctx.chatId);
+        return {
+          type: 'user',
+          userId,
+          user: cached ? {
+            id: cached.userId,
+            is_bot: false,
+            first_name: cached.firstName,
+            last_name: cached.lastName,
+            username: cached.username
+          } : {
+            id: userId,
+            is_bot: false,
+            first_name: `User ${userId}`
+          },
+          source: 'numeric_id'
+        };
+      }
+
+      // Explicit @username
+      if (firstArg.startsWith('@')) {
+        const username = firstArg.replace(/^@/, '');
+        const known = db.findUserByUsername(username, ctx.chatId);
+        if (known) {
+          return {
+            type: 'user',
+            userId: known.userId,
+            user: {
+              id: known.userId,
+              is_bot: false,
+              first_name: known.firstName,
+              last_name: known.lastName,
+              username: known.username
+            },
+            source: 'username'
+          };
+        }
+
+        return {
+          type: 'none',
+          source: 'none',
+          error: `⚠️ Could not find a member with username @${username} in local group memory.\nPlease reply to their message and use ${cleanCmd}`
+        };
+      }
+    }
+
+    // 2. PRIMARY (When no explicit @user/ID argument): Reply to a message
     if (ctx.message.reply_to_message) {
       const repliedMessage = ctx.message.reply_to_message;
 
@@ -366,36 +419,11 @@ export class TelegramMiddleware {
       }
     }
 
-    // 2. Numeric ID or @username from arguments
+    // 3. Arguments without @ prefix (bare username matching cache)
     if (effectiveArgs && effectiveArgs.length > 0) {
-      const arg = effectiveArgs[0].trim();
-
-      // Numeric ID
-      if (/^\d{3,16}$/.test(arg)) {
-        const userId = parseInt(arg, 10);
-        const cached = db.findUserById(userId, ctx.chatId);
-        return {
-          type: 'user',
-          userId,
-          user: cached ? {
-            id: cached.userId,
-            is_bot: false,
-            first_name: cached.firstName,
-            last_name: cached.lastName,
-            username: cached.username
-          } : {
-            id: userId,
-            is_bot: false,
-            first_name: `User ${userId}`
-          },
-          source: 'numeric_id'
-        };
-      }
-
-      // Username: lookup ONLY in observed cached members
-      if (arg.startsWith('@') || /^[a-zA-Z0-9_]{4,32}$/.test(arg)) {
-        const username = arg.replace(/^@/, '');
-        const known = db.findUserByUsername(username, ctx.chatId);
+      const firstArg = effectiveArgs[0].trim();
+      if (/^[a-zA-Z0-9_]{4,32}$/.test(firstArg)) {
+        const known = db.findUserByUsername(firstArg, ctx.chatId);
         if (known) {
           return {
             type: 'user',
@@ -410,12 +438,6 @@ export class TelegramMiddleware {
             source: 'username'
           };
         }
-
-        return {
-          type: 'none',
-          source: 'none',
-          error: `⚠️ Could not find a member with username @${username} in local group memory.\nPlease reply to their message and use ${cleanCmd}`
-        };
       }
     }
 

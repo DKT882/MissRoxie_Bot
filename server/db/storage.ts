@@ -1,12 +1,22 @@
 import fs from 'fs';
 import path from 'path';
-import { GroupSettings, WarningRecord, StickerFreeUser, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord } from '../telegram/types.js';
+import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession } from '../telegram/types.js';
+
+interface RaidStateRecord {
+  recentJoins: number[];
+  isRaidModeActive: boolean;
+  raidActiveUntil: number;
+}
 
 interface DatabaseSchema {
   settings: Record<number, GroupSettings>;
   warnings: WarningRecord[];
   tempActions: TempActionRecord[];
   stickerFreeUsers: StickerFreeUser[];
+  contentPermissions: Record<string, ContentPermissionRecord>;
+  notes: Record<string, NoteRecord>; // `${chatId}_${notename}` -> NoteRecord
+  approvedUsers: Record<string, ApprovedUserRecord>; // `${chatId}_${userId}` -> ApprovedUserRecord
+  captchaSessions: CaptchaSession[];
   schedules: ScheduledMessage[];
   logs: ModerationLog[];
   knownUsers: Record<string, CachedMember>; // username (lowercase) -> CachedMember
@@ -24,6 +34,10 @@ class StorageManager {
     warnings: [],
     tempActions: [],
     stickerFreeUsers: [],
+    contentPermissions: {},
+    notes: {},
+    approvedUsers: {},
+    captchaSessions: [],
     schedules: [],
     logs: [],
     knownUsers: {},
@@ -31,6 +45,7 @@ class StorageManager {
     groupMembers: {},
     customRoles: {}
   };
+  private raidStates: Record<number, RaidStateRecord> = {};
   private isLoaded: boolean = false;
   private saveTimeout: NodeJS.Timeout | null = null;
 
@@ -52,6 +67,10 @@ class StorageManager {
             warnings: parsed.warnings || [],
             tempActions: parsed.tempActions || [],
             stickerFreeUsers: parsed.stickerFreeUsers || [],
+            contentPermissions: parsed.contentPermissions || {},
+            notes: parsed.notes || {},
+            approvedUsers: parsed.approvedUsers || {},
+            captchaSessions: parsed.captchaSessions || [],
             schedules: parsed.schedules || [],
             logs: parsed.logs || [],
             knownUsers: parsed.knownUsers || {},
@@ -254,10 +273,20 @@ class StorageManager {
         chatTitle: chatTitle || undefined,
         warnLimit: 3,
         warnAction: 'ban',
+        warnExpireSeconds: 0,
         floodEnabled: false,
         floodCount: 8,
         floodWindow: 5,
         floodAction: 'mute',
+        raidEnabled: false,
+        raidLimit: 8,
+        raidWindow: 30,
+        raidAction: 'kick',
+        raidDuration: 300,
+        captchaEnabled: false,
+        captchaMode: 'button',
+        captchaTimeout: 120,
+        captchaAction: 'kick',
         linksProtection: true,
         linksWhitelist: [],
         mediaProtection: true,
@@ -281,12 +310,22 @@ class StorageManager {
     } else {
       const s = this.data.settings[chatId];
       let needsSave = false;
-      // Ensure all phase 2 fields are populated if loaded from older format
+      // Ensure all phase 2 & 3 fields are populated if loaded from older format
       if (s.warnAction === undefined) { s.warnAction = 'ban'; needsSave = true; }
+      if (s.warnExpireSeconds === undefined) { s.warnExpireSeconds = 0; needsSave = true; }
       if (s.floodEnabled === undefined) { s.floodEnabled = false; needsSave = true; }
       if (s.floodCount === undefined) { s.floodCount = 8; needsSave = true; }
       if (s.floodWindow === undefined) { s.floodWindow = 5; needsSave = true; }
       if (s.floodAction === undefined) { s.floodAction = 'mute'; needsSave = true; }
+      if (s.raidEnabled === undefined) { s.raidEnabled = false; needsSave = true; }
+      if (s.raidLimit === undefined) { s.raidLimit = 8; needsSave = true; }
+      if (s.raidWindow === undefined) { s.raidWindow = 30; needsSave = true; }
+      if (s.raidAction === undefined) { s.raidAction = 'kick'; needsSave = true; }
+      if (s.raidDuration === undefined) { s.raidDuration = 300; needsSave = true; }
+      if (s.captchaEnabled === undefined) { s.captchaEnabled = false; needsSave = true; }
+      if (s.captchaMode === undefined) { s.captchaMode = 'button'; needsSave = true; }
+      if (s.captchaTimeout === undefined) { s.captchaTimeout = 120; needsSave = true; }
+      if (s.captchaAction === undefined) { s.captchaAction = 'kick'; needsSave = true; }
       if (!Array.isArray(s.linksWhitelist)) { s.linksWhitelist = []; needsSave = true; }
       if (s.gifsProtection === undefined) { s.gifsProtection = false; needsSave = true; }
       if (s.videosProtection === undefined) { s.videosProtection = false; needsSave = true; }
@@ -395,6 +434,13 @@ class StorageManager {
     return this.getGroupSettings(chatId).filters || {};
   }
 
+  public clearAllFilters(chatId: number): number {
+    const s = this.getGroupSettings(chatId);
+    const count = Object.keys(s.filters || {}).length;
+    this.updateGroupSettings(chatId, { filters: {} });
+    return count;
+  }
+
   // --- Warnings System ---
   public addWarning(record: Omit<WarningRecord, 'id' | 'timestamp' | 'count'>): { warning: WarningRecord; totalWarnings: number } {
     const existing = this.getUserWarnings(record.chatId, record.userId);
@@ -413,8 +459,33 @@ class StorageManager {
     return { warning: newRecord, totalWarnings };
   }
 
+  public removeLatestWarning(chatId: number, userId: number): { removed: boolean; remaining: number } {
+    const userWarnings = this.data.warnings.filter((w) => w.chatId === chatId && w.userId === userId);
+    if (userWarnings.length === 0) {
+      return { removed: false, remaining: 0 };
+    }
+
+    // Sort by timestamp or index and remove latest
+    const latest = userWarnings[userWarnings.length - 1];
+    this.data.warnings = this.data.warnings.filter((w) => w.id !== latest.id);
+    this.scheduleSave();
+
+    const remaining = this.getUserWarnings(chatId, userId).length;
+    return { removed: true, remaining };
+  }
+
   public getUserWarnings(chatId: number, userId: number): WarningRecord[] {
-    return this.data.warnings.filter((w) => w.chatId === chatId && w.userId === userId);
+    const s = this.getGroupSettings(chatId);
+    let list = this.data.warnings.filter((w) => w.chatId === chatId && w.userId === userId);
+
+    // If warning expiration is configured (> 0 seconds), filter out expired warnings
+    if (s.warnExpireSeconds && s.warnExpireSeconds > 0) {
+      const now = Date.now();
+      const cutoff = now - (s.warnExpireSeconds * 1000);
+      list = list.filter((w) => new Date(w.timestamp).getTime() >= cutoff);
+    }
+
+    return list;
   }
 
   public resetUserWarnings(chatId: number, userId: number): number {
@@ -423,6 +494,391 @@ class StorageManager {
     const removed = initialCount - this.data.warnings.length;
     this.scheduleSave();
     return removed;
+  }
+
+  // --- Saved Notes System ---
+  public saveNote(
+    chatId: number,
+    name: string,
+    content: string,
+    savedBy: number,
+    savedByUsername?: string,
+    fileId?: string,
+    fileType?: string
+  ): NoteRecord {
+    if (!this.data.notes) {
+      this.data.notes = {};
+    }
+    const cleanName = name.toLowerCase().trim();
+    const key = `${chatId}_${cleanName}`;
+    const record: NoteRecord = {
+      name: cleanName,
+      chatId,
+      content,
+      savedBy,
+      savedByUsername,
+      savedAt: new Date().toISOString(),
+      fileId,
+      fileType
+    };
+    this.data.notes[key] = record;
+    this.scheduleSave();
+    return record;
+  }
+
+  public getNote(chatId: number, name: string): NoteRecord | null {
+    if (!this.data.notes) return null;
+    const cleanName = name.toLowerCase().trim();
+    const key = `${chatId}_${cleanName}`;
+    return this.data.notes[key] || null;
+  }
+
+  public getAllNotes(chatId: number): NoteRecord[] {
+    if (!this.data.notes) return [];
+    const prefix = `${chatId}_`;
+    return Object.entries(this.data.notes)
+      .filter(([k]) => k.startsWith(prefix))
+      .map(([, v]) => v)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  public deleteNote(chatId: number, name: string): boolean {
+    if (!this.data.notes) return false;
+    const cleanName = name.toLowerCase().trim();
+    const key = `${chatId}_${cleanName}`;
+    if (this.data.notes[key]) {
+      delete this.data.notes[key];
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  public clearAllNotes(chatId: number): number {
+    if (!this.data.notes) return 0;
+    const prefix = `${chatId}_`;
+    let count = 0;
+    for (const k of Object.keys(this.data.notes)) {
+      if (k.startsWith(prefix)) {
+        delete this.data.notes[k];
+        count++;
+      }
+    }
+    if (count > 0) {
+      this.scheduleSave();
+    }
+    return count;
+  }
+
+  // --- Approved / Trusted Users ---
+  public approveUser(
+    chatId: number,
+    userId: number,
+    approvedBy: number,
+    username?: string,
+    firstName?: string
+  ): ApprovedUserRecord {
+    if (!this.data.approvedUsers) {
+      this.data.approvedUsers = {};
+    }
+    const key = `${chatId}_${userId}`;
+    const record: ApprovedUserRecord = {
+      chatId,
+      userId,
+      username,
+      firstName,
+      approvedBy,
+      approvedAt: new Date().toISOString()
+    };
+    this.data.approvedUsers[key] = record;
+    this.scheduleSave();
+    return record;
+  }
+
+  public unapproveUser(chatId: number, userId: number): boolean {
+    if (!this.data.approvedUsers) return false;
+    const key = `${chatId}_${userId}`;
+    if (this.data.approvedUsers[key]) {
+      delete this.data.approvedUsers[key];
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  public isUserApproved(chatId: number, userId: number): boolean {
+    if (!this.data.approvedUsers) return false;
+    const key = `${chatId}_${userId}`;
+    return Boolean(this.data.approvedUsers[key]);
+  }
+
+  public getApprovedUsers(chatId: number): ApprovedUserRecord[] {
+    if (!this.data.approvedUsers) return [];
+    const prefix = `${chatId}_`;
+    return Object.entries(this.data.approvedUsers)
+      .filter(([k]) => k.startsWith(prefix))
+      .map(([, v]) => v);
+  }
+
+  // --- CAPTCHA Sessions ---
+  public createCaptchaSession(
+    chatId: number,
+    userId: number,
+    question: string,
+    correctAnswer: string,
+    timeoutSeconds: number = 120
+  ): CaptchaSession {
+    if (!this.data.captchaSessions) {
+      this.data.captchaSessions = [];
+    }
+    // Remove existing session for this user in this chat
+    this.removeCaptchaSession(chatId, userId);
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const token = Math.random().toString(36).substring(2, 12);
+    const session: CaptchaSession = {
+      id: Math.random().toString(36).substring(2, 9),
+      chatId,
+      userId,
+      question,
+      correctAnswer,
+      token,
+      createdAt: nowSec,
+      expiresAt: nowSec + timeoutSeconds
+    };
+    this.data.captchaSessions.push(session);
+    this.scheduleSave();
+    return session;
+  }
+
+  public setCaptchaMessageId(sessionId: string, messageId: number): void {
+    if (!this.data.captchaSessions) return;
+    const s = this.data.captchaSessions.find((x) => x.id === sessionId);
+    if (s) {
+      s.messageId = messageId;
+      this.scheduleSave();
+    }
+  }
+
+  public getCaptchaSession(chatId: number, userId: number): CaptchaSession | undefined {
+    if (!this.data.captchaSessions) return undefined;
+    return this.data.captchaSessions.find((s) => s.chatId === chatId && s.userId === userId);
+  }
+
+  public getCaptchaSessionByToken(token: string): CaptchaSession | undefined {
+    if (!this.data.captchaSessions) return undefined;
+    return this.data.captchaSessions.find((s) => s.token === token);
+  }
+
+  public removeCaptchaSession(chatId: number, userId: number): boolean {
+    if (!this.data.captchaSessions) return false;
+    const initialLen = this.data.captchaSessions.length;
+    this.data.captchaSessions = this.data.captchaSessions.filter(
+      (s) => !(s.chatId === chatId && s.userId === userId)
+    );
+    const removed = initialLen > this.data.captchaSessions.length;
+    if (removed) {
+      this.scheduleSave();
+    }
+    return removed;
+  }
+
+  public getExpiredCaptchaSessions(): CaptchaSession[] {
+    if (!this.data.captchaSessions) return [];
+    const nowSec = Math.floor(Date.now() / 1000);
+    return this.data.captchaSessions.filter((s) => s.expiresAt <= nowSec);
+  }
+
+  // --- Anti-Raid System ---
+  public trackJoinAndCheckRaid(chatId: number): { isRaid: boolean; joinCount: number } {
+    const s = this.getGroupSettings(chatId);
+    const now = Math.floor(Date.now() / 1000);
+
+    if (!this.raidStates[chatId]) {
+      this.raidStates[chatId] = {
+        recentJoins: [],
+        isRaidModeActive: false,
+        raidActiveUntil: 0
+      };
+    }
+
+    const state = this.raidStates[chatId];
+
+    // Check if raid is already active and still in time
+    if (state.isRaidModeActive && state.raidActiveUntil > now) {
+      return { isRaid: true, joinCount: state.recentJoins.length };
+    } else if (state.isRaidModeActive && state.raidActiveUntil <= now) {
+      // Raid mode has expired
+      state.isRaidModeActive = false;
+      state.raidActiveUntil = 0;
+    }
+
+    if (!s.raidEnabled) {
+      return { isRaid: false, joinCount: 0 };
+    }
+
+    // Prune joins older than raidWindow (seconds)
+    const windowCutoff = now - (s.raidWindow || 30);
+    state.recentJoins = state.recentJoins.filter((t) => t >= windowCutoff);
+    state.recentJoins.push(now);
+
+    const limit = s.raidLimit || 8;
+    if (state.recentJoins.length >= limit) {
+      state.isRaidModeActive = true;
+      state.raidActiveUntil = now + (s.raidDuration || 300);
+      return { isRaid: true, joinCount: state.recentJoins.length };
+    }
+
+    return { isRaid: false, joinCount: state.recentJoins.length };
+  }
+
+  public isRaidActive(chatId: number): boolean {
+    const state = this.raidStates[chatId];
+    if (!state) return false;
+    const now = Math.floor(Date.now() / 1000);
+    if (state.isRaidModeActive && state.raidActiveUntil > now) {
+      return true;
+    }
+    if (state.isRaidModeActive && state.raidActiveUntil <= now) {
+      state.isRaidModeActive = false;
+      state.raidActiveUntil = 0;
+    }
+    return false;
+  }
+
+  public setRaidActive(chatId: number, active: boolean, durationSeconds?: number): void {
+    const now = Math.floor(Date.now() / 1000);
+    if (!this.raidStates[chatId]) {
+      this.raidStates[chatId] = {
+        recentJoins: [],
+        isRaidModeActive: false,
+        raidActiveUntil: 0
+      };
+    }
+    const state = this.raidStates[chatId];
+    state.isRaidModeActive = active;
+    state.raidActiveUntil = active ? now + (durationSeconds || 300) : 0;
+  }
+
+  // --- Configuration Export & Import ---
+  public exportGroupConfig(chatId: number): object {
+    const s = this.getGroupSettings(chatId);
+    const filters = this.getFilters(chatId);
+    const notes = this.getAllNotes(chatId);
+    const whitelist = this.getLinkWhitelist(chatId);
+    const locks = this.getLocks(chatId);
+
+    return {
+      version: '3.0',
+      exportedAt: new Date().toISOString(),
+      chatId,
+      settings: {
+        warnLimit: s.warnLimit,
+        warnAction: s.warnAction,
+        warnExpireSeconds: s.warnExpireSeconds,
+        floodEnabled: s.floodEnabled,
+        floodCount: s.floodCount,
+        floodWindow: s.floodWindow,
+        floodAction: s.floodAction,
+        raidEnabled: s.raidEnabled,
+        raidLimit: s.raidLimit,
+        raidWindow: s.raidWindow,
+        raidAction: s.raidAction,
+        raidDuration: s.raidDuration,
+        captchaEnabled: s.captchaEnabled,
+        captchaMode: s.captchaMode,
+        captchaTimeout: s.captchaTimeout,
+        captchaAction: s.captchaAction,
+        linksProtection: s.linksProtection,
+        linksWhitelist: whitelist,
+        mediaProtection: s.mediaProtection,
+        stickerProtection: s.stickerProtection,
+        gifsProtection: s.gifsProtection,
+        videosProtection: s.videosProtection,
+        photosProtection: s.photosProtection,
+        voiceProtection: s.voiceProtection,
+        audioProtection: s.audioProtection,
+        locks,
+        welcomeEnabled: s.welcomeEnabled,
+        welcomeMessage: s.welcomeMessage,
+        goodbyeEnabled: s.goodbyeEnabled,
+        goodbyeMessage: s.goodbyeMessage,
+        slowModeSeconds: s.slowModeSeconds,
+        reportsEnabled: s.reportsEnabled
+      },
+      filters,
+      notes: notes.map((n) => ({ name: n.name, content: n.content }))
+    };
+  }
+
+  public importGroupConfig(
+    chatId: number,
+    config: any,
+    importedBy: number
+  ): { ok: boolean; message: string; appliedCount: number } {
+    if (!config || typeof config !== 'object' || !config.settings) {
+      return { ok: false, message: 'Invalid configuration format. Must contain "settings" object.', appliedCount: 0 };
+    }
+
+    const s = config.settings;
+    const updates: Partial<GroupSettings> = {};
+    let appliedCount = 0;
+
+    if (typeof s.warnLimit === 'number' && s.warnLimit >= 1 && s.warnLimit <= 20) { updates.warnLimit = s.warnLimit; appliedCount++; }
+    if (['ban', 'mute', 'kick', 'warn_only'].includes(s.warnAction)) { updates.warnAction = s.warnAction; appliedCount++; }
+    if (typeof s.warnExpireSeconds === 'number') { updates.warnExpireSeconds = s.warnExpireSeconds; appliedCount++; }
+    if (typeof s.floodEnabled === 'boolean') { updates.floodEnabled = s.floodEnabled; appliedCount++; }
+    if (typeof s.floodCount === 'number') { updates.floodCount = s.floodCount; appliedCount++; }
+    if (typeof s.floodWindow === 'number') { updates.floodWindow = s.floodWindow; appliedCount++; }
+    if (['delete', 'mute', 'kick', 'ban'].includes(s.floodAction)) { updates.floodAction = s.floodAction; appliedCount++; }
+    if (typeof s.raidEnabled === 'boolean') { updates.raidEnabled = s.raidEnabled; appliedCount++; }
+    if (typeof s.raidLimit === 'number') { updates.raidLimit = s.raidLimit; appliedCount++; }
+    if (typeof s.raidWindow === 'number') { updates.raidWindow = s.raidWindow; appliedCount++; }
+    if (['kick', 'mute', 'ban', 'restrict'].includes(s.raidAction)) { updates.raidAction = s.raidAction; appliedCount++; }
+    if (typeof s.raidDuration === 'number') { updates.raidDuration = s.raidDuration; appliedCount++; }
+    if (typeof s.captchaEnabled === 'boolean') { updates.captchaEnabled = s.captchaEnabled; appliedCount++; }
+    if (['button', 'math'].includes(s.captchaMode)) { updates.captchaMode = s.captchaMode; appliedCount++; }
+    if (typeof s.captchaTimeout === 'number') { updates.captchaTimeout = s.captchaTimeout; appliedCount++; }
+    if (['kick', 'mute', 'ban'].includes(s.captchaAction)) { updates.captchaAction = s.captchaAction; appliedCount++; }
+    if (typeof s.linksProtection === 'boolean') { updates.linksProtection = s.linksProtection; appliedCount++; }
+    if (Array.isArray(s.linksWhitelist)) { updates.linksWhitelist = s.linksWhitelist; appliedCount++; }
+    if (typeof s.mediaProtection === 'boolean') { updates.mediaProtection = s.mediaProtection; appliedCount++; }
+    if (typeof s.stickerProtection === 'boolean') { updates.stickerProtection = s.stickerProtection; appliedCount++; }
+    if (typeof s.gifsProtection === 'boolean') { updates.gifsProtection = s.gifsProtection; appliedCount++; }
+    if (typeof s.videosProtection === 'boolean') { updates.videosProtection = s.videosProtection; appliedCount++; }
+    if (typeof s.photosProtection === 'boolean') { updates.photosProtection = s.photosProtection; appliedCount++; }
+    if (typeof s.voiceProtection === 'boolean') { updates.voiceProtection = s.voiceProtection; appliedCount++; }
+    if (typeof s.audioProtection === 'boolean') { updates.audioProtection = s.audioProtection; appliedCount++; }
+    if (s.locks && typeof s.locks === 'object') { updates.locks = s.locks; appliedCount++; }
+    if (typeof s.welcomeEnabled === 'boolean') { updates.welcomeEnabled = s.welcomeEnabled; appliedCount++; }
+    if (typeof s.welcomeMessage === 'string') { updates.welcomeMessage = s.welcomeMessage; appliedCount++; }
+    if (typeof s.goodbyeEnabled === 'boolean') { updates.goodbyeEnabled = s.goodbyeEnabled; appliedCount++; }
+    if (typeof s.goodbyeMessage === 'string') { updates.goodbyeMessage = s.goodbyeMessage; appliedCount++; }
+    if (typeof s.reportsEnabled === 'boolean') { updates.reportsEnabled = s.reportsEnabled; appliedCount++; }
+
+    this.updateGroupSettings(chatId, updates);
+
+    // Import filters
+    if (config.filters && typeof config.filters === 'object') {
+      for (const [k, v] of Object.entries(config.filters)) {
+        if (typeof v === 'string') {
+          this.setFilter(chatId, k, v);
+          appliedCount++;
+        }
+      }
+    }
+
+    // Import notes
+    if (Array.isArray(config.notes)) {
+      for (const n of config.notes) {
+        if (n && typeof n.name === 'string' && typeof n.content === 'string') {
+          this.saveNote(chatId, n.name, n.content, importedBy);
+          appliedCount++;
+        }
+      }
+    }
+
+    return { ok: true, message: `Successfully imported ${appliedCount} configuration items.`, appliedCount };
   }
 
   // --- Temporary Moderation Actions (tmute & tban) ---
@@ -479,50 +935,242 @@ class StorageManager {
     );
   }
 
-  // --- Media & Sticker Permissions (/free & /unfree) ---
+  // --- Media, Sticker & Content Permissions (/free & /unfree) ---
+  public hasContentPermission(chatId: number, userId: number, contentType: ContentType): boolean {
+    if (!this.data.contentPermissions) this.data.contentPermissions = {};
+    
+    // Check direct match or 'all'
+    const directKey = `${chatId}_${userId}_${contentType.toLowerCase()}`;
+    const allKey = `${chatId}_${userId}_all`;
+    
+    if (this.data.contentPermissions[directKey] || this.data.contentPermissions[allKey]) {
+      return true;
+    }
+
+    // Media umbrella check
+    if (['photos', 'videos', 'gifs', 'voice', 'audio'].includes(contentType.toLowerCase())) {
+      const mediaKey = `${chatId}_${userId}_media`;
+      if (this.data.contentPermissions[mediaKey]) return true;
+    }
+
+    // Backward-compatibility check with stickerFreeUsers
+    if (['stickers', 'media', 'photos', 'videos', 'gifs', 'voice', 'audio'].includes(contentType.toLowerCase())) {
+      if (this.data.stickerFreeUsers && this.data.stickerFreeUsers.some((u) => u.chatId === chatId && u.userId === userId)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   public isUserStickerFree(chatId: number, userId: number): boolean {
-    return this.data.stickerFreeUsers.some((u) => u.chatId === chatId && u.userId === userId);
+    return this.hasContentPermission(chatId, userId, 'stickers');
   }
 
   public isUserMediaFree(chatId: number, userId: number): boolean {
-    return this.isUserStickerFree(chatId, userId);
+    return this.hasContentPermission(chatId, userId, 'media');
+  }
+
+  public grantContentPermission(
+    chatId: number,
+    userId: number,
+    contentType: ContentType,
+    grantedBy: number,
+    username?: string
+  ): ContentPermissionRecord {
+    if (!this.data.contentPermissions) this.data.contentPermissions = {};
+    
+    const normalizedType = contentType.toLowerCase() as ContentType;
+    const key = `${chatId}_${userId}_${normalizedType}`;
+    
+    const record: ContentPermissionRecord = {
+      chatId,
+      userId,
+      contentType: normalizedType,
+      grantedBy,
+      grantedAt: new Date().toISOString(),
+      username
+    };
+
+    this.data.contentPermissions[key] = record;
+
+    // Backward-compatibility sync with stickerFreeUsers
+    if (['stickers', 'media', 'all'].includes(normalizedType)) {
+      if (!this.data.stickerFreeUsers.some((u) => u.chatId === chatId && u.userId === userId)) {
+        this.data.stickerFreeUsers.push({
+          chatId,
+          userId,
+          username,
+          grantedBy,
+          grantedAt: record.grantedAt
+        });
+      }
+    }
+
+    this.scheduleSave();
+    return record;
   }
 
   public grantStickerPermission(chatId: number, userId: number, grantedBy: number, username?: string): void {
-    if (!this.isUserStickerFree(chatId, userId)) {
-      this.data.stickerFreeUsers.push({
-        chatId,
-        userId,
-        username,
-        grantedBy,
-        grantedAt: new Date().toISOString()
-      });
-      this.scheduleSave();
-    }
+    this.grantContentPermission(chatId, userId, 'stickers', grantedBy, username);
   }
 
   public grantMediaPermission(chatId: number, userId: number, grantedBy: number, username?: string): void {
-    this.grantStickerPermission(chatId, userId, grantedBy, username);
+    this.grantContentPermission(chatId, userId, 'media', grantedBy, username);
   }
 
-  public revokeStickerPermission(chatId: number, userId: number): boolean {
-    const initialCount = this.data.stickerFreeUsers.length;
-    this.data.stickerFreeUsers = this.data.stickerFreeUsers.filter(
-      (u) => !(u.chatId === chatId && u.userId === userId)
-    );
-    const removed = initialCount > this.data.stickerFreeUsers.length;
+  public revokeContentPermission(chatId: number, userId: number, contentType?: ContentType): boolean {
+    if (!this.data.contentPermissions) return false;
+    
+    let removed = false;
+    if (contentType) {
+      const normalizedType = contentType.toLowerCase() as ContentType;
+      const key = `${chatId}_${userId}_${normalizedType}`;
+      if (this.data.contentPermissions[key]) {
+        delete this.data.contentPermissions[key];
+        removed = true;
+      }
+      // If revoking 'all', also remove any specific permissions for this user in this chat
+      if (normalizedType === 'all') {
+        for (const k of Object.keys(this.data.contentPermissions)) {
+          if (k.startsWith(`${chatId}_${userId}_`)) {
+            delete this.data.contentPermissions[k];
+            removed = true;
+          }
+        }
+      }
+    } else {
+      // Revoke all permissions for this user in this chat
+      for (const k of Object.keys(this.data.contentPermissions)) {
+        if (k.startsWith(`${chatId}_${userId}_`)) {
+          delete this.data.contentPermissions[k];
+          removed = true;
+        }
+      }
+    }
+
+    // Sync with legacy stickerFreeUsers
+    if (!contentType || ['stickers', 'media', 'all'].includes(contentType.toLowerCase())) {
+      const initialCount = this.data.stickerFreeUsers.length;
+      this.data.stickerFreeUsers = this.data.stickerFreeUsers.filter(
+        (u) => !(u.chatId === chatId && u.userId === userId)
+      );
+      if (initialCount > this.data.stickerFreeUsers.length) {
+        removed = true;
+      }
+    }
+
     if (removed) {
       this.scheduleSave();
     }
     return removed;
   }
 
+  public revokeStickerPermission(chatId: number, userId: number): boolean {
+    return this.revokeContentPermission(chatId, userId, 'stickers');
+  }
+
   public revokeMediaPermission(chatId: number, userId: number): boolean {
-    return this.revokeStickerPermission(chatId, userId);
+    return this.revokeContentPermission(chatId, userId, 'media');
+  }
+
+  public getUserContentPermissions(chatId: number, userId: number): ContentType[] {
+    if (!this.data.contentPermissions) return [];
+    const types: Set<ContentType> = new Set();
+
+    for (const [key, record] of Object.entries(this.data.contentPermissions)) {
+      if (record.chatId === chatId && record.userId === userId) {
+        types.add(record.contentType);
+      }
+    }
+
+    // Check legacy stickerFreeUsers
+    if (this.data.stickerFreeUsers && this.data.stickerFreeUsers.some((u) => u.chatId === chatId && u.userId === userId)) {
+      types.add('stickers');
+      types.add('media');
+    }
+
+    return Array.from(types);
   }
 
   public getFreedUsers(chatId: number): StickerFreeUser[] {
-    return this.data.stickerFreeUsers.filter((u) => u.chatId === chatId);
+    const list: StickerFreeUser[] = [];
+    const seen = new Set<number>();
+
+    // From content permissions
+    if (this.data.contentPermissions) {
+      for (const record of Object.values(this.data.contentPermissions)) {
+        if (record.chatId === chatId && !seen.has(record.userId)) {
+          seen.add(record.userId);
+          list.push({
+            chatId: record.chatId,
+            userId: record.userId,
+            username: record.username,
+            grantedBy: record.grantedBy,
+            grantedAt: record.grantedAt
+          });
+        }
+      }
+    }
+
+    // From legacy
+    for (const u of this.data.stickerFreeUsers) {
+      if (u.chatId === chatId && !seen.has(u.userId)) {
+        seen.add(u.userId);
+        list.push(u);
+      }
+    }
+
+    return list;
+  }
+
+  public getGroupContentPermissions(chatId: number): Array<{ userId: number; username?: string; contentTypes: ContentType[]; grantedAt: string }> {
+    const map = new Map<number, { userId: number; username?: string; contentTypes: Set<ContentType>; grantedAt: string }>();
+
+    if (this.data.contentPermissions) {
+      for (const record of Object.values(this.data.contentPermissions)) {
+        if (record.chatId === chatId) {
+          let entry = map.get(record.userId);
+          if (!entry) {
+            entry = {
+              userId: record.userId,
+              username: record.username,
+              contentTypes: new Set(),
+              grantedAt: record.grantedAt
+            };
+            map.set(record.userId, entry);
+          }
+          entry.contentTypes.add(record.contentType);
+          if (record.username && !entry.username) entry.username = record.username;
+        }
+      }
+    }
+
+    // Also include legacy stickerFreeUsers
+    for (const u of this.data.stickerFreeUsers) {
+      if (u.chatId === chatId) {
+        let entry = map.get(u.userId);
+        if (!entry) {
+          entry = {
+            userId: u.userId,
+            username: u.username,
+            contentTypes: new Set(),
+            grantedAt: u.grantedAt
+          };
+          map.set(u.userId, entry);
+        }
+        entry.contentTypes.add('stickers');
+        entry.contentTypes.add('media');
+        if (u.username && !entry.username) entry.username = u.username;
+      }
+    }
+
+    return Array.from(map.values()).map((entry) => ({
+      userId: entry.userId,
+      username: entry.username,
+      contentTypes: Array.from(entry.contentTypes),
+      grantedAt: entry.grantedAt
+    }));
   }
 
   // --- Scheduled Messages ---

@@ -107,10 +107,10 @@ export class CommandHandler {
     '/promote', '/demote', '/permissions',
     '/warn', '/warnings', '/resetwarns', '/setwarnlimit',
     '/setmod', '/delmod',
-    '/links', '/media', '/images', '/stickers', '/gifs', '/videos', '/photos', '/voice', '/audio',
+    '/links', '/link', '/media', '/images', '/image', '/photos', '/photo', '/stickers', '/sticker', '/gifs', '/gif', '/videos', '/video', '/voice', '/audio',
     '/lock', '/unlock', '/locks', '/locklist',
     '/linkallow', '/linkwhitelist', '/allowlink', '/linkunallow', '/linkdisallow', '/removelink', '/linkallowlist', '/linkslist',
-    '/flood', '/setflood',
+    '/flood', '/setflood', '/antiflood',
     '/filter', '/unfilter', '/stop', '/filters', '/filterlist',
     '/welcome', '/setwelcome', '/goodbye', '/setgoodbye',
     '/pin', '/unpin', '/unpinall',
@@ -220,6 +220,7 @@ export class CommandHandler {
         await this.handleDelMod(ctx);
         return true;
       case '/links':
+      case '/link':
         await this.handleLinksSetting(ctx);
         return true;
       case '/linkallow':
@@ -238,16 +239,21 @@ export class CommandHandler {
         return true;
       case '/media':
       case '/images':
+      case '/image':
       case '/photos':
+      case '/photo':
         await this.handlePhotosSetting(ctx);
         return true;
       case '/stickers':
+      case '/sticker':
         await this.handleStickersSetting(ctx);
         return true;
       case '/gifs':
+      case '/gif':
         await this.handleGifsSetting(ctx);
         return true;
       case '/videos':
+      case '/video':
         await this.handleVideosSetting(ctx);
         return true;
       case '/voice':
@@ -268,6 +274,7 @@ export class CommandHandler {
         return true;
       case '/flood':
       case '/setflood':
+      case '/antiflood':
         await this.handleFloodSetting(ctx);
         return true;
       case '/filter':
@@ -1501,23 +1508,43 @@ export class CommandHandler {
       botCanPromoteMembers: botMember?.can_promote_members
     });
 
-    const res = await telegramApi.promoteChatMember(ctx.chatId, target.targetUserId, {
+    const isOwner = botMember?.status === 'creator';
+    const canDelete = isOwner || Boolean(botMember?.can_delete_messages);
+    const canRestrict = isOwner || Boolean(botMember?.can_restrict_members);
+    const canInvite = isOwner || Boolean(botMember?.can_invite_users);
+    const canPin = isOwner || Boolean(botMember?.can_pin_messages);
+    const canManageVideoChats = isOwner || Boolean(botMember?.can_manage_video_chats);
+    const canManageTopics = isOwner || Boolean(botMember?.can_manage_topics);
+
+    let res = await telegramApi.promoteChatMember(ctx.chatId, target.targetUserId, {
       is_anonymous: false,
       can_manage_chat: false,
       can_post_messages: false,
       can_edit_messages: false,
-      can_delete_messages: true,
-      can_manage_video_chats: true,
-      can_restrict_members: true,
+      can_delete_messages: canDelete,
+      can_manage_video_chats: canManageVideoChats,
+      can_restrict_members: canRestrict,
       can_promote_members: false,
       can_change_info: false,
-      can_invite_users: true,
-      can_pin_messages: true,
-      can_manage_topics: true,
+      can_invite_users: canInvite,
+      can_pin_messages: canPin,
+      can_manage_topics: canManageTopics,
       can_post_stories: false,
       can_edit_stories: false,
       can_delete_stories: false
     });
+
+    // If initial promote failed, retry with core essential permissions
+    if (!res.ok) {
+      const fallbackRes = await telegramApi.promoteChatMember(ctx.chatId, target.targetUserId, {
+        can_delete_messages: canDelete,
+        can_restrict_members: canRestrict,
+        can_invite_users: canInvite
+      });
+      if (fallbackRes.ok) {
+        res = fallbackRes;
+      }
+    }
 
     const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
 

@@ -1,10 +1,17 @@
 import { telegramApi } from './api.js';
-import { TelegramMessage, TelegramUpdate, TelegramUser, TelegramBotStatus } from './types.js';
+import { TelegramMessage, TelegramUpdate, TelegramUser, TelegramChat, TelegramChatMember, TelegramBotStatus } from './types.js';
 import { db } from '../db/storage.js';
 import { CommandHandler, registerBotCommands } from './commands.js';
 import { ModerationService } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { TelegramMiddleware, CommandContext } from './middleware.js';
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
 export class TelegramBotManager {
   private isRunning: boolean = false;
@@ -104,7 +111,7 @@ export class TelegramBotManager {
         const data = await telegramApi.getUpdates(
           this.lastUpdateId ? this.lastUpdateId + 1 : undefined,
           20,
-          ['message', 'edited_message', 'callback_query']
+          ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member']
         );
 
         if (!data.ok) {
@@ -128,7 +135,12 @@ export class TelegramBotManager {
             } else if (update.edited_message) {
               await this.handleMessage(update.edited_message);
             } else if (update.callback_query) {
-              await CommandHandler.handleCallbackQuery(update.callback_query);
+              const handledCaptcha = await ModerationService.handleCaptchaCallback(update.callback_query);
+              if (!handledCaptcha) {
+                await CommandHandler.handleCallbackQuery(update.callback_query);
+              }
+            } else if ((update as any).chat_member) {
+              await this.handleChatMemberUpdate((update as any).chat_member);
             }
           }
         }
@@ -241,6 +253,53 @@ export class TelegramBotManager {
     if (textOrCaption) {
       const linkIntercepted = await ModerationService.handleLinkProtection(message);
       if (linkIntercepted) return;
+    }
+  }
+
+  private async handleChatMemberUpdate(chatMemberUpdate: {
+    chat: TelegramChat;
+    from: TelegramUser;
+    date: number;
+    old_chat_member: TelegramChatMember;
+    new_chat_member: TelegramChatMember;
+  }) {
+    if (!chatMemberUpdate || !chatMemberUpdate.chat) return;
+    const chatId = chatMemberUpdate.chat.id;
+    const oldStatus = chatMemberUpdate.old_chat_member?.status;
+    const newStatus = chatMemberUpdate.new_chat_member?.status;
+    const user = chatMemberUpdate.new_chat_member?.user || chatMemberUpdate.from;
+
+    if (user) {
+      db.cacheUser(user, chatId);
+    }
+
+    const settings = db.getGroupSettings(chatId, chatMemberUpdate.chat.title);
+    const chatTitle = chatMemberUpdate.chat.title || 'the group';
+
+    // Member joined via invite link or approval
+    if (newStatus === 'member' && oldStatus !== 'member' && settings.welcomeEnabled && user) {
+      const me = await telegramApi.getMe();
+      if (user.id !== me.result?.id) {
+        const firstName = user.first_name || 'Member';
+        const lastName = user.last_name || '';
+        const displayName = user.first_name || (user.username ? `@${user.username}` : `User ${user.id}`);
+        const username = user.username ? `@${user.username}` : displayName;
+        const mention = `<a href="tg://user?id=${user.id}">${escapeHtml(displayName)}</a>`;
+        const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
+
+        const text = template
+          .replace(/{first_name}/gi, firstName)
+          .replace(/{last_name}/gi, lastName)
+          .replace(/{user}/gi, displayName)
+          .replace(/{name}/gi, displayName)
+          .replace(/{username}/gi, username)
+          .replace(/{mention}/gi, mention)
+          .replace(/{chat_title}/gi, chatTitle)
+          .replace(/{chat}/gi, chatTitle)
+          .replace(/{id}/gi, String(user.id));
+
+        await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
+      }
     }
   }
 

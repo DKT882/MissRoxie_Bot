@@ -220,17 +220,63 @@ export interface TelegramChatMember {
   can_delete_stories?: boolean;
 }
 
+export interface NoteRecord {
+  name: string;
+  chatId: number;
+  content: string;
+  savedBy: number;
+  savedByUsername?: string;
+  savedAt: string;
+  fileId?: string;
+  fileType?: string;
+}
+
+export interface ApprovedUserRecord {
+  chatId: number;
+  userId: number;
+  username?: string;
+  firstName?: string;
+  approvedBy: number;
+  approvedAt: string;
+}
+
+export interface CaptchaSession {
+  id: string;
+  chatId: number;
+  userId: number;
+  messageId?: number;
+  question: string;
+  correctAnswer: string;
+  token: string;
+  createdAt: number; // Unix timestamp in seconds
+  expiresAt: number; // Unix timestamp in seconds
+}
+
+export type PolicyDecision = 'ALLOW' | 'BLOCK' | 'EXEMPT' | 'ADMIN_BYPASS';
+
 export interface GroupSettings {
   chatId: number;
   chatTitle?: string;
   // Warnings
   warnLimit: number; // default 3
   warnAction: 'ban' | 'mute' | 'kick' | 'warn_only'; // default 'ban'
+  warnExpireSeconds?: number; // 0 = permanent
   // Anti-Flood
   floodEnabled: boolean; // default false
   floodCount: number; // default 8
   floodWindow: number; // default 5 (seconds)
   floodAction: 'delete' | 'mute' | 'kick' | 'ban'; // default 'mute'
+  // Anti-Raid
+  raidEnabled: boolean; // default false
+  raidLimit: number; // default 8 joins
+  raidWindow: number; // default 30 seconds
+  raidAction: 'kick' | 'mute' | 'ban' | 'restrict'; // default 'kick'
+  raidDuration: number; // default 300 seconds (5 mins)
+  // CAPTCHA / Join Verification
+  captchaEnabled: boolean; // default false
+  captchaMode: 'button' | 'math'; // default 'button'
+  captchaTimeout: number; // default 120 seconds
+  captchaAction: 'kick' | 'mute' | 'ban'; // default 'kick'
   // Links & Whitelist
   linksProtection: boolean; // default true
   linksWhitelist: string[]; // default []
@@ -243,9 +289,13 @@ export interface GroupSettings {
   voiceProtection: boolean; // default false
   audioProtection: boolean; // default false
   // Content Locks
-  locks: Record<string, boolean>; // e.g. { links, stickers, gifs, videos, photos, audio, voice, documents, polls, forwards, contacts, locations }
-  // Custom Text Filters
-  filters: Record<string, string>; // word/phrase -> reply or empty for delete
+  locks: Record<string, boolean>; // e.g. { links, stickers, gifs, videos, photos, audio, voice, documents, polls, forwards, contacts, locations, commands, invitelinks }
+  // Custom Text Filters (word/phrase -> reply or empty for delete)
+  filters: Record<string, string>;
+  // Saved Notes (notename -> NoteRecord or content)
+  notes?: Record<string, NoteRecord>;
+  // Approved / Trusted Users
+  approvedUsers?: Record<number, ApprovedUserRecord>;
   // Welcome & Goodbye
   welcomeEnabled: boolean; // default false
   welcomeMessage?: string;
@@ -280,6 +330,27 @@ export interface StickerFreeUser {
 }
 
 export type MediaFreeUser = StickerFreeUser;
+
+export type ContentType =
+  | 'stickers'
+  | 'links'
+  | 'media'
+  | 'photos'
+  | 'videos'
+  | 'gifs'
+  | 'voice'
+  | 'audio'
+  | 'files'
+  | 'all';
+
+export interface ContentPermissionRecord {
+  chatId: number;
+  userId: number;
+  contentType: ContentType;
+  grantedBy: number;
+  grantedAt: string;
+  username?: string;
+}
 
 export interface ScheduledMessage {
   id: string;

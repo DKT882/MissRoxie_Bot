@@ -61,6 +61,13 @@ export class MessageScheduler {
       console.warn('Error processing expired temp actions in scheduler:', err);
     }
 
+    // Process any expired CAPTCHA sessions
+    try {
+      await ModerationService.processExpiredCaptchaSessions();
+    } catch (err) {
+      console.warn('Error processing expired captcha sessions in scheduler:', err);
+    }
+
     const schedules = db.getAllSchedules();
     const now = Date.now();
 

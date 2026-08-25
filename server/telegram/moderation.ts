@@ -1,7 +1,8 @@
 import { telegramApi } from './api.js';
-import { TelegramMessage, TelegramUser, ChatPermissions, TempActionRecord } from './types.js';
+import { TelegramMessage, TelegramUser, ChatPermissions, TempActionRecord, CaptchaSession } from './types.js';
 import { db } from '../db/storage.js';
 import { TelegramMiddleware } from './middleware.js';
+import { ContentPolicyEngine } from './policyEngine.js';
 
 export const MUTED_PERMISSIONS: ChatPermissions = {
   can_send_messages: false,
@@ -320,6 +321,11 @@ export class ModerationService {
 
     if (!message.from) return false;
 
+    // Check if sender has been granted link permission via /free <user> links (or all)
+    if (db.hasContentPermission(chatId, message.from.id, 'links') || db.hasContentPermission(chatId, message.from.id, 'all')) {
+      return false;
+    }
+
     // Detect links in text, caption, or message entities
     const textToCheck = `${message.text || ''} ${message.caption || ''}`.trim();
     const hasUrlEntity = message.entities?.some((e) => e.type === 'url' || e.type === 'text_link') ||
@@ -388,137 +394,335 @@ export class ModerationService {
   }
 
   /**
+   * Unified Content Policy & Locks Interceptor.
+   * Leverages ContentPolicyEngine for exhaustive lock evaluation.
+   */
+  public static async handleContentPolicy(message: TelegramMessage): Promise<boolean> {
+    if (!TelegramMiddleware.isGroup(message)) return false;
+    if (!message.from) return false;
+
+    const chatId = message.chat.id;
+    const userId = message.from.id;
+
+    const evalResult = await ContentPolicyEngine.evaluateMessage(message, chatId, userId);
+    if (evalResult.decision === 'BLOCK') {
+      // Delete message
+      await telegramApi.deleteMessage(chatId, message.message_id);
+      db.untrackMessages(chatId, [message.message_id]);
+
+      const username = message.from.username ? `@${message.from.username}` : message.from.first_name;
+      const lockType = evalResult.lockType || 'content';
+
+      db.addLog({
+        chatId,
+        chatTitle: message.chat.title,
+        targetUserId: userId,
+        targetUsername: message.from.username,
+        action: 'delete_media',
+        reason: evalResult.reason || `Blocked ${lockType} due to active lock`
+      });
+
+      // Rate limit notice per user/chat
+      const noticeKey = `${chatId}_${userId}_lock_${lockType}`;
+      const lastNotice = this.filterNoticeCooldowns.get(noticeKey) || 0;
+      if (Date.now() - lastNotice > 8000) {
+        this.filterNoticeCooldowns.set(noticeKey, Date.now());
+        await telegramApi.sendMessage(
+          chatId,
+          `🚫 <b>${capitalize(lockType)} is locked in this chat.</b>\n` +
+          `👤 ${username}, your message was removed.`
+        );
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Automatic Image, Media, Lock & Content Protection Handler.
    * Intercepts and deletes locked items, media, stickers, files, polls, forwards, contacts, locations.
    */
   public static async handleMediaAndStickerProtection(message: TelegramMessage): Promise<boolean> {
-    if (!TelegramMiddleware.isGroup(message)) return false;
-
-    const chatId = message.chat.id;
-    const settings = db.getGroupSettings(chatId, message.chat.title);
-
-    // Detect media and content types
-    const hasSticker = Boolean(message.sticker);
-    const hasPhoto = Boolean(message.photo && message.photo.length > 0);
-    const hasAnimation = Boolean(message.animation);
-    const hasVideo = Boolean(message.video || message.video_note);
-    const hasVoice = Boolean(message.voice);
-    const hasAudio = Boolean(message.audio);
-    const hasPoll = Boolean(message.poll);
-    const hasContact = Boolean(message.contact);
-    const hasLocation = Boolean(message.location || message.venue);
-    const hasForward = Boolean(message.forward_date || message.forward_from || message.forward_from_chat || message.forward_origin);
-    const hasDocument = Boolean(message.document);
-
-    const isImageDoc = Boolean(
-      message.document &&
-      (message.document.mime_type?.startsWith('image/') ||
-       message.document.mime_type?.startsWith('video/') ||
-       message.document.file_name?.match(/\.(jpe?g|png|webp|gif|bmp|heic|svg|mp4|mov)$/i))
-    );
-
-    const isImage = hasPhoto || (isImageDoc && message.document?.mime_type?.startsWith('image/'));
-    const isGif = hasAnimation || (isImageDoc && message.document?.mime_type?.includes('gif'));
-    const isVideo = hasVideo || (isImageDoc && message.document?.mime_type?.startsWith('video/'));
-
-    // Content lock checks
-    const lockStickers = db.isLocked(chatId, 'stickers') || settings.stickerProtection;
-    const lockGifs = db.isLocked(chatId, 'gifs') || settings.gifsProtection;
-    const lockVideos = db.isLocked(chatId, 'videos') || settings.videosProtection;
-    const lockPhotos = db.isLocked(chatId, 'photos') || settings.photosProtection;
-    const lockAudio = db.isLocked(chatId, 'audio') || settings.audioProtection;
-    const lockVoice = db.isLocked(chatId, 'voice') || settings.voiceProtection;
-    const lockDocuments = db.isLocked(chatId, 'documents');
-    const lockPolls = db.isLocked(chatId, 'polls');
-    const lockForwards = db.isLocked(chatId, 'forwards');
-    const lockContacts = db.isLocked(chatId, 'contacts');
-    const lockLocations = db.isLocked(chatId, 'locations');
-    const masterMediaLocked = settings.mediaProtection;
-
-    let violatedType: string | null = null;
-    let actionType: 'delete_sticker' | 'delete_image' | 'delete_media' = 'delete_media';
-
-    if (hasSticker && lockStickers) {
-      violatedType = 'sticker';
-      actionType = 'delete_sticker';
-    } else if (isGif && (lockGifs || masterMediaLocked)) {
-      violatedType = 'GIF';
-      actionType = 'delete_media';
-    } else if (isVideo && (lockVideos || masterMediaLocked)) {
-      violatedType = 'video';
-      actionType = 'delete_media';
-    } else if (isImage && (lockPhotos || masterMediaLocked)) {
-      violatedType = 'photo / image';
-      actionType = 'delete_image';
-    } else if (hasVoice && (lockVoice || masterMediaLocked)) {
-      violatedType = 'voice note';
-      actionType = 'delete_media';
-    } else if (hasAudio && (lockAudio || masterMediaLocked)) {
-      violatedType = 'audio track';
-      actionType = 'delete_media';
-    } else if (hasDocument && !isImageDoc && lockDocuments) {
-      violatedType = 'document / file';
-      actionType = 'delete_media';
-    } else if (hasPoll && lockPolls) {
-      violatedType = 'poll';
-      actionType = 'delete_media';
-    } else if (hasForward && lockForwards) {
-      violatedType = 'forwarded message';
-      actionType = 'delete_media';
-    } else if (hasContact && lockContacts) {
-      violatedType = 'contact card';
-      actionType = 'delete_media';
-    } else if (hasLocation && lockLocations) {
-      violatedType = 'location share';
-      actionType = 'delete_media';
-    }
-
-    if (!violatedType) {
-      return false;
-    }
-
-    // Check if sender is an admin (including anonymous admin)
-    const isAdmin = await TelegramMiddleware.isAdmin(chatId, message.from?.id, message);
-    if (isAdmin) return false;
-
-    if (!message.from) return false;
-
-    // Check if sender has been freed (/free) by an admin for media/stickers
-    const isFree = db.isUserMediaFree(chatId, message.from.id);
-    if (isFree && (hasSticker || isImage || isGif || isVideo || hasVoice || hasAudio)) {
-      return false;
-    }
-
-    // Delete the unauthorized content
-    await telegramApi.deleteMessage(chatId, message.message_id);
-    db.untrackMessages(chatId, [message.message_id]);
-
-    const username = message.from.username ? `@${message.from.username}` : message.from.first_name;
-
-    db.addLog({
-      chatId,
-      chatTitle: message.chat.title,
-      targetUserId: message.from.id,
-      targetUsername: message.from.username,
-      action: actionType,
-      reason: `Unauthorized ${violatedType} sent by non-admin member`
-    });
-
-    await telegramApi.sendMessage(
-      chatId,
-      `🚫 <b>${capitalize(violatedType)}s are restricted in this group.</b>\n` +
-      `👤 ${username}, your ${violatedType} was automatically removed.\n` +
-      `<i>(An administrator can grant permission using <code>/free</code> or unlock with <code>/unlock</code>)</i>`
-    );
-
-    return true;
+    return this.handleContentPolicy(message);
   }
 
   /**
    * Backward-compatible Sticker Protection Handler.
    */
   public static async handleStickerProtection(message: TelegramMessage): Promise<boolean> {
-    return this.handleMediaAndStickerProtection(message);
+    return this.handleContentPolicy(message);
+  }
+
+  /**
+   * Anti-Raid Join Handler.
+   * Checks join frequency against configured threshold and takes defensive action.
+   */
+  public static async handleAntiRaid(
+    chatId: number,
+    newMembers: TelegramUser[],
+    chatTitle?: string
+  ): Promise<boolean> {
+    const settings = db.getGroupSettings(chatId, chatTitle);
+    if (!settings.raidEnabled) return false;
+
+    let raidTriggered = false;
+    for (const member of newMembers) {
+      const { isRaid } = db.trackJoinAndCheckRaid(chatId);
+      if (isRaid) {
+        raidTriggered = true;
+        const action = settings.raidAction || 'kick';
+        try {
+          if (action === 'kick') {
+            await this.executeKick(chatId, member.id);
+          } else if (action === 'ban') {
+            await this.executeBan(chatId, member.id);
+          } else if (action === 'mute' || action === 'restrict') {
+            const untilDate = Math.floor(Date.now() / 1000) + (settings.raidDuration || 300);
+            await this.executeMute(chatId, member.id, untilDate);
+          }
+
+          db.addLog({
+            chatId,
+            chatTitle,
+            targetUserId: member.id,
+            targetUsername: member.username,
+            action: 'auto_kick',
+            reason: `Anti-raid trigger (${action})`
+          });
+        } catch (err) {
+          console.warn(`Anti-raid action failed for user ${member.id}:`, err);
+        }
+      }
+    }
+
+    if (raidTriggered) {
+      const noticeKey = `${chatId}_raid_alert`;
+      const lastNotice = this.filterNoticeCooldowns.get(noticeKey) || 0;
+      if (Date.now() - lastNotice > 30000) {
+        this.filterNoticeCooldowns.set(noticeKey, Date.now());
+        await telegramApi.sendMessage(
+          chatId,
+          `🚨 <b>ANTI-RAID MODE ACTIVATED</b>\n\n` +
+          `⚠️ High join velocity detected! Incoming joins are automatically <b>${settings.raidAction || 'kicked'}</b> for the next ${Math.round((settings.raidDuration || 300) / 60)} minutes.`
+        );
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * CAPTCHA / Join Verification Handler.
+   * Restricts new joiners and issues an interactive challenge button.
+   */
+  public static async handleCaptchaOnJoin(
+    chatId: number,
+    member: TelegramUser,
+    chatTitle?: string
+  ): Promise<boolean> {
+    const settings = db.getGroupSettings(chatId, chatTitle);
+    if (!settings.captchaEnabled) return false;
+
+    // Check if user is already approved or admin
+    if (db.isUserApproved(chatId, member.id)) return false;
+
+    // Restrict member from speaking until captcha is solved
+    await this.executeMute(chatId, member.id);
+
+    const mode = settings.captchaMode || 'button';
+    let question = 'Please click the button below within 2 minutes to prove you are human:';
+    let correctAnswer = 'pass';
+    let buttons: Array<Array<{ text: string; callback_data: string }>> = [];
+
+    const timeout = settings.captchaTimeout || 120;
+    const session = db.createCaptchaSession(chatId, member.id, question, correctAnswer, timeout);
+
+    if (mode === 'math') {
+      const a = Math.floor(Math.random() * 8) + 1;
+      const b = Math.floor(Math.random() * 8) + 1;
+      const sum = a + b;
+      correctAnswer = String(sum);
+      question = `Solve this math problem: <b>${a} + ${b} = ?</b>`;
+      session.question = question;
+      session.correctAnswer = correctAnswer;
+
+      const options = [sum, sum + 1, Math.max(1, sum - 1), sum + 2].sort(() => Math.random() - 0.5);
+      buttons = [
+        options.map((opt) => ({
+          text: String(opt),
+          callback_data: `c_ans:${session.token}:${opt}`
+        }))
+      ];
+    } else {
+      buttons = [
+        [
+          {
+            text: '✅ I am Human (Click to Verify)',
+            callback_data: `c_btn:${session.token}`
+          }
+        ]
+      ];
+    }
+
+    const username = member.username ? `@${member.username}` : member.first_name;
+    const challengeText =
+      `🛡️ <b>Join Verification Required</b>\n\n` +
+      `Welcome ${username}!\n` +
+      `${question}\n\n` +
+      `<i>⏱️ You have ${timeout} seconds to verify.</i>`;
+
+    const msgRes = await telegramApi.sendMessage(chatId, challengeText, {
+      reply_markup: {
+        inline_keyboard: buttons
+      }
+    });
+
+    if (msgRes.ok && msgRes.result) {
+      db.setCaptchaMessageId(session.id, msgRes.result.message_id);
+    }
+
+    return true;
+  }
+
+  /**
+   * Process CAPTCHA Callback Query.
+   */
+  public static async handleCaptchaCallback(callbackQuery: any): Promise<boolean> {
+    const data = callbackQuery.data || '';
+    if (!data.startsWith('c_btn:') && !data.startsWith('c_ans:')) {
+      return false;
+    }
+
+    const parts = data.split(':');
+    const token = parts[1];
+    const answer = parts[2]; // for math mode
+
+    const session = db.getCaptchaSessionByToken(token);
+    if (!session) {
+      await telegramApi.answerCallbackQuery(callbackQuery.id, {
+        text: '⚠️ This verification challenge has expired.',
+        show_alert: true
+      });
+      return true;
+    }
+
+    // Verify actor is the targeted joiner
+    if (callbackQuery.from.id !== session.userId) {
+      await telegramApi.answerCallbackQuery(callbackQuery.id, {
+        text: '⚠️ This verification challenge is only for the joining user.',
+        show_alert: true
+      });
+      return true;
+    }
+
+    // Check answer in math mode
+    if (data.startsWith('c_ans:')) {
+      if (answer !== session.correctAnswer) {
+        await telegramApi.answerCallbackQuery(callbackQuery.id, {
+          text: '❌ Incorrect answer! Try again before time runs out.',
+          show_alert: true
+        });
+        return true;
+      }
+    }
+
+    // Challenge passed! Restore permissions
+    await this.executeUnmute(session.chatId, session.userId);
+    db.removeCaptchaSession(session.chatId, session.userId);
+
+    // Delete verification prompt
+    if (session.messageId) {
+      await telegramApi.deleteMessage(session.chatId, session.messageId).catch(() => {});
+    }
+
+    await telegramApi.answerCallbackQuery(callbackQuery.id, {
+      text: '✅ Verified successfully! You can now chat.'
+    });
+
+    // Send welcome message if enabled
+    const settings = db.getGroupSettings(session.chatId);
+    if (settings.welcomeEnabled) {
+      const member = callbackQuery.from;
+      const firstName = member.first_name || 'Member';
+      const lastName = member.last_name || '';
+      const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
+      const username = member.username ? `@${member.username}` : displayName;
+      const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
+      const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
+
+      const text = template
+        .replace(/{first_name}/gi, firstName)
+        .replace(/{last_name}/gi, lastName)
+        .replace(/{user}/gi, displayName)
+        .replace(/{name}/gi, displayName)
+        .replace(/{username}/gi, username)
+        .replace(/{mention}/gi, mention)
+        .replace(/{chat_title}/gi, settings.chatTitle || 'the group')
+        .replace(/{chat}/gi, settings.chatTitle || 'the group')
+        .replace(/{id}/gi, String(member.id));
+
+      await telegramApi.sendMessage(session.chatId, text, { parse_mode: 'HTML' });
+    }
+
+    return true;
+  }
+
+  /**
+   * Periodically sweep expired CAPTCHA sessions.
+   */
+  public static async processExpiredCaptchaSessions(): Promise<number> {
+    const expired = db.getExpiredCaptchaSessions();
+    if (expired.length === 0) return 0;
+
+    let processed = 0;
+    for (const session of expired) {
+      try {
+        const settings = db.getGroupSettings(session.chatId);
+        const action = settings.captchaAction || 'kick';
+
+        if (action === 'kick') {
+          await this.executeKick(session.chatId, session.userId);
+        } else if (action === 'ban') {
+          await this.executeBan(session.chatId, session.userId);
+        }
+
+        if (session.messageId) {
+          await telegramApi.deleteMessage(session.chatId, session.messageId).catch(() => {});
+        }
+
+        db.removeCaptchaSession(session.chatId, session.userId);
+        processed++;
+      } catch (err) {
+        console.warn(`Failed to process expired captcha for user ${session.userId}:`, err);
+      }
+    }
+    return processed;
+  }
+
+  /**
+   * Handle hashtag note shortcuts (#notename).
+   */
+  public static async handleNotesShortcut(message: TelegramMessage): Promise<boolean> {
+    if (!TelegramMiddleware.isGroup(message)) return false;
+    const text = message.text || '';
+    if (!text.startsWith('#')) return false;
+
+    const notename = text.slice(1).split(/\s+/)[0].toLowerCase().trim();
+    if (!notename) return false;
+
+    const note = db.getNote(message.chat.id, notename);
+    if (!note) return false;
+
+    const formattedContent = note.content
+      .replace(/{user}/gi, message.from?.first_name || 'User')
+      .replace(/{chat}/gi, message.chat.title || 'Chat');
+
+    await telegramApi.sendMessage(message.chat.id, formattedContent, {
+      reply_to_message_id: message.message_id
+    });
+    return true;
   }
 
   /**
@@ -735,17 +939,25 @@ export class ModerationService {
         const me = await telegramApi.getMe();
         if (member.id === me.result?.id) continue;
 
+        const firstName = member.first_name || 'Member';
+        const lastName = member.last_name || '';
         const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
         const username = member.username ? `@${member.username}` : displayName;
+        const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
         const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
 
         const text = template
+          .replace(/{first_name}/gi, firstName)
+          .replace(/{last_name}/gi, lastName)
           .replace(/{user}/gi, displayName)
+          .replace(/{name}/gi, displayName)
           .replace(/{username}/gi, username)
-          .replace(/{id}/gi, String(member.id))
-          .replace(/{chat}/gi, chatTitle);
+          .replace(/{mention}/gi, mention)
+          .replace(/{chat_title}/gi, chatTitle)
+          .replace(/{chat}/gi, chatTitle)
+          .replace(/{id}/gi, String(member.id));
 
-        await telegramApi.sendMessage(chatId, text);
+        await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
       }
     }
 
@@ -754,17 +966,25 @@ export class ModerationService {
       const member = message.left_chat_member;
       const me = await telegramApi.getMe();
       if (member.id !== me.result?.id) {
+        const firstName = member.first_name || 'Member';
+        const lastName = member.last_name || '';
         const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
         const username = member.username ? `@${member.username}` : displayName;
+        const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
         const template = settings.goodbyeMessage || 'Goodbye {user}!';
 
         const text = template
+          .replace(/{first_name}/gi, firstName)
+          .replace(/{last_name}/gi, lastName)
           .replace(/{user}/gi, displayName)
+          .replace(/{name}/gi, displayName)
           .replace(/{username}/gi, username)
-          .replace(/{id}/gi, String(member.id))
-          .replace(/{chat}/gi, chatTitle);
+          .replace(/{mention}/gi, mention)
+          .replace(/{chat_title}/gi, chatTitle)
+          .replace(/{chat}/gi, chatTitle)
+          .replace(/{id}/gi, String(member.id));
 
-        await telegramApi.sendMessage(chatId, text);
+        await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
       }
     }
   }
