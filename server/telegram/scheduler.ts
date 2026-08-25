@@ -1,6 +1,7 @@
 import { db } from '../db/storage.js';
 import { telegramApi } from './api.js';
 import { ScheduledMessage } from './types.js';
+import { ModerationService } from './moderation.js';
 
 export class MessageScheduler {
   private timer: NodeJS.Timeout | null = null;
@@ -53,6 +54,13 @@ export class MessageScheduler {
   }
 
   public async checkAndExecuteSchedules() {
+    // Process any expired temporary moderation actions (tmute & tban)
+    try {
+      await ModerationService.processExpiredTempActions();
+    } catch (err) {
+      console.warn('Error processing expired temp actions in scheduler:', err);
+    }
+
     const schedules = db.getAllSchedules();
     const now = Date.now();
 

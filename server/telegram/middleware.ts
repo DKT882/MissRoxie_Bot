@@ -43,6 +43,8 @@ export interface ActorResolution {
   isAnonymousAdmin: boolean;
   actorStatus?: string;
   canPromoteMembers?: boolean;
+  canRestrictMembers?: boolean;
+  canDeleteMessages?: boolean;
   actorMember?: TelegramChatMember | null;
   customRole?: string;
 }
@@ -138,6 +140,8 @@ export class TelegramMiddleware {
         isAnonymousAdmin: true,
         actorStatus: 'anonymous_admin',
         canPromoteMembers: true,
+        canRestrictMembers: true,
+        canDeleteMessages: true,
         actorMember: null,
         customRole: 'NONE'
       };
@@ -156,6 +160,8 @@ export class TelegramMiddleware {
         isAnonymousAdmin: false,
         actorStatus: 'unknown',
         canPromoteMembers: false,
+        canRestrictMembers: false,
+        canDeleteMessages: false,
         actorMember: null,
         customRole: 'NONE'
       };
@@ -176,6 +182,8 @@ export class TelegramMiddleware {
           isAnonymousAdmin: false,
           actorStatus: 'creator',
           canPromoteMembers: true,
+          canRestrictMembers: true,
+          canDeleteMessages: true,
           actorMember: member,
           customRole
         };
@@ -190,6 +198,8 @@ export class TelegramMiddleware {
           isAnonymousAdmin: false,
           actorStatus: 'administrator',
           canPromoteMembers: !!member.can_promote_members,
+          canRestrictMembers: member.can_restrict_members !== undefined ? !!member.can_restrict_members : true,
+          canDeleteMessages: member.can_delete_messages !== undefined ? !!member.can_delete_messages : true,
           actorMember: member,
           customRole
         };
@@ -207,6 +217,8 @@ export class TelegramMiddleware {
         isAnonymousAdmin: false,
         actorStatus: member?.status || 'member',
         canPromoteMembers: false,
+        canRestrictMembers: false,
+        canDeleteMessages: false,
         actorMember: member,
         customRole: 'MODERATOR'
       };
@@ -221,6 +233,8 @@ export class TelegramMiddleware {
       isAnonymousAdmin: false,
       actorStatus: member?.status || 'member',
       canPromoteMembers: false,
+      canRestrictMembers: false,
+      canDeleteMessages: false,
       actorMember: member,
       customRole: 'NONE'
     };
@@ -510,7 +524,7 @@ export class TelegramMiddleware {
    */
   public static async validateModerationAction(
     ctx: CommandContext,
-    action: 'kick' | 'ban' | 'unban' | 'demote' | 'promote' | 'permissions' | 'warn'
+    action: 'kick' | 'ban' | 'unban' | 'mute' | 'unmute' | 'tmute' | 'tban' | 'dban' | 'dmute' | 'dkick' | 'sban' | 'smute' | 'skick' | 'demote' | 'promote' | 'permissions' | 'warn'
   ): Promise<ValidationResult> {
     // 1. Group Check
     if (!this.isGroup(ctx.message)) {
@@ -538,11 +552,37 @@ export class TelegramMiddleware {
           actor
         };
       }
+    } else if (action === 'warn') {
+      if (actor.actorRank < RoleRank.MODERATOR) {
+        return {
+          allowed: false,
+          reason: '❌ This bot is available only to group administrators.',
+          actor
+        };
+      }
     } else {
+      // General moderation actions: kick, ban, unban, mute, unmute, tmute, tban, dban, dmute, dkick, sban, smute, skick
       if (actor.actorRank < RoleRank.ADMIN) {
         return {
           allowed: false,
           reason: '❌ This bot is available only to group administrators.',
+          actor
+        };
+      }
+
+      if (actor.actorRole === 'ADMIN' && !actor.isAnonymousAdmin && actor.canRestrictMembers === false) {
+        return {
+          allowed: false,
+          reason: '❌ You need the "Ban Users" (Restrict Members) administrator permission to perform this action.',
+          actor
+        };
+      }
+
+      if ((action === 'dban' || action === 'dmute' || action === 'dkick' || action === 'sban' || action === 'smute' || action === 'skick') &&
+          actor.actorRole === 'ADMIN' && !actor.isAnonymousAdmin && actor.canDeleteMessages === false) {
+        return {
+          allowed: false,
+          reason: '❌ You need the "Delete Messages" administrator permission to perform this action.',
           actor
         };
       }
@@ -698,12 +738,16 @@ export class TelegramMiddleware {
       }
     }
 
-    // 9. Non-Demote/Promote/Permissions Hierarchy Comparison (Actor must strictly outrank Target for kick/ban/warn)
+    // 9. Non-Demote/Promote/Permissions Hierarchy Comparison (Actor must strictly outrank Target for kick/ban/warn/mute)
     if (action !== 'demote' && action !== 'promote' && action !== 'permissions' && actor.actorRank <= targetRank) {
       if (targetRole === 'ADMIN') {
         return {
           allowed: false,
-          reason: action === 'warn' ? '⚠️ I can\'t warn an administrator.' : '⚠️ I can\'t remove another administrator.',
+          reason: action === 'warn'
+            ? '⚠️ I can\'t warn an administrator.'
+            : (action === 'mute' || action === 'tmute' || action === 'dmute' || action === 'smute')
+            ? '⚠️ I can\'t restrict another administrator.'
+            : '⚠️ I can\'t remove another administrator.',
           actor,
           target
         };
@@ -726,7 +770,10 @@ export class TelegramMiddleware {
 
     // 10. Fetch Bot ChatMember & Verify Bot Telegram Capabilities
     if (action !== 'warn') {
-      const requiredBotPerm = (action === 'demote' || action === 'promote' || action === 'permissions') ? 'can_promote_members' : 'can_restrict_members';
+      const requiredBotPerm = (action === 'demote' || action === 'promote' || action === 'permissions')
+        ? 'can_promote_members'
+        : 'can_restrict_members';
+
       const botCheck = await this.checkBotPermissions(ctx.chatId, requiredBotPerm);
       if (!botCheck.allowed) {
         return {
@@ -739,6 +786,19 @@ export class TelegramMiddleware {
           actor,
           target
         };
+      }
+
+      // Check Delete Messages capability for delete/silent variants
+      if (action === 'dban' || action === 'dmute' || action === 'dkick' || action === 'sban' || action === 'smute' || action === 'skick') {
+        const deleteCheck = await this.checkBotPermissions(ctx.chatId, 'can_delete_messages');
+        if (!deleteCheck.allowed) {
+          return {
+            allowed: false,
+            reason: '❌ The bot requires the "Delete Messages" permission to perform this action.',
+            actor,
+            target
+          };
+        }
       }
     }
 

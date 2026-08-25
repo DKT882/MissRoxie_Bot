@@ -5,7 +5,7 @@
  */
 
 export function mapTelegramError(
-  action: 'kick' | 'ban' | 'unban' | 'demote' | 'warn' | 'restrict' | 'delete' | 'promote' | 'permissions' | 'general',
+  action: 'kick' | 'ban' | 'unban' | 'mute' | 'unmute' | 'tmute' | 'tban' | 'dban' | 'dmute' | 'dkick' | 'sban' | 'smute' | 'skick' | 'demote' | 'warn' | 'restrict' | 'delete' | 'promote' | 'permissions' | 'general',
   rawDescription?: string,
   errorCode?: number
 ): string {

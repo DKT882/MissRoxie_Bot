@@ -1,7 +1,7 @@
 import { telegramApi } from './api.js';
 import { TelegramMiddleware, CommandContext, RoleRank } from './middleware.js';
 import { db } from '../db/storage.js';
-import { ModerationService } from './moderation.js';
+import { ModerationService, parseDuration } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { mapTelegramError } from './errorMapper.js';
 import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand } from './types.js';
@@ -12,6 +12,17 @@ export const ADMIN_COMMANDS: BotCommand[] = [
   { command: 'ping', description: 'Check bot responsiveness' },
   { command: 'del', description: 'Delete replied message for all group members' },
   { command: 'clear', description: 'Purge messages (e.g. /clear, /clear 5s, /clear 1m, /clear @user)' },
+  { command: 'purge', description: 'Purge messages from replied message to current' },
+  { command: 'mute', description: 'Mute a member in the group' },
+  { command: 'unmute', description: 'Unmute a muted member' },
+  { command: 'tmute', description: 'Temporarily mute a member (e.g. /tmute 2h [reason])' },
+  { command: 'tban', description: 'Temporarily ban a member (e.g. /tban 1d [reason])' },
+  { command: 'dban', description: 'Delete replied message and ban the sender' },
+  { command: 'dmute', description: 'Delete replied message and mute the sender' },
+  { command: 'dkick', description: 'Delete replied message and kick the sender' },
+  { command: 'sban', description: 'Silently ban user and delete command/message' },
+  { command: 'smute', description: 'Silently mute user and delete command/message' },
+  { command: 'skick', description: 'Silently kick user and delete command/message' },
   { command: 'promote', description: 'Promote a member to administrator' },
   { command: 'demote', description: 'Demote an administrator to regular member' },
   { command: 'permissions', description: 'View and edit administrator permissions' },
@@ -85,25 +96,52 @@ export class CommandHandler {
   private static sayCooldowns: Map<number, number> = new Map();
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
+  public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
+    '/report'
+  ]);
+
+  public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
+    '/clear', '/del', '/delete', '/purge',
+    '/kick', '/ban', '/unban', '/mute', '/unmute',
+    '/tmute', '/tban', '/dban', '/dmute', '/dkick', '/sban', '/smute', '/skick',
+    '/promote', '/demote', '/permissions',
+    '/warn', '/warnings', '/resetwarns', '/setwarnlimit',
+    '/setmod', '/delmod',
+    '/links', '/media', '/images', '/stickers', '/gifs', '/videos', '/photos', '/voice', '/audio',
+    '/lock', '/unlock', '/locks', '/locklist',
+    '/linkallow', '/linkwhitelist', '/allowlink', '/linkunallow', '/linkdisallow', '/removelink', '/linkallowlist', '/linkslist',
+    '/flood', '/setflood',
+    '/filter', '/unfilter', '/stop', '/filters', '/filterlist',
+    '/welcome', '/setwelcome', '/goodbye', '/setgoodbye',
+    '/pin', '/unpin', '/unpinall',
+    '/slowmode', '/slow',
+    '/adminlog', '/modlog', '/logs',
+    '/free', '/unfree', '/freelist', '/freed',
+    '/say', '/schedule', '/listschedules', '/deleteschedule',
+    '/live', '/start', '/ping', '/status', '/settings', '/help'
+  ]);
+
   public static async handleCommand(ctx: CommandContext): Promise<boolean> {
     const cmd = ctx.command.toLowerCase().split('@')[0]; // strip bot username if present, e.g. /ban@MissRoxie_Bot
 
-    const handledCommands = new Set([
-      '/clear', '/del', '/delete', '/kick', '/ban', '/unban', '/promote', '/demote', '/permissions',
-      '/warn', '/warnings', '/resetwarns', '/setwarnlimit',
-      '/setmod', '/delmod', '/links', '/media', '/images', '/stickers', '/free', '/unfree', '/freelist', '/freed',
-      '/report', '/say', '/schedule', '/listschedules', '/deleteschedule',
-      '/live', '/start', '/ping', '/status', '/help'
-    ]);
+    const isPublic = CommandHandler.PUBLIC_GROUP_COMMANDS.has(cmd);
+    const isAdminOnly = CommandHandler.ADMIN_ONLY_COMMANDS.has(cmd);
 
-    if (!handledCommands.has(cmd)) {
+    if (!isPublic && !isAdminOnly) {
       return false;
     }
 
-    // Centrally enforce admin-only requirement on ALL Roxie commands
-    const auth = await TelegramMiddleware.requireAdmin(ctx);
-    if (!auth.allowed) {
-      return true; // Command was handled (denial notice dispatched)
+    if (isAdminOnly) {
+      // Centrally enforce admin-only requirement on ALL Roxie admin and moderation commands
+      const auth = await TelegramMiddleware.requireAdmin(ctx);
+      if (!auth.allowed) {
+        return true; // Command was handled (denial notice dispatched)
+      }
+    } else if (isPublic) {
+      // Public commands (like /report) are restricted to groups and open to normal members
+      if (!(await TelegramMiddleware.requireGroup(ctx))) {
+        return true;
+      }
     }
 
     switch (cmd) {
@@ -112,6 +150,7 @@ export class CommandHandler {
         await this.handleDel(ctx);
         return true;
       case '/clear':
+      case '/purge':
         await this.handleClear(ctx);
         return true;
       case '/kick':
@@ -122,6 +161,36 @@ export class CommandHandler {
         return true;
       case '/unban':
         await this.handleUnban(ctx);
+        return true;
+      case '/mute':
+        await this.handleMute(ctx);
+        return true;
+      case '/unmute':
+        await this.handleUnmute(ctx);
+        return true;
+      case '/tmute':
+        await this.handleTMute(ctx);
+        return true;
+      case '/tban':
+        await this.handleTBan(ctx);
+        return true;
+      case '/dban':
+        await this.handleDBan(ctx);
+        return true;
+      case '/dmute':
+        await this.handleDMute(ctx);
+        return true;
+      case '/dkick':
+        await this.handleDKick(ctx);
+        return true;
+      case '/sban':
+        await this.handleSBan(ctx);
+        return true;
+      case '/smute':
+        await this.handleSMute(ctx);
+        return true;
+      case '/skick':
+        await this.handleSKick(ctx);
         return true;
       case '/promote':
         await this.handlePromote(ctx);
@@ -153,12 +222,94 @@ export class CommandHandler {
       case '/links':
         await this.handleLinksSetting(ctx);
         return true;
+      case '/linkallow':
+      case '/linkwhitelist':
+      case '/allowlink':
+        await this.handleLinkAllow(ctx);
+        return true;
+      case '/linkunallow':
+      case '/linkdisallow':
+      case '/removelink':
+        await this.handleLinkUnallow(ctx);
+        return true;
+      case '/linkallowlist':
+      case '/linkslist':
+        await this.handleLinkAllowList(ctx);
+        return true;
       case '/media':
       case '/images':
-        await this.handleMediaSetting(ctx);
+      case '/photos':
+        await this.handlePhotosSetting(ctx);
         return true;
       case '/stickers':
         await this.handleStickersSetting(ctx);
+        return true;
+      case '/gifs':
+        await this.handleGifsSetting(ctx);
+        return true;
+      case '/videos':
+        await this.handleVideosSetting(ctx);
+        return true;
+      case '/voice':
+        await this.handleVoiceSetting(ctx);
+        return true;
+      case '/audio':
+        await this.handleAudioSetting(ctx);
+        return true;
+      case '/lock':
+        await this.handleLock(ctx);
+        return true;
+      case '/unlock':
+        await this.handleUnlock(ctx);
+        return true;
+      case '/locks':
+      case '/locklist':
+        await this.handleLocks(ctx);
+        return true;
+      case '/flood':
+      case '/setflood':
+        await this.handleFloodSetting(ctx);
+        return true;
+      case '/filter':
+        await this.handleFilterCommand(ctx);
+        return true;
+      case '/unfilter':
+      case '/stop':
+        await this.handleUnfilterCommand(ctx);
+        return true;
+      case '/filters':
+      case '/filterlist':
+        await this.handleFiltersList(ctx);
+        return true;
+      case '/welcome':
+        await this.handleWelcomeSetting(ctx);
+        return true;
+      case '/setwelcome':
+        await this.handleSetWelcome(ctx);
+        return true;
+      case '/goodbye':
+        await this.handleGoodbyeSetting(ctx);
+        return true;
+      case '/setgoodbye':
+        await this.handleSetGoodbye(ctx);
+        return true;
+      case '/pin':
+        await this.handlePin(ctx);
+        return true;
+      case '/unpin':
+        await this.handleUnpin(ctx);
+        return true;
+      case '/unpinall':
+        await this.handleUnpinAll(ctx);
+        return true;
+      case '/slowmode':
+      case '/slow':
+        await this.handleSlowMode(ctx);
+        return true;
+      case '/adminlog':
+      case '/modlog':
+      case '/logs':
+        await this.handleAdminLog(ctx);
         return true;
       case '/free':
         await this.handleFree(ctx);
@@ -169,9 +320,6 @@ export class CommandHandler {
       case '/freelist':
       case '/freed':
         await this.handleFreeList(ctx);
-        return true;
-      case '/report':
-        await this.handleReport(ctx);
         return true;
       case '/say':
         await this.handleSay(ctx);
@@ -188,6 +336,9 @@ export class CommandHandler {
       case '/live':
         await this.handleLive(ctx);
         return true;
+      case '/report':
+        await this.handleReport(ctx);
+        return true;
       case '/start':
         await this.handleStart(ctx);
         return true;
@@ -196,6 +347,9 @@ export class CommandHandler {
         return true;
       case '/status':
         await this.handleStatus(ctx);
+        return true;
+      case '/settings':
+        await this.handleSettings(ctx);
         return true;
       case '/help':
         await this.handleHelp(ctx);
@@ -404,6 +558,770 @@ export class CommandHandler {
 
       await telegramApi.sendMessage(ctx.chatId, friendlyError, {
         reply_to_message_id: ctx.message.message_id
+      });
+    }
+  }
+
+  // ==========================================
+  // 3a. MUTE COMMAND (/mute)
+  // ==========================================
+  private static async handleMute(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'mute');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'mute',
+          action: 'mute',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot mute this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Admin mute';
+    const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
+
+    const res = await ModerationService.executeMute(ctx.chatId, target.targetUserId);
+
+    if (res.ok) {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'mute',
+        action: 'mute',
+        result: 'success',
+        reason
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🔇 <b>${targetTag} has been muted.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      const friendlyError = mapTelegramError('mute', res.description, res.error_code);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'mute',
+        action: 'mute',
+        result: 'error',
+        telegramError: res.description
+      });
+
+      await telegramApi.sendMessage(ctx.chatId, friendlyError, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+  }
+
+  // ==========================================
+  // 3b. UNMUTE COMMAND (/unmute)
+  // ==========================================
+  private static async handleUnmute(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'unmute');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'unmute',
+          action: 'unmute',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot unmute this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
+    const res = await ModerationService.executeUnmute(ctx.chatId, target.targetUserId);
+
+    if (res.ok) {
+      db.removeTempAction(ctx.chatId, target.targetUserId, 'tmute');
+
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'unmute',
+        action: 'unmute',
+        result: 'success'
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🔊 <b>${targetTag} has been unmuted.</b>`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      const friendlyError = mapTelegramError('unmute', res.description, res.error_code);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'unmute',
+        action: 'unmute',
+        result: 'error',
+        telegramError: res.description
+      });
+
+      await telegramApi.sendMessage(ctx.chatId, friendlyError, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+  }
+
+  // ==========================================
+  // 3c. TEMPORARY MUTE COMMAND (/tmute)
+  // ==========================================
+  private static async handleTMute(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'tmute');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'tmute',
+          action: 'tmute',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot tmute this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
+    const timeArg = isTargetInArgs ? ctx.args[1] : ctx.args[0];
+    const duration = timeArg ? parseDuration(timeArg) : null;
+
+    if (!duration) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ <b>Invalid or missing duration.</b>\n\n` +
+        `<b>Usage:</b>\n` +
+        `• <i>(Reply)</i> <code>/tmute &lt;time&gt; [reason]</code>\n` +
+        `• <code>/tmute &lt;@user|id&gt; &lt;time&gt; [reason]</code>\n\n` +
+        `<b>Examples:</b> <code>/tmute 30m</code>, <code>/tmute 2h spamming</code>, <code>/tmute 1d</code>`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    const reasonArgs = isTargetInArgs ? ctx.args.slice(2) : ctx.args.slice(1);
+    const reason = reasonArgs.join(' ') || 'Temporary mute';
+    const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
+
+    const untilDateSec = Math.floor(Date.now() / 1000) + duration.seconds;
+    const res = await ModerationService.executeMute(ctx.chatId, target.targetUserId, untilDateSec);
+
+    if (res.ok) {
+      db.addTempAction({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        userId: target.targetUserId,
+        username: target.targetUsername,
+        action: 'tmute',
+        durationSeconds: duration.seconds,
+        durationFormatted: duration.formatted,
+        expiresAt: untilDateSec,
+        reason,
+        adminId: actor.actorUserId,
+        adminUsername: actor.actorUsername
+      });
+
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'tmute',
+        action: 'tmute',
+        result: 'success',
+        reason,
+        details: `Muted for ${duration.formatted}`
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🔇 <b>${targetTag} has been muted for ${duration.formatted}.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      const friendlyError = mapTelegramError('tmute', res.description, res.error_code);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'tmute',
+        action: 'tmute',
+        result: 'error',
+        telegramError: res.description
+      });
+
+      await telegramApi.sendMessage(ctx.chatId, friendlyError, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+  }
+
+  // ==========================================
+  // 3d. TEMPORARY BAN COMMAND (/tban)
+  // ==========================================
+  private static async handleTBan(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'tban');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'tban',
+          action: 'tban',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot tban this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
+    const timeArg = isTargetInArgs ? ctx.args[1] : ctx.args[0];
+    const duration = timeArg ? parseDuration(timeArg) : null;
+
+    if (!duration) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ <b>Invalid or missing duration.</b>\n\n` +
+        `<b>Usage:</b>\n` +
+        `• <i>(Reply)</i> <code>/tban &lt;time&gt; [reason]</code>\n` +
+        `• <code>/tban &lt;@user|id&gt; &lt;time&gt; [reason]</code>\n\n` +
+        `<b>Examples:</b> <code>/tban 1d</code>, <code>/tban 7d rule violation</code>, <code>/tban 2h</code>`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    const reasonArgs = isTargetInArgs ? ctx.args.slice(2) : ctx.args.slice(1);
+    const reason = reasonArgs.join(' ') || 'Temporary ban';
+    const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
+
+    const untilDateSec = Math.floor(Date.now() / 1000) + duration.seconds;
+    const res = await ModerationService.executeBan(ctx.chatId, target.targetUserId, untilDateSec);
+
+    if (res.ok) {
+      db.addTempAction({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        userId: target.targetUserId,
+        username: target.targetUsername,
+        action: 'tban',
+        durationSeconds: duration.seconds,
+        durationFormatted: duration.formatted,
+        expiresAt: untilDateSec,
+        reason,
+        adminId: actor.actorUserId,
+        adminUsername: actor.actorUsername
+      });
+
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'tban',
+        action: 'tban',
+        result: 'success',
+        reason,
+        details: `Banned for ${duration.formatted}`
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🔨 <b>${targetTag} has been banned for ${duration.formatted}.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      const friendlyError = mapTelegramError('tban', res.description, res.error_code);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'tban',
+        action: 'tban',
+        result: 'error',
+        telegramError: res.description
+      });
+
+      await telegramApi.sendMessage(ctx.chatId, friendlyError, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+  }
+
+  // ==========================================
+  // 3e. DELETE & BAN COMMAND (/dban)
+  // ==========================================
+  private static async handleDBan(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'dban');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'dban',
+          action: 'dban',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot ban this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    // Delete replied message and command message if possible
+    const replyMsgId = ctx.message.reply_to_message?.message_id;
+    if (replyMsgId) {
+      await Promise.allSettled([
+        telegramApi.deleteMessage(ctx.chatId, replyMsgId),
+        telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id)
+      ]);
+      db.untrackMessages(ctx.chatId, [replyMsgId, ctx.message.message_id]);
+    }
+
+    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Admin dban';
+    const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
+
+    const res = await ModerationService.executeBan(ctx.chatId, target.targetUserId);
+
+    if (res.ok) {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'dban',
+        action: 'dban',
+        result: 'success',
+        reason
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🔨 <b>${targetTag} has been banned and their message was deleted.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`
+      );
+    } else {
+      const friendlyError = mapTelegramError('dban', res.description, res.error_code);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'dban',
+        action: 'dban',
+        result: 'error',
+        telegramError: res.description
+      });
+
+      await telegramApi.sendMessage(ctx.chatId, friendlyError);
+    }
+  }
+
+  // ==========================================
+  // 3f. DELETE & MUTE COMMAND (/dmute)
+  // ==========================================
+  private static async handleDMute(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'dmute');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'dmute',
+          action: 'dmute',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot mute this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    const replyMsgId = ctx.message.reply_to_message?.message_id;
+    if (replyMsgId) {
+      await Promise.allSettled([
+        telegramApi.deleteMessage(ctx.chatId, replyMsgId),
+        telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id)
+      ]);
+      db.untrackMessages(ctx.chatId, [replyMsgId, ctx.message.message_id]);
+    }
+
+    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Admin dmute';
+    const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
+
+    const res = await ModerationService.executeMute(ctx.chatId, target.targetUserId);
+
+    if (res.ok) {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'dmute',
+        action: 'dmute',
+        result: 'success',
+        reason
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🔇 <b>${targetTag} has been muted and their message was deleted.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`
+      );
+    } else {
+      const friendlyError = mapTelegramError('dmute', res.description, res.error_code);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'dmute',
+        action: 'dmute',
+        result: 'error',
+        telegramError: res.description
+      });
+
+      await telegramApi.sendMessage(ctx.chatId, friendlyError);
+    }
+  }
+
+  // ==========================================
+  // 3g. DELETE & KICK COMMAND (/dkick)
+  // ==========================================
+  private static async handleDKick(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'dkick');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'dkick',
+          action: 'dkick',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot kick this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    const replyMsgId = ctx.message.reply_to_message?.message_id;
+    if (replyMsgId) {
+      await Promise.allSettled([
+        telegramApi.deleteMessage(ctx.chatId, replyMsgId),
+        telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id)
+      ]);
+      db.untrackMessages(ctx.chatId, [replyMsgId, ctx.message.message_id]);
+    }
+
+    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Admin dkick';
+    const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
+
+    const res = await ModerationService.executeKick(ctx.chatId, target.targetUserId);
+
+    if (res.ok) {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'dkick',
+        action: 'dkick',
+        result: 'success',
+        reason
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `👢 <b>${targetTag} was removed from the group and their message was deleted.</b>`
+      );
+    } else {
+      const friendlyError = mapTelegramError('dkick', res.description, res.error_code);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'dkick',
+        action: 'dkick',
+        result: 'error',
+        telegramError: res.description
+      });
+
+      await telegramApi.sendMessage(ctx.chatId, friendlyError);
+    }
+  }
+
+  // ==========================================
+  // 3h. SILENT BAN COMMAND (/sban)
+  // ==========================================
+  private static async handleSBan(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'sban');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'sban',
+          action: 'sban',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot sban this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    // Delete command message and replied message (silent)
+    const replyMsgId = ctx.message.reply_to_message?.message_id;
+    const toDelete = [ctx.message.message_id];
+    if (replyMsgId) toDelete.push(replyMsgId);
+
+    await Promise.allSettled(toDelete.map((id) => telegramApi.deleteMessage(ctx.chatId, id)));
+    db.untrackMessages(ctx.chatId, toDelete);
+
+    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Silent ban';
+    const res = await ModerationService.executeBan(ctx.chatId, target.targetUserId);
+
+    if (res.ok) {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'sban',
+        action: 'sban',
+        result: 'success',
+        reason,
+        details: 'Silent ban executed (messages deleted, no public notice)'
+      });
+    } else {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'sban',
+        action: 'sban',
+        result: 'error',
+        telegramError: res.description
+      });
+    }
+  }
+
+  // ==========================================
+  // 3i. SILENT MUTE COMMAND (/smute)
+  // ==========================================
+  private static async handleSMute(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'smute');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'smute',
+          action: 'smute',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot smute this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    // Delete command message and replied message (silent)
+    const replyMsgId = ctx.message.reply_to_message?.message_id;
+    const toDelete = [ctx.message.message_id];
+    if (replyMsgId) toDelete.push(replyMsgId);
+
+    await Promise.allSettled(toDelete.map((id) => telegramApi.deleteMessage(ctx.chatId, id)));
+    db.untrackMessages(ctx.chatId, toDelete);
+
+    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Silent mute';
+    const res = await ModerationService.executeMute(ctx.chatId, target.targetUserId);
+
+    if (res.ok) {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'smute',
+        action: 'smute',
+        result: 'success',
+        reason,
+        details: 'Silent mute executed (messages deleted, no public notice)'
+      });
+    } else {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'smute',
+        action: 'smute',
+        result: 'error',
+        telegramError: res.description
+      });
+    }
+  }
+
+  // ==========================================
+  // 3j. SILENT KICK COMMAND (/skick)
+  // ==========================================
+  private static async handleSKick(ctx: CommandContext) {
+    const validation = await TelegramMiddleware.validateModerationAction(ctx, 'skick');
+
+    if (!validation.allowed) {
+      if (validation.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: validation.actor,
+          target: validation.target,
+          command: 'skick',
+          action: 'skick',
+          result: 'denied',
+          reason: validation.reason
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, validation.reason || '⚠️ Cannot skick this user.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const { actor, target } = validation;
+    if (!actor || !target) return;
+
+    // Delete command message and replied message (silent)
+    const replyMsgId = ctx.message.reply_to_message?.message_id;
+    const toDelete = [ctx.message.message_id];
+    if (replyMsgId) toDelete.push(replyMsgId);
+
+    await Promise.allSettled(toDelete.map((id) => telegramApi.deleteMessage(ctx.chatId, id)));
+    db.untrackMessages(ctx.chatId, toDelete);
+
+    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Silent kick';
+    const res = await ModerationService.executeKick(ctx.chatId, target.targetUserId);
+
+    if (res.ok) {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'skick',
+        action: 'skick',
+        result: 'success',
+        reason,
+        details: 'Silent kick executed (messages deleted, no public notice)'
+      });
+    } else {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        target,
+        command: 'skick',
+        action: 'skick',
+        result: 'error',
+        telegramError: res.description
       });
     }
   }
@@ -1065,7 +1983,7 @@ export class CommandHandler {
 
     if (totalWarnings >= warnLimit) {
       const userObj = target.targetUser || { id: target.targetUserId, is_bot: false, first_name: targetTag };
-      await ModerationService.executeAutoBan(ctx.chatId, userObj, ctx.chatTitle, `Exceeded warning limit (${totalWarnings}/${warnLimit}): ${reason}`);
+      await ModerationService.executeWarningThresholdAction(ctx.chatId, userObj, ctx.chatTitle, reason);
     } else {
       await telegramApi.sendMessage(
         ctx.chatId,
@@ -1222,17 +2140,24 @@ export class CommandHandler {
   }
 
   // ==========================================
-  // 7. CUSTOM WARNING THRESHOLD
+  // 7. CUSTOM WARNING THRESHOLD & ACTION
   // ==========================================
   private static async handleSetWarnLimit(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
     if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
+    const current = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
 
     if (ctx.args.length === 0) {
-      const current = db.getGroupSettings(ctx.chatId, ctx.chatTitle).warnLimit;
-      await telegramApi.sendMessage(ctx.chatId, `ℹ️ Current warning limit is <b>${current}</b>. Usage: <code>/setwarnlimit &lt;number&gt;</code>`);
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>Warning Threshold Settings:</b>\n` +
+        `• Threshold Limit: <b>${current.warnLimit}</b> warnings\n` +
+        `• Threshold Action: <b>${(current.warnAction || 'ban').toUpperCase()}</b>\n\n` +
+        `Usage: <code>/setwarnlimit &lt;limit&gt; [ban|mute|kick|warn_only]</code>\n` +
+        `Example: <code>/setwarnlimit 3 mute</code>`
+      );
       return;
     }
 
@@ -1242,7 +2167,11 @@ export class CommandHandler {
       return;
     }
 
-    db.updateGroupSettings(ctx.chatId, { warnLimit: limit });
+    const validActions = ['ban', 'mute', 'kick', 'warn_only'];
+    const actionArg = (ctx.args[1] || '').toLowerCase();
+    const action = validActions.includes(actionArg) ? (actionArg as 'ban' | 'mute' | 'kick' | 'warn_only') : (current.warnAction || 'ban');
+
+    db.updateGroupSettings(ctx.chatId, { warnLimit: limit, warnAction: action });
     TelegramMiddleware.logAudit({
       chatId: ctx.chatId,
       chatTitle: ctx.chatTitle,
@@ -1250,14 +2179,17 @@ export class CommandHandler {
       command: 'setwarnlimit',
       action: 'setting_change',
       result: 'success',
-      details: `Changed warn limit to ${limit}`
+      details: `Changed warn limit to ${limit} (Action: ${action})`
     });
 
-    await telegramApi.sendMessage(ctx.chatId, `⚙️ <b>Warning threshold updated:</b> <b>${limit}</b> warnings will trigger an automatic ban.`);
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `⚙️ <b>Warning threshold updated:</b> <b>${limit}</b> warnings will trigger <b>${action.toUpperCase()}</b>.`
+    );
   }
 
   // ==========================================
-  // 8. LINK PROTECTION SETTING
+  // 8. LINK PROTECTION & WHITELIST SETTINGS
   // ==========================================
   private static async handleLinksSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
@@ -1294,15 +2226,104 @@ export class CommandHandler {
     } else {
       await telegramApi.sendMessage(
         ctx.chatId,
-        `ℹ️ <b>Link Protection Status:</b> ${currentSettings.linksProtection ? '🟢 ON' : '🔴 OFF'}\n\nUsage: <code>/links on</code> or <code>/links off</code>`
+        `ℹ️ <b>Link Protection Status:</b> ${currentSettings.linksProtection ? '🟢 ON' : '🔴 OFF'}\n\n` +
+        `• Toggle: <code>/links on</code> or <code>/links off</code>\n` +
+        `• Whitelist domain: <code>/linkallow &lt;domain&gt;</code>\n` +
+        `• View whitelist: <code>/linkallowlist</code>`
       );
     }
   }
 
+  private static async handleLinkAllow(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    if (ctx.args.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/linkallow &lt;domain.com&gt;</code>');
+      return;
+    }
+
+    const domain = ctx.args[0].trim();
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    db.addLinkWhitelist(ctx.chatId, domain);
+
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'linkallow',
+      action: 'setting_change',
+      result: 'success',
+      details: `Added ${domain} to allowed link domains`
+    });
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `✅ <b>Domain Whitelisted:</b> <code>${escapeHtml(domain)}</code> is now permitted in this group.`
+    );
+  }
+
+  private static async handleLinkUnallow(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    if (ctx.args.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/linkunallow &lt;domain.com&gt;</code>');
+      return;
+    }
+
+    const domain = ctx.args[0].trim();
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const removed = db.removeLinkWhitelist(ctx.chatId, domain);
+
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'linkunallow',
+      action: 'setting_change',
+      result: 'success',
+      details: `Removed ${domain} from allowed link domains`
+    });
+
+    if (removed) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🗑️ <b>Domain Removed:</b> <code>${escapeHtml(domain)}</code> was removed from the whitelist.`
+      );
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <code>${escapeHtml(domain)}</code> was not in the whitelist.`
+      );
+    }
+  }
+
+  private static async handleLinkAllowList(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const domains = db.getLinkWhitelist(ctx.chatId);
+    if (domains.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        'ℹ️ <b>Allowed Link Domains:</b> None configured.\nAdd domains with <code>/linkallow &lt;domain&gt;</code>.'
+      );
+      return;
+    }
+
+    const list = domains.map((d, i) => `${i + 1}. <code>${escapeHtml(d)}</code>`).join('\n');
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `🔗 <b>Whitelisted Link Domains (${domains.length}):</b>\n\n${list}\n\n` +
+      `<i>Remove with <code>/linkunallow &lt;domain&gt;</code></i>`
+    );
+  }
+
   // ==========================================
-  // 9. MEDIA & IMAGE PROTECTION SETTING
+  // 9. MEDIA & CONTENT FILTER SETTINGS
   // ==========================================
-  private static async handleMediaSetting(ctx: CommandContext) {
+  private static async handlePhotosSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
     if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
 
@@ -1312,45 +2333,203 @@ export class CommandHandler {
 
     if (arg === 'on') {
       db.updateGroupSettings(ctx.chatId, { mediaProtection: true });
+      db.setLock(ctx.chatId, 'photos', true);
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,
         actor,
-        command: 'media',
+        command: 'photos',
         action: 'setting_change',
         result: 'success',
-        details: 'Media & image protection enabled'
+        details: 'Photo protection enabled'
       });
       await telegramApi.sendMessage(
         ctx.chatId,
-        '🛡️ <b>Image & Media Protection is now ON.</b>\n' +
-        'Images, photos, GIFs, and videos from normal members will be automatically deleted until an admin frees them with <code>/free</code>.',
+        '🛡️ <b>Photo & Image Protection is now ON.</b>\nPhotos from normal members will be automatically deleted unless freed with <code>/free</code>.',
         { reply_to_message_id: ctx.message.message_id }
       );
     } else if (arg === 'off') {
       db.updateGroupSettings(ctx.chatId, { mediaProtection: false });
+      db.setLock(ctx.chatId, 'photos', false);
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,
         actor,
-        command: 'media',
+        command: 'photos',
         action: 'setting_change',
         result: 'success',
-        details: 'Media & image protection disabled'
+        details: 'Photo protection disabled'
       });
       await telegramApi.sendMessage(
         ctx.chatId,
-        '🔓 <b>Image & Media Protection is now OFF.</b>\nAll group members may send photos and media freely.',
+        '🔓 <b>Photo & Image Protection is now OFF.</b>\nAll group members may send photos freely.',
         { reply_to_message_id: ctx.message.message_id }
       );
     } else {
       await telegramApi.sendMessage(
         ctx.chatId,
-        `ℹ️ <b>Image & Media Protection Status:</b> ${currentSettings.mediaProtection ? '🟢 ON' : '🔴 OFF'}\n\n` +
-        `Usage:\n` +
-        `• <code>/media on</code> — Enable auto-deletion of images/media from un-freed members\n` +
-        `• <code>/media off</code> — Allow all members to send images/media`,
+        `ℹ️ <b>Photo & Image Protection:</b> ${currentSettings.mediaProtection ? '🟢 ON' : '🔴 OFF'}\n\nUsage: <code>/photos on</code> or <code>/photos off</code>`,
         { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+  }
+
+  private static async handleGifsSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const current = db.getGroupSettings(ctx.chatId, ctx.chatTitle).locks?.gifs || false;
+
+    if (arg === 'on' || arg === 'lock') {
+      db.setLock(ctx.chatId, 'gifs', true);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'gifs',
+        action: 'setting_change',
+        result: 'success',
+        details: 'GIF protection enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>GIF Protection is now ON.</b>\nGIFs from regular members will be deleted.');
+    } else if (arg === 'off' || arg === 'unlock') {
+      db.setLock(ctx.chatId, 'gifs', false);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'gifs',
+        action: 'setting_change',
+        result: 'success',
+        details: 'GIF protection disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>GIF Protection is now OFF.</b>\nMembers may send GIFs.');
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>GIF Protection:</b> ${current ? '🟢 ON (Locked)' : '🔴 OFF (Unlocked)'}\n\nUsage: <code>/gifs on</code> or <code>/gifs off</code>`
+      );
+    }
+  }
+
+  private static async handleVideosSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const current = db.getGroupSettings(ctx.chatId, ctx.chatTitle).locks?.videos || false;
+
+    if (arg === 'on' || arg === 'lock') {
+      db.setLock(ctx.chatId, 'videos', true);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'videos',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Video protection enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Video Protection is now ON.</b>\nVideos and video notes from regular members will be deleted.');
+    } else if (arg === 'off' || arg === 'unlock') {
+      db.setLock(ctx.chatId, 'videos', false);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'videos',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Video protection disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Video Protection is now OFF.</b>\nMembers may send videos.');
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>Video Protection:</b> ${current ? '🟢 ON (Locked)' : '🔴 OFF (Unlocked)'}\n\nUsage: <code>/videos on</code> or <code>/videos off</code>`
+      );
+    }
+  }
+
+  private static async handleVoiceSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const current = db.getGroupSettings(ctx.chatId, ctx.chatTitle).locks?.voice || false;
+
+    if (arg === 'on' || arg === 'lock') {
+      db.setLock(ctx.chatId, 'voice', true);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'voice',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Voice note protection enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Voice Message Protection is now ON.</b>\nVoice messages from regular members will be deleted.');
+    } else if (arg === 'off' || arg === 'unlock') {
+      db.setLock(ctx.chatId, 'voice', false);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'voice',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Voice note protection disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Voice Message Protection is now OFF.</b>\nMembers may send voice messages.');
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>Voice Protection:</b> ${current ? '🟢 ON (Locked)' : '🔴 OFF (Unlocked)'}\n\nUsage: <code>/voice on</code> or <code>/voice off</code>`
+      );
+    }
+  }
+
+  private static async handleAudioSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const current = db.getGroupSettings(ctx.chatId, ctx.chatTitle).locks?.audio || false;
+
+    if (arg === 'on' || arg === 'lock') {
+      db.setLock(ctx.chatId, 'audio', true);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'audio',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Audio protection enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Audio File Protection is now ON.</b>\nAudio files from regular members will be deleted.');
+    } else if (arg === 'off' || arg === 'unlock') {
+      db.setLock(ctx.chatId, 'audio', false);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'audio',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Audio protection disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Audio File Protection is now OFF.</b>\nMembers may send audio files.');
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>Audio Protection:</b> ${current ? '🟢 ON (Locked)' : '🔴 OFF (Unlocked)'}\n\nUsage: <code>/audio on</code> or <code>/audio off</code>`
       );
     }
   }
@@ -1914,6 +3093,708 @@ export class CommandHandler {
     await telegramApi.sendMessage(ctx.chatId, '🏓 <b>Pong!</b> Administration engine active.');
   }
 
+  // ==========================================
+  // 11. CONTENT LOCKS & GRANULAR PERMISSIONS
+  // ==========================================
+  private static async handleLock(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const lockType = (ctx.args[0] || '').toLowerCase();
+    const validTypes = ['links', 'stickers', 'gifs', 'videos', 'photos', 'audio', 'voice', 'documents', 'polls', 'forwards', 'contacts', 'locations'];
+
+    if (!lockType || !validTypes.includes(lockType)) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ <b>Invalid lock type.</b>\n\n` +
+        `<b>Available lock types:</b>\n<code>${validTypes.join(', ')}</code>\n\n` +
+        `Usage: <code>/lock &lt;type&gt;</code> (e.g. <code>/lock stickers</code>)`
+      );
+      return;
+    }
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    db.setLock(ctx.chatId, lockType, true);
+
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'lock',
+      action: 'setting_change',
+      result: 'success',
+      details: `Locked ${lockType}`
+    });
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `🔒 <b>Locked:</b> <code>${lockType}</code> is now restricted for regular members.`
+    );
+  }
+
+  private static async handleUnlock(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const lockType = (ctx.args[0] || '').toLowerCase();
+    const validTypes = ['links', 'stickers', 'gifs', 'videos', 'photos', 'audio', 'voice', 'documents', 'polls', 'forwards', 'contacts', 'locations'];
+
+    if (!lockType || !validTypes.includes(lockType)) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ <b>Invalid lock type.</b>\n\n` +
+        `<b>Available lock types:</b>\n<code>${validTypes.join(', ')}</code>\n\n` +
+        `Usage: <code>/unlock &lt;type&gt;</code>`
+      );
+      return;
+    }
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    db.setLock(ctx.chatId, lockType, false);
+
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'unlock',
+      action: 'setting_change',
+      result: 'success',
+      details: `Unlocked ${lockType}`
+    });
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `🔓 <b>Unlocked:</b> <code>${lockType}</code> is now permitted for all members.`
+    );
+  }
+
+  private static async handleLocks(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const locks = db.getLocks(ctx.chatId);
+    const validTypes = ['links', 'stickers', 'gifs', 'videos', 'photos', 'audio', 'voice', 'documents', 'polls', 'forwards', 'contacts', 'locations'];
+
+    const items = validTypes.map((type) => {
+      const isLocked = Boolean(locks[type]);
+      return `• <code>${type}</code>: ${isLocked ? '🔒 Locked' : '🔓 Unlocked'}`;
+    }).join('\n');
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `🔐 <b>Group Content Locks:</b>\n\n${items}\n\n` +
+      `<i>Lock with <code>/lock &lt;type&gt;</code>, unlock with <code>/unlock &lt;type&gt;</code></i>`
+    );
+  }
+
+  // ==========================================
+  // 12. ANTI-FLOOD SYSTEM
+  // ==========================================
+  private static async handleFloodSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const current = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (ctx.args.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🌊 <b>Anti-Flood Settings:</b>\n` +
+        `• Status: <b>${current.floodEnabled ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+        `• Threshold: <b>${current.floodCount || 8}</b> messages in <b>${current.floodWindow || 5}s</b>\n` +
+        `• Action: <b>${(current.floodAction || 'mute').toUpperCase()}</b>\n\n` +
+        `Usage:\n` +
+        `• <code>/flood on</code> / <code>/flood off</code>\n` +
+        `• <code>/flood &lt;messages&gt; [mute|ban|kick]</code> (e.g. <code>/flood 5 mute</code>)`
+      );
+      return;
+    }
+
+    const arg0 = ctx.args[0].toLowerCase();
+    if (arg0 === 'on') {
+      db.updateGroupSettings(ctx.chatId, { floodEnabled: true });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'flood',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Flood control enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Anti-Flood Protection is now ON.</b>');
+      return;
+    }
+
+    if (arg0 === 'off') {
+      db.updateGroupSettings(ctx.chatId, { floodEnabled: false });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'flood',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Flood control disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Anti-Flood Protection is now OFF.</b>');
+      return;
+    }
+
+    const count = parseInt(arg0, 10);
+    if (!isNaN(count) && count >= 2 && count <= 30) {
+      const validActions = ['mute', 'ban', 'kick'];
+      const actionArg = (ctx.args[1] || '').toLowerCase();
+      const action = validActions.includes(actionArg) ? (actionArg as 'mute' | 'ban' | 'kick') : (current.floodAction || 'mute');
+
+      db.updateGroupSettings(ctx.chatId, {
+        floodEnabled: true,
+        floodCount: count,
+        floodAction: action
+      });
+
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'flood',
+        action: 'setting_change',
+        result: 'success',
+        details: `Flood set to ${count} msgs (Action: ${action})`
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚙️ <b>Anti-Flood Updated:</b> Trigger threshold set to <b>${count}</b> messages in 5s (Action: <b>${action.toUpperCase()}</b>).`
+      );
+      return;
+    }
+
+    await telegramApi.sendMessage(ctx.chatId, '⚠️ Please provide a valid message count between 2 and 30.');
+  }
+
+  // ==========================================
+  // 13. CUSTOM TEXT & MEDIA FILTERS
+  // ==========================================
+  private static async handleFilterCommand(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    if (ctx.args.length < 2) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ <b>Usage:</b> <code>/filter &lt;keyword&gt; &lt;reply text&gt;</code>\n` +
+        `Example: <code>/filter rules Read the pinned message for group rules!</code>`
+      );
+      return;
+    }
+
+    const keyword = ctx.args[0];
+    const replyText = ctx.args.slice(1).join(' ');
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    db.setFilter(ctx.chatId, keyword, replyText);
+
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'filter',
+      action: 'setting_change',
+      result: 'success',
+      details: `Added filter for "${keyword}"`
+    });
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `✅ <b>Filter Saved:</b> Whenever someone mentions <code>${escapeHtml(keyword)}</code>, I will respond with your reply message.`
+    );
+  }
+
+  private static async handleUnfilterCommand(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    if (ctx.args.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/unfilter &lt;keyword&gt;</code>');
+      return;
+    }
+
+    const keyword = ctx.args[0];
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const removed = db.removeFilter(ctx.chatId, keyword);
+
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'unfilter',
+      action: 'setting_change',
+      result: 'success',
+      details: `Removed filter for "${keyword}"`
+    });
+
+    if (removed) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🗑️ <b>Filter Removed:</b> <code>${escapeHtml(keyword)}</code> has been deleted.`
+      );
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ No filter found for <code>${escapeHtml(keyword)}</code>.`
+      );
+    }
+  }
+
+  private static async handleFiltersList(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const filters = db.getFilters(ctx.chatId);
+    const entries = Object.entries(filters);
+    if (entries.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        'ℹ️ <b>Active Filters:</b> None configured.\nAdd custom filters with <code>/filter &lt;keyword&gt; &lt;reply text&gt;</code>.'
+      );
+      return;
+    }
+
+    const list = entries.map(([kw], i) => `${i + 1}. <code>${escapeHtml(kw)}</code>`).join('\n');
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `📋 <b>Active Filters (${entries.length}):</b>\n\n${list}\n\n` +
+      `<i>Delete a filter with <code>/unfilter &lt;keyword&gt;</code></i>`
+    );
+  }
+
+  // ==========================================
+  // 14. WELCOME & GOODBYE GREETINGS
+  // ==========================================
+  private static async handleWelcomeSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { welcomeEnabled: true });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'welcome',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Welcome messages enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '👋 <b>Welcome messages are now ON.</b>');
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { welcomeEnabled: false });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'welcome',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Welcome messages disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '👋 <b>Welcome messages are now OFF.</b>');
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `👋 <b>Welcome Message Status:</b> ${settings.welcomeEnabled ? '🟢 ON' : '🔴 OFF'}\n\n` +
+        `<b>Current Template:</b>\n<i>${escapeHtml(settings.welcomeMessage || 'Default greeting')}</i>\n\n` +
+        `Usage:\n` +
+        `• <code>/welcome on</code> / <code>/welcome off</code>\n` +
+        `• <code>/setwelcome &lt;text&gt;</code> (Supports {first_name}, {username}, {chat_title}, {mention})`
+      );
+    }
+  }
+
+  private static async handleSetWelcome(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    if (ctx.args.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ <b>Usage:</b> <code>/setwelcome &lt;welcome message&gt;</code>\n\n` +
+        `<b>Available Tags:</b>\n` +
+        `• <code>{first_name}</code> — User's first name\n` +
+        `• <code>{username}</code> — User's @username\n` +
+        `• <code>{mention}</code> — Clickable user mention\n` +
+        `• <code>{chat_title}</code> — Group name\n` +
+        `• <code>{id}</code> — User ID`
+      );
+      return;
+    }
+
+    const text = ctx.args.join(' ');
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    db.updateGroupSettings(ctx.chatId, { welcomeMessage: text, welcomeEnabled: true });
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'setwelcome',
+      action: 'setting_change',
+      result: 'success',
+      details: 'Updated welcome template'
+    });
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `✅ <b>Welcome Message Updated & Activated:</b>\n\n${escapeHtml(text)}`
+    );
+  }
+
+  private static async handleGoodbyeSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { goodbyeEnabled: true });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'goodbye',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Goodbye messages enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '👋 <b>Goodbye messages are now ON.</b>');
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { goodbyeEnabled: false });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'goodbye',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Goodbye messages disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '👋 <b>Goodbye messages are now OFF.</b>');
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `👋 <b>Goodbye Message Status:</b> ${settings.goodbyeEnabled ? '🟢 ON' : '🔴 OFF'}\n\n` +
+        `<b>Current Template:</b>\n<i>${escapeHtml(settings.goodbyeMessage || 'Default goodbye')}</i>\n\n` +
+        `Usage:\n` +
+        `• <code>/goodbye on</code> / <code>/goodbye off</code>\n` +
+        `• <code>/setgoodbye &lt;text&gt;</code>`
+      );
+    }
+  }
+
+  private static async handleSetGoodbye(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    if (ctx.args.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ <b>Usage:</b> <code>/setgoodbye &lt;goodbye message&gt;</code>\n\n` +
+        `<b>Available Tags:</b>\n` +
+        `• <code>{first_name}</code> — User's first name\n` +
+        `• <code>{username}</code> — User's @username\n` +
+        `• <code>{chat_title}</code> — Group name`
+      );
+      return;
+    }
+
+    const text = ctx.args.join(' ');
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    db.updateGroupSettings(ctx.chatId, { goodbyeMessage: text, goodbyeEnabled: true });
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'setgoodbye',
+      action: 'setting_change',
+      result: 'success',
+      details: 'Updated goodbye template'
+    });
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `✅ <b>Goodbye Message Updated & Activated:</b>\n\n${escapeHtml(text)}`
+    );
+  }
+
+  // ==========================================
+  // 15. PIN & UNPIN MANAGEMENT
+  // ==========================================
+  private static async handlePin(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const replyMsg = ctx.message.reply_to_message;
+    if (!replyMsg) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '⚠️ Please reply to the message you want to pin with <code>/pin</code> (or <code>/pin loud</code>).',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    const isLoud = ctx.args.includes('loud') || ctx.args.includes('notify');
+    const disableNotification = !isLoud;
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    const res = await telegramApi.pinChatMessage(ctx.chatId, replyMsg.message_id, disableNotification);
+
+    if (res.ok) {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'pin',
+        action: 'pin',
+        result: 'success',
+        details: `Pinned message #${replyMsg.message_id} (${disableNotification ? 'silent' : 'loud'})`
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `📌 <b>Message pinned successfully.</b>${disableNotification ? ' <i>(Silent)</i>' : ''}`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ Failed to pin message: ${res.description || 'Permission denied'}`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+  }
+
+  private static async handleUnpin(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const replyMsg = ctx.message.reply_to_message;
+    const messageId = replyMsg ? replyMsg.message_id : undefined;
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    const res = await telegramApi.unpinChatMessage(ctx.chatId, messageId);
+
+    if (res.ok) {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'unpin',
+        action: 'unpin',
+        result: 'success',
+        details: messageId ? `Unpinned message #${messageId}` : 'Unpinned latest pinned message'
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '📌 <b>Message unpinned.</b>',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ Failed to unpin message: ${res.description || 'Permission denied'}`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+  }
+
+  private static async handleUnpinAll(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const res = await telegramApi.unpinAllChatMessages(ctx.chatId);
+
+    if (res.ok) {
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'unpinall',
+        action: 'unpin',
+        result: 'success',
+        details: 'Unpinned all chat messages'
+      });
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '📌 <b>All pinned messages have been unpinned.</b>',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ Failed to unpin all messages: ${res.description || 'Permission denied'}`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+  }
+
+  // ==========================================
+  // 16. SLOW MODE
+  // ==========================================
+  private static async handleSlowMode(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    if (ctx.args.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🐢 <b>Slow Mode Usage:</b>\n` +
+        `• <code>/slowmode 10s</code> — 10 seconds delay\n` +
+        `• <code>/slowmode 30s</code> — 30 seconds delay\n` +
+        `• <code>/slowmode 1m</code> — 1 minute delay\n` +
+        `• <code>/slowmode 5m</code> — 5 minutes delay\n` +
+        `• <code>/slowmode 15m</code> — 15 minutes delay\n` +
+        `• <code>/slowmode 1h</code> — 1 hour delay\n` +
+        `• <code>/slowmode off</code> / <code>0</code> — Disable slow mode\n\n` +
+        `<i>Allowed Telegram values: 0, 10s, 30s, 1m, 5m, 15m, 1h.</i>`
+      );
+      return;
+    }
+
+    const arg = ctx.args[0].toLowerCase();
+    let seconds = 0;
+
+    if (arg === 'off' || arg === '0' || arg === '0s') {
+      seconds = 0;
+    } else if (arg === '10s' || arg === '10') {
+      seconds = 10;
+    } else if (arg === '30s' || arg === '30') {
+      seconds = 30;
+    } else if (arg === '1m' || arg === '60' || arg === '60s') {
+      seconds = 60;
+    } else if (arg === '5m' || arg === '300' || arg === '300s') {
+      seconds = 300;
+    } else if (arg === '15m' || arg === '900' || arg === '900s') {
+      seconds = 900;
+    } else if (arg === '1h' || arg === '3600' || arg === '3600s') {
+      seconds = 3600;
+    } else {
+      const parsedNum = parseInt(arg, 10);
+      const validDelays = [0, 10, 30, 60, 300, 900, 3600];
+      if (validDelays.includes(parsedNum)) {
+        seconds = parsedNum;
+      } else {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          '⚠️ Invalid slow mode interval. Supported values: <code>0 (off), 10s, 30s, 1m, 5m, 15m, 1h</code>.'
+        );
+        return;
+      }
+    }
+
+    const res = await telegramApi.setChatSlowModeDelay(ctx.chatId, seconds);
+
+    if (res.ok) {
+      db.updateGroupSettings(ctx.chatId, { slowModeSeconds: seconds });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'slowmode',
+        action: 'setting_change',
+        result: 'success',
+        details: seconds === 0 ? 'Slow mode disabled' : `Slow mode set to ${seconds}s`
+      });
+
+      if (seconds === 0) {
+        await telegramApi.sendMessage(ctx.chatId, '⚡ <b>Slow Mode disabled.</b> Members can send messages without delay.');
+      } else {
+        await telegramApi.sendMessage(ctx.chatId, `🐢 <b>Slow Mode activated:</b> Members must wait <b>${seconds}s</b> between messages.`);
+      }
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ Failed to set slow mode: ${res.description || 'Permission denied'}`
+      );
+    }
+  }
+
+  // ==========================================
+  // 17. AUDIT LOGS & SETTINGS DASHBOARD
+  // ==========================================
+  private static async handleAdminLog(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const count = parseInt(ctx.args[0] || '8', 10);
+    const limit = Math.min(Math.max(count, 1), 25);
+    const logs = db.getGroupLogs(ctx.chatId, limit);
+
+    if (logs.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, 'ℹ️ No moderation audit logs recorded for this group yet.');
+      return;
+    }
+
+    const logText = logs
+      .map((l, i) => {
+        const time = new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const targetStr = l.targetUsername ? ` ➔ @${l.targetUsername}` : (l.targetUserId ? ` ➔ User ${l.targetUserId}` : '');
+        const actorStr = l.adminUsername || l.actorUsername || (l.actorId ? `User ${l.actorId}` : 'Admin');
+        const statusIcon = l.result === 'success' ? '✅' : '❌';
+        return `${i + 1}. [${time}] ${statusIcon} <b>/${l.command || l.action}</b> by <i>${escapeHtml(actorStr)}</i>${targetStr}\n    ${escapeHtml(l.details || l.reason || '')}`;
+      })
+      .join('\n\n');
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `📜 <b>Recent Moderation Audit Trail (${logs.length}):</b>\n\n${logText}`
+    );
+  }
+
+  private static async handleSettings(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const s = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const filters = Object.keys(db.getFilters(ctx.chatId)).length;
+    const allowedDomains = db.getLinkWhitelist(ctx.chatId).length;
+    const freedUsers = db.getFreedUsers(ctx.chatId).length;
+    const activeLocks = Object.entries(s.locks || {}).filter(([_, v]) => v).map(([k]) => k);
+
+    const text =
+      `⚙️ <b>Group Settings & Policy: ${escapeHtml(ctx.chatTitle || 'Group')}</b>\n\n` +
+      `🛡️ <b>Protections:</b>\n` +
+      `• Links Filter: <b>${s.linksProtection ? '🟢 ON' : '🔴 OFF'}</b> (${allowedDomains} whitelisted)\n` +
+      `• Photos/Media: <b>${s.mediaProtection ? '🟢 ON' : '🔴 OFF'}</b> (${freedUsers} freed users)\n` +
+      `• Stickers: <b>${s.stickerProtection ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+      `• Anti-Flood: <b>${s.floodEnabled ? '🟢 ON' : '🔴 OFF'}</b> (${s.floodCount || 8} msgs/${s.floodWindow || 5}s ➔ ${(s.floodAction || 'mute').toUpperCase()})\n` +
+      `• Content Locks: <b>${activeLocks.length > 0 ? activeLocks.join(', ') : 'None'}</b>\n\n` +
+      `⚠️ <b>Moderation Thresholds:</b>\n` +
+      `• Warn Limit: <b>${s.warnLimit}</b> warnings ➔ <b>${(s.warnAction || 'ban').toUpperCase()}</b>\n` +
+      `• Slow Mode: <b>${s.slowModeSeconds ? s.slowModeSeconds + 's' : 'OFF'}</b>\n\n` +
+      `👋 <b>Automation:</b>\n` +
+      `• Welcome Message: <b>${s.welcomeEnabled ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+      `• Goodbye Message: <b>${s.goodbyeEnabled ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+      `• Custom Filters: <b>${filters}</b> configured\n\n` +
+      `<i>Use <code>/help</code> to view full admin command toolkit.</i>`;
+
+    await telegramApi.sendMessage(ctx.chatId, text);
+  }
+
   private static async handleStatus(ctx: CommandContext) {
     const isGroup = TelegramMiddleware.isGroup(ctx.message);
     const me = (await telegramApi.getMe()).result;
@@ -1929,9 +3810,10 @@ export class CommandHandler {
       text +=
         `\n👥 <b>Group Settings (${ctx.chatTitle}):</b>\n` +
         `• Link Protection: <b>${settings.linksProtection ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
-        `• Media/Image Protection: <b>${settings.mediaProtection ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
+        `• Photo Protection: <b>${settings.mediaProtection ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
         `• Sticker Protection: <b>${settings.stickerProtection ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
-        `• Warn Limit: <b>${settings.warnLimit} warns = Ban</b>\n` +
+        `• Anti-Flood: <b>${settings.floodEnabled ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
+        `• Warn Limit: <b>${settings.warnLimit} warns = ${(settings.warnAction || 'ban').toUpperCase()}</b>\n` +
         `• Active Schedules: <b>${schedules}</b>\n`;
     }
 
@@ -1942,39 +3824,77 @@ export class CommandHandler {
     const helpText =
       `🛡️ <b>Roxie Administrator Command Toolkit</b>\n` +
       `<i>🔒 All commands are restricted to group administrators.</i>\n\n` +
-      `🛡️ <b>ADMINISTRATION</b>\n` +
-      `• <code>/promote @user</code> — Promote a member to administrator\n` +
+      `🛡️ <b>ADMINISTRATION & ROLES</b>\n` +
+      `• <code>/promote @user</code> — Promote member to administrator\n` +
       `• <code>/demote @user</code> — Revoke administrator privileges\n` +
-      `• <code>/permissions @user</code> — View & edit administrator permissions\n` +
+      `• <code>/permissions @user</code> — Interactive permission editor\n` +
       `• <code>/setmod @user</code> — Assign bot moderator role\n` +
-      `• <code>/delmod @user</code> — Remove bot moderator role\n\n` +
-      `🔨 <b>MODERATION & PURGE</b>\n` +
-      `• <code>/del</code> — (Reply) Delete replied message for all members\n` +
-      `• <code>/clear [5s|1m|1h|num]</code> — Purge messages by timing, count, or all\n` +
-      `• <code>/clear user</code> — (Reply) Purge all messages from replied member\n` +
-      `• <code>/kick @user</code> — Remove member from group\n` +
+      `• <code>/delmod @user</code> — Remove bot moderator role\n` +
+      `• <code>/adminlog [limit]</code> — View moderation audit trail\n` +
+      `• <code>/settings</code> — Full group configuration dashboard\n\n` +
+      `🔨 <b>BAN & KICK</b>\n` +
       `• <code>/ban @user [reason]</code> — Ban member permanently\n` +
+      `• <code>/tban &lt;@user|reply&gt; &lt;time&gt; [reason]</code> — Temporarily ban member (e.g. /tban 1d)\n` +
+      `• <code>/dban</code> — (Reply) Delete message and ban user\n` +
+      `• <code>/sban @user</code> — Silently ban user (delete command/message)\n` +
       `• <code>/unban @user</code> — Unban member\n` +
-      `• <code>/warn @user [reason]</code> — Warn member (auto-ban on limit)\n` +
+      `• <code>/kick @user</code> — Remove member from group\n` +
+      `• <code>/dkick</code> — (Reply) Delete message and kick user\n` +
+      `• <code>/skick @user</code> — Silently kick user (delete command/message)\n\n` +
+      `🔇 <b>MUTE & RESTRICTIONS</b>\n` +
+      `• <code>/mute @user [reason]</code> — Mute member permanently\n` +
+      `• <code>/tmute &lt;@user|reply&gt; &lt;time&gt; [reason]</code> — Temporarily mute member (e.g. /tmute 2h)\n` +
+      `• <code>/dmute</code> — (Reply) Delete message and mute user\n` +
+      `• <code>/smute @user</code> — Silently mute user (delete command/message)\n` +
+      `• <code>/unmute @user</code> — Restore speaking permissions\n\n` +
+      `🧹 <b>PURGE & CLEANUP</b>\n` +
+      `• <code>/del</code> — (Reply) Delete replied message\n` +
+      `• <code>/clear [5s|1m|1h|num]</code> — Purge messages by timing, count, or all\n` +
+      `• <code>/purge</code> — (Reply) Purge all messages from replied message to now\n` +
+      `• <code>/clear user</code> — (Reply) Purge all messages from replied member\n` +
+      `• <code>/clear @user</code> — Purge recent messages from member\n\n` +
+      `⚠️ <b>WARNINGS</b>\n` +
+      `• <code>/warn @user [reason]</code> — Warn member (triggers auto action on limit)\n` +
       `• <code>/warnings [@user]</code> — View active warnings\n` +
-      `• <code>/resetwarns @user</code> — Clear all warnings for member\n\n` +
-      `⚙️ <b>PROTECTION & PERMISSIONS</b>\n` +
-      `• <code>/media on|off</code> — Toggle image/photo/media protection\n` +
+      `• <code>/resetwarns @user</code> — Clear all warnings for member\n` +
+      `• <code>/setwarnlimit &lt;num&gt; [action]</code> — Set threshold & action (ban, mute, kick)\n\n` +
+      `🔒 <b>CONTENT LOCKS & MEDIA</b>\n` +
+      `• <code>/lock &lt;type&gt;</code> — Lock content (stickers, gifs, videos, links, etc.)\n` +
+      `• <code>/unlock &lt;type&gt;</code> — Unlock content type\n` +
+      `• <code>/locks</code> — View all active content locks\n` +
+      `• <code>/photos on|off</code> — Toggle image/photo protection\n` +
       `• <code>/stickers on|off</code> — Toggle sticker filter\n` +
-      `• <code>/free @user</code> — Allow member to send images & stickers\n` +
-      `• <code>/unfree @user</code> — Revoke image & sticker permission\n` +
+      `• <code>/gifs on|off</code> / <code>/videos on|off</code> — Media filters\n` +
+      `• <code>/free @user</code> — Exempt member from media & sticker restrictions\n` +
+      `• <code>/unfree @user</code> — Revoke member media exemption\n` +
       `• <code>/freelist</code> — List all exempted/freed members\n` +
-      `• <code>/links on|off</code> — Toggle automatic link filter\n` +
-      `• <code>/setwarnlimit &lt;num&gt;</code> — Set threshold for auto-ban\n\n` +
-      `📢 <b>COMMUNICATION</b>\n` +
-      `• <code>/say &lt;message&gt;</code> — Broadcast message as bot\n` +
+      `• <code>/links on|off</code> — Toggle link protection\n` +
+      `• <code>/linkallow &lt;domain&gt;</code> — Whitelist trusted domain\n` +
+      `• <code>/linkallowlist</code> — View whitelisted domains\n\n` +
+      `🌊 <b>ANTI-FLOOD & SLOW MODE</b>\n` +
+      `• <code>/flood on|off</code> — Toggle anti-flood\n` +
+      `• <code>/flood &lt;num&gt; [mute|ban|kick]</code> — Configure flood threshold\n` +
+      `• <code>/slowmode 10s|30s|1m|5m|off</code> — Set message cooldown delay\n\n` +
+      `📌 <b>PIN & UNPIN</b>\n` +
+      `• <code>/pin [loud]</code> — (Reply) Pin replied message (silent or loud)\n` +
+      `• <code>/unpin</code> — (Reply) Unpin replied message or top pinned\n` +
+      `• <code>/unpinall</code> — Unpin all pinned messages in group\n\n` +
+      `💬 <b>CUSTOM FILTERS</b>\n` +
+      `• <code>/filter &lt;keyword&gt; &lt;reply text&gt;</code> — Add automated trigger reply\n` +
+      `• <code>/unfilter &lt;keyword&gt;</code> — Delete filter trigger\n` +
+      `• <code>/filters</code> — List active custom filters\n\n` +
+      `👋 <b>GREETINGS & BROADCASTS</b>\n` +
+      `• <code>/welcome on|off</code> — Toggle welcome greeting\n` +
+      `• <code>/setwelcome &lt;msg&gt;</code> — Configure custom welcome message\n` +
+      `• <code>/goodbye on|off</code> — Toggle goodbye message\n` +
+      `• <code>/setgoodbye &lt;msg&gt;</code> — Configure custom goodbye message\n` +
+      `• <code>/say &lt;msg&gt;</code> — Broadcast announcement as bot\n` +
       `• <code>/schedule &lt;interval&gt; &lt;msg&gt;</code> — Schedule recurring broadcast\n` +
       `• <code>/listschedules</code> — List active scheduled messages\n` +
-      `• <code>/deleteschedule &lt;id&gt;</code> — Remove scheduled broadcast\n` +
-      `• <code>/live</code> — Live stream & voice chat info\n\n` +
+      `• <code>/deleteschedule &lt;id&gt;</code> — Remove scheduled broadcast\n\n` +
       `🛠️ <b>TOOLS</b>\n` +
       `• <code>/report [reason]</code> — (Reply) Forward report to admins\n` +
-      `• <code>/status</code> — View group & bot operational status\n` +
+      `• <code>/status</code> — Operational status overview\n` +
       `• <code>/ping</code> — Check bot responsiveness`;
 
     await telegramApi.sendMessage(ctx.chatId, helpText);

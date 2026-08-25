@@ -1,10 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import { GroupSettings, WarningRecord, StickerFreeUser, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage } from '../telegram/types.js';
+import { GroupSettings, WarningRecord, StickerFreeUser, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord } from '../telegram/types.js';
 
 interface DatabaseSchema {
   settings: Record<number, GroupSettings>;
   warnings: WarningRecord[];
+  tempActions: TempActionRecord[];
   stickerFreeUsers: StickerFreeUser[];
   schedules: ScheduledMessage[];
   logs: ModerationLog[];
@@ -21,6 +22,7 @@ class StorageManager {
   private data: DatabaseSchema = {
     settings: {},
     warnings: [],
+    tempActions: [],
     stickerFreeUsers: [],
     schedules: [],
     logs: [],
@@ -48,6 +50,7 @@ class StorageManager {
           this.data = {
             settings: parsed.settings || {},
             warnings: parsed.warnings || [],
+            tempActions: parsed.tempActions || [],
             stickerFreeUsers: parsed.stickerFreeUsers || [],
             schedules: parsed.schedules || [],
             logs: parsed.logs || [],
@@ -249,17 +252,62 @@ class StorageManager {
       this.data.settings[chatId] = {
         chatId,
         chatTitle: chatTitle || undefined,
-        linksProtection: true,
-        stickerProtection: true,
-        mediaProtection: true,
         warnLimit: 3,
+        warnAction: 'ban',
+        floodEnabled: false,
+        floodCount: 8,
+        floodWindow: 5,
+        floodAction: 'mute',
+        linksProtection: true,
+        linksWhitelist: [],
+        mediaProtection: true,
+        stickerProtection: true,
+        gifsProtection: false,
+        videosProtection: false,
+        photosProtection: false,
+        voiceProtection: false,
+        audioProtection: false,
+        locks: {},
+        filters: {},
+        welcomeEnabled: false,
+        welcomeMessage: 'Welcome {user} to {chat}!',
+        goodbyeEnabled: false,
+        goodbyeMessage: 'Goodbye {user}!',
+        slowModeSeconds: 0,
         reportsEnabled: true,
         updatedAt: new Date().toISOString()
       };
       this.scheduleSave();
-    } else if (chatTitle && this.data.settings[chatId].chatTitle !== chatTitle) {
-      this.data.settings[chatId].chatTitle = chatTitle;
-      this.scheduleSave();
+    } else {
+      const s = this.data.settings[chatId];
+      let needsSave = false;
+      // Ensure all phase 2 fields are populated if loaded from older format
+      if (s.warnAction === undefined) { s.warnAction = 'ban'; needsSave = true; }
+      if (s.floodEnabled === undefined) { s.floodEnabled = false; needsSave = true; }
+      if (s.floodCount === undefined) { s.floodCount = 8; needsSave = true; }
+      if (s.floodWindow === undefined) { s.floodWindow = 5; needsSave = true; }
+      if (s.floodAction === undefined) { s.floodAction = 'mute'; needsSave = true; }
+      if (!Array.isArray(s.linksWhitelist)) { s.linksWhitelist = []; needsSave = true; }
+      if (s.gifsProtection === undefined) { s.gifsProtection = false; needsSave = true; }
+      if (s.videosProtection === undefined) { s.videosProtection = false; needsSave = true; }
+      if (s.photosProtection === undefined) { s.photosProtection = false; needsSave = true; }
+      if (s.voiceProtection === undefined) { s.voiceProtection = false; needsSave = true; }
+      if (s.audioProtection === undefined) { s.audioProtection = false; needsSave = true; }
+      if (!s.locks || typeof s.locks !== 'object') { s.locks = {}; needsSave = true; }
+      if (!s.filters || typeof s.filters !== 'object') { s.filters = {}; needsSave = true; }
+      if (s.welcomeEnabled === undefined) { s.welcomeEnabled = false; needsSave = true; }
+      if (!s.welcomeMessage) { s.welcomeMessage = 'Welcome {user} to {chat}!'; needsSave = true; }
+      if (s.goodbyeEnabled === undefined) { s.goodbyeEnabled = false; needsSave = true; }
+      if (!s.goodbyeMessage) { s.goodbyeMessage = 'Goodbye {user}!'; needsSave = true; }
+      if (s.slowModeSeconds === undefined) { s.slowModeSeconds = 0; needsSave = true; }
+
+      if (chatTitle && s.chatTitle !== chatTitle) {
+        s.chatTitle = chatTitle;
+        needsSave = true;
+      }
+      if (needsSave) {
+        this.scheduleSave();
+      }
     }
     return this.data.settings[chatId];
   }
@@ -276,11 +324,86 @@ class StorageManager {
     return updated;
   }
 
+  // --- Links Whitelist ---
+  public addLinkWhitelist(chatId: number, domain: string): string[] {
+    const s = this.getGroupSettings(chatId);
+    const cleanDomain = domain.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/.*$/, '').trim();
+    if (!cleanDomain) return s.linksWhitelist;
+
+    if (!s.linksWhitelist.includes(cleanDomain)) {
+      s.linksWhitelist.push(cleanDomain);
+      this.updateGroupSettings(chatId, { linksWhitelist: s.linksWhitelist });
+    }
+    return s.linksWhitelist;
+  }
+
+  public removeLinkWhitelist(chatId: number, domain: string): boolean {
+    const s = this.getGroupSettings(chatId);
+    const cleanDomain = domain.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/.*$/, '').trim();
+    const initialLen = s.linksWhitelist.length;
+    s.linksWhitelist = s.linksWhitelist.filter((d) => d !== cleanDomain);
+    if (s.linksWhitelist.length !== initialLen) {
+      this.updateGroupSettings(chatId, { linksWhitelist: s.linksWhitelist });
+      return true;
+    }
+    return false;
+  }
+
+  public getLinkWhitelist(chatId: number): string[] {
+    return this.getGroupSettings(chatId).linksWhitelist || [];
+  }
+
+  // --- Locks Management ---
+  public setLock(chatId: number, lockType: string, locked: boolean): Record<string, boolean> {
+    const s = this.getGroupSettings(chatId);
+    const locks = { ...s.locks, [lockType.toLowerCase()]: locked };
+    this.updateGroupSettings(chatId, { locks });
+    return locks;
+  }
+
+  public getLocks(chatId: number): Record<string, boolean> {
+    return this.getGroupSettings(chatId).locks || {};
+  }
+
+  public isLocked(chatId: number, lockType: string): boolean {
+    const locks = this.getLocks(chatId);
+    return Boolean(locks[lockType.toLowerCase()]);
+  }
+
+  // --- Custom Text Filters ---
+  public setFilter(chatId: number, keyword: string, replyText: string = ''): Record<string, string> {
+    const s = this.getGroupSettings(chatId);
+    const key = keyword.toLowerCase().trim();
+    const filters = { ...s.filters, [key]: replyText };
+    this.updateGroupSettings(chatId, { filters });
+    return filters;
+  }
+
+  public removeFilter(chatId: number, keyword: string): boolean {
+    const s = this.getGroupSettings(chatId);
+    const key = keyword.toLowerCase().trim();
+    if (s.filters && s.filters[key] !== undefined) {
+      const filters = { ...s.filters };
+      delete filters[key];
+      this.updateGroupSettings(chatId, { filters });
+      return true;
+    }
+    return false;
+  }
+
+  public getFilters(chatId: number): Record<string, string> {
+    return this.getGroupSettings(chatId).filters || {};
+  }
+
   // --- Warnings System ---
-  public addWarning(record: Omit<WarningRecord, 'id' | 'timestamp'>): { warning: WarningRecord; totalWarnings: number } {
+  public addWarning(record: Omit<WarningRecord, 'id' | 'timestamp' | 'count'>): { warning: WarningRecord; totalWarnings: number } {
+    const existing = this.getUserWarnings(record.chatId, record.userId);
+    const count = existing.length + 1;
+
     const newRecord: WarningRecord = {
       id: Math.random().toString(36).substring(2, 9),
       timestamp: new Date().toISOString(),
+      count,
       ...record
     };
     this.data.warnings.push(newRecord);
@@ -300,6 +423,60 @@ class StorageManager {
     const removed = initialCount - this.data.warnings.length;
     this.scheduleSave();
     return removed;
+  }
+
+  // --- Temporary Moderation Actions (tmute & tban) ---
+  public addTempAction(record: Omit<TempActionRecord, 'id' | 'createdAt'>): TempActionRecord {
+    // Remove any existing pending temp action for this same user/chat/action
+    this.removeTempAction(record.chatId, record.userId, record.action);
+
+    const newRecord: TempActionRecord = {
+      id: Math.random().toString(36).substring(2, 9),
+      createdAt: new Date().toISOString(),
+      ...record
+    };
+
+    if (!this.data.tempActions) {
+      this.data.tempActions = [];
+    }
+
+    this.data.tempActions.push(newRecord);
+    this.scheduleSave();
+    return newRecord;
+  }
+
+  public removeTempAction(chatId: number, userId: number, action?: 'tmute' | 'tban'): boolean {
+    if (!this.data.tempActions) return false;
+    const initialCount = this.data.tempActions.length;
+    this.data.tempActions = this.data.tempActions.filter(
+      (a) => !(a.chatId === chatId && a.userId === userId && (!action || a.action === action))
+    );
+    const removed = initialCount > this.data.tempActions.length;
+    if (removed) {
+      this.scheduleSave();
+    }
+    return removed;
+  }
+
+  public getActiveTempActions(chatId?: number): TempActionRecord[] {
+    if (!this.data.tempActions) return [];
+    const nowSec = Math.floor(Date.now() / 1000);
+    return this.data.tempActions.filter(
+      (a) => (!chatId || a.chatId === chatId) && a.expiresAt > nowSec
+    );
+  }
+
+  public getExpiredTempActions(): TempActionRecord[] {
+    if (!this.data.tempActions) return [];
+    const nowSec = Math.floor(Date.now() / 1000);
+    return this.data.tempActions.filter((a) => a.expiresAt <= nowSec);
+  }
+
+  public getTempAction(chatId: number, userId: number, action?: 'tmute' | 'tban'): TempActionRecord | undefined {
+    if (!this.data.tempActions) return undefined;
+    return this.data.tempActions.find(
+      (a) => a.chatId === chatId && a.userId === userId && (!action || a.action === action)
+    );
   }
 
   // --- Media & Sticker Permissions (/free & /unfree) ---
@@ -408,6 +585,13 @@ class StorageManager {
 
   public getRecentLogs(limit: number = 30): ModerationLog[] {
     return this.data.logs.slice(-limit);
+  }
+
+  public getGroupLogs(chatId: number, limit: number = 20): ModerationLog[] {
+    return this.data.logs
+      .filter((l) => l.chatId === chatId)
+      .slice(-limit)
+      .reverse(); // Most recent first
   }
 
   // --- Chat Message Tracking for /clear ---

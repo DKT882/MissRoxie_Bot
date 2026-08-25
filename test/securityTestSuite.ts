@@ -485,18 +485,12 @@ async function runSecurityTestSuite() {
     );
   }
 
-  // AUTH-25: All commands protected by the same centralized admin guard
+  // AUTH-25: All admin commands protected by the same centralized admin guard
   {
-    const allCommands = [
-      '/kick', '/ban', '/unban', '/promote', '/demote', '/permissions',
-      '/warn', '/warnings', '/resetwarns', '/setwarnlimit',
-      '/setmod', '/delmod', '/links', '/stickers', '/free', '/unfree',
-      '/report', '/say', '/schedule', '/listschedules', '/deleteschedule',
-      '/live', '/start', '/ping', '/status', '/help'
-    ];
+    const allAdminCommands = Array.from(CommandHandler.ADMIN_ONLY_COMMANDS);
 
     let allProtected = true;
-    for (const cmd of allCommands) {
+    for (const cmd of allAdminCommands) {
       lastSentMessage = null;
       const ctx = makeContext(normalMemberId, cmd);
       const handled = await CommandHandler.handleCommand(ctx);
@@ -509,7 +503,7 @@ async function runSecurityTestSuite() {
 
     assert(
       allProtected === true,
-      'AUTH-25 All commands protected by the same centralized admin guard'
+      'AUTH-25 All admin commands protected by the same centralized admin guard'
     );
   }
 

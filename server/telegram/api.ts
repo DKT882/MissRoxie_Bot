@@ -160,6 +160,78 @@ export class TelegramApi {
     return { ok: true };
   }
 
+  public async restrictChatMember(
+    chatId: number | string,
+    userId: number,
+    permissions: import('./types.js').ChatPermissions,
+    options?: { until_date?: number; use_independent_chat_permissions?: boolean }
+  ): Promise<{ ok: boolean; description?: string; error_code?: number }> {
+    return this.call('restrictChatMember', {
+      chat_id: chatId,
+      user_id: userId,
+      permissions,
+      until_date: options?.until_date,
+      use_independent_chat_permissions: options?.use_independent_chat_permissions ?? true
+    });
+  }
+
+  public async unmuteChatMember(
+    chatId: number | string,
+    userId: number
+  ): Promise<{ ok: boolean; description?: string; error_code?: number }> {
+    // Standard member chat permissions to restore all standard rights
+    const fullPermissions: import('./types.js').ChatPermissions = {
+      can_send_messages: true,
+      can_send_audios: true,
+      can_send_documents: true,
+      can_send_photos: true,
+      can_send_videos: true,
+      can_send_video_notes: true,
+      can_send_voice_notes: true,
+      can_send_polls: true,
+      can_send_other_messages: true,
+      can_add_web_page_previews: true,
+      can_invite_users: true,
+      can_pin_messages: false,
+      can_change_info: false,
+      can_manage_topics: false
+    };
+
+    return this.restrictChatMember(chatId, userId, fullPermissions, {
+      use_independent_chat_permissions: true
+    });
+  }
+
+  public async pinChatMessage(
+    chatId: number | string,
+    messageId: number,
+    disableNotification: boolean = false
+  ): Promise<{ ok: boolean; description?: string; error_code?: number }> {
+    return this.call('pinChatMessage', {
+      chat_id: chatId,
+      message_id: messageId,
+      disable_notification: disableNotification
+    });
+  }
+
+  public async unpinChatMessage(
+    chatId: number | string,
+    messageId?: number
+  ): Promise<{ ok: boolean; description?: string; error_code?: number }> {
+    return this.call('unpinChatMessage', {
+      chat_id: chatId,
+      message_id: messageId
+    });
+  }
+
+  public async unpinAllChatMessages(
+    chatId: number | string
+  ): Promise<{ ok: boolean; description?: string; error_code?: number }> {
+    return this.call('unpinAllChatMessages', {
+      chat_id: chatId
+    });
+  }
+
   public async promoteChatMember(
     chatId: number | string,
     userId: number,
@@ -203,6 +275,16 @@ export class TelegramApi {
   ): Promise<{ ok: boolean; result?: TelegramChatMember[]; description?: string; error_code?: number }> {
     return this.call<TelegramChatMember[]>('getChatAdministrators', {
       chat_id: chatId
+    });
+  }
+
+  public async setChatSlowModeDelay(
+    chatId: number | string,
+    slowModeDelay: number
+  ): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    return this.call('setChatSlowModeDelay', {
+      chat_id: chatId,
+      slow_mode_delay: slowModeDelay
     });
   }
 

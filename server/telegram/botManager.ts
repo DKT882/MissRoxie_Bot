@@ -184,18 +184,16 @@ export class TelegramBotManager {
       }
     }
 
-    // Check image, media & sticker protection if message contains media/stickers
-    const mediaIntercepted = await ModerationService.handleMediaAndStickerProtection(message);
-    if (mediaIntercepted) return;
+    // 1. Process Welcome and Goodbye messages
+    await ModerationService.handleWelcomeAndGoodbye(message);
 
-    // Check link protection on text or captions
+    // 2. Check if message is a bot command (starts with '/' or '!')
     const textOrCaption = message.text || message.caption;
     if (textOrCaption) {
-      // 1. Check if message is a bot command (starts with '/')
       const trimmed = textOrCaption.trim();
-      if (trimmed.startsWith('/')) {
+      if (trimmed.startsWith('/') || trimmed.startsWith('!')) {
         const parts = trimmed.split(/\s+/);
-        const command = parts[0];
+        const command = parts[0].startsWith('!') ? `/${parts[0].slice(1)}` : parts[0];
         const args = parts.slice(1);
 
         const isAnonymousAdmin = TelegramMiddleware.isAnonymousAdminMessage(message, message.chat.id);
@@ -225,8 +223,22 @@ export class TelegramBotManager {
         const handled = await CommandHandler.handleCommand(ctx);
         if (handled) return;
       }
+    }
 
-      // 2. Check for unwanted links
+    // 3. Check Anti-Flood protection
+    const floodIntercepted = await ModerationService.handleAntiFlood(message);
+    if (floodIntercepted) return;
+
+    // 4. Check Custom Text Filters
+    const filterIntercepted = await ModerationService.handleCustomFilters(message);
+    if (filterIntercepted) return;
+
+    // 5. Check Content Locks & Media / Sticker / File / Forward / Poll / Location Protection
+    const mediaIntercepted = await ModerationService.handleMediaAndStickerProtection(message);
+    if (mediaIntercepted) return;
+
+    // 6. Check Link Protection
+    if (textOrCaption) {
       const linkIntercepted = await ModerationService.handleLinkProtection(message);
       if (linkIntercepted) return;
     }

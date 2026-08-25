@@ -90,6 +90,48 @@ export interface TelegramMessage {
     length: number;
     duration: number;
   };
+  voice?: {
+    file_id: string;
+    file_unique_id: string;
+    duration: number;
+    mime_type?: string;
+    file_size?: number;
+  };
+  audio?: {
+    file_id: string;
+    file_unique_id: string;
+    duration: number;
+    performer?: string;
+    title?: string;
+    mime_type?: string;
+    file_size?: number;
+  };
+  poll?: {
+    id: string;
+    question: string;
+    options: Array<{ text: string; voter_count: number }>;
+    total_voter_count: number;
+    is_closed: boolean;
+  };
+  contact?: {
+    phone_number: string;
+    first_name: string;
+    last_name?: string;
+    user_id?: number;
+  };
+  location?: {
+    longitude: number;
+    latitude: number;
+  };
+  venue?: {
+    location: { longitude: number; latitude: number };
+    title: string;
+    address: string;
+  };
+  forward_from?: TelegramUser;
+  forward_from_chat?: TelegramChat;
+  forward_date?: number;
+  forward_origin?: any;
   new_chat_members?: TelegramUser[];
   left_chat_member?: TelegramUser;
   new_chat_title?: string;
@@ -181,10 +223,37 @@ export interface TelegramChatMember {
 export interface GroupSettings {
   chatId: number;
   chatTitle?: string;
-  linksProtection: boolean; // default true
-  stickerProtection: boolean; // default true
-  mediaProtection: boolean; // default true (images, GIFs, photos, media)
+  // Warnings
   warnLimit: number; // default 3
+  warnAction: 'ban' | 'mute' | 'kick' | 'warn_only'; // default 'ban'
+  // Anti-Flood
+  floodEnabled: boolean; // default false
+  floodCount: number; // default 8
+  floodWindow: number; // default 5 (seconds)
+  floodAction: 'delete' | 'mute' | 'kick' | 'ban'; // default 'mute'
+  // Links & Whitelist
+  linksProtection: boolean; // default true
+  linksWhitelist: string[]; // default []
+  // Media Toggles
+  mediaProtection: boolean; // default true
+  stickerProtection: boolean; // default true
+  gifsProtection: boolean; // default false
+  videosProtection: boolean; // default false
+  photosProtection: boolean; // default false
+  voiceProtection: boolean; // default false
+  audioProtection: boolean; // default false
+  // Content Locks
+  locks: Record<string, boolean>; // e.g. { links, stickers, gifs, videos, photos, audio, voice, documents, polls, forwards, contacts, locations }
+  // Custom Text Filters
+  filters: Record<string, string>; // word/phrase -> reply or empty for delete
+  // Welcome & Goodbye
+  welcomeEnabled: boolean; // default false
+  welcomeMessage?: string;
+  goodbyeEnabled: boolean; // default false
+  goodbyeMessage?: string;
+  // Slow Mode
+  slowModeSeconds: number; // 0 = off
+  // Reports
   reportsEnabled: boolean; // default true
   updatedAt: string;
 }
@@ -198,6 +267,7 @@ export interface WarningRecord {
   adminId: number;
   adminUsername?: string;
   reason: string;
+  count?: number;
   timestamp: string;
 }
 
@@ -244,6 +314,40 @@ export interface TrackedChatMessage {
   userId?: number;
 }
 
+export interface ChatPermissions {
+  can_send_messages?: boolean;
+  can_send_audios?: boolean;
+  can_send_documents?: boolean;
+  can_send_photos?: boolean;
+  can_send_videos?: boolean;
+  can_send_video_notes?: boolean;
+  can_send_voice_notes?: boolean;
+  can_send_polls?: boolean;
+  can_send_other_messages?: boolean;
+  can_add_web_page_previews?: boolean;
+  can_change_info?: boolean;
+  can_invite_users?: boolean;
+  can_pin_messages?: boolean;
+  can_manage_topics?: boolean;
+}
+
+export interface TempActionRecord {
+  id: string;
+  chatId: number;
+  chatTitle?: string;
+  userId: number;
+  username?: string;
+  userFirstName?: string;
+  action: 'tmute' | 'tban';
+  durationSeconds: number;
+  durationFormatted: string;
+  reason?: string;
+  adminId: number;
+  adminUsername?: string;
+  createdAt: string;
+  expiresAt: number; // Unix timestamp in seconds
+}
+
 export interface ModerationLog {
   id: string;
   chatId: number;
@@ -260,7 +364,7 @@ export interface ModerationLog {
   adminUserId?: number;
   adminUsername?: string;
   command?: string;
-  action: 'kick' | 'ban' | 'unban' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'delete_image' | 'delete_media' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'clear' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change';
+  action: 'kick' | 'ban' | 'unban' | 'mute' | 'unmute' | 'tmute' | 'tban' | 'dban' | 'dmute' | 'dkick' | 'sban' | 'smute' | 'skick' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'delete_image' | 'delete_media' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'clear' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change' | 'lock' | 'unlock' | 'flood_action' | 'filter_match' | 'set_slowmode' | 'pin' | 'unpin';
   result?: 'success' | 'denied' | 'error';
   telegramError?: string;
   reason?: string;
