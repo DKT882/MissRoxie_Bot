@@ -38,7 +38,7 @@ export async function runPhase9ATests() {
   // 4. Test Promotion Detection
   const promoMessage = {
     message_id: 1,
-    chat: { id: chatId, title: chatTitle, type: 'supergroup' },
+    chat: { id: chatId, title: chatTitle, type: 'supergroup' as const },
     from: { id: normalUserId, is_bot: false, first_name: 'RegularUser' },
     date: Date.now() / 1000,
     text: 'Join my channel t.me/cryptosignalsvip for guaranteed 100x gains!'

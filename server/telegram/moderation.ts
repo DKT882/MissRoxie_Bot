@@ -919,7 +919,7 @@ export class ModerationService {
 
     // Check if autoDeleteJoinLeave is enabled and this message is a join or leave system service message
     if (settings.autoDeleteJoinLeave) {
-      if ((message.new_chat_members && message.new_chat_members.length > 0) || message.left_chat_member || message.new_chat_member || message.old_chat_member) {
+      if ((message.new_chat_members && message.new_chat_members.length > 0) || message.left_chat_member) {
         setTimeout(() => {
           telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
         }, 3500); // delete after 3.5 seconds

@@ -104,7 +104,7 @@ export class CommandHandler {
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
   public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
-    '/report', '/getnote', '/notes', '/note', '/delnote'
+    '/report', '/getnote', '/notes', '/note', '/delnote', '/all'
   ]);
 
   public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
@@ -131,27 +131,38 @@ export class CommandHandler {
   ]);
 
   public static async handleCommand(ctx: CommandContext): Promise<boolean> {
-    const cmd = ctx.command.toLowerCase().split('@')[0]; // strip bot username if present, e.g. /ban@MissRoxie_Bot
+    const rawCmd = ctx.command;
+    const cmd = rawCmd.toLowerCase().split('@')[0]; // strip bot username if present, e.g. /ban@MissRoxie_Bot
+    console.log(`[COMMAND] received command=${rawCmd} chatId=${ctx.chatId} userId=${ctx.sender?.id}`);
+    console.log(`[COMMAND] parsed name=${cmd.replace(/^\//, '')} args=${JSON.stringify(ctx.args || [])}`);
 
     const isPublic = CommandHandler.PUBLIC_GROUP_COMMANDS.has(cmd);
     const isAdminOnly = CommandHandler.ADMIN_ONLY_COMMANDS.has(cmd);
 
     if (!isPublic && !isAdminOnly) {
+      console.log(`[COMMAND] registry lookup command=${cmd.replace(/^\//, '')} result=NOT_FOUND`);
       return false;
     }
+    console.log(`[COMMAND] registry lookup command=${cmd.replace(/^\//, '')} result=FOUND`);
 
     if (isAdminOnly) {
       // Centrally enforce admin-only requirement on ALL Roxie admin and moderation commands
       const auth = await TelegramMiddleware.requireAdmin(ctx);
       if (!auth.allowed) {
+        console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DENIED`);
         return true; // Command was handled (denial notice dispatched)
       }
+      console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED`);
     } else if (isPublic) {
       // Public commands (like /report) are restricted to groups and open to normal members
       if (!(await TelegramMiddleware.requireGroup(ctx))) {
+        console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DENIED_NOT_GROUP`);
         return true;
       }
+      console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED`);
     }
+
+    console.log(`[COMMAND] handler command=${cmd.replace(/^\//, '')} invoked`);
 
     switch (cmd) {
       case '/del':
@@ -2933,70 +2944,84 @@ export class CommandHandler {
     if (actor.actorRank < RoleRank.MODERATOR) {
       await telegramApi.sendMessage(
         ctx.chatId,
-        '❌ This command is available only to moderators and administrators.',
+        '❌ You don\'t have permission to use /all.',
         { reply_to_message_id: ctx.message.message_id }
       );
       return;
     }
 
-    const customText = ctx.args.join(' ');
+    const customText = ctx.args.join(' ').trim();
+    const defaultMsg = customText || 'Hiee';
     const members = db.getGroupMembersList(ctx.chatId);
 
-    // Delete admin command message
-    await telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
+    const validMembers = members.filter(m => {
+      const uname = (m.username || '').toLowerCase();
+      if (uname.includes('bot') || uname.endsWith('bot') || (m as any).is_bot) return false;
+      return true;
+    });
 
-    if (members.length === 0) {
+    if (validMembers.length === 0) {
       await telegramApi.sendMessage(
         ctx.chatId,
-        customText ? `${customText}\n\n@all` : '📢 <b>Attention Everyone!</b> @all',
-        { reply_to_message_id: ctx.message.reply_to_message?.message_id }
+        '⚠️ I don\'t have enough cached group members to mention everyone yet.',
+        { reply_to_message_id: ctx.message.message_id }
       );
+      setTimeout(() => {
+        telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
+      }, 10000);
+
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,
         actor,
         command: 'all',
-        action: 'all_mention',
+        action: 'warn',
         result: 'success',
-        details: 'Mentioned all members (no cached members yet)'
+        details: 'Tried /all but no cached members available'
       });
       return;
     }
 
-    const header = customText ? `${customText}\n\n` : '📢 <b>Attention Everyone!</b>\n\n';
+    const header = `${defaultMsg}\n\n`;
     const chunks: string[] = [];
     let currentChunk: string[] = [];
     let currentLength = header.length;
 
-    for (const m of members) {
-      const mention = `<a href="tg://user?id=${m.userId}">${m.firstName || 'User'}</a>`;
+    for (const m of validMembers) {
+      const displayName = m.firstName || m.username || `User ${m.userId}`;
+      const mention = `<a href="tg://user?id=${m.userId}">${escapeHtml(displayName)}</a>`;
       if (currentLength + mention.length + 2 > 3800) {
-        chunks.push(header + currentChunk.join(', '));
+        chunks.push(header + currentChunk.join(' '));
         currentChunk = [mention];
         currentLength = header.length + mention.length;
       } else {
         currentChunk.push(mention);
-        currentLength += mention.length + 2;
+        currentLength += mention.length + 1;
       }
     }
     if (currentChunk.length > 0) {
-      chunks.push(header + currentChunk.join(', '));
+      chunks.push(header + currentChunk.join(' '));
     }
 
     for (let i = 0; i < chunks.length; i++) {
       await telegramApi.sendMessage(ctx.chatId, chunks[i], {
-        reply_to_message_id: i === 0 && ctx.message.reply_to_message?.message_id ? ctx.message.reply_to_message.message_id : undefined
+        reply_to_message_id: i === 0 && ctx.message.reply_to_message?.message_id ? ctx.message.reply_to_message.message_id : undefined,
+        parse_mode: 'HTML'
       });
     }
+
+    setTimeout(() => {
+      telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
+    }, 10000);
 
     TelegramMiddleware.logAudit({
       chatId: ctx.chatId,
       chatTitle: ctx.chatTitle,
       actor,
       command: 'all',
-      action: 'all_mention',
+      action: 'warn',
       result: 'success',
-      details: `Mentioned ${members.length} members across ${chunks.length} message(s)`
+      details: `Mentioned ${validMembers.length} members across ${chunks.length} message(s)`
     });
   }
 
@@ -4308,18 +4333,28 @@ export class CommandHandler {
 
   private static async handleNote(ctx: CommandContext) {
     const actor = await TelegramMiddleware.resolveActor(ctx);
-    // Allow if moderator/admin or if in simulation/test (actorRank >= MEMBER)
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '❌ You don\'t have permission to use this command.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      console.log(`[COMMAND] authorization command=note result=DENIED`);
+      return;
+    }
+
     const name = ctx.args[0]?.toLowerCase()?.trim()?.replace(/^#/, '');
     const content = ctx.args.slice(1).join(' ').trim();
 
     if (!name || !content) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Usage:</b> <code>/note <name> <content></code>', {
+      await telegramApi.sendMessage(ctx.chatId, 'Usage:\n/note <name> <content>', {
         reply_to_message_id: ctx.message.message_id
       });
+      console.log(`[COMMAND] reply result=usage_error`);
       return;
     }
 
+    console.log(`[NOTE] saveNote chatId=${ctx.chatId} key=${name}`);
     db.saveNote(ctx.chatId, name, content, ctx.sender.id, ctx.adminDisplayName);
+    console.log(`[NOTE] saveNote result=success`);
 
     db.addLog({
       chatId: ctx.chatId,
@@ -4330,74 +4365,101 @@ export class CommandHandler {
       reason: `Saved note #${name}`
     });
 
-    await telegramApi.sendMessage(ctx.chatId, `✅ <b>Note <code>#${name}</code> saved successfully!</b>\nTrigger in chat with <code>#${name}</code> or view with <code>/getnote ${name}</code>`, {
+    await telegramApi.sendMessage(ctx.chatId, `✅ Note saved: ${name}`, {
       reply_to_message_id: ctx.message.message_id
     });
+    console.log(`[COMMAND] reply result=success`);
   }
 
   private static async handleGetNote(ctx: CommandContext) {
     const name = ctx.args[0]?.toLowerCase()?.trim()?.replace(/^#/, '');
     if (!name) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Usage:</b> <code>/getnote <name></code>', {
+      await telegramApi.sendMessage(ctx.chatId, 'Usage:\n/getnote <name>', {
         reply_to_message_id: ctx.message.message_id
       });
+      console.log(`[COMMAND] reply result=usage_error`);
       return;
     }
 
+    console.log(`[NOTE] getNote chatId=${ctx.chatId} key=${name}`);
     const note = db.getNote(ctx.chatId, name);
     if (!note) {
-      await telegramApi.sendMessage(ctx.chatId, `⚠️ Note <code>#${name}</code> not found in this group.`, {
+      console.log(`[NOTE] getNote result=not_found`);
+      await telegramApi.sendMessage(ctx.chatId, `❌ Note not found: ${name}`, {
         reply_to_message_id: ctx.message.message_id
       });
+      console.log(`[COMMAND] reply result=success`);
       return;
     }
+    console.log(`[NOTE] getNote result=success`);
 
     const formattedContent = note.content
       .replace(/{user}/gi, ctx.sender.first_name || 'User')
       .replace(/{chat}/gi, ctx.chatTitle || 'Chat');
 
-    await telegramApi.sendMessage(ctx.chatId, formattedContent, {
+    const responseText = `📝 <b>${name}</b>\n\n${formattedContent}`;
+    await telegramApi.sendMessage(ctx.chatId, responseText, {
       reply_to_message_id: ctx.message.message_id
     });
+    console.log(`[COMMAND] reply result=success`);
   }
 
   private static async handleNotesList(ctx: CommandContext) {
+    console.log(`[NOTE] list chatId=${ctx.chatId}`);
     const notes = db.getAllNotes(ctx.chatId);
     if (!notes || notes.length === 0) {
-      await telegramApi.sendMessage(ctx.chatId, 'ℹ️ <b>No notes configured in this chat.</b>\nAdmins can add notes with <code>/note <name> <content></code>.', {
+      console.log(`[NOTE] list result=empty`);
+      await telegramApi.sendMessage(ctx.chatId, '📝 No notes saved for this group.', {
         reply_to_message_id: ctx.message.message_id
       });
+      console.log(`[COMMAND] reply result=success`);
       return;
     }
+    console.log(`[NOTE] list result=success count=${notes.length}`);
 
     const noteLines = notes
-      .map((n, i) => `${i + 1}. <b>#${n.name}</b> (by ${n.savedByUsername || 'Admin'})`)
+      .map((n) => `• ${n.name}`)
       .join('\n');
 
-    await telegramApi.sendMessage(ctx.chatId, `📚 <b>Group Notes (${notes.length})</b>\n\n${noteLines}\n\n<i>Retrieve with <code>/getnote <name></code> or shortcut <code>#<name></code></i>`, {
+    const responseText = `📝 <b>Group Notes</b>\n\n${noteLines}`;
+    await telegramApi.sendMessage(ctx.chatId, responseText, {
       reply_to_message_id: ctx.message.message_id
     });
+    console.log(`[COMMAND] reply result=success`);
   }
 
   private static async handleDelNote(ctx: CommandContext) {
     const actor = await TelegramMiddleware.resolveActor(ctx);
-    const name = ctx.args[0]?.toLowerCase()?.trim()?.replace(/^#/, '');
-    if (!name) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Usage:</b> <code>/delnote <name></code>', {
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '❌ You don\'t have permission to use this command.', {
         reply_to_message_id: ctx.message.message_id
       });
+      console.log(`[COMMAND] authorization command=delnote result=DENIED`);
       return;
     }
 
-    const note = db.getNote(ctx.chatId, name);
-    if (!note) {
-      await telegramApi.sendMessage(ctx.chatId, `⚠️ Note <code>#${name}</code> does not exist.`, {
+    const name = ctx.args[0]?.toLowerCase()?.trim()?.replace(/^#/, '');
+    if (!name) {
+      await telegramApi.sendMessage(ctx.chatId, 'Usage:\n/delnote <name>', {
         reply_to_message_id: ctx.message.message_id
       });
+      console.log(`[COMMAND] reply result=usage_error`);
+      return;
+    }
+
+    console.log(`[NOTE] deleteNote chatId=${ctx.chatId} key=${name}`);
+    const note = db.getNote(ctx.chatId, name);
+    if (!note) {
+      console.log(`[NOTE] deleteNote result=not_found`);
+      await telegramApi.sendMessage(ctx.chatId, `❌ Note not found: ${name}`, {
+        reply_to_message_id: ctx.message.message_id
+      });
+      console.log(`[COMMAND] reply result=success`);
       return;
     }
 
     db.deleteNote(ctx.chatId, name);
+    console.log(`[NOTE] deleteNote result=success`);
 
     db.addLog({
       chatId: ctx.chatId,
@@ -4408,9 +4470,10 @@ export class CommandHandler {
       reason: `Deleted note #${name}`
     });
 
-    await telegramApi.sendMessage(ctx.chatId, `✅ <b>Note <code>#${name}</code> has been deleted.</b>`, {
+    await telegramApi.sendMessage(ctx.chatId, `✅ Note deleted: ${name}`, {
       reply_to_message_id: ctx.message.message_id
     });
+    console.log(`[COMMAND] reply result=success`);
   }
 
   private static async handleExportConfig(ctx: CommandContext) {

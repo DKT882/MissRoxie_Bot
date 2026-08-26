@@ -836,6 +836,22 @@
       "content": "Hello!",
       "savedBy": 111,
       "savedAt": "2026-08-26T09:08:19.542Z"
+    },
+    "-100555666777_rules": {
+      "name": "rules",
+      "chatId": -100555666777,
+      "content": "Group rules content",
+      "savedBy": 12345,
+      "savedByUsername": "Admin",
+      "savedAt": "2026-08-26T11:13:40.735Z"
+    },
+    "-100555666777_faq2": {
+      "name": "faq2",
+      "chatId": -100555666777,
+      "content": "FAQ 2 content",
+      "savedBy": 12345,
+      "savedByUsername": "Admin",
+      "savedAt": "2026-08-26T11:13:40.735Z"
     }
   },
   "approvedUsers": {},
@@ -844,34 +860,34 @@
     {
       "id": "ZYWSXD",
       "createdAt": "2026-08-25T18:41:32.055Z",
-      "runsCount": 3,
+      "runsCount": 4,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-26T10:51:54.628Z",
+      "nextRun": "2026-08-26T11:51:59.055Z",
       "adminId": 999
     },
     {
       "id": "55O99P",
       "createdAt": "2026-08-25T18:58:18.112Z",
-      "runsCount": 3,
+      "runsCount": 4,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-26T10:51:54.628Z",
+      "nextRun": "2026-08-26T11:51:59.055Z",
       "adminId": 999
     },
     {
       "id": "Z1CLUO",
       "createdAt": "2026-08-25T19:17:55.318Z",
-      "runsCount": 2,
+      "runsCount": 3,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-26T10:51:54.628Z",
+      "nextRun": "2026-08-26T11:51:59.055Z",
       "adminId": 999
     },
     {
@@ -888,12 +904,12 @@
     {
       "id": "83NSXH",
       "createdAt": "2026-08-25T19:18:12.310Z",
-      "runsCount": 2,
+      "runsCount": 3,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-26T10:51:54.628Z",
+      "nextRun": "2026-08-26T11:51:59.055Z",
       "adminId": 999
     },
     {
@@ -910,12 +926,12 @@
     {
       "id": "W1HJPK",
       "createdAt": "2026-08-26T08:53:26.672Z",
-      "runsCount": 2,
+      "runsCount": 3,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-26T10:54:09.635Z",
+      "nextRun": "2026-08-26T11:54:14.064Z",
       "adminId": 999
     },
     {
@@ -932,12 +948,12 @@
     {
       "id": "M8HLLH",
       "createdAt": "2026-08-26T08:54:23.506Z",
-      "runsCount": 2,
+      "runsCount": 3,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-26T10:54:39.636Z",
+      "nextRun": "2026-08-26T11:54:44.066Z",
       "adminId": 999
     },
     {
@@ -953,12 +969,12 @@
     {
       "id": "YDSVDX",
       "createdAt": "2026-08-26T09:06:54.357Z",
-      "runsCount": 2,
+      "runsCount": 3,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-26T11:07:30.270Z",
+      "nextRun": "2026-08-26T12:07:30.544Z",
       "adminId": 999
     },
     {
@@ -974,12 +990,12 @@
     {
       "id": "2PHBNL",
       "createdAt": "2026-08-26T09:07:52.077Z",
-      "runsCount": 2,
+      "runsCount": 3,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-26T11:08:15.272Z",
+      "nextRun": "2026-08-26T12:08:15.546Z",
       "adminId": 999
     },
     {
@@ -1015,398 +1031,6 @@
     }
   ],
   "logs": [
-    {
-      "id": "b5z038g",
-      "timestamp": "2026-08-25T19:17:35.116Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ I couldn't identify that user. Reply to their message or provide a valid Telegram ID."
-    },
-    {
-      "id": "o5k3xw5",
-      "timestamp": "2026-08-25T19:17:35.117Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "targetId": 4001,
-      "targetUserId": 4001,
-      "targetUsername": "member1_user",
-      "targetTelegramStatus": "member",
-      "targetCustomRole": "NONE",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ That user is not currently an administrator."
-    },
-    {
-      "id": "cxrskr4",
-      "timestamp": "2026-08-25T19:17:35.117Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 2001,
-      "actorUsername": "admin_promote",
-      "actorRole": "ADMIN",
-      "adminUserId": 2001,
-      "adminUsername": "AdminWithPromote",
-      "targetId": 1001,
-      "targetUserId": 1001,
-      "targetUsername": "owner_user",
-      "targetTelegramStatus": "creator",
-      "targetCustomRole": "NONE",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ The group owner cannot have their permissions edited."
-    },
-    {
-      "id": "tgbvqt7",
-      "timestamp": "2026-08-25T19:17:35.118Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ Roxie's permissions cannot be edited through this command."
-    },
-    {
-      "id": "p4biipq",
-      "timestamp": "2026-08-25T19:17:35.118Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 2001,
-      "actorUsername": "admin_promote",
-      "actorRole": "ADMIN",
-      "adminUserId": 2001,
-      "adminUsername": "AdminWithPromote",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ You cannot edit your own permissions."
-    },
-    {
-      "id": "f1vga1n",
-      "timestamp": "2026-08-25T19:17:35.118Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ Anonymous administrators and channels cannot have their permissions edited."
-    },
-    {
-      "id": "6gyx4rj",
-      "timestamp": "2026-08-25T19:17:35.119Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "targetId": 2004,
-      "targetUserId": 2004,
-      "targetUsername": "target_uneditable",
-      "targetTelegramStatus": "administrator",
-      "targetCustomRole": "NONE",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ Telegram does not allow Roxie to modify this administrator."
-    },
-    {
-      "id": "0fs9q87",
-      "timestamp": "2026-08-25T19:17:35.121Z",
-      "chatId": -1001234567890,
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "success",
-      "details": "Successfully updated administrator permissions for @target_editable"
-    },
-    {
-      "id": "y904oum",
-      "timestamp": "2026-08-25T19:17:35.122Z",
-      "chatId": -1001234567890,
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "error",
-      "details": "Telegram API error: ❌ Telegram does not allow Roxie to modify this administrator.",
-      "telegramError": "CANNOT_EDIT_THIS_USER"
-    },
-    {
-      "id": "131w90g",
-      "timestamp": "2026-08-25T19:17:35.924Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 4001,
-      "adminUsername": "member_user",
-      "action": "report",
-      "reason": "spamming links",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "hhxt5qx",
-      "timestamp": "2026-08-25T19:17:35.926Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 2001,
-      "adminUsername": "admin_user",
-      "action": "report",
-      "reason": "advertising",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "otdp2us",
-      "timestamp": "2026-08-25T19:17:35.926Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "action": "report",
-      "reason": "offending content",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "zz2qcb2",
-      "timestamp": "2026-08-25T19:17:35.926Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 4001,
-      "adminUsername": "member_user",
-      "action": "report",
-      "reason": "malicious user",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "x4eax0e",
-      "timestamp": "2026-08-25T19:17:35.926Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 4001,
-      "adminUsername": "member_user",
-      "action": "report",
-      "reason": "Rule 1 violation",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "frl1asz",
-      "timestamp": "2026-08-25T19:17:52.726Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ I couldn't identify that user. Reply to their message or provide a valid Telegram ID."
-    },
-    {
-      "id": "1fecv4a",
-      "timestamp": "2026-08-25T19:17:52.727Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "targetId": 4001,
-      "targetUserId": 4001,
-      "targetUsername": "member1_user",
-      "targetTelegramStatus": "member",
-      "targetCustomRole": "NONE",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ That user is not currently an administrator."
-    },
-    {
-      "id": "hb498as",
-      "timestamp": "2026-08-25T19:17:52.727Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 2001,
-      "actorUsername": "admin_promote",
-      "actorRole": "ADMIN",
-      "adminUserId": 2001,
-      "adminUsername": "AdminWithPromote",
-      "targetId": 1001,
-      "targetUserId": 1001,
-      "targetUsername": "owner_user",
-      "targetTelegramStatus": "creator",
-      "targetCustomRole": "NONE",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ The group owner cannot have their permissions edited."
-    },
-    {
-      "id": "ov2gp59",
-      "timestamp": "2026-08-25T19:17:52.728Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ Roxie's permissions cannot be edited through this command."
-    },
-    {
-      "id": "c8k13gv",
-      "timestamp": "2026-08-25T19:17:52.728Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 2001,
-      "actorUsername": "admin_promote",
-      "actorRole": "ADMIN",
-      "adminUserId": 2001,
-      "adminUsername": "AdminWithPromote",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ You cannot edit your own permissions."
-    },
-    {
-      "id": "nmoc4b0",
-      "timestamp": "2026-08-25T19:17:52.728Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ Anonymous administrators and channels cannot have their permissions edited."
-    },
-    {
-      "id": "o1u9aex",
-      "timestamp": "2026-08-25T19:17:52.729Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "targetId": 2004,
-      "targetUserId": 2004,
-      "targetUsername": "target_uneditable",
-      "targetTelegramStatus": "administrator",
-      "targetCustomRole": "NONE",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ Telegram does not allow Roxie to modify this administrator."
-    },
-    {
-      "id": "vlma9n9",
-      "timestamp": "2026-08-25T19:17:52.731Z",
-      "chatId": -1001234567890,
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "success",
-      "details": "Successfully updated administrator permissions for @target_editable"
-    },
-    {
-      "id": "k5ss2pu",
-      "timestamp": "2026-08-25T19:17:52.732Z",
-      "chatId": -1001234567890,
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "error",
-      "details": "Telegram API error: ❌ Telegram does not allow Roxie to modify this administrator.",
-      "telegramError": "CANNOT_EDIT_THIS_USER"
-    },
-    {
-      "id": "2ad2qqf",
-      "timestamp": "2026-08-25T19:17:53.526Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 4001,
-      "adminUsername": "member_user",
-      "action": "report",
-      "reason": "spamming links",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
     {
       "id": "h80qgfs",
       "timestamp": "2026-08-25T19:17:53.527Z",
@@ -3589,6 +3213,272 @@
       "action": "clear",
       "result": "success",
       "details": "Purged 50 messages (all recent messages)"
+    },
+    {
+      "id": "hbmvmia",
+      "timestamp": "2026-08-26T10:48:32.424Z",
+      "chatId": -1004476693823,
+      "chatTitle": "testSubject 2",
+      "groupId": -1004476693823,
+      "actorId": 8204962552,
+      "actorUsername": "palindrome1551",
+      "actorRole": "OWNER",
+      "adminUserId": 8204962552,
+      "adminUsername": "@palindrome1551",
+      "command": "clear",
+      "action": "clear",
+      "result": "success",
+      "details": "Purged 50 messages (all recent messages)"
+    },
+    {
+      "id": "ldttftk",
+      "timestamp": "2026-08-26T10:51:59.910Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [ZYWSXD]: \"Daily check-in...\""
+    },
+    {
+      "id": "0cdvp8n",
+      "timestamp": "2026-08-26T10:52:00.862Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [55O99P]: \"Daily check-in...\""
+    },
+    {
+      "id": "dmywuyx",
+      "timestamp": "2026-08-26T10:52:01.268Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [Z1CLUO]: \"Daily check-in...\""
+    },
+    {
+      "id": "kwd2qqu",
+      "timestamp": "2026-08-26T10:52:01.671Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [83NSXH]: \"Daily check-in...\""
+    },
+    {
+      "id": "rjk2txt",
+      "timestamp": "2026-08-26T10:54:14.935Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [W1HJPK]: \"Daily check-in...\""
+    },
+    {
+      "id": "qz7ru2y",
+      "timestamp": "2026-08-26T10:54:45.405Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [M8HLLH]: \"Daily check-in...\""
+    },
+    {
+      "id": "aiixicr",
+      "timestamp": "2026-08-26T11:07:31.404Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [YDSVDX]: \"Daily check-in...\""
+    },
+    {
+      "id": "s3clnj3",
+      "timestamp": "2026-08-26T11:08:15.956Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [2PHBNL]: \"Daily check-in...\""
+    },
+    {
+      "id": "yojcr14",
+      "timestamp": "2026-08-26T11:13:40.733Z",
+      "chatId": -100555666777,
+      "chatTitle": "Test Group",
+      "targetUserId": 12345,
+      "targetUsername": "adminuser",
+      "action": "warn",
+      "reason": "Saved note #faq"
+    },
+    {
+      "id": "23sn1dc",
+      "timestamp": "2026-08-26T11:13:40.735Z",
+      "chatId": -100555666777,
+      "chatTitle": "Test Group",
+      "targetUserId": 12345,
+      "targetUsername": "adminuser",
+      "action": "warn",
+      "reason": "Deleted note #faq"
+    },
+    {
+      "id": "ukpar5j",
+      "timestamp": "2026-08-26T11:13:40.736Z",
+      "chatId": -100555666777,
+      "chatTitle": "Test Group",
+      "targetUserId": 12345,
+      "targetUsername": "adminuser",
+      "action": "warn",
+      "reason": "Saved note #faq2"
+    },
+    {
+      "id": "wfwjxw5",
+      "timestamp": "2026-08-26T11:13:41.889Z",
+      "chatId": -100999888778,
+      "chatTitle": "Test Group",
+      "groupId": -100999888778,
+      "actorId": 12345,
+      "actorRole": "ADMIN",
+      "adminUserId": 12345,
+      "adminUsername": "Admin",
+      "command": "all",
+      "action": "warn",
+      "result": "success",
+      "details": "Mentioned 2 members across 1 message(s)"
+    },
+    {
+      "id": "ndeb1ez",
+      "timestamp": "2026-08-26T11:13:41.889Z",
+      "chatId": -100999888778,
+      "chatTitle": "Test Group",
+      "groupId": -100999888778,
+      "actorId": 12345,
+      "actorRole": "ADMIN",
+      "adminUserId": 12345,
+      "adminUsername": "Admin",
+      "command": "all",
+      "action": "warn",
+      "result": "success",
+      "details": "Mentioned 2 members across 1 message(s)"
+    },
+    {
+      "id": "2cm5qww",
+      "timestamp": "2026-08-26T11:13:41.890Z",
+      "chatId": -888999,
+      "chatTitle": "Empty Group",
+      "groupId": -888999,
+      "actorId": 12345,
+      "actorRole": "ADMIN",
+      "adminUserId": 12345,
+      "adminUsername": "Admin",
+      "command": "all",
+      "action": "warn",
+      "result": "success",
+      "details": "Tried /all but no cached members available"
+    },
+    {
+      "id": "z9k7ksn",
+      "timestamp": "2026-08-26T11:13:54.703Z",
+      "chatId": -100111222333,
+      "chatTitle": "Test Group",
+      "targetUserId": 12345,
+      "action": "warn",
+      "reason": "Saved note #dispatchkey"
+    },
+    {
+      "id": "7kg8wby",
+      "timestamp": "2026-08-26T11:13:54.703Z",
+      "chatId": -100111222333,
+      "chatTitle": "Test Group",
+      "targetUserId": 12345,
+      "action": "warn",
+      "reason": "Deleted note #dispatchkey"
+    },
+    {
+      "id": "jc5hfv9",
+      "timestamp": "2026-08-26T11:13:54.704Z",
+      "chatId": -100111222333,
+      "chatTitle": "Test Group",
+      "groupId": -100111222333,
+      "actorId": 12345,
+      "actorRole": "ADMIN",
+      "adminUserId": 12345,
+      "adminUsername": "Admin",
+      "command": "all",
+      "action": "warn",
+      "result": "success",
+      "details": "Tried /all but no cached members available"
+    },
+    {
+      "id": "q25pf57",
+      "timestamp": "2026-08-26T11:13:55.785Z",
+      "chatId": -100999888778,
+      "chatTitle": "Test Group",
+      "groupId": -100999888778,
+      "actorId": 12345,
+      "actorRole": "ADMIN",
+      "adminUserId": 12345,
+      "adminUsername": "Admin",
+      "command": "all",
+      "action": "warn",
+      "result": "success",
+      "details": "Mentioned 2 members across 1 message(s)"
+    },
+    {
+      "id": "z9r25i5",
+      "timestamp": "2026-08-26T11:13:55.786Z",
+      "chatId": -100999888778,
+      "chatTitle": "Test Group",
+      "groupId": -100999888778,
+      "actorId": 12345,
+      "actorRole": "ADMIN",
+      "adminUserId": 12345,
+      "adminUsername": "Admin",
+      "command": "all",
+      "action": "warn",
+      "result": "success",
+      "details": "Mentioned 2 members across 1 message(s)"
+    },
+    {
+      "id": "r9zsb6g",
+      "timestamp": "2026-08-26T11:13:55.786Z",
+      "chatId": -888999,
+      "chatTitle": "Empty Group",
+      "groupId": -888999,
+      "actorId": 12345,
+      "actorRole": "ADMIN",
+      "adminUserId": 12345,
+      "adminUsername": "Admin",
+      "command": "all",
+      "action": "warn",
+      "result": "success",
+      "details": "Tried /all but no cached members available"
+    },
+    {
+      "id": "d0i41jv",
+      "timestamp": "2026-08-26T11:14:08.770Z",
+      "chatId": -100111222333,
+      "chatTitle": "Test Group",
+      "targetUserId": 12345,
+      "action": "warn",
+      "reason": "Saved note #dispatchkey"
+    },
+    {
+      "id": "42j2v2l",
+      "timestamp": "2026-08-26T11:14:08.770Z",
+      "chatId": -100111222333,
+      "chatTitle": "Test Group",
+      "targetUserId": 12345,
+      "action": "warn",
+      "reason": "Deleted note #dispatchkey"
+    },
+    {
+      "id": "ichjlrp",
+      "timestamp": "2026-08-26T11:14:08.771Z",
+      "chatId": -100111222333,
+      "chatTitle": "Test Group",
+      "groupId": -100111222333,
+      "actorId": 12345,
+      "actorRole": "ADMIN",
+      "adminUserId": 12345,
+      "adminUsername": "Admin",
+      "command": "all",
+      "action": "warn",
+      "result": "success",
+      "details": "Tried /all but no cached members available"
     }
   ],
   "knownUsers": {
@@ -3596,15 +3486,15 @@
       "userId": 8864012889,
       "username": "Rojloo",
       "firstName": "Vaani",
-      "groupId": -1004331070653,
-      "lastSeen": "2026-08-26T08:52:07.388Z"
+      "groupId": -1004356470022,
+      "lastSeen": "2026-08-26T10:57:22.044Z"
     },
     "palindrome1551": {
       "userId": 8204962552,
       "username": "palindrome1551",
       "firstName": "susss",
       "groupId": -1004476693823,
-      "lastSeen": "2026-08-26T10:46:22.555Z"
+      "lastSeen": "2026-08-26T10:48:29.962Z"
     },
     "missroxie_bot": {
       "userId": 8841013562,
@@ -3650,11 +3540,11 @@
       "lastSeen": "2026-08-26T09:08:16.248Z"
     },
     "testbot": {
-      "userId": 9999,
-      "username": "TestBot",
-      "firstName": "TestBot",
-      "groupId": -1001234567890,
-      "lastSeen": "2026-08-26T09:08:16.250Z"
+      "userId": 333,
+      "username": "testbot",
+      "firstName": "Bot",
+      "groupId": -100999888778,
+      "lastSeen": "2026-08-26T11:13:55.781Z"
     },
     "test_member_alpha": {
       "userId": 77770001,
@@ -3870,7 +3760,7 @@
       "username": "Version_of_sex",
       "firstName": "✇‿⃪ᷝ ⷨ 𝐖 ꘍ ɤ ɤ ᛧ ꭷ ɤ𝁜่🚩",
       "groupId": -1004356470022,
-      "lastSeen": "2026-08-26T10:15:32.248Z"
+      "lastSeen": "2026-08-26T11:02:09.797Z"
     },
     "zskvd": {
       "userId": 1210223411,
@@ -3995,9 +3885,44 @@
       "lastName": ".",
       "groupId": -1004356470022,
       "lastSeen": "2026-08-26T10:06:19.588Z"
+    },
+    "alice": {
+      "userId": 111,
+      "username": "alice",
+      "firstName": "Alice",
+      "groupId": -100999888778,
+      "lastSeen": "2026-08-26T11:13:55.779Z"
+    },
+    "bob": {
+      "userId": 222,
+      "username": "bob",
+      "firstName": "Bob",
+      "groupId": -100999888778,
+      "lastSeen": "2026-08-26T11:13:55.781Z"
     }
   },
   "knownUsersById": {
+    "111": {
+      "userId": 111,
+      "username": "alice",
+      "firstName": "Alice",
+      "groupId": -100999888778,
+      "lastSeen": "2026-08-26T11:13:55.779Z"
+    },
+    "222": {
+      "userId": 222,
+      "username": "bob",
+      "firstName": "Bob",
+      "groupId": -100999888778,
+      "lastSeen": "2026-08-26T11:13:55.781Z"
+    },
+    "333": {
+      "userId": 333,
+      "username": "testbot",
+      "firstName": "Bot",
+      "groupId": -100999888778,
+      "lastSeen": "2026-08-26T11:13:55.781Z"
+    },
     "1001": {
       "userId": 1001,
       "username": "owner_user",
@@ -4076,7 +4001,6 @@
     },
     "9999": {
       "userId": 9999,
-      "username": "TestBot",
       "firstName": "TestBot",
       "groupId": -1001234567890,
       "lastSeen": "2026-08-26T09:08:16.250Z"
@@ -4199,15 +4123,15 @@
       "id": 8864012889,
       "username": "Rojloo",
       "firstName": "Vaani",
-      "lastSeen": "2026-08-26T08:52:07.388Z",
+      "lastSeen": "2026-08-26T10:57:22.044Z",
       "userId": 8864012889,
-      "groupId": -1004331070653
+      "groupId": -1004356470022
     },
     "8204962552": {
       "id": 8204962552,
       "username": "palindrome1551",
       "firstName": "susss",
-      "lastSeen": "2026-08-26T10:46:22.555Z",
+      "lastSeen": "2026-08-26T10:48:29.962Z",
       "userId": 8204962552,
       "groupId": -1004476693823
     },
@@ -4468,7 +4392,7 @@
       "username": "Version_of_sex",
       "firstName": "✇‿⃪ᷝ ⷨ 𝐖 ꘍ ɤ ɤ ᛧ ꭷ ɤ𝁜่🚩",
       "groupId": -1004356470022,
-      "lastSeen": "2026-08-26T10:15:32.248Z"
+      "lastSeen": "2026-08-26T11:02:09.797Z"
     },
     "7967040884": {
       "userId": 7967040884,
@@ -4785,7 +4709,7 @@
       "username": "Rojloo",
       "firstName": "Vaani",
       "groupId": -1004356470022,
-      "lastSeen": "2026-08-25T18:46:57.884Z"
+      "lastSeen": "2026-08-26T10:57:22.044Z"
     },
     "-1004356470022_8841013562": {
       "userId": 8841013562,
@@ -4970,7 +4894,7 @@
       "username": "palindrome1551",
       "firstName": "susss",
       "groupId": -1004476693823,
-      "lastSeen": "2026-08-26T10:46:22.555Z"
+      "lastSeen": "2026-08-26T10:48:29.962Z"
     },
     "-1004476693823_8841013562": {
       "userId": 8841013562,
@@ -4998,7 +4922,7 @@
       "username": "Rojloo",
       "firstName": "Vaani",
       "groupId": -1004331070653,
-      "lastSeen": "2026-08-26T08:52:07.388Z"
+      "lastSeen": "2026-08-26T10:54:32.106Z"
     },
     "-1004356470022_8505218132": {
       "userId": 8505218132,
@@ -5293,7 +5217,7 @@
       "username": "Version_of_sex",
       "firstName": "✇‿⃪ᷝ ⷨ 𝐖 ꘍ ɤ ɤ ᛧ ꭷ ɤ𝁜่🚩",
       "groupId": -1004356470022,
-      "lastSeen": "2026-08-26T10:15:32.248Z"
+      "lastSeen": "2026-08-26T11:02:09.797Z"
     },
     "-1004331070653_8937266040": {
       "userId": 8937266040,
@@ -5522,6 +5446,27 @@
       "lastName": ".",
       "groupId": -1004356470022,
       "lastSeen": "2026-08-26T10:06:19.588Z"
+    },
+    "-100999888778_111": {
+      "userId": 111,
+      "username": "alice",
+      "firstName": "Alice",
+      "groupId": -100999888778,
+      "lastSeen": "2026-08-26T11:13:55.779Z"
+    },
+    "-100999888778_222": {
+      "userId": 222,
+      "username": "bob",
+      "firstName": "Bob",
+      "groupId": -100999888778,
+      "lastSeen": "2026-08-26T11:13:55.781Z"
+    },
+    "-100999888778_333": {
+      "userId": 333,
+      "username": "testbot",
+      "firstName": "Bot",
+      "groupId": -100999888778,
+      "lastSeen": "2026-08-26T11:13:55.781Z"
     }
   },
   "customRoles": {
