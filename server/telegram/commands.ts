@@ -434,8 +434,416 @@ export class CommandHandler {
       case '/help':
         await this.handleHelp(ctx);
         return true;
+      case '/automod':
+        await this.handleAutoMod(ctx);
+        return true;
+      case '/media':
+        await this.handleMediaCommand(ctx);
+        return true;
+      case '/warnsettings':
+        await this.handleWarnSettings(ctx);
+        return true;
+      case '/security':
+        await this.handleSecurity(ctx);
+        return true;
+      case '/captcha':
+        await this.handleCaptchaSetting(ctx);
+        return true;
+      case '/antiraid':
+        await this.handleAntiRaidSetting(ctx);
+        return true;
+      case '/joinmode':
+        await this.handleJoinMode(ctx);
+        return true;
+      case '/autoaccept':
+        await this.handleAutoAccept(ctx);
+        return true;
+      case '/automation':
+        await this.handleAutomation(ctx);
+        return true;
+      case '/setrules':
+      case '/clearrules':
+      case '/rules':
+        await this.handleRules(ctx);
+        return true;
       default:
         return false;
+    }
+  }
+
+  // ==========================================
+  // PHASE 10 HANDLERS
+  // ==========================================
+  private static async handleAutoMod(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const action = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (action === 'on') {
+      settings.automodEnabled = true;
+      settings.stopSpamEnabled = true;
+      settings.stopAbusiveEnabled = true;
+      settings.stopPromotionEnabled = true;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'automod',
+        action: 'automod_toggle',
+        result: 'success',
+        reason: 'Auto Moderation enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Smart Auto Moderation</b> has been enabled (Spam, Abusive, & Promotion protection active).');
+    } else if (action === 'off') {
+      settings.automodEnabled = false;
+      settings.stopSpamEnabled = false;
+      settings.stopAbusiveEnabled = false;
+      settings.stopPromotionEnabled = false;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'automod',
+        action: 'automod_toggle',
+        result: 'success',
+        reason: 'Auto Moderation disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Smart Auto Moderation</b> has been disabled.');
+    } else {
+      const status = settings.automodEnabled ? '🟢 Enabled' : '🔴 Disabled';
+      await telegramApi.sendMessage(ctx.chatId, `🛡️ <b>Auto Moderation Status</b>\nStatus: ${status}\n- Spam Protection: ${settings.stopSpamEnabled ? 'ON' : 'OFF'}\n- Abusive Protection: ${settings.stopAbusiveEnabled ? 'ON' : 'OFF'}\n- Promotion Protection: ${settings.stopPromotionEnabled ? 'ON' : 'OFF'}`);
+    }
+  }
+
+  private static async handleMediaCommand(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const action = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    if (action === 'status') {
+      await telegramApi.sendMessage(ctx.chatId, `🖼️ <b>Media Protection Status</b>\n- GIF: ${settings.gifsProtection ? 'ON' : 'OFF'}\n- Link: ${settings.linkProtection ? 'ON' : 'OFF'}\n- Image: ${settings.imageProtection ? 'ON' : 'OFF'}\n- File: ${settings.fileProtection ? 'ON' : 'OFF'}\n- Video: ${settings.videosProtection ? 'ON' : 'OFF'}\n- Voice: ${settings.voiceProtection ? 'ON' : 'OFF'}\n- Sticker: ${settings.stickerProtection ? 'ON' : 'OFF'}\n- Media Action: ${settings.mediaAction || 'delete'}`);
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, 'Usage: /media status or use /gif on/off, /link on/off, /image on/off, /file on/off, /video on/off, /voice on/off, /sticker on/off.');
+    }
+  }
+
+  private static async handleWarnSettings(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const sub = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    if (sub === 'action') {
+      const act = ctx.args[1] as any;
+      if (['warn_only', 'mute', 'ban', 'kick'].includes(act)) {
+        settings.warnAction = act;
+        db.scheduleSave();
+        await telegramApi.sendMessage(ctx.chatId, `⚠️ Warning threshold action updated to: <b>${act}</b>`);
+      } else {
+        await telegramApi.sendMessage(ctx.chatId, 'Usage: /warnsettings action <warn_only|mute|ban|kick>');
+      }
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `⚠️ <b>Warning Settings</b>\n- Limit: ${settings.warnLimit}\n- Default Action: ${settings.warnAction}\n- Expire Time: ${settings.warnExpireSeconds}s`);
+    }
+  }
+
+  private static async handleSecurity(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const action = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (action === 'on') {
+      settings.securityEnabled = true;
+      settings.captchaEnabled = true;
+      settings.raidEnabled = true;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'security',
+        action: 'security_toggle',
+        result: 'success',
+        reason: 'Security center enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🔒 <b>Security Center</b> enabled (CAPTCHA & Anti-Raid active).');
+    } else if (action === 'off') {
+      settings.securityEnabled = false;
+      settings.captchaEnabled = false;
+      settings.raidEnabled = false;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'security',
+        action: 'security_toggle',
+        result: 'success',
+        reason: 'Security center disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🔒 <b>Security Center</b> disabled.');
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `🔒 <b>Security Center Status</b>\n- Security: ${settings.securityEnabled ? 'ON' : 'OFF'}\n- CAPTCHA: ${settings.captchaEnabled ? 'ON' : 'OFF'}\n- Anti-Raid: ${settings.raidEnabled ? 'ON' : 'OFF'}\n- Join Mode: ${settings.joinmode || 'normal'}`);
+    }
+  }
+
+  private static async handleCaptchaSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const action = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (action === 'on') {
+      settings.captchaEnabled = true;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'captcha',
+        action: 'captcha_toggle',
+        result: 'success',
+        reason: 'Captcha enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🤖 <b>CAPTCHA Verification</b> enabled.');
+    } else if (action === 'off') {
+      settings.captchaEnabled = false;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'captcha',
+        action: 'captcha_toggle',
+        result: 'success',
+        reason: 'Captcha disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🤖 <b>CAPTCHA Verification</b> disabled.');
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `🤖 <b>CAPTCHA Status</b>: ${settings.captchaEnabled ? 'ON' : 'OFF'}`);
+    }
+  }
+
+  private static async handleAntiRaidSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const action = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (action === 'on') {
+      settings.raidEnabled = true;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'antiraid',
+        action: 'antiraid_toggle',
+        result: 'success',
+        reason: 'Anti-raid enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Anti-Raid Protection</b> enabled.');
+    } else if (action === 'off') {
+      settings.raidEnabled = false;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'antiraid',
+        action: 'antiraid_toggle',
+        result: 'success',
+        reason: 'Anti-raid disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Anti-Raid Protection</b> disabled.');
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `🛡️ <b>Anti-Raid Status</b>: ${settings.raidEnabled ? 'ON' : 'OFF'}`);
+    }
+  }
+
+  private static async handleJoinMode(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const mode = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (['normal', 'captcha', 'strict'].includes(mode)) {
+      settings.joinmode = mode as any;
+      if (mode === 'normal') {
+        settings.captchaEnabled = false;
+        settings.raidEnabled = false;
+      } else if (mode === 'captcha') {
+        settings.captchaEnabled = true;
+        settings.raidEnabled = false;
+      } else if (mode === 'strict') {
+        settings.captchaEnabled = true;
+        settings.raidEnabled = true;
+      }
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'joinmode',
+        action: 'joinmode_change',
+        result: 'success',
+        reason: `Joinmode set to ${mode}`
+      });
+      await telegramApi.sendMessage(ctx.chatId, `🚪 <b>Join Mode</b> set to: <b>${mode}</b>`);
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `🚪 <b>Current Join Mode</b>: ${settings.joinmode || 'normal'}\nUsage: /joinmode <normal|captcha|strict>`);
+    }
+  }
+
+  private static async handleAutoAccept(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const action = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (action === 'on') {
+      settings.autoAcceptEnabled = true;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'autoaccept',
+        action: 'auto_accept',
+        result: 'success',
+        reason: 'Auto accept enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '✅ <b>Auto Accept Join Requests</b> enabled.');
+    } else if (action === 'off') {
+      settings.autoAcceptEnabled = false;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'autoaccept',
+        action: 'auto_accept',
+        result: 'success',
+        reason: 'Auto accept disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '❌ <b>Auto Accept Join Requests</b> disabled.');
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `✅ <b>Auto Accept Status</b>: ${settings.autoAcceptEnabled ? 'ON' : 'OFF'}`);
+    }
+  }
+
+  private static async handleAutomation(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const sub = (ctx.args[0] || '').toLowerCase();
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (sub === 'add') {
+      const trigger = ctx.args[1];
+      const action = ctx.args[2];
+      if (!trigger || !action) {
+        await telegramApi.sendMessage(ctx.chatId, 'Usage: /automation add <trigger> <action> (e.g. /automation add spam delete)');
+        return;
+      }
+      const auto = {
+        id: Math.random().toString(36).substring(2, 9),
+        trigger,
+        action,
+        parameters: ctx.args.slice(3).join(' '),
+        enabled: true,
+        createdBy: ctx.sender?.id || 0,
+        createdAt: new Date().toISOString()
+      };
+      db.addAutomation(ctx.chatId, auto);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'automation',
+        action: 'automation_add',
+        result: 'success',
+        reason: `Added automation rule ${auto.id}`
+      });
+      await telegramApi.sendMessage(ctx.chatId, `⚙️ Automation rule added successfully (ID: <code>${auto.id}</code>).`);
+    } else if (sub === 'remove') {
+      const id = ctx.args[1];
+      if (!id) {
+        await telegramApi.sendMessage(ctx.chatId, 'Usage: /automation remove <id>');
+        return;
+      }
+      const removed = db.removeAutomation(ctx.chatId, id);
+      if (removed) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor,
+          command: 'automation',
+          action: 'automation_remove',
+          result: 'success',
+          reason: `Removed automation rule ${id}`
+        });
+      }
+      await telegramApi.sendMessage(ctx.chatId, removed ? `🗑️ Automation rule ${id} removed.` : `❌ Rule ${id} not found.`);
+    } else {
+      const autos = db.getAutomations(ctx.chatId);
+      if (autos.length === 0) {
+        await telegramApi.sendMessage(ctx.chatId, '⚙️ No active automation rules configured.');
+      } else {
+        const text = autos.map((a: any) => `• <b>ID:</b> ${a.id} | <b>Trigger:</b> ${a.trigger} | <b>Action:</b> ${a.action} | <b>Status:</b> ${a.enabled ? 'Enabled' : 'Disabled'}`).join('\n');
+        await telegramApi.sendMessage(ctx.chatId, `⚙️ <b>Automation Rules (${autos.length}):</b>\n\n${text}`);
+      }
+    }
+  }
+
+  private static async handleRules(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (ctx.command.toLowerCase().includes('setrules')) {
+      if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+      const text = ctx.args.join(' ');
+      if (!text) {
+        await telegramApi.sendMessage(ctx.chatId, 'Usage: /setrules <rules text>');
+        return;
+      }
+      db.setRules(ctx.chatId, text);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'setrules',
+        action: 'rules_update',
+        result: 'success',
+        reason: 'Updated rules'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '📜 Group rules have been updated successfully.');
+    } else if (ctx.command.toLowerCase().includes('clearrules')) {
+      if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+      db.clearRules(ctx.chatId);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'clearrules',
+        action: 'rules_update',
+        result: 'success',
+        reason: 'Cleared rules'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '📜 Group rules have been cleared.');
+    } else {
+      const rules = db.getRules(ctx.chatId);
+      const chatTitle = ctx.chatTitle || 'this group';
+      const mention = ctx.sender ? `<a href="tg://user?id=${ctx.sender.id}">${escapeHtml(ctx.sender.first_name)}</a>` : 'User';
+      const formatted = rules
+        .replace(/\{chat_title\}/g, escapeHtml(chatTitle))
+        .replace(/\{mention\}/g, mention);
+
+      if (!rules) {
+        await telegramApi.sendMessage(ctx.chatId, '📜 No rules set for this group yet. Use /setrules to configure them.');
+      } else {
+        await telegramApi.sendMessage(ctx.chatId, `📜 <b>Group Rules for ${escapeHtml(chatTitle)}:</b>\n\n${formatted}`);
+      }
     }
   }
 

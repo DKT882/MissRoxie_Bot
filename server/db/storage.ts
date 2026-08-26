@@ -87,7 +87,7 @@ class StorageManager {
     this.isLoaded = true;
   }
 
-  private scheduleSave() {
+  public scheduleSave() {
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout);
     }
@@ -315,6 +315,15 @@ class StorageManager {
         imageProtection: false,
         fileProtection: false,
         customAbusiveWords: [],
+        automodEnabled: false,
+        mediaAction: 'delete',
+        warnEscalation: [],
+        securityEnabled: false,
+        joinmode: 'normal',
+        autoAcceptEnabled: false,
+        automations: [],
+        rules: '',
+        lastAllTimestamp: 0,
         updatedAt: new Date().toISOString()
       };
       this.scheduleSave();
@@ -350,6 +359,15 @@ class StorageManager {
       if (s.goodbyeEnabled === undefined) { s.goodbyeEnabled = false; needsSave = true; }
       if (!s.goodbyeMessage) { s.goodbyeMessage = 'Goodbye {user}!'; needsSave = true; }
       if (s.slowModeSeconds === undefined) { s.slowModeSeconds = 0; needsSave = true; }
+      if (s.automodEnabled === undefined) { s.automodEnabled = false; needsSave = true; }
+      if (s.mediaAction === undefined) { s.mediaAction = 'delete'; needsSave = true; }
+      if (!Array.isArray(s.warnEscalation)) { s.warnEscalation = []; needsSave = true; }
+      if (s.securityEnabled === undefined) { s.securityEnabled = false; needsSave = true; }
+      if (s.joinmode === undefined) { s.joinmode = 'normal'; needsSave = true; }
+      if (s.autoAcceptEnabled === undefined) { s.autoAcceptEnabled = false; needsSave = true; }
+      if (!Array.isArray(s.automations)) { s.automations = []; needsSave = true; }
+      if (s.rules === undefined) { s.rules = ''; needsSave = true; }
+      if (s.lastAllTimestamp === undefined) { s.lastAllTimestamp = 0; needsSave = true; }
 
       if (chatTitle && s.chatTitle !== chatTitle) {
         s.chatTitle = chatTitle;
@@ -1461,6 +1479,70 @@ class StorageManager {
       activeSchedules,
       groupsCount
     };
+  }
+
+  // --- Phase 10 Rules & Automations ---
+  public getRules(chatId: number): string {
+    const s = this.getGroupSettings(chatId);
+    return s.rules || '';
+  }
+
+  public setRules(chatId: number, rules: string) {
+    const s = this.getGroupSettings(chatId);
+    s.rules = rules;
+    s.updatedAt = new Date().toISOString();
+    this.scheduleSave();
+  }
+
+  public clearRules(chatId: number) {
+    const s = this.getGroupSettings(chatId);
+    s.rules = '';
+    s.updatedAt = new Date().toISOString();
+    this.scheduleSave();
+  }
+
+  public getAutomations(chatId: number): any[] {
+    const s = this.getGroupSettings(chatId);
+    if (!Array.isArray(s.automations)) {
+      s.automations = [];
+    }
+    return s.automations;
+  }
+
+  public addAutomation(chatId: number, automation: { id: string; trigger: string; action: string; parameters?: string; enabled: boolean; createdBy: number; createdAt: string }) {
+    const s = this.getGroupSettings(chatId);
+    if (!Array.isArray(s.automations)) {
+      s.automations = [];
+    }
+    s.automations.push(automation);
+    s.updatedAt = new Date().toISOString();
+    this.scheduleSave();
+  }
+
+  public removeAutomation(chatId: number, id: string): boolean {
+    const s = this.getGroupSettings(chatId);
+    if (!Array.isArray(s.automations)) return false;
+    const initialLen = s.automations.length;
+    s.automations = s.automations.filter((a) => a.id !== id);
+    if (s.automations.length < initialLen) {
+      s.updatedAt = new Date().toISOString();
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  public toggleAutomation(chatId: number, id: string, enabled: boolean): boolean {
+    const s = this.getGroupSettings(chatId);
+    if (!Array.isArray(s.automations)) return false;
+    const auto = s.automations.find((a) => a.id === id);
+    if (auto) {
+      auto.enabled = enabled;
+      s.updatedAt = new Date().toISOString();
+      this.scheduleSave();
+      return true;
+    }
+    return false;
   }
 }
 
