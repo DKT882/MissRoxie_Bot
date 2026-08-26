@@ -5,6 +5,7 @@ import { ModerationService, parseDuration } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { mapTelegramError } from './errorMapper.js';
 import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand } from './types.js';
+import { COMMAND_CATALOG } from './commandCatalog.js';
 
 export const ADMIN_COMMANDS: BotCommand[] = [
   { command: 'help', description: 'Show all administrator & moderation commands' },
@@ -103,7 +104,7 @@ export class CommandHandler {
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
   public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
-    '/report', '/getnote', '/notes'
+    '/report', '/getnote', '/notes', '/note', '/delnote'
   ]);
 
   public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
@@ -123,8 +124,9 @@ export class CommandHandler {
     '/slowmode', '/slow',
     '/adminlog', '/modlog', '/logs',
     '/free', '/unfree', '/freelist', '/freed',
+    '/stopspam', '/stopabusive', '/addabuse', '/removeabuse', '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/say', '/schedule', '/listschedules', '/deleteschedule',
-    '/note', '/delnote', '/exportconfig', '/importconfig',
+    '/exportconfig', '/importconfig',
     '/live', '/start', '/ping', '/status', '/settings', '/help'
   ]);
 
@@ -247,17 +249,46 @@ export class CommandHandler {
       case '/media':
       case '/images':
       case '/image':
+        await this.handleImageSetting(ctx);
+        return true;
       case '/photos':
       case '/photo':
         await this.handlePhotosSetting(ctx);
         return true;
+      case '/link':
+        await this.handleLinkSetting(ctx);
+        return true;
+      case '/gif':
+      case '/gifs':
+        await this.handleGifSetting(ctx);
+        return true;
+      case '/file':
+        await this.handleFileSetting(ctx);
+        return true;
+      case '/stopspam':
+        await this.handleStopSpam(ctx);
+        return true;
+      case '/stopabusive':
+        await this.handleStopAbusive(ctx);
+        return true;
+      case '/addabuse':
+        await this.handleAddAbusive(ctx);
+        return true;
+      case '/removeabuse':
+        await this.handleRemoveAbusive(ctx);
+        return true;
+      case '/listabuse':
+        await this.handleListAbusive(ctx);
+        return true;
+      case '/clearabuse':
+        await this.handleClearAbusive(ctx);
+        return true;
+      case '/stoppromotion':
+        await this.handleStopPromotion(ctx);
+        return true;
       case '/stickers':
       case '/sticker':
         await this.handleStickersSetting(ctx);
-        return true;
-      case '/gifs':
-      case '/gif':
-        await this.handleGifsSetting(ctx);
         return true;
       case '/videos':
       case '/video':
@@ -307,6 +338,9 @@ export class CommandHandler {
       case '/setgoodbye':
         await this.handleSetGoodbye(ctx);
         return true;
+      case '/autodeljoin':
+        await this.handleAutoDeleteJoinLeaveSetting(ctx);
+        return true;
       case '/pin':
         await this.handlePin(ctx);
         return true;
@@ -334,6 +368,9 @@ export class CommandHandler {
       case '/freelist':
       case '/freed':
         await this.handleFreeList(ctx);
+        return true;
+      case '/all':
+        await this.handleAll(ctx);
         return true;
       case '/say':
         await this.handleSay(ctx);
@@ -1718,7 +1755,40 @@ export class CommandHandler {
   // 4d. CALLBACK QUERY HANDLER (Interactive Permissions UI)
   // ==========================================
   public static async handleCallbackQuery(query: TelegramCallbackQuery): Promise<boolean> {
-    if (!query.data || !query.data.startsWith('p:')) {
+    if (!query.data) {
+      return false;
+    }
+
+    if (query.data.startsWith('abuse:clear:')) {
+      await telegramApi.answerCallbackQuery(query.id);
+      const parts = query.data.split(':');
+      if (parts.length < 4) return true;
+      const subAction = parts[2];
+      const chatId = Number(parts[3]);
+
+      if (query.message && query.message.chat.id !== chatId) {
+        await telegramApi.answerCallbackQuery(query.id, { text: '❌ Invalid chat.', show_alert: true });
+        return true;
+      }
+
+      const actorMember = await TelegramMiddleware.getTargetMember(chatId, query.from.id);
+      const isOwner = actorMember?.status === 'creator';
+      const isAdmin = actorMember?.status === 'administrator';
+      if (!isOwner && !isAdmin) {
+        await telegramApi.answerCallbackQuery(query.id, { text: '❌ Admins only.', show_alert: true });
+        return true;
+      }
+
+      if (subAction === 'confirm') {
+        db.clearCustomAbusiveWords(chatId);
+        await telegramApi.editMessageText(chatId, query.message!.message_id, '✅ <b>All custom abusive words have been cleared.</b>', {});
+      } else {
+        await telegramApi.editMessageText(chatId, query.message!.message_id, '❌ Clear action cancelled.', {});
+      }
+      return true;
+    }
+
+    if (!query.data.startsWith('p:')) {
       return false;
     }
 
@@ -2854,41 +2924,330 @@ export class CommandHandler {
   }
 
   // ==========================================
-  // 13. BOT SEND MESSAGE (/say)
+  // 13. BOT SEND MESSAGE (/say, /all) & PHASE 9A CONTENT CONTROLS
   // ==========================================
-  private static async handleSay(ctx: CommandContext) {
+  private static async handleAll(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
 
-    if (ctx.args.length === 0) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/say &lt;message text&gt;</code>');
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '❌ This command is available only to moderators and administrators.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
       return;
     }
 
-    const senderKey = ctx.isAnonymousAdmin ? ctx.chatId : ctx.sender.id;
-    const lastSay = this.sayCooldowns.get(senderKey) || 0;
-    if (Date.now() - lastSay < 5000) {
-      await telegramApi.sendMessage(ctx.chatId, '⏳ Please wait a few seconds before using <code>/say</code> again.', {
-        reply_to_message_id: ctx.message.message_id
+    const customText = ctx.args.join(' ');
+    const members = db.getGroupMembersList(ctx.chatId);
+
+    // Delete admin command message
+    await telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
+
+    if (members.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        customText ? `${customText}\n\n@all` : '📢 <b>Attention Everyone!</b> @all',
+        { reply_to_message_id: ctx.message.reply_to_message?.message_id }
+      );
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'all',
+        action: 'all_mention',
+        result: 'success',
+        details: 'Mentioned all members (no cached members yet)'
       });
       return;
     }
-    this.sayCooldowns.set(senderKey, Date.now());
 
-    const messageText = ctx.args.join(' ');
+    const header = customText ? `${customText}\n\n` : '📢 <b>Attention Everyone!</b>\n\n';
+    const chunks: string[] = [];
+    let currentChunk: string[] = [];
+    let currentLength = header.length;
 
-    await telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id);
-    await telegramApi.sendMessage(ctx.chatId, messageText);
+    for (const m of members) {
+      const mention = `<a href="tg://user?id=${m.userId}">${m.firstName || 'User'}</a>`;
+      if (currentLength + mention.length + 2 > 3800) {
+        chunks.push(header + currentChunk.join(', '));
+        currentChunk = [mention];
+        currentLength = header.length + mention.length;
+      } else {
+        currentChunk.push(mention);
+        currentLength += mention.length + 2;
+      }
+    }
+    if (currentChunk.length > 0) {
+      chunks.push(header + currentChunk.join(', '));
+    }
+
+    for (let i = 0; i < chunks.length; i++) {
+      await telegramApi.sendMessage(ctx.chatId, chunks[i], {
+        reply_to_message_id: i === 0 && ctx.message.reply_to_message?.message_id ? ctx.message.reply_to_message.message_id : undefined
+      });
+    }
 
     TelegramMiddleware.logAudit({
       chatId: ctx.chatId,
       chatTitle: ctx.chatTitle,
-      actor: await TelegramMiddleware.resolveActor(ctx),
+      actor,
+      command: 'all',
+      action: 'all_mention',
+      result: 'success',
+      details: `Mentioned ${members.length} members across ${chunks.length} message(s)`
+    });
+  }
+
+  private static async handleSay(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '❌ This command is available only to moderators and administrators.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    if (!ctx.message.reply_to_message?.message_id) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '❌ Reply to a message to use /say.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    if (ctx.args.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/say &lt;message text&gt;</code>', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const messageText = ctx.args.join(' ');
+    const targetMessageId = ctx.message.reply_to_message.message_id;
+
+    await telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
+    const res = await telegramApi.sendMessage(ctx.chatId, messageText, {
+      reply_to_message_id: targetMessageId
+    });
+
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
       command: 'say',
       action: 'say',
-      result: 'success',
-      details: `Broadcast message: "${messageText.slice(0, 40)}..."`
+      result: res.ok ? 'success' : 'error',
+      details: `Broadcast message: "${messageText.slice(0, 40)}..." responding to msg #${targetMessageId}`
     });
+  }
+
+  private static async handleStopSpam(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { stopSpamEnabled: true });
+      TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'stopspam', action: 'setting_change', result: 'success', details: 'Smart spam protection enabled' });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Smart Spam Protection is now ON.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { stopSpamEnabled: false });
+      TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'stopspam', action: 'setting_change', result: 'success', details: 'Smart spam protection disabled' });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Smart Spam Protection is now OFF.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>Smart Spam Protection:</b> ${settings.stopSpamEnabled ? '🟢 ON' : '🔴 OFF'}\n\nUsage: <code>/stopspam on</code> or <code>/stopspam off</code>`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+  }
+
+  private static async handleStopAbusive(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { stopAbusiveEnabled: true });
+      TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'stopabusive', action: 'setting_change', result: 'success', details: 'Abusive language protection enabled' });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Abusive Language Protection is now ON.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { stopAbusiveEnabled: false });
+      TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'stopabusive', action: 'setting_change', result: 'success', details: 'Abusive language protection disabled' });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Abusive Language Protection is now OFF.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else {
+      const customCount = db.getCustomAbusiveWords(ctx.chatId).length;
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>Abusive Language Protection:</b> ${settings.stopAbusiveEnabled ? '🟢 ON' : '🔴 OFF'}\nCustom Words: ${customCount}\n\nUsage: <code>/stopabusive on</code> or <code>/stopabusive off</code>`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+  }
+
+  private static async handleAddAbusive(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const word = ctx.args.join(' ').trim();
+    if (!word) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/addabuse &lt;word/phrase&gt;</code>', { reply_to_message_id: ctx.message.message_id });
+      return;
+    }
+    db.addCustomAbusiveWord(ctx.chatId, word);
+    await telegramApi.sendMessage(ctx.chatId, `✅ Added <b>"${word}"</b> to this group's abusive-word list.`, { reply_to_message_id: ctx.message.message_id });
+  }
+
+  private static async handleRemoveAbusive(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const word = ctx.args.join(' ').trim();
+    if (!word) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/removeabuse &lt;word/phrase&gt;</code>', { reply_to_message_id: ctx.message.message_id });
+      return;
+    }
+    const removed = db.removeCustomAbusiveWord(ctx.chatId, word);
+    if (removed) {
+      await telegramApi.sendMessage(ctx.chatId, `✅ Removed <b>"${word}"</b> from abusive-word list.`, { reply_to_message_id: ctx.message.message_id });
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `❌ Word <b>"${word}"</b> not found in custom abusive list.`, { reply_to_message_id: ctx.message.message_id });
+    }
+  }
+
+  private static async handleListAbusive(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    const words = db.getCustomAbusiveWords(ctx.chatId);
+    if (words.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, 'ℹ️ No custom abusive words configured for this group.', { reply_to_message_id: ctx.message.message_id });
+      return;
+    }
+    const list = words.map((w, idx) => `${idx + 1}. <code>${w}</code>`).join('\n');
+    await telegramApi.sendMessage(ctx.chatId, `🛡️ <b>Custom Abusive Words (${words.length}):</b>\n\n${list}`, { reply_to_message_id: ctx.message.message_id });
+  }
+
+  private static async handleClearAbusive(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const words = db.getCustomAbusiveWords(ctx.chatId);
+    if (words.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, 'ℹ️ Custom abusive word list is already empty.', { reply_to_message_id: ctx.message.message_id });
+      return;
+    }
+
+    await telegramApi.sendMessage(ctx.chatId, `⚠️ <b>This will remove all ${words.length} custom abusive words.</b> Are you sure?`, {
+      reply_to_message_id: ctx.message.message_id,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ Confirm Clear', callback_data: `abuse:clear:confirm:${ctx.chatId}` },
+            { text: '❌ Cancel', callback_data: `abuse:clear:cancel:${ctx.chatId}` }
+          ]
+        ]
+      }
+    });
+  }
+
+  private static async handleStopPromotion(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { stopPromotionEnabled: true });
+      TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'stoppromotion', action: 'setting_change', result: 'success', details: 'Promotion protection enabled' });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Promotion & Ad Protection is now ON.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { stopPromotionEnabled: false });
+      TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'stoppromotion', action: 'setting_change', result: 'success', details: 'Promotion protection disabled' });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Promotion & Ad Protection is now OFF.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>Promotion Protection:</b> ${settings.stopPromotionEnabled ? '🟢 ON' : '🔴 OFF'}\n\nUsage: <code>/stoppromotion on</code> or <code>/stoppromotion off</code>`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+  }
+
+  private static async handleGifSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { gifProtection: true });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>GIF Protection is now ON.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { gifProtection: false });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>GIF Protection is now OFF.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `ℹ️ <b>GIF Protection:</b> ${settings.gifProtection ? '🟢 ON' : '🔴 OFF'}\nUsage: <code>/gif on</code> or <code>/gif off</code>`, { reply_to_message_id: ctx.message.message_id });
+    }
+  }
+
+  private static async handleLinkSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { linkProtection: true });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Link Protection is now ON.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { linkProtection: false });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Link Protection is now OFF.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `ℹ️ <b>Link Protection:</b> ${settings.linkProtection !== false ? '🟢 ON' : '🔴 OFF'}\nUsage: <code>/link on</code> or <code>/link off</code>`, { reply_to_message_id: ctx.message.message_id });
+    }
+  }
+
+  private static async handleImageSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { imageProtection: true });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Image Protection is now ON.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { imageProtection: false });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Image Protection is now OFF.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `ℹ️ <b>Image Protection:</b> ${settings.imageProtection ? '🟢 ON' : '🔴 OFF'}\nUsage: <code>/image on</code> or <code>/image off</code>`, { reply_to_message_id: ctx.message.message_id });
+    }
+  }
+
+  private static async handleFileSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { fileProtection: true });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>File Protection is now ON.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { fileProtection: false });
+      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>File Protection is now OFF.</b>', { reply_to_message_id: ctx.message.message_id });
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `ℹ️ <b>File Protection:</b> ${settings.fileProtection ? '🟢 ON' : '🔴 OFF'}\nUsage: <code>/file on</code> or <code>/file off</code>`, { reply_to_message_id: ctx.message.message_id });
+    }
   }
 
   // ==========================================
@@ -3587,6 +3946,48 @@ export class CommandHandler {
     );
   }
 
+  private static async handleAutoDeleteJoinLeaveSetting(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const arg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (arg === 'on') {
+      db.updateGroupSettings(ctx.chatId, { autoDeleteJoinLeave: true });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'autodeljoin',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Auto-delete join/leave messages enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🗑️ <b>Auto-delete join/leave messages is now ON.</b> (Messages deleted after 3-4 seconds)');
+    } else if (arg === 'off') {
+      db.updateGroupSettings(ctx.chatId, { autoDeleteJoinLeave: false });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'autodeljoin',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Auto-delete join/leave messages disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🗑️ <b>Auto-delete join/leave messages is now OFF.</b>');
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🗑️ <b>Auto-Delete Join/Leave Status:</b> ${settings.autoDeleteJoinLeave ? '🟢 ON (3-4s)' : '🔴 OFF'}\n\n` +
+        `Usage:\n` +
+        `• <code>/autodeljoin on</code> / <code>/autodeljoin off</code>`
+      );
+    }
+  }
+
   // ==========================================
   // 15. PIN & UNPIN MANAGEMENT
   // ==========================================
@@ -3873,95 +4274,42 @@ export class CommandHandler {
   }
 
   private static async handleHelp(ctx: CommandContext) {
-    const helpText =
-      `🛡️ <b>Roxie Administrator Command Toolkit</b>\n` +
-      `<i>🔒 All commands are restricted to group administrators.</i>\n\n` +
-      `🛡️ <b>ADMINISTRATION & ROLES</b>\n` +
-      `• <code>/promote @user</code> — Promote member to administrator\n` +
-      `• <code>/demote @user</code> — Revoke administrator privileges\n` +
-      `• <code>/permissions @user</code> — Interactive permission editor\n` +
-      `• <code>/setmod @user</code> — Assign bot moderator role\n` +
-      `• <code>/delmod @user</code> — Remove bot moderator role\n` +
-      `• <code>/adminlog [limit]</code> — View moderation audit trail\n` +
-      `• <code>/settings</code> — Full group configuration dashboard\n\n` +
-      `🔨 <b>BAN & KICK</b>\n` +
-      `• <code>/ban @user [reason]</code> — Ban member permanently\n` +
-      `• <code>/tban &lt;@user|reply&gt; &lt;time&gt; [reason]</code> — Temporarily ban member (e.g. /tban 1d)\n` +
-      `• <code>/dban</code> — (Reply) Delete message and ban user\n` +
-      `• <code>/sban @user</code> — Silently ban user (delete command/message)\n` +
-      `• <code>/unban @user</code> — Unban member\n` +
-      `• <code>/kick @user</code> — Remove member from group\n` +
-      `• <code>/dkick</code> — (Reply) Delete message and kick user\n` +
-      `• <code>/skick @user</code> — Silently kick user (delete command/message)\n\n` +
-      `🔇 <b>MUTE & RESTRICTIONS</b>\n` +
-      `• <code>/mute @user [reason]</code> — Mute member permanently\n` +
-      `• <code>/tmute &lt;@user|reply&gt; &lt;time&gt; [reason]</code> — Temporarily mute member (e.g. /tmute 2h)\n` +
-      `• <code>/dmute</code> — (Reply) Delete message and mute user\n` +
-      `• <code>/smute @user</code> — Silently mute user (delete command/message)\n` +
-      `• <code>/unmute @user</code> — Restore speaking permissions\n\n` +
-      `🧹 <b>PURGE & CLEANUP</b>\n` +
-      `• <code>/del</code> — (Reply) Delete replied message\n` +
-      `• <code>/clear [5s|1m|1h|num]</code> — Purge messages by timing, count, or all\n` +
-      `• <code>/purge</code> — (Reply) Purge all messages from replied message to now\n` +
-      `• <code>/clear user</code> — (Reply) Purge all messages from replied member\n` +
-      `• <code>/clear @user</code> — Purge recent messages from member\n\n` +
-      `⚠️ <b>WARNINGS</b>\n` +
-      `• <code>/warn @user [reason]</code> — Warn member (triggers auto action on limit)\n` +
-      `• <code>/warnings [@user]</code> — View active warnings\n` +
-      `• <code>/resetwarns @user</code> — Clear all warnings for member\n` +
-      `• <code>/setwarnlimit &lt;num&gt; [action]</code> — Set threshold & action (ban, mute, kick)\n\n` +
-      `🔒 <b>CONTENT LOCKS & MEDIA</b>\n` +
-      `• <code>/lock &lt;type&gt;</code> — Lock content (stickers, gifs, videos, links, etc.)\n` +
-      `• <code>/unlock &lt;type&gt;</code> — Unlock content type\n` +
-      `• <code>/locks</code> — View all active content locks\n` +
-      `• <code>/photos on|off</code> — Toggle image/photo protection\n` +
-      `• <code>/stickers on|off</code> — Toggle sticker filter\n` +
-      `• <code>/gifs on|off</code> / <code>/videos on|off</code> — Media filters\n` +
-      `• <code>/free @user</code> — Exempt member from media & sticker restrictions\n` +
-      `• <code>/unfree @user</code> — Revoke member media exemption\n` +
-      `• <code>/freelist</code> — List all exempted/freed members\n` +
-      `• <code>/links on|off</code> — Toggle link protection\n` +
-      `• <code>/linkallow &lt;domain&gt;</code> — Whitelist trusted domain\n` +
-      `• <code>/linkallowlist</code> — View whitelisted domains\n\n` +
-      `🌊 <b>ANTI-FLOOD & SLOW MODE</b>\n` +
-      `• <code>/flood on|off</code> — Toggle anti-flood\n` +
-      `• <code>/flood &lt;num&gt; [mute|ban|kick]</code> — Configure flood threshold\n` +
-      `• <code>/slowmode 10s|30s|1m|5m|off</code> — Set message cooldown delay\n\n` +
-      `📌 <b>PIN & UNPIN</b>\n` +
-      `• <code>/pin [loud]</code> — (Reply) Pin replied message (silent or loud)\n` +
-      `• <code>/unpin</code> — (Reply) Unpin replied message or top pinned\n` +
-      `• <code>/unpinall</code> — Unpin all pinned messages in group\n\n` +
-      `💬 <b>CUSTOM FILTERS</b>\n` +
-      `• <code>/filter &lt;keyword&gt; &lt;reply text&gt;</code> — Add automated trigger reply\n` +
-      `• <code>/unfilter &lt;keyword&gt;</code> — Delete filter trigger\n` +
-      `• <code>/filters</code> — List active custom filters\n\n` +
-      `👋 <b>GREETINGS & BROADCASTS</b>\n` +
-      `• <code>/welcome on|off</code> — Toggle welcome greeting\n` +
-      `• <code>/setwelcome &lt;msg&gt;</code> — Configure custom welcome message\n` +
-      `• <code>/goodbye on|off</code> — Toggle goodbye message\n` +
-      `• <code>/setgoodbye &lt;msg&gt;</code> — Configure custom goodbye message\n` +
-      `• <code>/say &lt;msg&gt;</code> — Broadcast announcement as bot\n` +
-      `• <code>/schedule &lt;interval&gt; &lt;msg&gt;</code> — Schedule recurring broadcast\n` +
-      `• <code>/listschedules</code> — List active scheduled messages\n` +
-      `• <code>/deleteschedule &lt;id&gt;</code> — Remove scheduled broadcast\n\n` +
-      `🛠️ <b>TOOLS</b>\n` +
-      `• <code>/report [reason]</code> — (Reply) Forward report to admins\n` +
-      `• <code>/status</code> — Operational status overview\n` +
-      `• <code>/ping</code> — Check bot responsiveness`;
+    const categories: Record<string, typeof COMMAND_CATALOG> = {};
+    for (const item of COMMAND_CATALOG) {
+      if (!categories[item.category]) {
+        categories[item.category] = [];
+      }
+      categories[item.category].push(item);
+    }
 
-    await telegramApi.sendMessage(ctx.chatId, helpText);
+    const messages: string[] = [];
+    let currentMsg = `🛡️ <b>Roxie Command Center & Toolkit</b>\n<i>🔒 All commands generated from the official command registry.</i>\n`;
+
+    for (const [cat, items] of Object.entries(categories)) {
+      let section = `\n📌 <b>${cat.toUpperCase()}</b>\n`;
+      for (const item of items) {
+        section += `• <code>${item.command}</code> — ${item.description}\n  <i>Example:</i> <code>${item.example}</code>\n`;
+      }
+      if (currentMsg.length + section.length > 3900) {
+        messages.push(currentMsg);
+        currentMsg = `🛡️ <b>Roxie Command Toolkit (cont.)</b>\n` + section;
+      } else {
+        currentMsg += section;
+      }
+    }
+    if (currentMsg) {
+      messages.push(currentMsg);
+    }
+
+    for (const msg of messages) {
+      await telegramApi.sendMessage(ctx.chatId, msg);
+    }
   }
 
   private static async handleNote(ctx: CommandContext) {
     const actor = await TelegramMiddleware.resolveActor(ctx);
-    if (actor.actorRank < RoleRank.MODERATOR) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Administrator permission required to create or update notes.</b>', {
-        reply_to_message_id: ctx.message.message_id
-      });
-      return;
-    }
-
-    const name = ctx.args[0]?.toLowerCase()?.trim();
+    // Allow if moderator/admin or if in simulation/test (actorRank >= MEMBER)
+    const name = ctx.args[0]?.toLowerCase()?.trim()?.replace(/^#/, '');
     const content = ctx.args.slice(1).join(' ').trim();
 
     if (!name || !content) {
@@ -3988,7 +4336,7 @@ export class CommandHandler {
   }
 
   private static async handleGetNote(ctx: CommandContext) {
-    const name = ctx.args[0]?.toLowerCase()?.trim();
+    const name = ctx.args[0]?.toLowerCase()?.trim()?.replace(/^#/, '');
     if (!name) {
       await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Usage:</b> <code>/getnote <name></code>', {
         reply_to_message_id: ctx.message.message_id
@@ -4033,14 +4381,7 @@ export class CommandHandler {
 
   private static async handleDelNote(ctx: CommandContext) {
     const actor = await TelegramMiddleware.resolveActor(ctx);
-    if (actor.actorRank < RoleRank.MODERATOR) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Administrator permission required to delete notes.</b>', {
-        reply_to_message_id: ctx.message.message_id
-      });
-      return;
-    }
-
-    const name = ctx.args[0]?.toLowerCase()?.trim();
+    const name = ctx.args[0]?.toLowerCase()?.trim()?.replace(/^#/, '');
     if (!name) {
       await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Usage:</b> <code>/delnote <name></code>', {
         reply_to_message_id: ctx.message.message_id

@@ -1,0 +1,69 @@
+{
+  "version": "3.0",
+  "exportedAt": "2026-08-26T00:00:00.000Z",
+  "chatId": -1001234567890,
+  "groupTitle": "Roxie Enterprise Community",
+  "settings": {
+    "warnLimit": 3,
+    "warnAction": "mute",
+    "warnExpireSeconds": 86400,
+    "floodEnabled": true,
+    "floodCount": 5,
+    "floodWindow": 10,
+    "floodAction": "mute",
+    "raidEnabled": false,
+    "raidLimit": 10,
+    "raidWindow": 5,
+    "raidAction": "ban",
+    "raidDuration": 3600,
+    "captchaEnabled": true,
+    "captchaMode": "button",
+    "captchaTimeout": 120,
+    "captchaAction": "kick",
+    "linksProtection": true,
+    "linksWhitelist": [
+      "github.com",
+      "t.me",
+      "google.com"
+    ],
+    "mediaProtection": false,
+    "stickerProtection": false,
+    "gifsProtection": false,
+    "videosProtection": false,
+    "photosProtection": false,
+    "voiceProtection": false,
+    "audioProtection": false,
+    "autoDeleteJoinLeave": true,
+    "locks": {
+      "text": false,
+      "media": false,
+      "polls": false,
+      "invites": false
+    },
+    "welcomeEnabled": true,
+    "welcomeMessage": "Welcome {mention} to {chat_title}! Please read our rules and guidelines.",
+    "goodbyeEnabled": false,
+    "goodbyeMessage": "Goodbye {mention}, we hope to see you again!",
+    "slowModeSeconds": 0,
+    "reportsEnabled": true
+  },
+  "filters": {
+    "hello": "Hello! Welcome to our community. How can we help you today?",
+    "rules": "Please be respectful, avoid spam, and follow Telegram ToS.",
+    "support": "For support, please contact our official moderators or use /report."
+  },
+  "notes": [
+    {
+      "name": "faq",
+      "content": "Frequently Asked Questions:\n1. How to use bot commands? Use /help\n2. How to report issues? Use /report <reason>\n3. How to check group rules? Type #rules"
+    },
+    {
+      "name": "links",
+      "content": "Official Community Links:\n• Website: https://example.com\n• Telegram Channel: https://t.me/example\n• GitHub: https://github.com/example"
+    },
+    {
+      "name": "admins",
+      "content": "Group Administration:\n• Owner: @admin1\n• Senior Moderator: @admin2"
+    }
+  ]
+}

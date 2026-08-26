@@ -1,6 +1,7 @@
 import { db } from '../db/storage.js';
 import { TelegramMessage, ContentType, PolicyDecision } from './types.js';
 import { TelegramMiddleware, RoleRank } from './middleware.js';
+import { ContentProtectionService } from './contentProtection.js';
 
 export interface ContentPolicyEvaluation {
   decision: PolicyDecision;
@@ -40,6 +41,20 @@ export class ContentPolicyEngine {
 
     const settings = db.getGroupSettings(chatId);
     const locks = settings.locks || {};
+    const textToCheck = `${message.text || ''} ${message.caption || ''}`.trim();
+
+    // 0. Phase 9A: Smart Content Protection (Spam, Abusive Language, Promotion)
+    if (settings.stopSpamEnabled && ContentProtectionService.isSpam(message, chatId)) {
+      return { decision: 'BLOCK', lockType: 'spam', reason: 'Spam protection triggered' };
+    }
+
+    if (settings.stopAbusiveEnabled && textToCheck && ContentProtectionService.isAbusive(textToCheck, chatId)) {
+      return { decision: 'BLOCK', lockType: 'abusive', reason: 'Abusive language detected' };
+    }
+
+    if (settings.stopPromotionEnabled && textToCheck && ContentProtectionService.isPromotion(message, chatId)) {
+      return { decision: 'BLOCK', lockType: 'promotion', reason: 'Promotion/advertisement detected' };
+    }
 
     // 1. Lock "all" (Chat lockdown)
     if (locks['all'] && !db.hasContentPermission(chatId, userId, 'all')) {
@@ -48,7 +63,7 @@ export class ContentPolicyEngine {
 
     // 2. Stickers
     if (message.sticker) {
-      const isLocked = Boolean(locks['stickers'] || locks['sticker'] || settings.stickerProtection);
+      const isLocked = Boolean(locks['stickers'] || locks['sticker'] || settings.stickerProtection === true);
       if (isLocked && !db.hasContentPermission(chatId, userId, 'stickers')) {
         return { decision: 'BLOCK', lockType: 'stickers', reason: 'Stickers are locked' };
       }
@@ -56,7 +71,7 @@ export class ContentPolicyEngine {
 
     // 3. GIFs / Animations
     if (message.animation) {
-      const isLocked = Boolean(locks['gifs'] || locks['gif'] || settings.gifsProtection || settings.mediaProtection);
+      const isLocked = Boolean(locks['gifs'] || locks['gif'] || settings.gifProtection || settings.gifsProtection || settings.mediaProtection);
       if (isLocked && !db.hasContentPermission(chatId, userId, 'gifs') && !db.hasContentPermission(chatId, userId, 'media')) {
         return { decision: 'BLOCK', lockType: 'gifs', reason: 'GIFs are locked' };
       }
@@ -64,7 +79,7 @@ export class ContentPolicyEngine {
 
     // 4. Photos
     if (message.photo && message.photo.length > 0) {
-      const isLocked = Boolean(locks['photos'] || locks['photo'] || locks['images'] || locks['image'] || settings.photosProtection || settings.mediaProtection);
+      const isLocked = Boolean(locks['photos'] || locks['photo'] || locks['images'] || locks['image'] || settings.imageProtection || settings.photosProtection || settings.mediaProtection);
       if (isLocked && !db.hasContentPermission(chatId, userId, 'photos') && !db.hasContentPermission(chatId, userId, 'media')) {
         return { decision: 'BLOCK', lockType: 'photos', reason: 'Photos are locked' };
       }
@@ -96,7 +111,7 @@ export class ContentPolicyEngine {
 
     // 8. Documents / Files
     if (message.document && !message.animation) {
-      const isLocked = Boolean(locks['files'] || locks['file'] || locks['documents'] || locks['document']);
+      const isLocked = Boolean(locks['files'] || locks['file'] || locks['documents'] || locks['document'] || settings.fileProtection);
       if (isLocked && !db.hasContentPermission(chatId, userId, 'files')) {
         return { decision: 'BLOCK', lockType: 'files', reason: 'Files/Documents are locked' };
       }
@@ -149,7 +164,6 @@ export class ContentPolicyEngine {
     }
 
     // 15. Links & Invite Links
-    const textToCheck = `${message.text || ''} ${message.caption || ''}`.trim();
     if (textToCheck) {
       const hasInviteLink = /(?:https?:\/\/)?(?:t\.me|telegram\.me)\/(?:joinchat\/|\+[a-zA-Z0-9_-]+|[a-zA-Z0-9_]{4,})/i.test(textToCheck);
       const isInviteLocked = Boolean(locks['invitelinks'] || locks['invitelink'] || locks['invites']);

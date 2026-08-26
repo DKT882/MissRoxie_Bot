@@ -303,10 +303,20 @@ export interface GroupSettings {
   welcomeMessage?: string;
   goodbyeEnabled: boolean; // default false
   goodbyeMessage?: string;
+  autoDeleteJoinLeave?: boolean; // default false
   // Slow Mode
   slowModeSeconds: number; // 0 = off
   // Reports
   reportsEnabled: boolean; // default true
+  // Phase 9A Smart Content Protection & Message Control
+  stopSpamEnabled?: boolean;
+  stopAbusiveEnabled?: boolean;
+  stopPromotionEnabled?: boolean;
+  gifProtection?: boolean;
+  linkProtection?: boolean;
+  imageProtection?: boolean;
+  fileProtection?: boolean;
+  customAbusiveWords?: string[];
   updatedAt: string;
 }
 

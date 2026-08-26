@@ -305,28 +305,7 @@ export class TelegramBotManager {
       if (user.id !== me.result?.id) {
         const raidTriggered = await ModerationService.handleAntiRaid(chatId, [user], chatTitle);
         if (!raidTriggered) {
-          const captchaTriggered = await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);
-          if (!captchaTriggered && settings.welcomeEnabled) {
-            const firstName = user.first_name || 'Member';
-            const lastName = user.last_name || '';
-            const displayName = user.first_name || (user.username ? `@${user.username}` : `User ${user.id}`);
-            const username = user.username ? `@${user.username}` : displayName;
-            const mention = `<a href="tg://user?id=${user.id}">${escapeHtml(displayName)}</a>`;
-            const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
-
-            const text = template
-              .replace(/{first_name}/gi, firstName)
-              .replace(/{last_name}/gi, lastName)
-              .replace(/{user}/gi, displayName)
-              .replace(/{name}/gi, displayName)
-              .replace(/{username}/gi, username)
-              .replace(/{mention}/gi, mention)
-              .replace(/{chat_title}/gi, chatTitle)
-              .replace(/{chat}/gi, chatTitle)
-              .replace(/{id}/gi, String(user.id));
-
-            await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
-          }
+          await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);
         }
       }
     }

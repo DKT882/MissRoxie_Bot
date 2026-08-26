@@ -302,8 +302,17 @@ class StorageManager {
         welcomeMessage: 'Welcome {user} to {chat}!',
         goodbyeEnabled: false,
         goodbyeMessage: 'Goodbye {user}!',
+        autoDeleteJoinLeave: false,
         slowModeSeconds: 0,
         reportsEnabled: true,
+        stopSpamEnabled: false,
+        stopAbusiveEnabled: false,
+        stopPromotionEnabled: false,
+        gifProtection: false,
+        linkProtection: true,
+        imageProtection: false,
+        fileProtection: false,
+        customAbusiveWords: [],
         updatedAt: new Date().toISOString()
       };
       this.scheduleSave();
@@ -441,6 +450,44 @@ class StorageManager {
     return count;
   }
 
+  // --- Custom Abusive Words ---
+  public getCustomAbusiveWords(chatId: number): string[] {
+    const s = this.getGroupSettings(chatId);
+    if (!Array.isArray(s.customAbusiveWords)) {
+      s.customAbusiveWords = [];
+    }
+    return s.customAbusiveWords;
+  }
+
+  public addCustomAbusiveWord(chatId: number, word: string): void {
+    const s = this.getGroupSettings(chatId);
+    if (!Array.isArray(s.customAbusiveWords)) s.customAbusiveWords = [];
+    const trimmed = word.trim().toLowerCase();
+    if (trimmed && !s.customAbusiveWords.includes(trimmed)) {
+      s.customAbusiveWords.push(trimmed);
+      this.scheduleSave();
+    }
+  }
+
+  public removeCustomAbusiveWord(chatId: number, word: string): boolean {
+    const s = this.getGroupSettings(chatId);
+    if (!Array.isArray(s.customAbusiveWords)) return false;
+    const trimmed = word.trim().toLowerCase();
+    const idx = s.customAbusiveWords.indexOf(trimmed);
+    if (idx !== -1) {
+      s.customAbusiveWords.splice(idx, 1);
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  public clearCustomAbusiveWords(chatId: number): void {
+    const s = this.getGroupSettings(chatId);
+    s.customAbusiveWords = [];
+    this.scheduleSave();
+  }
+
   // --- Warnings System ---
   public addWarning(record: Omit<WarningRecord, 'id' | 'timestamp' | 'count'>): { warning: WarningRecord; totalWarnings: number } {
     const existing = this.getUserWarnings(record.chatId, record.userId);
@@ -509,7 +556,7 @@ class StorageManager {
     if (!this.data.notes) {
       this.data.notes = {};
     }
-    const cleanName = name.toLowerCase().trim();
+    const cleanName = name.toLowerCase().trim().replace(/^#/, '');
     const key = `${chatId}_${cleanName}`;
     const record: NoteRecord = {
       name: cleanName,
@@ -528,7 +575,7 @@ class StorageManager {
 
   public getNote(chatId: number, name: string): NoteRecord | null {
     if (!this.data.notes) return null;
-    const cleanName = name.toLowerCase().trim();
+    const cleanName = name.toLowerCase().trim().replace(/^#/, '');
     const key = `${chatId}_${cleanName}`;
     return this.data.notes[key] || null;
   }
@@ -544,7 +591,7 @@ class StorageManager {
 
   public deleteNote(chatId: number, name: string): boolean {
     if (!this.data.notes) return false;
-    const cleanName = name.toLowerCase().trim();
+    const cleanName = name.toLowerCase().trim().replace(/^#/, '');
     const key = `${chatId}_${cleanName}`;
     if (this.data.notes[key]) {
       delete this.data.notes[key];
@@ -1171,6 +1218,17 @@ class StorageManager {
       contentTypes: Array.from(entry.contentTypes),
       grantedAt: entry.grantedAt
     }));
+  }
+
+  public getGroupMembersList(chatId: number): CachedMember[] {
+    if (!this.data.groupMembers) return [];
+    const members: CachedMember[] = [];
+    for (const [key, member] of Object.entries(this.data.groupMembers)) {
+      if (key.startsWith(`${chatId}_`)) {
+        members.push(member);
+      }
+    }
+    return members;
   }
 
   // --- Scheduled Messages ---

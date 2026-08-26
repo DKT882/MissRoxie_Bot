@@ -29,6 +29,55 @@ import {
   X
 } from 'lucide-react';
 
+const LIVE_TESTS = [
+  { id: 'LIVE-01', title: 'Bot responds to /ping' },
+  { id: 'LIVE-02', title: '/help works' },
+  { id: 'LIVE-03', title: 'Normal member cannot execute /ban' },
+  { id: 'LIVE-04', title: 'Admin can execute /ban' },
+  { id: 'LIVE-05', title: 'Admin can execute /kick' },
+  { id: 'LIVE-06', title: 'Admin can execute /mute' },
+  { id: 'LIVE-07', title: 'Admin can execute /warn' },
+  { id: 'LIVE-08', title: '/warnings works' },
+  { id: 'LIVE-09', title: '/clear works' },
+  { id: 'LIVE-10', title: '/del works' },
+  { id: 'LIVE-11', title: '/report works for normal member' },
+  { id: 'LIVE-12', title: '/report reaches admins' },
+  { id: 'LIVE-13', title: '/links off deletes links' },
+  { id: 'LIVE-14', title: '/stickers off deletes stickers' },
+  { id: 'LIVE-15', title: '/free bypass works' },
+  { id: 'LIVE-16', title: '/lock polls works' },
+  { id: 'LIVE-17', title: '/unlock polls works' },
+  { id: 'LIVE-18', title: '/flood works' },
+  { id: 'LIVE-19', title: '/filter works' },
+  { id: 'LIVE-20', title: '/welcome works' },
+  { id: 'LIVE-21', title: '/goodbye works' },
+  { id: 'LIVE-22', title: '/pin works' },
+  { id: 'LIVE-23', title: '/slowmode works' },
+  { id: 'LIVE-24', title: '/promote works' },
+  { id: 'LIVE-25', title: '/demote works' },
+  { id: 'LIVE-26', title: '/permissions UI works' },
+  { id: 'LIVE-27', title: 'Anonymous admin works' },
+  { id: 'LIVE-28', title: 'Owner cannot be moderated' },
+  { id: 'LIVE-29', title: 'Admin cannot moderate another admin' },
+  { id: 'LIVE-30', title: 'Self-target protection works' },
+  { id: 'LIVE-31', title: 'Bot-target protection works' },
+  { id: 'LIVE-32', title: 'Anti-raid triggers correctly' },
+  { id: 'LIVE-33', title: 'CAPTCHA appears for new member' },
+  { id: 'LIVE-34', title: 'CAPTCHA verification succeeds' },
+  { id: 'LIVE-35', title: 'CAPTCHA failure/expiry works' },
+  { id: 'LIVE-36', title: '#note shortcut works' },
+  { id: 'LIVE-37', title: '/note works' },
+  { id: 'LIVE-38', title: '/getnote works' },
+  { id: 'LIVE-39', title: '/delnote works' },
+  { id: 'LIVE-40', title: '/exportconfig works' },
+  { id: 'LIVE-41', title: '/importconfig works' },
+  { id: 'LIVE-42', title: 'Scheduled message executes' },
+  { id: 'LIVE-43', title: 'Scheduler survives restart' },
+  { id: 'LIVE-44', title: 'Multi-group isolation works' },
+  { id: 'LIVE-45', title: 'Rate limiter works for normal member' },
+  { id: 'LIVE-46', title: 'Admin bypasses rate limiter' },
+];
+
 interface BotInfo {
   id: number;
   username: string;
@@ -96,18 +145,38 @@ export default function App() {
   const [selectedEvent, setSelectedEvent] = useState<ModerationLog | null>(null);
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<any | null>(null);
+  const [telegramStatus, setTelegramStatus] = useState<any | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<string>('Welcome {mention} to {chat_title}! 👋 Your ID is {id}.');
+  const [liveTestStatus, setLiveTestStatus] = useState<Record<string, 'NOT TESTED' | 'PASS' | 'FAIL'>>(() => {
+    try {
+      const saved = localStorage.getItem('roxie_live_test_status');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const updateTestStatus = (testId: string, status: 'NOT TESTED' | 'PASS' | 'FAIL') => {
+    const updated = { ...liveTestStatus, [testId]: status };
+    setLiveTestStatus(updated);
+    try {
+      localStorage.setItem('roxie_live_test_status', JSON.stringify(updated));
+    } catch {}
+  };
 
   const fetchData = async () => {
     try {
-      const [overviewRes, groupsRes, cmdsRes] = await Promise.all([
+      const [overviewRes, groupsRes, cmdsRes, statusRes] = await Promise.all([
         fetch('/api/dashboard/overview'),
         fetch('/api/groups'),
-        fetch('/api/commands')
+        fetch('/api/commands'),
+        fetch('/api/telegram/status')
       ]);
 
       if (overviewRes.ok) setOverview(await overviewRes.json());
       if (groupsRes.ok) setGroups(await groupsRes.json());
       if (cmdsRes.ok) setCommands(await cmdsRes.json());
+      if (statusRes.ok) setTelegramStatus(await statusRes.json());
 
       if (selectedChatId !== 'all') {
         const detailRes = await fetch(`/api/groups/${selectedChatId}`);
@@ -252,10 +321,13 @@ export default function App() {
             </div>
 
             {/* Navigation Menu */}
-            <nav className="space-y-1">
+            <nav className="space-y-1 overflow-y-auto max-h-[calc(100vh-250px)] pr-1">
               {[
                 { id: 'overview', label: 'Overview', icon: Activity },
                 { id: 'live', label: 'Live Activity', icon: Terminal },
+                { id: 'live-verify', label: 'Live Telegram Verification', icon: ShieldCheck },
+                { id: 'live-checklist', label: 'Live Test Checklist (46)', icon: ListChecks },
+                { id: 'variables', label: 'Welcome / Goodbye Vars', icon: Smile },
                 { id: 'commands', label: 'Command Center', icon: ListChecks },
                 { id: 'bans', label: 'Banned Users', icon: Ban },
                 { id: 'kicks', label: 'Kicked Users', icon: UserX },
@@ -676,6 +748,201 @@ export default function App() {
                     [{l.timestamp}] [EVENT] {l.action} in group {l.chatId}
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* ACTIVE TAB: LIVE TELEGRAM VERIFICATION */}
+          {activeNav === 'live-verify' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-6">
+              <div className="flex items-center justify-between border-b border-stone-800 pb-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" /> Live Telegram Verification & Status
+                  </h3>
+                  <p className="text-xs text-stone-400 mt-0.5">Real-time Telegram API connection, bot identity, and long-polling diagnostics.</p>
+                </div>
+                <button
+                  onClick={handleTestConnection}
+                  disabled={testingConnection}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-medium transition-colors flex items-center gap-2"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} /> Test Connection
+                </button>
+              </div>
+
+              {!telegramStatus?.isConfigured && (
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-amber-300 text-xs flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <span>Live Telegram verification unavailable — configure TELEGRAM_BOT_TOKEN in environment variables.</span>
+                </div>
+              )}
+
+              {testResult && (
+                <div className={`p-4 rounded-xl text-xs border ${testResult.success ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
+                  {testResult.success ? `✅ Successfully connected to bot @${testResult.bot?.username} (${testResult.bot?.first_name})` : `❌ Connection failed: ${testResult.error}`}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-1">
+                  <span className="text-[11px] text-stone-400 font-medium">Connection State</span>
+                  <div className="text-sm font-bold flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${telegramStatus?.isConfigured && telegramStatus?.isPolling ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                    <span className="text-white">{telegramStatus?.isPolling ? 'CONNECTED & POLLING' : telegramStatus?.isConfigured ? 'DISCONNECTED (Not Polling)' : 'UNCONFIGURED'}</span>
+                  </div>
+                </div>
+
+                <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-1">
+                  <span className="text-[11px] text-stone-400 font-medium">Bot Username</span>
+                  <div className="text-sm font-bold text-white font-mono">
+                    @{telegramStatus?.botInfo?.username || botInfo?.username || 'Not Authenticated'}
+                  </div>
+                </div>
+
+                <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-1">
+                  <span className="text-[11px] text-stone-400 font-medium">Last Telegram API Error</span>
+                  <div className="text-xs font-mono text-red-400 truncate">
+                    {telegramStatus?.pollingError || 'None'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-3 font-mono text-xs">
+                <div className="text-stone-400 font-bold uppercase tracking-wider text-[10px]">Diagnostics Details</div>
+                <div className="flex justify-between border-b border-stone-800 pb-2">
+                  <span className="text-stone-400">Environment Variable:</span>
+                  <span className="text-stone-200">TELEGRAM_BOT_TOKEN ({telegramStatus?.isConfigured ? 'Present' : 'Missing'})</span>
+                </div>
+                <div className="flex justify-between border-b border-stone-800 pb-2">
+                  <span className="text-stone-400">Token Format:</span>
+                  <span className={telegramStatus?.isValidFormat ? 'text-emerald-400' : 'text-amber-400'}>{telegramStatus?.isValidFormat ? 'Valid Format' : 'Invalid or Missing'}</span>
+                </div>
+                <div className="flex justify-between border-b border-stone-800 pb-2">
+                  <span className="text-stone-400">Total Messages Processed:</span>
+                  <span className="text-stone-200">{telegramStatus?.totalMessagesReceived || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-stone-400">Last Polled At:</span>
+                  <span className="text-stone-200">{telegramStatus?.lastPolledAt ? new Date(telegramStatus.lastPolledAt).toLocaleString() : 'Never'}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ACTIVE TAB: LIVE TEST CHECKLIST */}
+          {activeNav === 'live-checklist' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-stone-800 pb-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <ListChecks className="w-4 h-4 text-blue-400" /> Live Test Checklist (LIVE-01 to LIVE-46)
+                  </h3>
+                  <p className="text-xs text-stone-400 mt-0.5">Manually record verification status for end-to-end Telegram bot behaviors.</p>
+                </div>
+                <div className="flex items-center gap-2 text-xs font-mono">
+                  <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg">
+                    Pass: {Object.values(liveTestStatus).filter(v => v === 'PASS').length}
+                  </span>
+                  <span className="px-2.5 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg">
+                    Fail: {Object.values(liveTestStatus).filter(v => v === 'FAIL').length}
+                  </span>
+                  <span className="px-2.5 py-1 bg-stone-900 text-stone-400 border border-stone-800 rounded-lg">
+                    Total: 46
+                  </span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-stone-900 text-stone-400 border-b border-stone-800">
+                    <tr>
+                      <th className="p-3 w-28">Test ID</th>
+                      <th className="p-3">Behavior / Feature Description</th>
+                      <th className="p-3 w-40 text-right">Verification Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-900">
+                    {LIVE_TESTS.map((test) => {
+                      const status = liveTestStatus[test.id] || 'NOT TESTED';
+                      return (
+                        <tr key={test.id} className="hover:bg-stone-900/50">
+                          <td className="p-3 font-mono font-bold text-blue-400">{test.id}</td>
+                          <td className="p-3 text-stone-200">{test.title}</td>
+                          <td className="p-3 text-right">
+                            <select
+                              value={status}
+                              onChange={(e) => updateTestStatus(test.id, e.target.value as any)}
+                              className={`px-3 py-1.5 rounded-xl font-medium text-xs focus:outline-none border ${
+                                status === 'PASS' 
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                                  : status === 'FAIL' 
+                                  ? 'bg-red-500/10 text-red-400 border-red-500/30' 
+                                  : 'bg-stone-900 text-stone-400 border-stone-800'
+                              }`}
+                            >
+                              <option value="NOT TESTED" className="bg-stone-950 text-stone-300">NOT TESTED</option>
+                              <option value="PASS" className="bg-stone-950 text-emerald-400">PASS</option>
+                              <option value="FAIL" className="bg-stone-950 text-red-400">FAIL</option>
+                            </select>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ACTIVE TAB: WELCOME & GOODBYE VARIABLES */}
+          {activeNav === 'variables' && (
+            <div className="bg-stone-950 border border-stone-800 rounded-2xl p-6 space-y-6">
+              <div className="border-b border-stone-800 pb-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Smile className="w-4 h-4 text-amber-400" /> Welcome & Goodbye Template Variables
+                </h3>
+                <p className="text-xs text-stone-400 mt-0.5">Customize greeting messages using real-time user and chat variables supported by Roxie.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[
+                  { tag: '{mention}', desc: 'Clickable HTML user mention', example: '<a href="tg://user?id=123">John</a>' },
+                  { tag: '{first_name}', desc: 'User first name', example: 'John' },
+                  { tag: '{username}', desc: 'User @username or fallback display name', example: '@john_doe' },
+                  { tag: '{chat_title}', desc: 'Title of the Telegram group', example: 'Roxie Community' },
+                  { tag: '{id}', desc: 'Numeric Telegram user ID', example: '987654321' },
+                ].map((v, idx) => (
+                  <div key={idx} className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-1.5">
+                    <span className="font-mono text-blue-400 font-bold text-xs">{v.tag}</span>
+                    <p className="text-xs text-stone-300">{v.desc}</p>
+                    <div className="text-[11px] text-stone-500 font-mono bg-stone-950 px-2 py-1 rounded">Example: {v.example}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-stone-900 border border-stone-800 rounded-xl p-6 space-y-4">
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider">Live Template Preview Sandbox</h4>
+                <div className="space-y-2">
+                  <label className="text-xs text-stone-400 block">Type custom template using variables:</label>
+                  <input
+                    type="text"
+                    value={previewTemplate}
+                    onChange={(e) => setPreviewTemplate(e.target.value)}
+                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-4 py-2.5 text-xs text-stone-200 font-mono focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div className="space-y-1 pt-2">
+                  <span className="text-[11px] text-stone-400 block font-medium">Rendered Result Preview:</span>
+                  <div className="bg-stone-950 border border-stone-800 rounded-xl p-4 text-xs font-sans text-stone-200">
+                    {previewTemplate
+                      .replace(/{mention}/gi, '@JohnDoe')
+                      .replace(/{first_name}/gi, 'John')
+                      .replace(/{username}/gi, '@johndoe')
+                      .replace(/{chat_title}/gi, 'My Test Group')
+                      .replace(/{id}/gi, '123456789')}
+                  </div>
+                </div>
               </div>
             </div>
           )}

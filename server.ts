@@ -5,6 +5,9 @@ import { createServer as createViteServer } from 'vite';
 import { telegramBot } from './server/telegram.js';
 import { db } from './server/db/storage.js';
 import { COMMAND_CATALOG } from './server/telegram/commandCatalog.js';
+import { enterpriseRouter } from './server/api/enterpriseRouter.js';
+import { phase8Router } from './server/api/phase8Router.js';
+import { DisasterRecoveryService } from './server/system/disasterRecovery.js';
 
 dotenv.config();
 
@@ -12,7 +15,13 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Startup recovery
+  const startupResult = DisasterRecoveryService.startupRecovery();
+  console.log('ROXIE STARTUP DIAGNOSTICS:', startupResult);
+
   app.use(express.json());
+  app.use(enterpriseRouter);
+  app.use(phase8Router);
 
   // Health check
   app.get('/api/health', (req, res) => {
@@ -199,9 +208,27 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on http://0.0.0.0:${PORT}`);
   });
+
+  const handleShutdown = (signal: string) => {
+    console.log(`Received ${signal}. Starting graceful shutdown sequence...`);
+    try {
+      telegramBot.stopPolling();
+    } catch {}
+    server.close(() => {
+      console.log('HTTP server closed. Exiting cleanly.');
+      process.exit(0);
+    });
+    setTimeout(() => {
+      console.error('Force shutting down after timeout.');
+      process.exit(1);
+    }, 5000);
+  };
+
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
 }
 
 startServer();

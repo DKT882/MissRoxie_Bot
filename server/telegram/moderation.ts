@@ -110,6 +110,7 @@ export class ModerationService {
   private static filterNoticeCooldowns: Map<string, number> = new Map();
   private static floodTracker: Map<string, number[]> = new Map();
   private static floodActionCooldowns: Map<string, number> = new Map();
+  private static welcomedUsersCache: Map<string, number> = new Map();
 
   public static clearReportCooldowns(): void {
     this.reportCooldowns.clear();
@@ -422,17 +423,6 @@ export class ModerationService {
         reason: evalResult.reason || `Blocked ${lockType} due to active lock`
       });
 
-      // Rate limit notice per user/chat
-      const noticeKey = `${chatId}_${userId}_lock_${lockType}`;
-      const lastNotice = this.filterNoticeCooldowns.get(noticeKey) || 0;
-      if (Date.now() - lastNotice > 8000) {
-        this.filterNoticeCooldowns.set(noticeKey, Date.now());
-        await telegramApi.sendMessage(
-          chatId,
-          `🚫 <b>${capitalize(lockType)} is locked in this chat.</b>\n` +
-          `👤 ${username}, your message was removed.`
-        );
-      }
       return true;
     }
 
@@ -645,25 +635,31 @@ export class ModerationService {
     const settings = db.getGroupSettings(session.chatId);
     if (settings.welcomeEnabled) {
       const member = callbackQuery.from;
-      const firstName = member.first_name || 'Member';
-      const lastName = member.last_name || '';
-      const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
-      const username = member.username ? `@${member.username}` : displayName;
-      const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
-      const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
+      const cacheKey = `${session.chatId}:${member.id}`;
+      const now = Date.now();
+      const lastWelcomed = ModerationService.welcomedUsersCache.get(cacheKey) || 0;
+      if (now - lastWelcomed >= 15000) {
+        ModerationService.welcomedUsersCache.set(cacheKey, now);
+        const firstName = member.first_name || 'Member';
+        const lastName = member.last_name || '';
+        const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
+        const username = member.username ? `@${member.username}` : displayName;
+        const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
+        const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
 
-      const text = template
-        .replace(/{first_name}/gi, firstName)
-        .replace(/{last_name}/gi, lastName)
-        .replace(/{user}/gi, displayName)
-        .replace(/{name}/gi, displayName)
-        .replace(/{username}/gi, username)
-        .replace(/{mention}/gi, mention)
-        .replace(/{chat_title}/gi, settings.chatTitle || 'the group')
-        .replace(/{chat}/gi, settings.chatTitle || 'the group')
-        .replace(/{id}/gi, String(member.id));
+        const text = template
+          .replace(/{first_name}/gi, firstName)
+          .replace(/{last_name}/gi, lastName)
+          .replace(/{user}/gi, displayName)
+          .replace(/{name}/gi, displayName)
+          .replace(/{username}/gi, username)
+          .replace(/{mention}/gi, mention)
+          .replace(/{chat_title}/gi, settings.chatTitle || 'the group')
+          .replace(/{chat}/gi, settings.chatTitle || 'the group')
+          .replace(/{id}/gi, String(member.id));
 
-      await telegramApi.sendMessage(session.chatId, text, { parse_mode: 'HTML' });
+        await telegramApi.sendMessage(session.chatId, text, { parse_mode: 'HTML' });
+      }
     }
 
     return true;
@@ -789,17 +785,6 @@ export class ModerationService {
             .replace(/{chat}/gi, message.chat.title || 'the group');
 
           await telegramApi.sendMessage(chatId, formattedReply);
-        } else {
-          // Rate-limited default deletion notice
-          const noticeKey = `${chatId}_${message.from.id}_filter`;
-          const lastNotice = this.filterNoticeCooldowns.get(noticeKey) || 0;
-          if (Date.now() - lastNotice > 8000) {
-            this.filterNoticeCooldowns.set(noticeKey, Date.now());
-            await telegramApi.sendMessage(
-              chatId,
-              `⚠️ <b>Filtered Word:</b> Message from ${username} was removed.`
-            );
-          }
         }
         return true;
       }
@@ -932,12 +917,29 @@ export class ModerationService {
     const settings = db.getGroupSettings(chatId, message.chat.title);
     const chatTitle = message.chat.title || 'the group';
 
+    // Check if autoDeleteJoinLeave is enabled and this message is a join or leave system service message
+    if (settings.autoDeleteJoinLeave) {
+      if ((message.new_chat_members && message.new_chat_members.length > 0) || message.left_chat_member || message.new_chat_member || message.old_chat_member) {
+        setTimeout(() => {
+          telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
+        }, 3500); // delete after 3.5 seconds
+      }
+    }
+
     // New chat members join
     if (message.new_chat_members && message.new_chat_members.length > 0 && settings.welcomeEnabled) {
       for (const member of message.new_chat_members) {
         // Skip welcoming the bot itself
         const me = await telegramApi.getMe();
         if (member.id === me.result?.id) continue;
+
+        const cacheKey = `${chatId}:${member.id}`;
+        const now = Date.now();
+        const lastWelcomed = ModerationService.welcomedUsersCache.get(cacheKey) || 0;
+        if (now - lastWelcomed < 15000) {
+          continue; // skip duplicate welcome within 15 seconds
+        }
+        ModerationService.welcomedUsersCache.set(cacheKey, now);
 
         const firstName = member.first_name || 'Member';
         const lastName = member.last_name || '';
