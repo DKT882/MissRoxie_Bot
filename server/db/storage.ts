@@ -83,6 +83,7 @@ class StorageManager {
     } catch (err) {
       console.error('Failed to initialize local bot storage:', err);
     }
+    this.cleanOldLogs();
     this.isLoaded = true;
   }
 
@@ -96,6 +97,7 @@ class StorageManager {
   }
 
   private persist() {
+    this.cleanOldLogs();
     try {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -1274,7 +1276,21 @@ class StorageManager {
   }
 
   // --- Moderation Logs ---
+  private cleanOldLogs() {
+    if (!this.data.logs || !Array.isArray(this.data.logs)) {
+      this.data.logs = [];
+      return;
+    }
+    const oneHourAgo = Date.now() - 3600 * 1000;
+    this.data.logs = this.data.logs.filter((log) => {
+      if (!log.timestamp) return false;
+      const t = new Date(log.timestamp).getTime();
+      return !isNaN(t) && t >= oneHourAgo;
+    });
+  }
+
   public addLog(log: Omit<ModerationLog, 'id' | 'timestamp'>): ModerationLog {
+    this.cleanOldLogs();
     const entry: ModerationLog = {
       id: Math.random().toString(36).substring(2, 9),
       timestamp: new Date().toISOString(),
@@ -1290,10 +1306,12 @@ class StorageManager {
   }
 
   public getRecentLogs(limit: number = 30): ModerationLog[] {
+    this.cleanOldLogs();
     return this.data.logs.slice(-limit);
   }
 
   public getGroupLogs(chatId: number, limit: number = 20): ModerationLog[] {
+    this.cleanOldLogs();
     return this.data.logs
       .filter((l) => l.chatId === chatId)
       .slice(-limit)
