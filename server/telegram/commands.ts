@@ -7,54 +7,10 @@ import { mapTelegramError } from './errorMapper.js';
 import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand } from './types.js';
 import { COMMAND_CATALOG } from './commandCatalog.js';
 
-export const ADMIN_COMMANDS: BotCommand[] = [
-  { command: 'help', description: 'Show all administrator & moderation commands' },
-  { command: 'status', description: 'View bot status and group configuration' },
-  { command: 'ping', description: 'Check bot responsiveness' },
-  { command: 'del', description: 'Delete replied message for all group members' },
-  { command: 'clear', description: 'Purge messages (e.g. /clear, /clear 5s, /clear 1m, /clear @user)' },
-  { command: 'purge', description: 'Purge messages from replied message to current' },
-  { command: 'mute', description: 'Mute a member in the group' },
-  { command: 'unmute', description: 'Unmute a muted member' },
-  { command: 'tmute', description: 'Temporarily mute a member (e.g. /tmute 2h [reason])' },
-  { command: 'tban', description: 'Temporarily ban a member (e.g. /tban 1d [reason])' },
-  { command: 'dban', description: 'Delete replied message and ban the sender' },
-  { command: 'dmute', description: 'Delete replied message and mute the sender' },
-  { command: 'dkick', description: 'Delete replied message and kick the sender' },
-  { command: 'sban', description: 'Silently ban user and delete command/message' },
-  { command: 'smute', description: 'Silently mute user and delete command/message' },
-  { command: 'skick', description: 'Silently kick user and delete command/message' },
-  { command: 'promote', description: 'Promote a member to administrator' },
-  { command: 'demote', description: 'Demote an administrator to regular member' },
-  { command: 'permissions', description: 'View and edit administrator permissions' },
-  { command: 'kick', description: 'Remove a member from the group' },
-  { command: 'ban', description: 'Ban a member from the group' },
-  { command: 'unban', description: 'Unban a member from the group' },
-  { command: 'warn', description: 'Issue a warning to a member' },
-  { command: 'warnings', description: 'View warnings for a member' },
-  { command: 'resetwarns', description: 'Clear warnings for a member' },
-  { command: 'setwarnlimit', description: 'Set warning threshold before auto-ban' },
-  { command: 'setmod', description: 'Assign bot moderator role' },
-  { command: 'delmod', description: 'Remove bot moderator role' },
-  { command: 'links', description: 'Toggle link protection filter' },
-  { command: 'media', description: 'Toggle image & media protection filter' },
-  { command: 'stickers', description: 'Toggle sticker protection filter' },
-  { command: 'free', description: 'Allow member to send images & stickers' },
-  { command: 'unfree', description: 'Revoke image & sticker permission from member' },
-  { command: 'freelist', description: 'List all members exempted to send images & stickers' },
-  { command: 'say', description: 'Broadcast announcement as the bot' },
-  { command: 'schedule', description: 'Schedule a recurring message' },
-  { command: 'listschedules', description: 'List all active scheduled messages' },
-  { command: 'deleteschedule', description: 'Delete a scheduled message by ID' },
-  { command: 'live', description: 'Group video and live stream info' },
-  { command: 'report', description: 'Report a message to group administrators' },
-  { command: 'note', description: 'Create or update a group note' },
-  { command: 'getnote', description: 'Retrieve a group note' },
-  { command: 'notes', description: 'List all available group notes' },
-  { command: 'delnote', description: 'Delete a group note' },
-  { command: 'exportconfig', description: 'Export group configuration as JSON' },
-  { command: 'importconfig', description: 'Import group configuration from JSON' }
-];
+export const ADMIN_COMMANDS: BotCommand[] = COMMAND_CATALOG.map(item => ({
+  command: item.command.replace(/^\//, ''),
+  description: item.description.slice(0, 256)
+}));
 
 export async function registerBotCommands(): Promise<{
   adminCommandsSet: boolean;
@@ -63,24 +19,59 @@ export async function registerBotCommands(): Promise<{
 }> {
   const errors: string[] = [];
 
-  // 1. Register admin commands for all_chat_administrators scope
-  const adminRes = await telegramApi.setMyCommands(ADMIN_COMMANDS, {
+  const allCommands: BotCommand[] = COMMAND_CATALOG.map(item => ({
+    command: item.command.replace(/^\//, ''),
+    description: item.description.slice(0, 256)
+  }));
+
+  const publicCommands: BotCommand[] = COMMAND_CATALOG
+    .filter(item => item.permission === 'Everyone')
+    .map(item => ({
+      command: item.command.replace(/^\//, ''),
+      description: item.description.slice(0, 256)
+    }));
+
+  const privateCommands: BotCommand[] = [
+    ...publicCommands,
+    { command: 'start', description: 'Initialize bot conversation and welcome' },
+    { command: 'help', description: "Show Roxie's command help" }
+  ];
+  const uniquePrivateCommands = Array.from(new Map(privateCommands.map(c => [c.command, c])).values());
+
+  // 1. Register all commands for administrators scope
+  const adminRes = await telegramApi.setMyCommands(allCommands, {
     type: 'all_chat_administrators'
   });
   if (!adminRes.ok) {
     errors.push(`Failed to set admin commands: ${adminRes.description}`);
   }
 
-  // 2. Clear default scope commands so normal members see NO auto-complete commands
-  const defaultRes = await telegramApi.setMyCommands([], {
+  // 2. Register public group commands for group chats scope
+  const groupRes = await telegramApi.setMyCommands(publicCommands, {
+    type: 'all_group_chats'
+  });
+  if (!groupRes.ok) {
+    errors.push(`Failed to set group commands: ${groupRes.description}`);
+  }
+
+  // 3. Register private chat commands for private chats scope
+  const privateRes = await telegramApi.setMyCommands(uniquePrivateCommands, {
+    type: 'all_private_chats'
+  });
+  if (!privateRes.ok) {
+    errors.push(`Failed to set private commands: ${privateRes.description}`);
+  }
+
+  // 4. Register public commands for default scope
+  const defaultRes = await telegramApi.setMyCommands(publicCommands, {
     type: 'default'
   });
   if (!defaultRes.ok) {
-    errors.push(`Failed to clear default commands: ${defaultRes.description}`);
+    errors.push(`Failed to set default commands: ${defaultRes.description}`);
   }
 
   return {
-    adminCommandsSet: adminRes.ok,
+    adminCommandsSet: adminRes.ok && groupRes.ok && privateRes.ok,
     defaultCommandsCleared: defaultRes.ok,
     errors: errors.length > 0 ? errors : undefined
   };
@@ -104,7 +95,7 @@ export class CommandHandler {
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
   public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
-    '/report', '/getnote', '/notes', '/note', '/delnote', '/rules'
+    '/help', '/start', '/ping', '/live', '/report', '/getnote', '/notes', '/rules'
   ]);
 
   public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
@@ -127,8 +118,7 @@ export class CommandHandler {
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse', '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/automation', '/setrules', '/clearrules', '/chatbot',
     '/say', '/schedule', '/listschedules', '/deleteschedule',
-    '/exportconfig', '/importconfig',
-    '/live', '/start', '/ping', '/status', '/settings', '/help'
+    '/exportconfig', '/importconfig', '/status', '/settings'
   ]);
 
   public static readonly SENSITIVE_COMMANDS = new Set<string>([
@@ -4815,8 +4805,16 @@ export class CommandHandler {
   }
 
   private static async handleHelp(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const isAdmin = actor.actorRank >= RoleRank.ADMIN;
+
+    const filteredCatalog = COMMAND_CATALOG.filter(item => {
+      if (isAdmin) return true;
+      return item.permission === 'Everyone';
+    });
+
     const categories: Record<string, typeof COMMAND_CATALOG> = {};
-    for (const item of COMMAND_CATALOG) {
+    for (const item of filteredCatalog) {
       if (!categories[item.category]) {
         categories[item.category] = [];
       }
@@ -4824,12 +4822,14 @@ export class CommandHandler {
     }
 
     const messages: string[] = [];
-    let currentMsg = `🛡️ <b>Roxie Command Center & Toolkit</b>\n<i>🔒 All commands generated from the official command registry.</i>\n`;
+    let currentMsg = isAdmin
+      ? `🛡️ <b>Roxie Admin Command Center & Toolkit</b>\n<i>🔒 Showing all available administrator & member commands.</i>\n`
+      : `🛡️ <b>Roxie Command Center</b>\n<i>📖 Showing available member commands.</i>\n`;
 
     for (const [cat, items] of Object.entries(categories)) {
       let section = `\n📌 <b>${cat.toUpperCase()}</b>\n`;
       for (const item of items) {
-        section += `• <code>${item.command}</code> — ${item.description}\n  <i>Example:</i> <code>${item.example}</code>\n`;
+        section += `• <code>${item.command}</code> — ${item.description}\n  <i>Syntax:</i> <code>${item.syntax}</code>\n`;
       }
       if (currentMsg.length + section.length > 3900) {
         messages.push(currentMsg);

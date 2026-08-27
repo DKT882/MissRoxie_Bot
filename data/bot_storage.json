@@ -1464,7 +1464,7 @@
     {
       "id": "UPYJ0G",
       "createdAt": "2026-08-27T09:09:23.822Z",
-      "runsCount": 2,
+      "runsCount": 3,
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminId": 111,
@@ -1475,7 +1475,7 @@
       "mediaFileId": "photo_file_id_123",
       "intervalMs": 7200000,
       "intervalFormatted": "2 hours",
-      "nextRun": "2026-08-27T11:12:16.931Z"
+      "nextRun": "2026-08-27T11:23:36.529Z"
     },
     {
       "id": "C7PU0C",
@@ -1507,6 +1507,37 @@
       "intervalMs": 7200000,
       "intervalFormatted": "2 hours",
       "nextRun": "2026-08-27T11:12:16.930Z"
+    },
+    {
+      "id": "RYSM5C",
+      "createdAt": "2026-08-27T09:23:36.509Z",
+      "runsCount": 0,
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminId": 111,
+      "adminUsername": "SuperAdmin",
+      "message": "Check out our new launch! https://example.com/promo",
+      "messageText": "Check out our new launch! https://example.com/promo",
+      "contentType": "text",
+      "intervalMs": 1800000,
+      "intervalFormatted": "30 minutes",
+      "nextRun": "2026-08-27T09:53:36.509Z"
+    },
+    {
+      "id": "W7ZVDW",
+      "createdAt": "2026-08-27T09:23:36.528Z",
+      "runsCount": 0,
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminId": 111,
+      "adminUsername": "SuperAdmin",
+      "message": "Promo Photo Caption with link https://example.com",
+      "messageText": "Promo Photo Caption with link https://example.com",
+      "contentType": "photo",
+      "mediaFileId": "photo_file_id_123",
+      "intervalMs": 7200000,
+      "intervalFormatted": "2 hours",
+      "nextRun": "2026-08-27T11:23:36.528Z"
     }
   ],
   "logs": [
@@ -2103,6 +2134,36 @@
     {
       "id": "38ncn0m",
       "timestamp": "2026-08-27T09:12:16.931Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [UPYJ0G]: \"Promo Photo Caption with link ...\""
+    },
+    {
+      "id": "sw77ho0",
+      "timestamp": "2026-08-27T09:23:36.509Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_created",
+      "details": "Created recurring schedule [RYSM5C] every 30 minutes"
+    },
+    {
+      "id": "8wnzjme",
+      "timestamp": "2026-08-27T09:23:36.528Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_created",
+      "details": "Created recurring schedule [W7ZVDW] every 2 hours"
+    },
+    {
+      "id": "5icaioy",
+      "timestamp": "2026-08-27T09:23:36.529Z",
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminUserId": 111,

@@ -13,8 +13,10 @@ function assert(condition: boolean, testName: string, detail?: string) {
     console.log(`✅ [PASS] ${testName}`);
     passedCount++;
   } else {
-    console.error(`❌ [FAIL] ${testName}${detail ? ` - ${detail}` : ''}`);
+    const msg = `❌ [FAIL] ${testName}${detail ? ` - ${detail}` : ''}`;
+    console.log(msg);
     failedCount++;
+    throw new Error(msg);
   }
 }
 
@@ -187,15 +189,15 @@ async function runSecurityTestSuite() {
   // ==========================================
   console.log('\n--- Step 2: Normal Group Member Access Denied Matrix ---');
 
-  // AUTH-04: Normal group member executes /help -> DENIED
+  // AUTH-04: Normal group member executes /ban -> DENIED
   {
     lastSentMessage = null;
-    const ctx = makeContext(normalMemberId, '/help');
+    const ctx = makeContext(normalMemberId, '/ban', [String(adminId)]);
     const handled = await CommandHandler.handleCommand(ctx);
     assert(
       handled === true &&
       lastSentMessage?.text === '❌ This bot is available only to group administrators.',
-      'AUTH-04 Normal group member executes /help -> DENIED'
+      'AUTH-04 Normal group member executes /ban -> DENIED'
     );
   }
 
@@ -283,15 +285,15 @@ async function runSecurityTestSuite() {
     );
   }
 
-  // AUTH-12: Normal group member executes /ping -> DENIED
+  // AUTH-12: Normal group member executes /kick -> DENIED
   {
     lastSentMessage = null;
-    const ctx = makeContext(normalMemberId, '/ping');
+    const ctx = makeContext(normalMemberId, '/kick', [String(adminId)]);
     const handled = await CommandHandler.handleCommand(ctx);
     assert(
       handled === true &&
       lastSentMessage?.text === '❌ This bot is available only to group administrators.',
-      'AUTH-12 Normal group member executes /ping -> DENIED'
+      'AUTH-12 Normal group member executes /kick -> DENIED'
     );
   }
 
@@ -327,10 +329,10 @@ async function runSecurityTestSuite() {
   // AUTH-15: Left/Kicked user executes command -> DENIED
   {
     lastSentMessage = null;
-    const ctxLeft = makeContext(leftUserId, '/ping');
+    const ctxLeft = makeContext(leftUserId, '/kick', [String(normalMemberId)]);
     const handledLeft = await CommandHandler.handleCommand(ctxLeft);
 
-    const ctxKicked = makeContext(kickedUserId, '/help');
+    const ctxKicked = makeContext(kickedUserId, '/kick', [String(normalMemberId)]);
     const handledKicked = await CommandHandler.handleCommand(ctxKicked);
 
     assert(
@@ -370,12 +372,12 @@ async function runSecurityTestSuite() {
     );
   }
 
-  // AUTH-18: Telegram command auto-complete default scope is empty
+  // AUTH-18: Telegram command auto-complete default scope is populated with public commands
   {
     const defaultCall = setMyCommandsCalls.find(c => c.scope?.type === 'default');
     assert(
-      Boolean(defaultCall && defaultCall.commands.length === 0),
-      'AUTH-18 Telegram command auto-complete default scope is empty'
+      Boolean(defaultCall && defaultCall.commands.length > 0 && defaultCall.commands.some(c => c.command === 'help')),
+      'AUTH-18 Telegram command auto-complete default scope is populated with public commands'
     );
   }
 
