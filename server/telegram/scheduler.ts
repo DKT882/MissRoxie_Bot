@@ -75,7 +75,35 @@ export class MessageScheduler {
       const nextRunTime = new Date(schedule.nextRun).getTime();
       if (now >= nextRunTime) {
         try {
-          await telegramApi.sendMessage(schedule.chatId, schedule.message);
+          const textContent = schedule.messageText || schedule.message || '';
+          if (schedule.contentType === 'photo' && schedule.mediaFileId) {
+            await telegramApi.sendPhoto(schedule.chatId, schedule.mediaFileId, {
+              caption: textContent,
+              parse_mode: 'HTML'
+            });
+          } else if (schedule.contentType === 'video' && schedule.mediaFileId) {
+            await telegramApi.sendVideo(schedule.chatId, schedule.mediaFileId, {
+              caption: textContent,
+              parse_mode: 'HTML'
+            });
+          } else if (schedule.contentType === 'document' && schedule.mediaFileId) {
+            await telegramApi.sendDocument(schedule.chatId, schedule.mediaFileId, {
+              caption: textContent,
+              parse_mode: 'HTML'
+            });
+          } else if (schedule.contentType === 'animation' && schedule.mediaFileId) {
+            await telegramApi.sendAnimation(schedule.chatId, schedule.mediaFileId, {
+              caption: textContent,
+              parse_mode: 'HTML'
+            });
+          } else if (schedule.contentType === 'sticker' && schedule.mediaFileId) {
+            await telegramApi.sendSticker(schedule.chatId, schedule.mediaFileId);
+            if (textContent) {
+              await telegramApi.sendMessage(schedule.chatId, textContent);
+            }
+          } else {
+            await telegramApi.sendMessage(schedule.chatId, textContent);
+          }
           
           db.addLog({
             chatId: schedule.chatId,
@@ -83,7 +111,7 @@ export class MessageScheduler {
             adminUserId: schedule.adminId,
             adminUsername: schedule.adminUsername,
             action: 'schedule_sent',
-            details: `Executed scheduled broadcast [${schedule.id}]: "${schedule.message.slice(0, 30)}..."`
+            details: `Executed scheduled broadcast [${schedule.id}]: "${textContent.slice(0, 30)}..."`
           });
 
           // Calculate next run time
@@ -102,7 +130,9 @@ export class MessageScheduler {
     adminId: number,
     adminUsername: string | undefined,
     intervalStr: string,
-    messageText: string
+    messageText: string,
+    contentType?: 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation',
+    mediaFileId?: string
   ): { success: boolean; schedule?: ScheduledMessage; error?: string } {
     const parsed = this.parseInterval(intervalStr);
     if (!parsed) {
@@ -112,10 +142,11 @@ export class MessageScheduler {
       };
     }
 
-    if (!messageText.trim()) {
+    const trimmedText = messageText.trim();
+    if (!trimmedText && !mediaFileId) {
       return {
         success: false,
-        error: 'Please provide a message body for the schedule.'
+        error: 'Please provide a message body or reply to a message/media for the schedule.'
       };
     }
 
@@ -125,7 +156,10 @@ export class MessageScheduler {
       chatTitle,
       adminId,
       adminUsername,
-      message: messageText.trim(),
+      message: trimmedText || (contentType ? `[${contentType.toUpperCase()}]` : 'Scheduled content'),
+      messageText: trimmedText,
+      contentType: contentType || 'text',
+      mediaFileId,
       intervalMs: parsed.ms,
       intervalFormatted: parsed.formatted,
       nextRun

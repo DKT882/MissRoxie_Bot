@@ -383,6 +383,9 @@ export interface ScheduledMessage {
   adminId: number;
   adminUsername?: string;
   message: string;
+  messageText?: string;
+  contentType?: 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation';
+  mediaFileId?: string;
   intervalMs: number;
   intervalFormatted: string;
   nextRun: string;

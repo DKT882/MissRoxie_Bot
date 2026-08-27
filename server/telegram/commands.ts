@@ -3339,20 +3339,59 @@ export class CommandHandler {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
     if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
 
-    if (ctx.args.length < 2) {
+    if (ctx.args.length < 1) {
       await telegramApi.sendMessage(
         ctx.chatId,
-        `ℹ️ <b>Usage:</b>\n<code>/schedule &lt;time&gt; &lt;message&gt;</code>\n\n` +
+        `ℹ️ <b>Usage:</b>\n<code>/schedule &lt;time&gt; [message]</code> (or reply to a message/media to schedule it)\n\n` +
         `<b>Examples:</b>\n` +
-        `• <code>/schedule 30m Welcome to the community!</code>\n` +
-        `• <code>/schedule 2h Remember to read group rules.</code>\n` +
+        `• <code>/schedule 30m Check out our promo! https://example.com</code>\n` +
+        `• <code>/schedule 2h</code> (replying to photo/video/sticker/media/text)\n` +
         `• <code>/schedule 1d Daily announcements...</code>`
       );
       return;
     }
 
     const intervalStr = ctx.args[0];
-    const messageText = ctx.args.slice(1).join(' ');
+    let messageText = ctx.args.slice(1).join(' ');
+    let contentType: 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation' = 'text';
+    let mediaFileId: string | undefined;
+
+    const reply = ctx.message.reply_to_message;
+    if (reply) {
+      if (reply.photo && reply.photo.length > 0) {
+        contentType = 'photo';
+        const largest = reply.photo[reply.photo.length - 1];
+        mediaFileId = largest.file_id;
+        if (!messageText && reply.caption) {
+          messageText = reply.caption;
+        }
+      } else if (reply.video) {
+        contentType = 'video';
+        mediaFileId = reply.video.file_id;
+        if (!messageText && reply.caption) {
+          messageText = reply.caption;
+        }
+      } else if (reply.document) {
+        contentType = 'document';
+        mediaFileId = reply.document.file_id;
+        if (!messageText && reply.caption) {
+          messageText = reply.caption;
+        }
+      } else if (reply.animation) {
+        contentType = 'animation';
+        mediaFileId = reply.animation.file_id;
+        if (!messageText && reply.caption) {
+          messageText = reply.caption;
+        }
+      } else if (reply.sticker) {
+        contentType = 'sticker';
+        mediaFileId = reply.sticker.file_id;
+      } else if (reply.text) {
+        if (!messageText) {
+          messageText = reply.text;
+        }
+      }
+    }
 
     const res = messageScheduler.createSchedule(
       ctx.chatId,
@@ -3360,7 +3399,9 @@ export class CommandHandler {
       ctx.sender.id,
       ctx.adminDisplayName,
       intervalStr,
-      messageText
+      messageText,
+      contentType,
+      mediaFileId
     );
 
     if (res.success && res.schedule) {
@@ -3368,9 +3409,10 @@ export class CommandHandler {
         ctx.chatId,
         `📅 <b>Message Scheduled Successfully!</b>\n\n` +
         `<b>Schedule ID:</b> <code>${res.schedule.id}</code>\n` +
+        `<b>Type:</b> ${res.schedule.contentType || 'text'}\n` +
         `<b>Frequency:</b> Every ${res.schedule.intervalFormatted}\n` +
         `<b>Next Run:</b> ${new Date(res.schedule.nextRun).toLocaleTimeString()}\n\n` +
-        `<i>Use <code>/listSchedules</code> to view all or <code>/deleteSchedule ${res.schedule.id}</code> to remove.</i>`
+        `<i>Use <code>/listschedules</code> to view all or <code>/deleteschedule ${res.schedule.id}</code> to remove.</i>`
       );
     } else {
       await telegramApi.sendMessage(ctx.chatId, `⚠️ <b>Scheduling error:</b> ${res.error}`);

@@ -335,6 +335,86 @@ export class TelegramApi {
       reply_markup: options?.reply_markup
     });
   }
+
+  public async sendPhoto(
+    chatId: number | string,
+    photo: string,
+    options?: {
+      caption?: string;
+      parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
+      reply_to_message_id?: number;
+      reply_markup?: any;
+    }
+  ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
+    return this.call('sendPhoto', {
+      chat_id: chatId,
+      photo,
+      caption: options?.caption,
+      parse_mode: options?.parse_mode || 'HTML',
+      reply_to_message_id: options?.reply_to_message_id,
+      reply_markup: options?.reply_markup
+    });
+  }
+
+  public async sendVideo(
+    chatId: number | string,
+    video: string,
+    options?: {
+      caption?: string;
+      parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
+      reply_to_message_id?: number;
+      reply_markup?: any;
+    }
+  ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
+    return this.call('sendVideo', {
+      chat_id: chatId,
+      video,
+      caption: options?.caption,
+      parse_mode: options?.parse_mode || 'HTML',
+      reply_to_message_id: options?.reply_to_message_id,
+      reply_markup: options?.reply_markup
+    });
+  }
+
+  public async sendDocument(
+    chatId: number | string,
+    document: string,
+    options?: {
+      caption?: string;
+      parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
+      reply_to_message_id?: number;
+      reply_markup?: any;
+    }
+  ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
+    return this.call('sendDocument', {
+      chat_id: chatId,
+      document,
+      caption: options?.caption,
+      parse_mode: options?.parse_mode || 'HTML',
+      reply_to_message_id: options?.reply_to_message_id,
+      reply_markup: options?.reply_markup
+    });
+  }
+
+  public async sendAnimation(
+    chatId: number | string,
+    animation: string,
+    options?: {
+      caption?: string;
+      parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
+      reply_to_message_id?: number;
+      reply_markup?: any;
+    }
+  ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
+    return this.call('sendAnimation', {
+      chat_id: chatId,
+      animation,
+      caption: options?.caption,
+      parse_mode: options?.parse_mode || 'HTML',
+      reply_to_message_id: options?.reply_to_message_id,
+      reply_markup: options?.reply_markup
+    });
+  }
 }
 
 export const telegramApi = new TelegramApi();

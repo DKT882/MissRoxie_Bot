@@ -412,7 +412,17 @@
       "goodbyeMessage": "Goodbye {user}!",
       "slowModeSeconds": 0,
       "reportsEnabled": true,
-      "updatedAt": "2026-08-25T17:55:10.833Z"
+      "updatedAt": "2026-08-25T17:55:10.833Z",
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "chatbotEnabled": true
     },
     "-100111222333": {
       "chatId": -100111222333,
@@ -1435,6 +1445,68 @@
       "message": "Automated test message",
       "scheduledTime": 1787823058671,
       "createdBy": "Admin"
+    },
+    {
+      "id": "M4G94M",
+      "createdAt": "2026-08-27T09:09:23.804Z",
+      "runsCount": 0,
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminId": 111,
+      "adminUsername": "SuperAdmin",
+      "message": "Check out our new launch! https://example.com/promo",
+      "messageText": "Check out our new launch! https://example.com/promo",
+      "contentType": "text",
+      "intervalMs": 1800000,
+      "intervalFormatted": "30 minutes",
+      "nextRun": "2026-08-27T09:39:23.804Z"
+    },
+    {
+      "id": "UPYJ0G",
+      "createdAt": "2026-08-27T09:09:23.822Z",
+      "runsCount": 2,
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminId": 111,
+      "adminUsername": "SuperAdmin",
+      "message": "Promo Photo Caption with link https://example.com",
+      "messageText": "Promo Photo Caption with link https://example.com",
+      "contentType": "photo",
+      "mediaFileId": "photo_file_id_123",
+      "intervalMs": 7200000,
+      "intervalFormatted": "2 hours",
+      "nextRun": "2026-08-27T11:12:16.931Z"
+    },
+    {
+      "id": "C7PU0C",
+      "createdAt": "2026-08-27T09:12:16.913Z",
+      "runsCount": 0,
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminId": 111,
+      "adminUsername": "SuperAdmin",
+      "message": "Check out our new launch! https://example.com/promo",
+      "messageText": "Check out our new launch! https://example.com/promo",
+      "contentType": "text",
+      "intervalMs": 1800000,
+      "intervalFormatted": "30 minutes",
+      "nextRun": "2026-08-27T09:42:16.912Z"
+    },
+    {
+      "id": "N0W2ZJ",
+      "createdAt": "2026-08-27T09:12:16.930Z",
+      "runsCount": 0,
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminId": 111,
+      "adminUsername": "SuperAdmin",
+      "message": "Promo Photo Caption with link https://example.com",
+      "messageText": "Promo Photo Caption with link https://example.com",
+      "contentType": "photo",
+      "mediaFileId": "photo_file_id_123",
+      "intervalMs": 7200000,
+      "intervalFormatted": "2 hours",
+      "nextRun": "2026-08-27T11:12:16.930Z"
     }
   ],
   "logs": [
@@ -1961,6 +2033,82 @@
       "adminUserId": 999,
       "action": "schedule_sent",
       "details": "Executed scheduled broadcast [MD5SE1]: \"Daily check-in...\""
+    },
+    {
+      "id": "x2idxuo",
+      "timestamp": "2026-08-27T08:59:21.134Z",
+      "chatId": -1004202449685,
+      "chatTitle": "Bot checking..🌚",
+      "groupId": -1004202449685,
+      "actorId": 8204962552,
+      "actorUsername": "palindrome1551",
+      "actorRole": "ADMIN",
+      "adminUserId": 8204962552,
+      "adminUsername": "@palindrome1551",
+      "command": "chatbot",
+      "action": "setting_change",
+      "result": "success",
+      "reason": "Roxie AI chatbot enabled"
+    },
+    {
+      "id": "9ujls95",
+      "timestamp": "2026-08-27T09:09:23.804Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_created",
+      "details": "Created recurring schedule [M4G94M] every 30 minutes"
+    },
+    {
+      "id": "iasieco",
+      "timestamp": "2026-08-27T09:09:23.822Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_created",
+      "details": "Created recurring schedule [UPYJ0G] every 2 hours"
+    },
+    {
+      "id": "8eakqza",
+      "timestamp": "2026-08-27T09:09:23.823Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [UPYJ0G]: \"Promo Photo Caption with link ...\""
+    },
+    {
+      "id": "5ps105b",
+      "timestamp": "2026-08-27T09:12:16.913Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_created",
+      "details": "Created recurring schedule [C7PU0C] every 30 minutes"
+    },
+    {
+      "id": "2svzzp5",
+      "timestamp": "2026-08-27T09:12:16.930Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_created",
+      "details": "Created recurring schedule [N0W2ZJ] every 2 hours"
+    },
+    {
+      "id": "38ncn0m",
+      "timestamp": "2026-08-27T09:12:16.931Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [UPYJ0G]: \"Promo Photo Caption with link ...\""
     }
   ],
   "knownUsers": {
@@ -1975,15 +2123,15 @@
       "userId": 8204962552,
       "username": "palindrome1551",
       "firstName": "susss",
-      "groupId": -1004476693823,
-      "lastSeen": "2026-08-27T08:35:13.192Z"
+      "groupId": -1004202449685,
+      "lastSeen": "2026-08-27T09:00:04.774Z"
     },
     "missroxie_bot": {
       "userId": 8841013562,
       "username": "MissRoxie_Bot",
       "firstName": "Roxie",
-      "groupId": -1004331070653,
-      "lastSeen": "2026-08-26T11:39:01.503Z"
+      "groupId": -1004202449685,
+      "lastSeen": "2026-08-27T08:59:52.182Z"
     },
     "owner_user": {
       "userId": 1001,
@@ -2613,17 +2761,17 @@
       "id": 8204962552,
       "username": "palindrome1551",
       "firstName": "susss",
-      "lastSeen": "2026-08-27T08:35:13.192Z",
+      "lastSeen": "2026-08-27T09:00:04.774Z",
       "userId": 8204962552,
-      "groupId": -1004476693823
+      "groupId": -1004202449685
     },
     "8841013562": {
       "id": 8841013562,
       "username": "MissRoxie_Bot",
       "firstName": "Roxie",
-      "lastSeen": "2026-08-26T11:39:01.503Z",
+      "lastSeen": "2026-08-27T08:59:52.182Z",
       "userId": 8841013562,
-      "groupId": -1004331070653
+      "groupId": -1004202449685
     },
     "8204969999": {
       "userId": 8204969999,
@@ -3740,7 +3888,7 @@
       "username": "palindrome1551",
       "firstName": "susss",
       "groupId": -1004202449685,
-      "lastSeen": "2026-08-25T18:32:28.193Z"
+      "lastSeen": "2026-08-27T09:00:04.774Z"
     },
     "-1004202449685_5663198703": {
       "userId": 5663198703,
@@ -3768,7 +3916,7 @@
       "username": "MissRoxie_Bot",
       "firstName": "Roxie",
       "groupId": -1004202449685,
-      "lastSeen": "2026-08-25T18:10:22.873Z"
+      "lastSeen": "2026-08-27T08:59:52.182Z"
     },
     "8007376038_8007376038": {
       "userId": 8007376038,

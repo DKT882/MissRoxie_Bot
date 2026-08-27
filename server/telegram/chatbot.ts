@@ -62,16 +62,20 @@ export class ChatbotService {
     const chatId = message.chat?.id;
     if (!chatId) return false;
 
-    // Check if chatbot is enabled for this group
-    const settings = db.getGroupSettings(chatId);
-    if (!settings.chatbotEnabled) {
-      return false;
+    const isPrivate = message.chat?.type === 'private';
+
+    if (!isPrivate) {
+      // Check if chatbot is enabled for this group
+      const settings = db.getGroupSettings(chatId);
+      if (!settings.chatbotEnabled) {
+        return false;
+      }
     }
 
-    const isExplicitTrigger = this.isTriggered(message, botUser);
+    const isExplicitTrigger = isPrivate || this.isTriggered(message, botUser);
 
     if (!isExplicitTrigger) {
-      // Check for Random Natural Chat trigger
+      // Check for Random Natural Chat trigger (only in groups)
       const now = Date.now();
       const lastRandom = this.chatRandomCooldowns.get(chatId) || 0;
       if (now - lastRandom > this.RANDOM_CHAT_COOLDOWN_MS) {
@@ -109,7 +113,7 @@ export class ChatbotService {
     }
 
     const model = process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat';
-    const userText = message.text || message.caption || '';
+    const userText = message.text || message.caption || (message.sticker ? '[Sent a sticker]' : message.photo ? '[Sent a photo]' : message.video ? '[Sent a video]' : 'Hello');
 
     // 1. TYPING INDICATOR: show typing status immediately
     await telegramApi.sendChatAction(chatId, 'typing');
