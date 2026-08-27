@@ -132,9 +132,9 @@ export class TelegramBotManager {
             }
 
             if (update.message) {
-              await this.handleMessage(update.message);
+              await this.handleMessage(update.message, false);
             } else if (update.edited_message) {
-              await this.handleMessage(update.edited_message);
+              await this.handleMessage(update.edited_message, true);
             } else if (update.callback_query) {
               const handledCaptcha = await ModerationService.handleCaptchaCallback(update.callback_query);
               if (!handledCaptcha) {
@@ -157,7 +157,7 @@ export class TelegramBotManager {
     this.isRunning = false;
   }
 
-  private async handleMessage(message: TelegramMessage) {
+  private async handleMessage(message: TelegramMessage, isEdit: boolean = false) {
     this.totalMessagesReceived++;
 
     const chatId = message.chat?.id;
@@ -171,6 +171,10 @@ export class TelegramBotManager {
     // Cache all encountered users in storage for reliable username and ID resolution
     if (message.from) {
       db.cacheUser(message.from, chatId);
+    }
+
+    if (isEdit) {
+      return;
     }
 
     // Global per-user rate limiter check

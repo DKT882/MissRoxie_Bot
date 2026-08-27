@@ -104,7 +104,7 @@ export class CommandHandler {
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
   public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
-    '/report', '/getnote', '/notes', '/note', '/delnote', '/all'
+    '/report', '/getnote', '/notes', '/note', '/delnote', '/all', '/rules'
   ]);
 
   public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
@@ -125,6 +125,7 @@ export class CommandHandler {
     '/adminlog', '/modlog', '/logs',
     '/free', '/unfree', '/freelist', '/freed',
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse', '/listabuse', '/clearabuse', '/stoppromotion', '/file',
+    '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/automation', '/setrules', '/clearrules',
     '/say', '/schedule', '/listschedules', '/deleteschedule',
     '/exportconfig', '/importconfig',
     '/live', '/start', '/ping', '/status', '/settings', '/help'
@@ -3446,15 +3447,6 @@ export class CommandHandler {
       return;
     }
 
-    if (!ctx.message.reply_to_message?.message_id) {
-      await telegramApi.sendMessage(
-        ctx.chatId,
-        '❌ Reply to a message to use /say.',
-        { reply_to_message_id: ctx.message.message_id }
-      );
-      return;
-    }
-
     if (ctx.args.length === 0) {
       await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/say &lt;message text&gt;</code>', {
         reply_to_message_id: ctx.message.message_id
@@ -3463,12 +3455,16 @@ export class CommandHandler {
     }
 
     const messageText = ctx.args.join(' ');
-    const targetMessageId = ctx.message.reply_to_message.message_id;
+    const targetMessageId = ctx.message.reply_to_message?.message_id;
 
     await telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
-    const res = await telegramApi.sendMessage(ctx.chatId, messageText, {
-      reply_to_message_id: targetMessageId
-    });
+
+    const sendOptions: any = {};
+    if (targetMessageId) {
+      sendOptions.reply_to_message_id = targetMessageId;
+    }
+
+    const res = await telegramApi.sendMessage(ctx.chatId, messageText, sendOptions);
 
     TelegramMiddleware.logAudit({
       chatId: ctx.chatId,
@@ -3477,7 +3473,9 @@ export class CommandHandler {
       command: 'say',
       action: 'say',
       result: res.ok ? 'success' : 'error',
-      details: `Broadcast message: "${messageText.slice(0, 40)}..." responding to msg #${targetMessageId}`
+      details: targetMessageId 
+        ? `Broadcast message: "${messageText.slice(0, 40)}..." responding to msg #${targetMessageId}`
+        : `Broadcast message: "${messageText.slice(0, 40)}..." (normal mode)`
     });
   }
 
