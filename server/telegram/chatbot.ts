@@ -1,6 +1,8 @@
 import { TelegramMessage, TelegramUser } from './types.js';
 import { telegramApi } from './api.js';
 import { db } from '../db/storage.js';
+import { metricsTracker } from '../observability/metricsService.js';
+import { errorTracker } from '../observability/errorService.js';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -25,17 +27,56 @@ export class ChatbotService {
   private static RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
   private static RANDOM_CHAT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes cooldown for random chime-in
   private static RANDOM_CHAT_PROBABILITY = 0.03; // 3% chance
-  private static STICKER_PROBABILITY = 0.15; // 15% chance to send occasional sticker
+  private static STICKER_PROBABILITY = 0.15; // 15% chance to send occasional sticker or GIF
 
-  // Curated sample sticker file_ids for different moods (fallback/sample)
-  private static STICKERS_BY_MOOD: Record<string, string[]> = {
-    cute: ['CAACAgIAAxkBAAI...cute1', 'CAACAgIAAxkBAAI...cute2'],
-    playful: ['CAACAgIAAxkBAAI...playful1'],
-    sarcastic: ['CAACAgIAAxkBAAI...sarcastic1'],
-    caring: ['CAACAgIAAxkBAAI...caring1'],
-    romantic: ['CAACAgIAAxkBAAI...romantic1'],
-    default: ['CAACAgIAAxkBAAI...default1']
-  };
+  // Production-ready dynamic configuration methods for Telegram sticker & animation file_ids
+  private static getStickersByMood(): Record<string, string[]> {
+    const stickers: Record<string, string[]> = {};
+    if (process.env.TELEGRAM_STICKERS_JSON) {
+      try {
+        const parsed = JSON.parse(process.env.TELEGRAM_STICKERS_JSON);
+        if (typeof parsed === 'object' && parsed !== null) {
+          Object.assign(stickers, parsed);
+        }
+      } catch (e) {
+        // ignore parse error
+      }
+    }
+    const moods = ['normal', 'cute', 'flirty', 'romantic', 'teasing/roasting', 'angry', 'playful', 'sarcastic', 'default'];
+    for (const mood of moods) {
+      const sanitized = mood.toUpperCase().replace('/', '_');
+      const val = process.env[`TELEGRAM_STICKER_${sanitized}`] || process.env[`TELEGRAM_STICKERS_${sanitized}`];
+      if (val) {
+        stickers[mood] = val.split(',').map(s => s.trim()).filter(Boolean);
+      }
+    }
+    return stickers;
+  }
+
+  private static getAnimationsByMood(): Record<string, string[]> {
+    const animations: Record<string, string[]> = {};
+    if (process.env.TELEGRAM_ANIMATIONS_JSON) {
+      try {
+        const parsed = JSON.parse(process.env.TELEGRAM_ANIMATIONS_JSON);
+        if (typeof parsed === 'object' && parsed !== null) {
+          Object.assign(animations, parsed);
+        }
+      } catch (e) {
+        // ignore parse error
+      }
+    }
+    const moods = ['normal', 'cute', 'flirty', 'romantic', 'teasing/roasting', 'angry', 'playful', 'sarcastic', 'default'];
+    for (const mood of moods) {
+      const sanitized = mood.toUpperCase().replace('/', '_');
+      const val = process.env[`TELEGRAM_ANIMATION_${sanitized}`] || process.env[`TELEGRAM_ANIMATIONS_${sanitized}`];
+      if (val) {
+        animations[mood] = val.split(',').map(s => s.trim()).filter(Boolean);
+      }
+    }
+    return animations;
+  }
+
+  private static recentAnimations: Set<string> = new Set();
 
   public static isTriggered(message: TelegramMessage, botUser: TelegramUser | null): boolean {
     const text = (message.text || message.caption || '').trim();
@@ -130,20 +171,32 @@ export class ChatbotService {
     }
     conv.lastActivity = now;
 
-    const systemPrompt = `You are Roxie, a fictional Indian girl who naturally communicates in Hindi, Hinglish, and English.
-Personality: Dynamically adapt to the user's message tone (cute, playful, sarcastic, angry, caring, romantic, selfish, or arrogant when appropriate).
-Guidelines:
-- Do NOT use fixed or predefined replies.
-- Keep responses short, natural, conversational, and Telegram-friendly (1-3 sentences max).
-- Avoid repetitive phrases and robotic corporate responses.
-- Never claim to be a real human or an AI model — stay in character as Roxie.
-- Use natural Hinglish mix when fitting (e.g. "Arrey yaar", "Achaa", "Samjha karo", "Pakka?").`;
+    const systemPrompt = `You are Roxie, a natural Indian girl chatting casually in a Telegram group chat.
+Personality & Tone Modes:
+- Automatically detect the user's tone/mood and choose an appropriate personality mode dynamically:
+  • normal → friendly, casual, chill ("acha", "hmm", "arre")
+  • cute → sweet, endearing
+  • flirty → playful, flirtatious, teasing
+  • romantic → affectionate, cute, loving ("jaan", "dil")
+  • teasing/roasting → witty, playful banter, non-abusive roast
+  • angry → irritated, attitude, sharp comeback
+  • playful → funny, humorous, lighthearted
+  • sarcastic → witty, cynical, dry humor
+- Keep responses varied, conversational, and short (1-3 sentences max). Avoid repetitive or predefined replies.
+- Mix Hindi, Hinglish, and English naturally and authentically.
+- Maintain conversation context and stay completely in character.
+- Never sound like an AI assistant or robot.
+- Never claim to be a real human if directly asked; remain Roxie.`;
 
     const apiMessages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
       ...conv.messages,
       { role: 'user', content: userText }
     ];
+
+    metricsTracker.increment('ai_requests');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     try {
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -159,12 +212,21 @@ Guidelines:
           messages: apiMessages,
           max_tokens: 300,
           temperature: 0.8
-        })
+        }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
+        metricsTracker.increment('ai_failures');
         const errText = await response.text();
         console.error('OpenRouter API error:', response.status, errText);
+        errorTracker.recordError({
+          source: 'AI',
+          severity: 'ERROR',
+          message: `OpenRouter API error ${response.status}: ${errText.slice(0, 100)}`,
+          chatId
+        });
         return false;
       }
 
@@ -183,17 +245,23 @@ Guidelines:
       }
       this.recentResponseTracker.set(dupKey, now);
 
-      // 2. OCCASIONAL STICKER / GIF: occasionally send a sticker along with or instead of text
-      let sentSticker = false;
+      // 2. OCCASIONAL STICKER OR GIF/ANIMATION: occasionally send sticker or GIF when contextually appropriate
       if (Math.random() < this.STICKER_PROBABILITY) {
-        const mood = this.inferMood(replyContent);
-        const stickerId = this.selectSticker(mood);
-        if (stickerId) {
-          const stickerRes = await telegramApi.sendSticker(chatId, stickerId, {
-            reply_to_message_id: message.message_id
-          });
-          if (stickerRes.ok) {
-            sentSticker = true;
+        const mood = this.inferMood(userText + ' ' + replyContent);
+        const sendAnimationInstead = Math.random() < 0.3; // 30% chance for animation/GIF when media triggers
+        if (sendAnimationInstead) {
+          const animId = this.selectAnimation(mood);
+          if (animId) {
+            await telegramApi.sendAnimation(chatId, animId, {
+              reply_to_message_id: message.message_id
+            });
+          }
+        } else {
+          const stickerId = this.selectSticker(mood);
+          if (stickerId) {
+            await telegramApi.sendSticker(chatId, stickerId, {
+              reply_to_message_id: message.message_id
+            });
           }
         }
       }
@@ -209,6 +277,24 @@ Guidelines:
 
       return true;
     } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        metricsTracker.increment('ai_timeouts');
+        errorTracker.recordError({
+          source: 'AI',
+          severity: 'WARN',
+          message: 'OpenRouter AI request timed out after 20s',
+          chatId
+        });
+      } else {
+        metricsTracker.increment('ai_failures');
+        errorTracker.recordError({
+          source: 'AI',
+          severity: 'ERROR',
+          message: `OpenRouter AI error: ${err.message}`,
+          chatId
+        });
+      }
       console.error('Error calling OpenRouter API:', err);
       return false;
     }
@@ -226,8 +312,8 @@ Guidelines:
     // 1. TYPING INDICATOR
     await telegramApi.sendChatAction(chatId, 'typing');
 
-    const systemPrompt = `You are Roxie, a fictional Indian girl in a Telegram group chat. Users are chatting normally.
-Chime in casually with a short, natural, relevant comment (1 sentence) in Hindi/Hinglish/English reacting to the user's message.
+    const systemPrompt = `You are Roxie, a natural Indian girl in a Telegram group chat. Users are chatting normally.
+Chime in casually with a short, natural, relevant comment (1 sentence) in Hinglish/English reacting to the user's message, occasionally adding light teasing or casual expressions ("acha", "arre", "hmm", "lol") if it fits the vibe.
 If you have nothing interesting or natural to add, reply with exactly the single word: SKIP`;
 
     try {
@@ -273,18 +359,22 @@ If you have nothing interesting or natural to add, reply with exactly the single
     }
   }
 
-  private static inferMood(text: string): string {
+  public static inferMood(text: string): string {
     const lower = text.toLowerCase();
-    if (lower.includes('❤️') || lower.includes('love') || lower.includes('jaan') || lower.includes('sweet')) return 'romantic';
-    if (lower.includes('😡') || lower.includes('angry') || lower.includes('pagal') || lower.includes('dimag')) return 'angry';
-    if (lower.includes('😂') || lower.includes('haha') || lower.includes('funny') || lower.includes('majaak')) return 'playful';
-    if (lower.includes('🙄') || lower.includes('seriously') || lower.includes('duh') || lower.includes('bas')) return 'sarcastic';
+    if (lower.includes('❤️') || lower.includes('love') || lower.includes('jaan') || lower.includes('dil') || lower.includes('romantic')) return 'romantic';
+    if (lower.includes('😡') || lower.includes('angry') || lower.includes('pagal') || lower.includes('dimag') || lower.includes('hate') || lower.includes('irritat')) return 'angry';
+    if (lower.includes('😂') || lower.includes('haha') || lower.includes('funny') || lower.includes('lol') || lower.includes('joke')) return 'playful';
+    if (lower.includes('🙄') || lower.includes('seriously') || lower.includes('duh') || lower.includes('sarcas')) return 'sarcastic';
     if (lower.includes('aww') || lower.includes('cute') || lower.includes('sweet')) return 'cute';
-    return 'default';
+    if (lower.includes('flirt') || lower.includes('hot') || lower.includes('handsome') || lower.includes('wink')) return 'flirty';
+    if (lower.includes('tease') || lower.includes('roast') || lower.includes('noob') || lower.includes('dumb')) return 'teasing/roasting';
+    return 'normal';
   }
 
-  private static selectSticker(mood: string): string | null {
-    const pool = this.STICKERS_BY_MOOD[mood] || this.STICKERS_BY_MOOD.default;
+  public static selectSticker(mood: string): string | null {
+    const stickersMap = this.getStickersByMood();
+    const pool = stickersMap[mood] || stickersMap['default'] || [];
+    if (!pool || pool.length === 0) return null;
     const available = pool.filter(id => !this.recentStickers.has(id));
     const targetPool = available.length > 0 ? available : pool;
     if (targetPool.length === 0) return null;
@@ -293,6 +383,22 @@ If you have nothing interesting or natural to add, reply with exactly the single
     if (this.recentStickers.size > 10) {
       const first = this.recentStickers.values().next().value;
       if (first) this.recentStickers.delete(first);
+    }
+    return selected;
+  }
+
+  public static selectAnimation(mood: string): string | null {
+    const animationsMap = this.getAnimationsByMood();
+    const pool = animationsMap[mood] || animationsMap['default'] || [];
+    if (!pool || pool.length === 0) return null;
+    const available = pool.filter(id => !this.recentAnimations.has(id));
+    const targetPool = available.length > 0 ? available : pool;
+    if (targetPool.length === 0) return null;
+    const selected = targetPool[Math.floor(Math.random() * targetPool.length)];
+    this.recentAnimations.add(selected);
+    if (this.recentAnimations.size > 10) {
+      const first = this.recentAnimations.values().next().value;
+      if (first) this.recentAnimations.delete(first);
     }
     return selected;
   }
@@ -312,6 +418,7 @@ If you have nothing interesting or natural to add, reply with exactly the single
     this.recentResponseTracker.clear();
     this.chatRandomCooldowns.clear();
     this.recentStickers.clear();
+    this.recentAnimations.clear();
   }
 
   public static getConversationsCount(): number {

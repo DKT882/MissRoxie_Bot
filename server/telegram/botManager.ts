@@ -7,6 +7,8 @@ import { messageScheduler } from './scheduler.js';
 import { TelegramMiddleware, CommandContext } from './middleware.js';
 import { RateLimiterService } from './rateLimiter.js';
 import { ChatbotService } from './chatbot.js';
+import { metricsTracker } from '../observability/metricsService.js';
+import { errorTracker } from '../observability/errorService.js';
 
 function escapeHtml(text: string): string {
   return text
@@ -24,6 +26,16 @@ export class TelegramBotManager {
   private lastPolledAt: string | null = null;
   private pollingError: string | null = null;
   private abortController: AbortController | null = null;
+  private reconnectCount: number = 0;
+  private lastReconnectAt: string | null = null;
+
+  public getReconnectCount(): number {
+    return this.reconnectCount;
+  }
+
+  public getLastReconnectAt(): string | null {
+    return this.lastReconnectAt;
+  }
 
   public getStatus(): TelegramBotStatus {
     const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -105,11 +117,13 @@ export class TelegramBotManager {
   }
 
   private async runPollingLoop() {
+    let hadError = false;
     while (!this.shouldStop) {
       try {
         this.lastPolledAt = new Date().toISOString();
         this.abortController = new AbortController();
 
+        metricsTracker.increment('telegram_api_requests');
         const data = await telegramApi.getUpdates(
           this.lastUpdateId ? this.lastUpdateId + 1 : undefined,
           20,
@@ -117,12 +131,27 @@ export class TelegramBotManager {
         );
 
         if (!data.ok) {
+          metricsTracker.increment('telegram_api_errors');
           if (data.error_code === 409) {
             this.pollingError = 'Conflict 409: Another bot session is active.';
+            hadError = true;
             await new Promise((r) => setTimeout(r, 5000));
             continue;
           }
+          if (data.error_code === 429 || data.parameters?.retry_after) {
+            const retryAfterSec = data.parameters?.retry_after || 5;
+            this.pollingError = `Rate limit 429: Too many requests. Retrying in ${retryAfterSec}s.`;
+            hadError = true;
+            await new Promise((r) => setTimeout(r, retryAfterSec * 1000));
+            continue;
+          }
           throw new Error(data.description || `Telegram API Error`);
+        }
+
+        if (hadError) {
+          this.reconnectCount++;
+          this.lastReconnectAt = new Date().toISOString();
+          hadError = false;
         }
 
         if (Array.isArray(data.result)) {
@@ -132,17 +161,28 @@ export class TelegramBotManager {
               this.lastUpdateId = Math.max(this.lastUpdateId, update.update_id);
             }
 
-            if (update.message) {
-              await this.handleMessage(update.message, false);
-            } else if (update.edited_message) {
-              await this.handleMessage(update.edited_message, true);
-            } else if (update.callback_query) {
-              const handledCaptcha = await ModerationService.handleCaptchaCallback(update.callback_query);
-              if (!handledCaptcha) {
-                await CommandHandler.handleCallbackQuery(update.callback_query);
+            metricsTracker.increment('telegram_updates_received');
+            try {
+              if (update.message) {
+                await this.handleMessage(update.message, false);
+              } else if (update.edited_message) {
+                await this.handleMessage(update.edited_message, true);
+              } else if (update.callback_query) {
+                const handledCaptcha = await ModerationService.handleCaptchaCallback(update.callback_query);
+                if (!handledCaptcha) {
+                  await CommandHandler.handleCallbackQuery(update.callback_query);
+                }
+              } else if ((update as any).chat_member) {
+                await this.handleChatMemberUpdate((update as any).chat_member);
               }
-            } else if ((update as any).chat_member) {
-              await this.handleChatMemberUpdate((update as any).chat_member);
+              metricsTracker.increment('telegram_updates_processed');
+            } catch (updateErr: any) {
+              metricsTracker.increment('telegram_updates_failed');
+              errorTracker.recordError({
+                source: 'TELEGRAM',
+                severity: 'ERROR',
+                message: `Failed to process update ${update.update_id}: ${updateErr.message}`
+              });
             }
           }
         }
@@ -150,7 +190,18 @@ export class TelegramBotManager {
         if (this.shouldStop) break;
         if (err.name === 'AbortError') break;
 
+        metricsTracker.increment('telegram_api_errors');
+        hadError = true;
+        this.reconnectCount++;
+        this.lastReconnectAt = new Date().toISOString();
         this.pollingError = err.message || 'Error during update polling';
+
+        errorTracker.recordError({
+          source: 'TELEGRAM',
+          severity: 'WARN',
+          message: `Telegram polling error / reconnect: ${err.message}`
+        });
+
         await new Promise((r) => setTimeout(r, 3000));
       }
     }

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 
 export type ErrorSeverity = 'INFO' | 'WARN' | 'ERROR' | 'CRITICAL';
-export type ErrorSource = 'TELEGRAM' | 'COMMAND' | 'STORAGE' | 'SCHEDULER' | 'AUTH' | 'DASHBOARD' | 'SSE' | 'SYSTEM';
+export type ErrorSource = 'TELEGRAM' | 'COMMAND' | 'STORAGE' | 'SCHEDULER' | 'AUTH' | 'DASHBOARD' | 'SSE' | 'SYSTEM' | 'AI';
 
 export interface SystemErrorRecord {
   id: string;

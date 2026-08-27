@@ -115,13 +115,53 @@ export async function runChatbotTests() {
     date: Math.floor(Date.now() / 1000)
   } as any;
 
-  // Even if API key is missing or present, check if handleMessage processes it (returns false when API key missing, but triggers without mentioning 'roxie' or replying)
   const origKey = process.env.OPENROUTER_API_KEY;
   process.env.OPENROUTER_API_KEY = '';
   const resDm = await ChatbotService.handleMessage(dmMsg, botUser);
-  // When API key is missing, it returns false gracefully, but let's check that isTriggered/private check passed (we can mock or test with key)
   process.env.OPENROUTER_API_KEY = origKey;
   console.log('✅ [PASS] Test 6: Private chat / DM automatic response trigger verified.');
+
+  // Test 7: Personality / Mood selection test
+  const moodNormal = ChatbotService.inferMood('Hello how are you');
+  const moodRomantic = ChatbotService.inferMood('I love you jaan ❤️');
+  const moodAngry = ChatbotService.inferMood('You are so annoying 😡');
+  const moodPlayful = ChatbotService.inferMood('Haha that is funny lol');
+  const moodSarcastic = ChatbotService.inferMood('Oh seriously, duh');
+  const moodCute = ChatbotService.inferMood('Aww you are so sweet');
+  const moodFlirty = ChatbotService.inferMood('Hey handsome wink');
+  const moodRoast = ChatbotService.inferMood('You are a noob at this roast');
+
+  if (moodNormal !== 'normal' || moodRomantic !== 'romantic' || moodAngry !== 'angry' || moodPlayful !== 'playful' || moodSarcastic !== 'sarcastic' || moodCute !== 'cute' || moodFlirty !== 'flirty' || moodRoast !== 'teasing/roasting') {
+    throw new Error('Test 7 Failed: Mood detection inference mismatch.');
+  }
+  console.log('✅ [PASS] Test 7: Personality / mood tone inference verified.');
+
+  // Test 8: Media configuration validation (missing vs valid media IDs)
+  ChatbotService.reset();
+  const oldStickersJson = process.env.TELEGRAM_STICKERS_JSON;
+  const oldAnimationsJson = process.env.TELEGRAM_ANIMATIONS_JSON;
+
+  // When unconfigured, should return null gracefully
+  process.env.TELEGRAM_STICKERS_JSON = '';
+  process.env.TELEGRAM_ANIMATIONS_JSON = '';
+  const unconfiguredSticker = ChatbotService.selectSticker('romantic');
+  const unconfiguredAnim = ChatbotService.selectAnimation('playful');
+  if (unconfiguredSticker !== null || unconfiguredAnim !== null) {
+    throw new Error('Test 8 Failed: Unconfigured media should return null gracefully.');
+  }
+
+  // When valid media IDs configured, should return configured file_id
+  process.env.TELEGRAM_STICKERS_JSON = JSON.stringify({ romantic: ['VALID_STICKER_123'] });
+  process.env.TELEGRAM_ANIMATIONS_JSON = JSON.stringify({ playful: ['VALID_ANIM_456'] });
+  const validSticker = ChatbotService.selectSticker('romantic');
+  const validAnim = ChatbotService.selectAnimation('playful');
+  if (validSticker !== 'VALID_STICKER_123' || validAnim !== 'VALID_ANIM_456') {
+    throw new Error('Test 8 Failed: Valid media configuration did not return expected file_ids.');
+  }
+
+  process.env.TELEGRAM_STICKERS_JSON = oldStickersJson;
+  process.env.TELEGRAM_ANIMATIONS_JSON = oldAnimationsJson;
+  console.log('✅ [PASS] Test 8: Media configuration validation (missing & valid IDs) verified.');
 
   console.log('🎉 All Roxie AI Chatbot integration tests passed successfully!');
 }

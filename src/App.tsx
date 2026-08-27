@@ -146,6 +146,7 @@ export default function App() {
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<any | null>(null);
   const [telegramStatus, setTelegramStatus] = useState<any | null>(null);
+  const [healthData, setHealthData] = useState<any | null>(null);
   const [previewTemplate, setPreviewTemplate] = useState<string>('Welcome {mention} to {chat_title}! 👋 Your ID is {id}.');
   const [liveTestStatus, setLiveTestStatus] = useState<Record<string, 'NOT TESTED' | 'PASS' | 'FAIL'>>(() => {
     try {
@@ -166,17 +167,19 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const [overviewRes, groupsRes, cmdsRes, statusRes] = await Promise.all([
+      const [overviewRes, groupsRes, cmdsRes, statusRes, healthRes] = await Promise.all([
         fetch('/api/dashboard/overview'),
         fetch('/api/groups'),
         fetch('/api/commands'),
-        fetch('/api/telegram/status')
+        fetch('/api/telegram/status'),
+        fetch('/api/health')
       ]);
 
       if (overviewRes.ok) setOverview(await overviewRes.json());
       if (groupsRes.ok) setGroups(await groupsRes.json());
       if (cmdsRes.ok) setCommands(await cmdsRes.json());
       if (statusRes.ok) setTelegramStatus(await statusRes.json());
+      if (healthRes.ok) setHealthData(await healthRes.json());
 
       if (selectedChatId !== 'all') {
         const detailRes = await fetch(`/api/groups/${selectedChatId}`);
@@ -324,6 +327,7 @@ export default function App() {
             <nav className="space-y-1 overflow-y-auto max-h-[calc(100vh-250px)] pr-1">
               {[
                 { id: 'overview', label: 'Overview', icon: Activity },
+                { id: 'health-diagnostics', label: 'Health & Diagnostics', icon: Activity },
                 { id: 'live', label: 'Live Activity', icon: Terminal },
                 { id: 'live-verify', label: 'Live Telegram Verification', icon: ShieldCheck },
                 { id: 'live-checklist', label: 'Live Test Checklist (46)', icon: ListChecks },
@@ -947,6 +951,158 @@ export default function App() {
                       .replace(/{chat_title}/gi, 'My Test Group')
                       .replace(/{id}/gi, '123456789')}
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ACTIVE TAB: HEALTH & DIAGNOSTICS */}
+          {activeNav === 'health-diagnostics' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-blue-400" /> Roxie Production Monitoring & Diagnostics
+                  </h2>
+                  <p className="text-xs text-stone-400">Real-time system health, component statuses, runtime metrics, and error diagnostics.</p>
+                </div>
+                <button
+                  onClick={fetchData}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-semibold text-white transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Refresh Diagnostics
+                </button>
+              </div>
+
+              {/* Overall Health Banner */}
+              <div className={`p-4 rounded-2xl border flex items-center justify-between ${
+                healthData?.status === 'HEALTHY' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+                healthData?.status === 'DEGRADED' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
+                'bg-red-500/10 border-red-500/30 text-red-400'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full animate-pulse ${
+                    healthData?.status === 'HEALTHY' ? 'bg-emerald-400' :
+                    healthData?.status === 'DEGRADED' ? 'bg-amber-400' :
+                    'bg-red-400'
+                  }`} />
+                  <div>
+                    <h3 className="text-sm font-bold">System Status: {healthData?.status || 'LOADING...'}</h3>
+                    <p className="text-xs opacity-80">Last checked: {healthData?.timestamp ? new Date(healthData.timestamp).toLocaleTimeString() : 'N/A'}</p>
+                  </div>
+                </div>
+                <div className="text-xs font-mono">
+                  Uptime: {Math.floor((healthData?.uptimeSeconds || 0) / 60)}m {(healthData?.uptimeSeconds || 0) % 60}s
+                </div>
+              </div>
+
+              {/* Component Status Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                {[
+                  { name: 'Bot Core', status: healthData?.components?.bot?.configured ? 'Configured' : 'Missing Token', ok: healthData?.components?.bot?.configured },
+                  { name: 'Telegram Polling', status: healthData?.components?.telegramPolling?.status || 'UNKNOWN', ok: healthData?.components?.telegramPolling?.status === 'HEALTHY' },
+                  { name: 'Scheduler', status: healthData?.components?.scheduler?.status || 'UNKNOWN', ok: healthData?.components?.scheduler?.status === 'HEALTHY' },
+                  { name: 'AI Chatbot', status: healthData?.components?.ai?.status || 'UNKNOWN', ok: healthData?.components?.ai?.status === 'HEALTHY' },
+                  { name: 'Storage / DB', status: healthData?.components?.storage?.connected ? 'Connected' : 'Disconnected', ok: healthData?.components?.storage?.connected }
+                ].map((comp, idx) => (
+                  <div key={idx} className="bg-stone-900 border border-stone-800 rounded-2xl p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-stone-300">{comp.name}</span>
+                      <span className={`w-2 h-2 rounded-full ${comp.ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                    </div>
+                    <div className="text-sm font-bold text-white">{comp.status}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Runtime Metrics Grid */}
+              <div className="bg-stone-900 border border-stone-800 rounded-2xl p-6 space-y-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-blue-400" /> Runtime Metrics
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  {[
+                    { label: 'Messages Processed', value: healthData?.metrics?.telegram_updates_processed || 0 },
+                    { label: 'Commands Executed', value: healthData?.metrics?.commands_executed || 0 },
+                    { label: 'AI Requests', value: healthData?.metrics?.ai_requests || 0 },
+                    { label: 'AI Failures', value: healthData?.metrics?.ai_failures || 0 },
+                    { label: 'AI Timeouts', value: healthData?.metrics?.ai_timeouts || 0 },
+                    { label: 'Telegram API Errors', value: healthData?.metrics?.telegram_api_errors || 0 },
+                    { label: 'Scheduler Runs', value: healthData?.metrics?.scheduler_runs || 0 },
+                    { label: 'Scheduler Failures', value: healthData?.metrics?.scheduler_failures || 0 },
+                    { label: 'Active Groups', value: healthData?.components?.storage?.activeGroups || 0 },
+                    { label: 'Memory Heap Used', value: `${healthData?.memory?.heapUsed || 0} MB` }
+                  ].map((m, idx) => (
+                    <div key={idx} className="bg-stone-950 border border-stone-800/60 rounded-xl p-3.5 space-y-1">
+                      <span className="text-[11px] text-stone-400 block">{m.label}</span>
+                      <span className="text-base font-bold font-mono text-white">{m.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Automatic Recovery Visibility */}
+              <div className="bg-stone-900 border border-stone-800 rounded-2xl p-6 space-y-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" /> Automatic Recovery & Resilience
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-stone-950 border border-stone-800 rounded-xl p-4 space-y-1">
+                    <span className="text-xs text-stone-400 block">Telegram Polling Reconnects</span>
+                    <span className="text-lg font-bold text-white font-mono">{healthData?.recovery?.pollingReconnects || 0}</span>
+                    <span className="text-[10px] text-stone-500 block">Last: {healthData?.components?.telegramPolling?.lastReconnectAt ? new Date(healthData.components.telegramPolling.lastReconnectAt).toLocaleTimeString() : 'None'}</span>
+                  </div>
+                  <div className="bg-stone-950 border border-stone-800 rounded-xl p-4 space-y-1">
+                    <span className="text-xs text-stone-400 block">Scheduler Consecutive Failures</span>
+                    <span className="text-lg font-bold text-white font-mono">{healthData?.recovery?.schedulerFailures || 0}</span>
+                    <span className="text-[10px] text-stone-500 block">Max threshold: 5 consecutive</span>
+                  </div>
+                  <div className="bg-stone-950 border border-stone-800 rounded-xl p-4 space-y-1">
+                    <span className="text-xs text-stone-400 block">OpenRouter AI Timeouts / Failures</span>
+                    <span className="text-lg font-bold text-white font-mono">{healthData?.recovery?.aiTimeouts || 0} / {healthData?.recovery?.aiFailures || 0}</span>
+                    <span className="text-[10px] text-stone-500 block">Timeout limit: 20s AbortController</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Centralized Error Diagnostics Table */}
+              <div className="bg-stone-900 border border-stone-800 rounded-2xl p-6 space-y-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" /> Centralized Error Diagnostics
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="border-b border-stone-800 text-stone-400">
+                        <th className="pb-3 font-semibold">Timestamp</th>
+                        <th className="pb-3 font-semibold">Component</th>
+                        <th className="pb-3 font-semibold">Severity</th>
+                        <th className="pb-3 font-semibold">Message</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-800/50">
+                      {healthData?.recentErrors && healthData.recentErrors.length > 0 ? (
+                        healthData.recentErrors.map((err: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-stone-800/30">
+                            <td className="py-3 text-stone-400 whitespace-nowrap">{new Date(err.timestamp).toLocaleTimeString()}</td>
+                            <td className="py-3 text-blue-400">{err.source || 'SYSTEM'}</td>
+                            <td className="py-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                err.severity === 'ERROR' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                              }`}>
+                                {err.severity || 'ERROR'}
+                              </span>
+                            </td>
+                            <td className="py-3 text-stone-300 break-all">{err.message}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={4} className="py-6 text-center text-stone-500">No recent errors recorded. System running cleanly.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>

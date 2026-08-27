@@ -8,6 +8,7 @@ import { COMMAND_CATALOG } from './server/telegram/commandCatalog.js';
 import { enterpriseRouter } from './server/api/enterpriseRouter.js';
 import { phase8Router } from './server/api/phase8Router.js';
 import { DisasterRecoveryService } from './server/system/disasterRecovery.js';
+import { HealthDiagnosticsService } from './server/observability/healthService.js';
 
 dotenv.config();
 
@@ -31,7 +32,12 @@ async function startServer() {
 
   // Health check
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    try {
+      const health = HealthDiagnosticsService.getSystemHealth();
+      res.json(health);
+    } catch (err: any) {
+      res.status(500).json({ status: 'ERROR', error: err.message });
+    }
   });
 
   // API Route: Check Telegram Bot status safely (never exposes token)

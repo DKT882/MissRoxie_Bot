@@ -268,7 +268,6 @@ export class CommandHandler {
         await this.handleDelMod(ctx);
         return true;
       case '/links':
-      case '/link':
         await this.handleLinksSetting(ctx);
         return true;
       case '/linkallow':
@@ -285,7 +284,6 @@ export class CommandHandler {
       case '/linkslist':
         await this.handleLinkAllowList(ctx);
         return true;
-      case '/media':
       case '/images':
       case '/image':
         await this.handleImageSetting(ctx);

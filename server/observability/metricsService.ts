@@ -20,6 +20,9 @@ export interface MetricCounters {
   anti_raid_triggers: number;
   scheduler_runs: number;
   scheduler_failures: number;
+  ai_requests: number;
+  ai_failures: number;
+  ai_timeouts: number;
   dashboard_actions: number;
   authentication_success: number;
   authentication_failure: number;
@@ -63,6 +66,9 @@ class MetricsTrackerService {
       anti_raid_triggers: 0,
       scheduler_runs: 0,
       scheduler_failures: 0,
+      ai_requests: 0,
+      ai_failures: 0,
+      ai_timeouts: 0,
       dashboard_actions: 0,
       authentication_success: 0,
       authentication_failure: 0,

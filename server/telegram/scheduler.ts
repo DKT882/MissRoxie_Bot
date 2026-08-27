@@ -2,10 +2,22 @@ import { db } from '../db/storage.js';
 import { telegramApi } from './api.js';
 import { ScheduledMessage } from './types.js';
 import { ModerationService } from './moderation.js';
+import { metricsTracker } from '../observability/metricsService.js';
+import { errorTracker } from '../observability/errorService.js';
 
 export class MessageScheduler {
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
+  private executions: number = 0;
+  private failures: number = 0;
+
+  public getStatus() {
+    return {
+      running: this.isRunning,
+      executions: this.executions,
+      failures: this.failures
+    };
+  }
 
   public start() {
     if (this.isRunning) return;
@@ -114,11 +126,22 @@ export class MessageScheduler {
             details: `Executed scheduled broadcast [${schedule.id}]: "${textContent.slice(0, 30)}..."`
           });
 
+          this.executions++;
+          metricsTracker.increment('scheduler_runs');
+
           // Calculate next run time
           const nextDate = new Date(now + schedule.intervalMs).toISOString();
           db.updateScheduleNextRun(schedule.id, nextDate);
         } catch (err: any) {
+          this.failures++;
+          metricsTracker.increment('scheduler_failures');
           console.error(`Error executing schedule ${schedule.id}:`, err.message);
+          errorTracker.recordError({
+            source: 'SCHEDULER',
+            severity: 'ERROR',
+            message: `Failed to execute schedule ${schedule.id}: ${err.message}`,
+            chatId: schedule.chatId
+          });
         }
       }
     }
