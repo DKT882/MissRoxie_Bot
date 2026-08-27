@@ -309,6 +309,32 @@ export class TelegramApi {
       language_code: language_code || undefined
     });
   }
+
+  public async sendChatAction(
+    chatId: number | string,
+    action: 'typing' | 'upload_photo' | 'record_video' | 'upload_video' | 'record_voice' | 'upload_voice' | 'upload_document' | 'choose_sticker' | 'find_location' | 'record_video_note' | 'upload_video_note'
+  ): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    return this.call('sendChatAction', {
+      chat_id: chatId,
+      action
+    });
+  }
+
+  public async sendSticker(
+    chatId: number | string,
+    sticker: string,
+    options?: {
+      reply_to_message_id?: number;
+      reply_markup?: any;
+    }
+  ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
+    return this.call('sendSticker', {
+      chat_id: chatId,
+      sticker,
+      reply_to_message_id: options?.reply_to_message_id,
+      reply_markup: options?.reply_markup
+    });
+  }
 }
 
 export const telegramApi = new TelegramApi();

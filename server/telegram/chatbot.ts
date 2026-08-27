@@ -16,11 +16,26 @@ export class ChatbotService {
   private static conversations: Map<string, ConversationContext> = new Map();
   private static userRateLimits: Map<string, { count: number; windowStart: number }> = new Map();
   private static recentResponseTracker: Map<string, number> = new Map();
+  private static chatRandomCooldowns: Map<number, number> = new Map();
+  private static recentStickers: Set<string> = new Set();
 
   private static TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes inactivity timeout
   private static MAX_HISTORY = 12; // recent message history limit
   private static RATE_LIMIT_MAX = 15; // max requests per user per window
   private static RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+  private static RANDOM_CHAT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes cooldown for random chime-in
+  private static RANDOM_CHAT_PROBABILITY = 0.03; // 3% chance
+  private static STICKER_PROBABILITY = 0.15; // 15% chance to send occasional sticker
+
+  // Curated sample sticker file_ids for different moods (fallback/sample)
+  private static STICKERS_BY_MOOD: Record<string, string[]> = {
+    cute: ['CAACAgIAAxkBAAI...cute1', 'CAACAgIAAxkBAAI...cute2'],
+    playful: ['CAACAgIAAxkBAAI...playful1'],
+    sarcastic: ['CAACAgIAAxkBAAI...sarcastic1'],
+    caring: ['CAACAgIAAxkBAAI...caring1'],
+    romantic: ['CAACAgIAAxkBAAI...romantic1'],
+    default: ['CAACAgIAAxkBAAI...default1']
+  };
 
   public static isTriggered(message: TelegramMessage, botUser: TelegramUser | null): boolean {
     const text = (message.text || message.caption || '').trim();
@@ -53,8 +68,20 @@ export class ChatbotService {
       return false;
     }
 
-    // Check if triggered
-    if (!this.isTriggered(message, botUser)) {
+    const isExplicitTrigger = this.isTriggered(message, botUser);
+
+    if (!isExplicitTrigger) {
+      // Check for Random Natural Chat trigger
+      const now = Date.now();
+      const lastRandom = this.chatRandomCooldowns.get(chatId) || 0;
+      if (now - lastRandom > this.RANDOM_CHAT_COOLDOWN_MS) {
+        if (Math.random() < this.RANDOM_CHAT_PROBABILITY) {
+          // Trigger random natural chat
+          this.chatRandomCooldowns.set(chatId, now);
+          await this.handleRandomNaturalChat(message);
+          return true;
+        }
+      }
       return false;
     }
 
@@ -78,14 +105,16 @@ export class ChatbotService {
 
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) {
-      // API key not configured
       return false;
     }
 
     const model = process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat';
     const userText = message.text || message.caption || '';
 
-    // Get or initialize conversation memory for this user in this group (strict group + user isolation)
+    // 1. TYPING INDICATOR: show typing status immediately
+    await telegramApi.sendChatAction(chatId, 'typing');
+
+    // Get or initialize conversation memory
     const now = Date.now();
     let conv = this.conversations.get(userKey);
     if (!conv || now - conv.lastActivity > this.TIMEOUT_MS) {
@@ -97,7 +126,6 @@ export class ChatbotService {
     }
     conv.lastActivity = now;
 
-    // System prompt embodying Roxie's personality
     const systemPrompt = `You are Roxie, a fictional Indian girl who naturally communicates in Hindi, Hinglish, and English.
 Personality: Dynamically adapt to the user's message tone (cute, playful, sarcastic, angry, caring, romantic, selfish, or arrogant when appropriate).
 Guidelines:
@@ -151,6 +179,21 @@ Guidelines:
       }
       this.recentResponseTracker.set(dupKey, now);
 
+      // 2. OCCASIONAL STICKER / GIF: occasionally send a sticker along with or instead of text
+      let sentSticker = false;
+      if (Math.random() < this.STICKER_PROBABILITY) {
+        const mood = this.inferMood(replyContent);
+        const stickerId = this.selectSticker(mood);
+        if (stickerId) {
+          const stickerRes = await telegramApi.sendSticker(chatId, stickerId, {
+            reply_to_message_id: message.message_id
+          });
+          if (stickerRes.ok) {
+            sentSticker = true;
+          }
+        }
+      }
+
       await telegramApi.sendMessage(chatId, replyContent, { reply_to_message_id: message.message_id });
 
       conv.messages.push({ role: 'user', content: userText });
@@ -167,6 +210,89 @@ Guidelines:
     }
   }
 
+  private static async handleRandomNaturalChat(message: TelegramMessage) {
+    const chatId = message.chat.id;
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+    if (!apiKey) return;
+
+    const model = process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat';
+    const userText = message.text || message.caption || '';
+    if (!userText) return;
+
+    // 1. TYPING INDICATOR
+    await telegramApi.sendChatAction(chatId, 'typing');
+
+    const systemPrompt = `You are Roxie, a fictional Indian girl in a Telegram group chat. Users are chatting normally.
+Chime in casually with a short, natural, relevant comment (1 sentence) in Hindi/Hinglish/English reacting to the user's message.
+If you have nothing interesting or natural to add, reply with exactly the single word: SKIP`;
+
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'HTTP-Referer': 'https://ai.studio',
+          'X-Title': 'Roxie Telegram Bot',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userText }
+          ],
+          max_tokens: 150,
+          temperature: 0.8
+        })
+      });
+
+      if (!response.ok) return;
+
+      const data = await response.json();
+      const replyContent = data.choices?.[0]?.message?.content?.trim();
+
+      if (!replyContent || replyContent === 'SKIP' || replyContent.toUpperCase() === 'SKIP.') {
+        return;
+      }
+
+      const now = Date.now();
+      const dupKey = `${chatId}_${replyContent}`;
+      const lastSentTime = this.recentResponseTracker.get(dupKey) || 0;
+      if (now - lastSentTime < 30000) {
+        return;
+      }
+      this.recentResponseTracker.set(dupKey, now);
+
+      await telegramApi.sendMessage(chatId, replyContent);
+    } catch (err) {
+      console.error('Error in random natural chat:', err);
+    }
+  }
+
+  private static inferMood(text: string): string {
+    const lower = text.toLowerCase();
+    if (lower.includes('❤️') || lower.includes('love') || lower.includes('jaan') || lower.includes('sweet')) return 'romantic';
+    if (lower.includes('😡') || lower.includes('angry') || lower.includes('pagal') || lower.includes('dimag')) return 'angry';
+    if (lower.includes('😂') || lower.includes('haha') || lower.includes('funny') || lower.includes('majaak')) return 'playful';
+    if (lower.includes('🙄') || lower.includes('seriously') || lower.includes('duh') || lower.includes('bas')) return 'sarcastic';
+    if (lower.includes('aww') || lower.includes('cute') || lower.includes('sweet')) return 'cute';
+    return 'default';
+  }
+
+  private static selectSticker(mood: string): string | null {
+    const pool = this.STICKERS_BY_MOOD[mood] || this.STICKERS_BY_MOOD.default;
+    const available = pool.filter(id => !this.recentStickers.has(id));
+    const targetPool = available.length > 0 ? available : pool;
+    if (targetPool.length === 0) return null;
+    const selected = targetPool[Math.floor(Math.random() * targetPool.length)];
+    this.recentStickers.add(selected);
+    if (this.recentStickers.size > 10) {
+      const first = this.recentStickers.values().next().value;
+      if (first) this.recentStickers.delete(first);
+    }
+    return selected;
+  }
+
   public static cleanupInactive() {
     const now = Date.now();
     for (const [key, conv] of this.conversations.entries()) {
@@ -180,6 +306,8 @@ Guidelines:
     this.conversations.clear();
     this.userRateLimits.clear();
     this.recentResponseTracker.clear();
+    this.chatRandomCooldowns.clear();
+    this.recentStickers.clear();
   }
 
   public static getConversationsCount(): number {
