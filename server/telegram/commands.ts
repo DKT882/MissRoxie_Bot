@@ -131,6 +131,35 @@ export class CommandHandler {
     '/live', '/start', '/ping', '/status', '/settings', '/help'
   ]);
 
+  public static readonly SENSITIVE_COMMANDS = new Set<string>([
+    '/say', '/all',
+    '/schedule', '/listschedules', '/deleteschedule',
+    '/welcome', '/setwelcome', '/goodbye', '/setgoodbye',
+    '/ban', '/unban', '/kick', '/mute', '/unmute',
+    '/tmute', '/tban', '/dban', '/dmute', '/dkick',
+    '/sban', '/smute', '/skick',
+    '/warn', '/warnings', '/resetwarns', '/setwarnlimit',
+    '/promote', '/demote', '/permissions', '/permission',
+    '/setmod', '/delmod',
+    '/security', '/antiraid', '/captcha', '/autoaccept',
+    '/automation', '/settings', '/setrules', '/clearrules',
+    '/flood', '/setflood', '/antiflood',
+    '/filter', '/unfilter', '/stop', '/filters', '/filterlist',
+    '/del', '/delete', '/clear', '/purge',
+    '/links', '/link', '/media', '/images', '/image', '/photos', '/photo',
+    '/stickers', '/sticker', '/gifs', '/gif', '/videos', '/video', '/voice', '/audio',
+    '/lock', '/unlock', '/locks', '/locklist',
+    '/linkallow', '/linkwhitelist', '/allowlink', '/linkunallow', '/linkdisallow',
+    '/removelink', '/linkallowlist', '/linkslist',
+    '/pin', '/unpin', '/unpinall',
+    '/slowmode', '/slow',
+    '/adminlog', '/modlog', '/logs',
+    '/free', '/unfree', '/freelist', '/freed',
+    '/stopspam', '/stopabusive', '/addabuse', '/removeabuse',
+    '/listabuse', '/clearabuse', '/stoppromotion', '/file',
+    '/exportconfig', '/importconfig'
+  ]);
+
   public static async handleCommand(ctx: CommandContext): Promise<boolean> {
     const rawCmd = ctx.command;
     const cmd = rawCmd.toLowerCase().split('@')[0]; // strip bot username if present, e.g. /ban@MissRoxie_Bot
@@ -164,6 +193,13 @@ export class CommandHandler {
     }
 
     console.log(`[COMMAND] handler command=${cmd.replace(/^\//, '')} invoked`);
+
+    if (TelegramMiddleware.isGroup(ctx.message) && CommandHandler.SENSITIVE_COMMANDS.has(cmd)) {
+      const delay = cmd === '/say' ? 1000 : 4500;
+      setTimeout(() => {
+        telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
+      }, delay);
+    }
 
     switch (cmd) {
       case '/del':
@@ -3375,9 +3411,6 @@ export class CommandHandler {
         '⚠️ I don\'t have enough cached group members to mention everyone yet.',
         { reply_to_message_id: ctx.message.message_id }
       );
-      setTimeout(() => {
-        telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
-      }, 10000);
 
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
@@ -3419,10 +3452,6 @@ export class CommandHandler {
       });
     }
 
-    setTimeout(() => {
-      telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
-    }, 10000);
-
     TelegramMiddleware.logAudit({
       chatId: ctx.chatId,
       chatTitle: ctx.chatTitle,
@@ -3456,8 +3485,6 @@ export class CommandHandler {
 
     const messageText = ctx.args.join(' ');
     const targetMessageId = ctx.message.reply_to_message?.message_id;
-
-    await telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
 
     const sendOptions: any = {};
     if (targetMessageId) {
