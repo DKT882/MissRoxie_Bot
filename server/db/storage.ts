@@ -8,6 +8,11 @@ interface RaidStateRecord {
   raidActiveUntil: number;
 }
 
+export interface MediaLibraryRecord {
+  stickers: Record<string, string[]>;
+  animations: Record<string, string[]>;
+}
+
 interface DatabaseSchema {
   settings: Record<number, GroupSettings>;
   warnings: WarningRecord[];
@@ -23,6 +28,7 @@ interface DatabaseSchema {
   knownUsersById: Record<number, CachedMember>; // userId -> CachedMember
   groupMembers: Record<string, CachedMember>; // `${chatId}_${userId}` -> CachedMember
   customRoles: Record<string, 'MODERATOR' | 'NONE'>; // `${chatId}_${userId}` -> Custom bot role
+  mediaLibrary?: MediaLibraryRecord;
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -43,7 +49,8 @@ class StorageManager {
     knownUsers: {},
     knownUsersById: {},
     groupMembers: {},
-    customRoles: {}
+    customRoles: {},
+    mediaLibrary: { stickers: {}, animations: {} }
   };
   private raidStates: Record<number, RaidStateRecord> = {};
   private isLoaded: boolean = false;
@@ -76,7 +83,8 @@ class StorageManager {
             knownUsers: parsed.knownUsers || {},
             knownUsersById: parsed.knownUsersById || {},
             groupMembers: parsed.groupMembers || {},
-            customRoles: parsed.customRoles || {}
+            customRoles: parsed.customRoles || {},
+            mediaLibrary: parsed.mediaLibrary || { stickers: {}, animations: {} }
           };
         }
       }
@@ -1545,6 +1553,73 @@ class StorageManager {
       return true;
     }
     return false;
+  }
+
+  public getMediaLibrary(): MediaLibraryRecord {
+    if (!this.data.mediaLibrary) {
+      this.data.mediaLibrary = { stickers: {}, animations: {} };
+    }
+    return this.data.mediaLibrary;
+  }
+
+  public addStickerToLibrary(mood: string, fileId: string): void {
+    const lib = this.getMediaLibrary();
+    const normalizedMood = mood.toLowerCase().trim();
+    if (!lib.stickers[normalizedMood]) {
+      lib.stickers[normalizedMood] = [];
+    }
+    if (!lib.stickers[normalizedMood].includes(fileId)) {
+      lib.stickers[normalizedMood].push(fileId);
+      this.scheduleSave();
+    }
+  }
+
+  public addAnimationToLibrary(mood: string, fileId: string): void {
+    const lib = this.getMediaLibrary();
+    const normalizedMood = mood.toLowerCase().trim();
+    if (!lib.animations[normalizedMood]) {
+      lib.animations[normalizedMood] = [];
+    }
+    if (!lib.animations[normalizedMood].includes(fileId)) {
+      lib.animations[normalizedMood].push(fileId);
+      this.scheduleSave();
+    }
+  }
+
+  public removeMediaFromLibrary(fileId: string): boolean {
+    const lib = this.getMediaLibrary();
+    let removed = false;
+    for (const mood of Object.keys(lib.stickers)) {
+      const idx = lib.stickers[mood].indexOf(fileId);
+      if (idx !== -1) {
+        lib.stickers[mood].splice(idx, 1);
+        removed = true;
+      }
+    }
+    for (const mood of Object.keys(lib.animations)) {
+      const idx = lib.animations[mood].indexOf(fileId);
+      if (idx !== -1) {
+        lib.animations[mood].splice(idx, 1);
+        removed = true;
+      }
+    }
+    if (removed) {
+      this.scheduleSave();
+    }
+    return removed;
+  }
+
+  public clearMediaLibrary(mood?: string): void {
+    const lib = this.getMediaLibrary();
+    if (mood) {
+      const normalizedMood = mood.toLowerCase().trim();
+      delete lib.stickers[normalizedMood];
+      delete lib.animations[normalizedMood];
+    } else {
+      lib.stickers = {};
+      lib.animations = {};
+    }
+    this.scheduleSave();
   }
 }
 

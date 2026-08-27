@@ -21,6 +21,7 @@ export class TelegramBotManager {
   private isRunning: boolean = false;
   private shouldStop: boolean = false;
   private lastUpdateId: number = 0;
+  private static processedUpdateIds: Set<number> = new Set();
   private botUser: TelegramUser | null = null;
   private totalMessagesReceived: number = 0;
   private lastPolledAt: string | null = null;
@@ -158,6 +159,14 @@ export class TelegramBotManager {
           this.pollingError = null;
           for (const update of data.result as TelegramUpdate[]) {
             if (update.update_id) {
+              if (TelegramBotManager.processedUpdateIds.has(update.update_id)) {
+                continue;
+              }
+              TelegramBotManager.processedUpdateIds.add(update.update_id);
+              if (TelegramBotManager.processedUpdateIds.size > 1000) {
+                const first = TelegramBotManager.processedUpdateIds.values().next().value;
+                if (first) TelegramBotManager.processedUpdateIds.delete(first);
+              }
               this.lastUpdateId = Math.max(this.lastUpdateId, update.update_id);
             }
 

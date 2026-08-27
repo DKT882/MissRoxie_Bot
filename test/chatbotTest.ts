@@ -1,6 +1,7 @@
 import { ChatbotService } from '../server/telegram/chatbot.ts';
 import { CommandHandler } from '../server/telegram/commands.ts';
 import { db } from '../server/db/storage.js';
+import { telegramApi } from '../server/telegram/api.ts';
 
 export async function runChatbotTests() {
   console.log('🧪 Starting Roxie AI Chatbot Test Suite...');
@@ -163,7 +164,172 @@ export async function runChatbotTests() {
   process.env.TELEGRAM_ANIMATIONS_JSON = oldAnimationsJson;
   console.log('✅ [PASS] Test 8: Media configuration validation (missing & valid IDs) verified.');
 
-  console.log('🎉 All Roxie AI Chatbot integration tests passed successfully!');
+  // Test 9: Dynamic Persistent Media Library & Admin Commands Logic
+  db.clearMediaLibrary();
+  db.addStickerToLibrary('cute', 'STICKER_CUTE_1');
+  db.addStickerToLibrary('cute', 'STICKER_CUTE_2');
+  db.addAnimationToLibrary('playful', 'ANIM_PLAYFUL_1');
+
+  const lib = db.getMediaLibrary();
+  if (!lib.stickers['cute']?.includes('STICKER_CUTE_1') || !lib.animations['playful']?.includes('ANIM_PLAYFUL_1')) {
+    throw new Error('Test 9 Failed: Persistent media library storage did not store added items.');
+  }
+
+  // Test selection from db persistent library
+  const selectedCute = ChatbotService.selectSticker('cute');
+  if (!selectedCute || !['STICKER_CUTE_1', 'STICKER_CUTE_2'].includes(selectedCute)) {
+    throw new Error('Test 9 Failed: Persistent library sticker selection failed.');
+  }
+
+  // Test removal
+  db.removeMediaFromLibrary('STICKER_CUTE_1');
+  const libAfterRemove = db.getMediaLibrary();
+  if (libAfterRemove.stickers['cute']?.includes('STICKER_CUTE_1')) {
+    throw new Error('Test 9 Failed: Media item removal failed.');
+  }
+
+  // Test clear category or all
+  db.clearMediaLibrary('cute');
+  const libAfterClear = db.getMediaLibrary();
+  if ((libAfterClear.stickers['cute']?.length || 0) > 0) {
+    throw new Error('Test 9 Failed: Clear category failed.');
+  }
+
+  db.clearMediaLibrary();
+  console.log('✅ [PASS] Test 9: Dynamic persistent media library and management verified.');
+
+  const oldApiKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = 'test_api_key';
+
+  // Test 10 & 14: One user message -> exactly one chatbot response & duplicate message prevention
+  ChatbotService.reset();
+  db.getGroupSettings(chatId, chatTitle).chatbotEnabled = true;
+  let responseCount = 0;
+  const origSendMsg = telegramApi.sendMessage;
+  const origSendChatAction = telegramApi.sendChatAction;
+  (telegramApi as any).sendChatAction = async () => ({ ok: true });
+  (telegramApi as any).sendMessage = async (chatId: any, text: any, options: any) => {
+    responseCount++;
+    return { ok: true };
+  };
+
+  const testMsg = {
+    message_id: 999,
+    chat: { id: chatId, type: 'supergroup', title: chatTitle },
+    from: { id: 222, is_bot: false, first_name: 'TestUser' },
+    text: 'Hello Roxie test message',
+    date: Math.floor(Date.now() / 1000)
+  } as any;
+
+  const origFetch = global.fetch;
+  (global as any).fetch = async () => ({
+    ok: true,
+    json: async () => ({ choices: [{ message: { content: 'Hello there test response' } }] })
+  });
+
+  await ChatbotService.handleMessage(testMsg, botUser);
+  // Duplicate message call should be ignored
+  await ChatbotService.handleMessage(testMsg, botUser);
+
+  if (responseCount !== 1) {
+    throw new Error(`Test 10/14 Failed: Expected exactly 1 response, got ${responseCount}`);
+  }
+  console.log('✅ [PASS] Tests 10 & 14: One user message triggers exactly one response, and duplicate message is ignored.');
+
+  // Test 11: Sticker request -> actual sendSticker call when valid media exists
+  ChatbotService.reset();
+  db.clearMediaLibrary();
+  db.getGroupSettings(chatId, chatTitle).chatbotEnabled = true;
+  db.addStickerToLibrary('normal', 'VALID_STICKER_XYZ');
+  let stickerCalled = false;
+  const origSendSticker = telegramApi.sendSticker;
+  (telegramApi as any).sendSticker = async (chatId: any, sticker: any, options: any) => {
+    if (sticker === 'VALID_STICKER_XYZ') stickerCalled = true;
+    return { ok: true };
+  };
+
+  const stickerMsg = {
+    message_id: 1000,
+    chat: { id: chatId, type: 'supergroup', title: chatTitle },
+    from: { id: 222, is_bot: false, first_name: 'TestUser' },
+    text: 'Please send me a sticker',
+    date: Math.floor(Date.now() / 1000)
+  } as any;
+
+  const res11 = await ChatbotService.handleMessage(stickerMsg, botUser);
+  console.log('TEST 11 RESULT:', res11, 'stickerCalled:', stickerCalled);
+  if (!stickerCalled) {
+    throw new Error('Test 11 Failed: Sticker request did not call sendSticker with valid media.');
+  }
+  console.log('✅ [PASS] Test 11: Sticker request successfully calls sendSticker with valid media.');
+
+  // Test 12: GIF request -> actual sendAnimation call when valid media exists
+  ChatbotService.reset();
+  db.clearMediaLibrary();
+  db.getGroupSettings(chatId, chatTitle).chatbotEnabled = true;
+  db.addAnimationToLibrary('normal', 'VALID_ANIM_ABC');
+  let animCalled = false;
+  const origSendAnimation = telegramApi.sendAnimation;
+  (telegramApi as any).sendAnimation = async (chatId: any, anim: any, options: any) => {
+    if (anim === 'VALID_ANIM_ABC') animCalled = true;
+    return { ok: true };
+  };
+
+  const gifMsg = {
+    message_id: 1001,
+    chat: { id: chatId, type: 'supergroup', title: chatTitle },
+    from: { id: 222, is_bot: false, first_name: 'TestUser' },
+    text: 'Send a playful gif animation',
+    date: Math.floor(Date.now() / 1000)
+  } as any;
+
+  await ChatbotService.handleMessage(gifMsg, botUser);
+  if (!animCalled) {
+    throw new Error('Test 12 Failed: GIF request did not call sendAnimation with valid media.');
+  }
+  console.log('✅ [PASS] Test 12: GIF request successfully calls sendAnimation with valid media.');
+
+  // Test 13: Missing media -> text fallback
+  ChatbotService.reset();
+  db.clearMediaLibrary();
+  const oldStickerEnv = process.env.TELEGRAM_STICKERS_NORMAL;
+  const oldJsonEnv = process.env.TELEGRAM_STICKERS_JSON;
+  delete process.env.TELEGRAM_STICKERS_NORMAL;
+  delete process.env.TELEGRAM_STICKERS_DEFAULT;
+  delete process.env.TELEGRAM_STICKERS_JSON;
+  db.getGroupSettings(chatId, chatTitle).chatbotEnabled = true;
+  let fallbackTextCalled = false;
+  (telegramApi as any).sendMessage = async (chatId: any, text: any, options: any) => {
+    fallbackTextCalled = true;
+    return { ok: true };
+  };
+
+  const missingMediaMsg = {
+    message_id: 1002,
+    chat: { id: chatId, type: 'supergroup', title: chatTitle },
+    from: { id: 222, is_bot: false, first_name: 'TestUser' },
+    text: 'Send me a sticker please',
+    date: Math.floor(Date.now() / 1000)
+  } as any;
+
+  await ChatbotService.handleMessage(missingMediaMsg, botUser);
+  if (oldStickerEnv !== undefined) process.env.TELEGRAM_STICKERS_NORMAL = oldStickerEnv;
+  if (oldJsonEnv !== undefined) process.env.TELEGRAM_STICKERS_JSON = oldJsonEnv;
+  if (!fallbackTextCalled) {
+    throw new Error('Test 13 Failed: Missing media did not gracefully fallback to text message.');
+  }
+  console.log('✅ [PASS] Test 13: Missing media gracefully falls back to text message.');
+
+  // Restore mocks
+  telegramApi.sendMessage = origSendMsg;
+  telegramApi.sendSticker = origSendSticker;
+  telegramApi.sendAnimation = origSendAnimation;
+  telegramApi.sendChatAction = origSendChatAction;
+  global.fetch = origFetch;
+  process.env.OPENROUTER_API_KEY = oldApiKey;
+  db.clearMediaLibrary();
+
+  console.log('🎉 All Roxie AI Chatbot integration and regression tests passed successfully!');
 }
 
 runChatbotTests().catch(err => {

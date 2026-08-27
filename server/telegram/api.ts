@@ -415,6 +415,10 @@ export class TelegramApi {
       reply_markup: options?.reply_markup
     });
   }
+
+  public async getStickerSet(name: string): Promise<{ ok: boolean; result?: { stickers: Array<{ file_id: string; [key: string]: any }> }; description?: string; error_code?: number }> {
+    return this.call('getStickerSet', { name });
+  }
 }
 
 export const telegramApi = new TelegramApi();

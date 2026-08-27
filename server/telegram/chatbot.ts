@@ -28,25 +28,58 @@ export class ChatbotService {
   private static RANDOM_CHAT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes cooldown for random chime-in
   private static RANDOM_CHAT_PROBABILITY = 0.03; // 3% chance
   private static STICKER_PROBABILITY = 0.15; // 15% chance to send occasional sticker or GIF
+  private static processedMessageKeys: Set<string> = new Set();
 
-  // Production-ready dynamic configuration methods for Telegram sticker & animation file_ids
+  public static reset() {
+    this.conversations.clear();
+    this.userRateLimits.clear();
+    this.recentResponseTracker.clear();
+    this.chatRandomCooldowns.clear();
+    this.recentStickers.clear();
+    this.recentAnimations.clear();
+    this.processedMessageKeys.clear();
+  }
+
+  private static isValidFileId(id: string | null | undefined): boolean {
+    if (!id || typeof id !== 'string') return false;
+    const trimmed = id.trim();
+    if (!trimmed) return false;
+    const lower = trimmed.toLowerCase();
+    if (lower === 'placeholder' || lower === 'dummy' || lower === 'test_placeholder' || lower.includes('placeholder')) {
+      return false;
+    }
+    return true;
+  }
+
+  // Production-ready dynamic configuration methods for Telegram sticker & animation file_ids using persistent database storage
   private static getStickersByMood(): Record<string, string[]> {
     const stickers: Record<string, string[]> = {};
+    const dbLib = db.getMediaLibrary();
+    if (dbLib && dbLib.stickers) {
+      for (const [mood, list] of Object.entries(dbLib.stickers)) {
+        if (Array.isArray(list) && list.length > 0) {
+          stickers[mood.toLowerCase()] = [...list];
+        }
+      }
+    }
     if (process.env.TELEGRAM_STICKERS_JSON) {
       try {
         const parsed = JSON.parse(process.env.TELEGRAM_STICKERS_JSON);
         if (typeof parsed === 'object' && parsed !== null) {
-          Object.assign(stickers, parsed);
+          for (const [m, val] of Object.entries(parsed)) {
+            const moodKey = m.toLowerCase();
+            if (!stickers[moodKey] || stickers[moodKey].length === 0) {
+              if (Array.isArray(val)) stickers[moodKey] = val as string[];
+            }
+          }
         }
-      } catch (e) {
-        // ignore parse error
-      }
+      } catch (e) {}
     }
-    const moods = ['normal', 'cute', 'flirty', 'romantic', 'teasing/roasting', 'angry', 'playful', 'sarcastic', 'default'];
+    const moods = ['normal', 'cute', 'flirty', 'romantic', 'teasing', 'angry', 'playful', 'sarcastic', 'default', 'teasing/roasting'];
     for (const mood of moods) {
       const sanitized = mood.toUpperCase().replace('/', '_');
       const val = process.env[`TELEGRAM_STICKER_${sanitized}`] || process.env[`TELEGRAM_STICKERS_${sanitized}`];
-      if (val) {
+      if (val && (!stickers[mood] || stickers[mood].length === 0)) {
         stickers[mood] = val.split(',').map(s => s.trim()).filter(Boolean);
       }
     }
@@ -55,21 +88,32 @@ export class ChatbotService {
 
   private static getAnimationsByMood(): Record<string, string[]> {
     const animations: Record<string, string[]> = {};
+    const dbLib = db.getMediaLibrary();
+    if (dbLib && dbLib.animations) {
+      for (const [mood, list] of Object.entries(dbLib.animations)) {
+        if (Array.isArray(list) && list.length > 0) {
+          animations[mood.toLowerCase()] = [...list];
+        }
+      }
+    }
     if (process.env.TELEGRAM_ANIMATIONS_JSON) {
       try {
         const parsed = JSON.parse(process.env.TELEGRAM_ANIMATIONS_JSON);
         if (typeof parsed === 'object' && parsed !== null) {
-          Object.assign(animations, parsed);
+          for (const [m, val] of Object.entries(parsed)) {
+            const moodKey = m.toLowerCase();
+            if (!animations[moodKey] || animations[moodKey].length === 0) {
+              if (Array.isArray(val)) animations[moodKey] = val as string[];
+            }
+          }
         }
-      } catch (e) {
-        // ignore parse error
-      }
+      } catch (e) {}
     }
-    const moods = ['normal', 'cute', 'flirty', 'romantic', 'teasing/roasting', 'angry', 'playful', 'sarcastic', 'default'];
+    const moods = ['normal', 'cute', 'flirty', 'romantic', 'teasing', 'angry', 'playful', 'sarcastic', 'default', 'teasing/roasting'];
     for (const mood of moods) {
       const sanitized = mood.toUpperCase().replace('/', '_');
       const val = process.env[`TELEGRAM_ANIMATION_${sanitized}`] || process.env[`TELEGRAM_ANIMATIONS_${sanitized}`];
-      if (val) {
+      if (val && (!animations[mood] || animations[mood].length === 0)) {
         animations[mood] = val.split(',').map(s => s.trim()).filter(Boolean);
       }
     }
@@ -89,10 +133,18 @@ export class ChatbotService {
       }
     }
 
-    // 2. Mention "Roxie" or bot username case-insensitively
+    // 2. Mention "Roxie", bot username, or media requests case-insensitively
     const lowerText = text.toLowerCase();
     const botUsername = botUser?.username ? `@${botUser.username.toLowerCase()}` : '';
-    if (lowerText.includes('roxie') || (botUsername && lowerText.includes(botUsername))) {
+    if (
+      lowerText.includes('roxie') ||
+      (botUsername && lowerText.includes(botUsername)) ||
+      lowerText.includes('sticker') ||
+      lowerText.includes('gif') ||
+      lowerText.includes('animation') ||
+      lowerText.includes('stkr') ||
+      lowerText.includes('bhej')
+    ) {
       return true;
     }
 
@@ -102,6 +154,17 @@ export class ChatbotService {
   public static async handleMessage(message: TelegramMessage, botUser: TelegramUser | null): Promise<boolean> {
     const chatId = message.chat?.id;
     if (!chatId) return false;
+
+    const msgId = message.message_id || 0;
+    const msgKey = `${chatId}_${msgId}`;
+    if (this.processedMessageKeys.has(msgKey)) {
+      return false;
+    }
+    this.processedMessageKeys.add(msgKey);
+    if (this.processedMessageKeys.size > 500) {
+      const first = this.processedMessageKeys.values().next().value;
+      if (first) this.processedMessageKeys.delete(first);
+    }
 
     const isPrivate = message.chat?.type === 'private';
 
@@ -245,28 +308,42 @@ Personality & Tone Modes:
       }
       this.recentResponseTracker.set(dupKey, now);
 
-      // 2. OCCASIONAL STICKER OR GIF/ANIMATION: occasionally send sticker or GIF when contextually appropriate
-      if (Math.random() < this.STICKER_PROBABILITY) {
+      // 2. STICKER OR GIF/ANIMATION: send sticker or GIF when requested or contextually triggered via backend code
+      const userLower = userText.toLowerCase();
+      const isStickerRequest = userLower.includes('sticker') || userLower.includes('stkr') || userLower.includes('bhej');
+      const isAnimationRequest = userLower.includes('gif') || userLower.includes('animation');
+      const shouldTriggerMedia = isStickerRequest || isAnimationRequest || Math.random() < this.STICKER_PROBABILITY;
+
+      let mediaSent = false;
+      if (shouldTriggerMedia) {
         const mood = this.inferMood(userText + ' ' + replyContent);
-        const sendAnimationInstead = Math.random() < 0.3; // 30% chance for animation/GIF when media triggers
+        const sendAnimationInstead = isAnimationRequest || (!isStickerRequest && Math.random() < 0.3);
+        const stickerId = this.selectSticker(mood);
+
         if (sendAnimationInstead) {
           const animId = this.selectAnimation(mood);
-          if (animId) {
-            await telegramApi.sendAnimation(chatId, animId, {
+          if (animId && this.isValidFileId(animId)) {
+            const res = await telegramApi.sendAnimation(chatId, animId, {
               reply_to_message_id: message.message_id
             });
+            if (res.ok) mediaSent = true;
           }
-        } else {
-          const stickerId = this.selectSticker(mood);
-          if (stickerId) {
-            await telegramApi.sendSticker(chatId, stickerId, {
+        }
+
+        if (!mediaSent) {
+          if (stickerId && this.isValidFileId(stickerId)) {
+            const res = await telegramApi.sendSticker(chatId, stickerId, {
               reply_to_message_id: message.message_id
             });
+            if (res.ok) mediaSent = true;
           }
         }
       }
 
-      await telegramApi.sendMessage(chatId, replyContent, { reply_to_message_id: message.message_id });
+      // If no valid media was sent (missing media library or no valid media exists), gracefully fall back to normal AI text response
+      if (!mediaSent || (!isStickerRequest && !isAnimationRequest)) {
+        await telegramApi.sendMessage(chatId, replyContent, { reply_to_message_id: message.message_id });
+      }
 
       conv.messages.push({ role: 'user', content: userText });
       conv.messages.push({ role: 'assistant', content: replyContent });
@@ -373,7 +450,16 @@ If you have nothing interesting or natural to add, reply with exactly the single
 
   public static selectSticker(mood: string): string | null {
     const stickersMap = this.getStickersByMood();
-    const pool = stickersMap[mood] || stickersMap['default'] || [];
+    let pool = (stickersMap[mood] || stickersMap['teasing/roasting'] || stickersMap['default'] || []).filter(id => this.isValidFileId(id));
+    if (!pool || pool.length === 0) {
+      for (const otherMood of Object.keys(stickersMap)) {
+        const validList = (stickersMap[otherMood] || []).filter(id => this.isValidFileId(id));
+        if (validList.length > 0) {
+          pool = validList;
+          break;
+        }
+      }
+    }
     if (!pool || pool.length === 0) return null;
     const available = pool.filter(id => !this.recentStickers.has(id));
     const targetPool = available.length > 0 ? available : pool;
@@ -389,7 +475,16 @@ If you have nothing interesting or natural to add, reply with exactly the single
 
   public static selectAnimation(mood: string): string | null {
     const animationsMap = this.getAnimationsByMood();
-    const pool = animationsMap[mood] || animationsMap['default'] || [];
+    let pool = (animationsMap[mood] || animationsMap['teasing/roasting'] || animationsMap['default'] || []).filter(id => this.isValidFileId(id));
+    if (!pool || pool.length === 0) {
+      for (const otherMood of Object.keys(animationsMap)) {
+        const validList = (animationsMap[otherMood] || []).filter(id => this.isValidFileId(id));
+        if (validList.length > 0) {
+          pool = validList;
+          break;
+        }
+      }
+    }
     if (!pool || pool.length === 0) return null;
     const available = pool.filter(id => !this.recentAnimations.has(id));
     const targetPool = available.length > 0 ? available : pool;
@@ -410,15 +505,6 @@ If you have nothing interesting or natural to add, reply with exactly the single
         this.conversations.delete(key);
       }
     }
-  }
-
-  public static reset() {
-    this.conversations.clear();
-    this.userRateLimits.clear();
-    this.recentResponseTracker.clear();
-    this.chatRandomCooldowns.clear();
-    this.recentStickers.clear();
-    this.recentAnimations.clear();
   }
 
   public static getConversationsCount(): number {

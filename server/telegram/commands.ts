@@ -118,7 +118,8 @@ export class CommandHandler {
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse', '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/automation', '/setrules', '/clearrules', '/chatbot',
     '/say', '/schedule', '/listschedules', '/deleteschedule',
-    '/exportconfig', '/importconfig', '/status', '/settings'
+    '/exportconfig', '/importconfig', '/status', '/settings',
+    '/addstickerpack', '/addsticker', '/addgif', '/liststickers', '/removesticker', '/clearstickers'
   ]);
 
   public static readonly SENSITIVE_COMMANDS = new Set<string>([
@@ -148,7 +149,8 @@ export class CommandHandler {
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse',
     '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/note', '/delnote',
-    '/exportconfig', '/importconfig'
+    '/exportconfig', '/importconfig',
+    '/addstickerpack', '/addsticker', '/addgif', '/liststickers', '/removesticker', '/clearstickers'
   ]);
 
   public static async handleCommand(ctx: CommandContext): Promise<boolean> {
@@ -159,8 +161,9 @@ export class CommandHandler {
 
     const isPublic = CommandHandler.PUBLIC_GROUP_COMMANDS.has(cmd);
     const isAdminOnly = CommandHandler.ADMIN_ONLY_COMMANDS.has(cmd);
+    const isSensitive = CommandHandler.SENSITIVE_COMMANDS.has(cmd);
 
-    if (!isPublic && !isAdminOnly) {
+    if (!isPublic && !isAdminOnly && !isSensitive) {
       console.log(`[COMMAND] registry lookup command=${cmd.replace(/^\//, '')} result=NOT_FOUND`);
       return false;
     }
@@ -176,6 +179,12 @@ export class CommandHandler {
       console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED`);
     } else if (isPublic) {
       // Public commands (like /report) are restricted to groups and open to normal members
+      if (!(await TelegramMiddleware.requireGroup(ctx))) {
+        console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DENIED_NOT_GROUP`);
+        return true;
+      }
+      console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED`);
+    } else if (isSensitive) {
       if (!(await TelegramMiddleware.requireGroup(ctx))) {
         console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DENIED_NOT_GROUP`);
         return true;
@@ -301,6 +310,24 @@ export class CommandHandler {
         return true;
       case '/file':
         await this.handleFileSetting(ctx);
+        return true;
+      case '/addstickerpack':
+        await this.handleAddStickerPack(ctx);
+        return true;
+      case '/addsticker':
+        await this.handleAddSticker(ctx);
+        return true;
+      case '/addgif':
+        await this.handleAddGif(ctx);
+        return true;
+      case '/liststickers':
+        await this.handleListStickers(ctx);
+        return true;
+      case '/removesticker':
+        await this.handleRemoveSticker(ctx);
+        return true;
+      case '/clearstickers':
+        await this.handleClearStickers(ctx);
         return true;
       case '/stopspam':
         await this.handleStopSpam(ctx);
@@ -3466,6 +3493,18 @@ export class CommandHandler {
       return;
     }
 
+    if (ctx.args[0]?.toLowerCase() === 'status') {
+      const members = db.getGroupMembersList(ctx.chatId);
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>/all Command Status</b>\n\n` +
+        `Cached Members: ${members.length}\n` +
+        `Usage: <code>/all [custom message text]</code>`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
     const customText = ctx.args.join(' ').trim();
     const defaultMsg = customText || 'Hiee';
     const members = db.getGroupMembersList(ctx.chatId);
@@ -5086,6 +5125,113 @@ export class CommandHandler {
       reply_to_message_id: ctx.message.message_id
     });
   }
+
+  private static async handleAddStickerPack(ctx: CommandContext) {
+    const args = ctx.args || [];
+    if (args.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/addstickerpack <pack_name> [mood]</code> (e.g. /addstickerpack Animals cute)');
+      return;
+    }
+    const packName = args[0].replace(/^https:\/\/t\.me\/addstickers\//, '').trim();
+    const mood = (args[1] || 'normal').toLowerCase();
+    const res = await telegramApi.getStickerSet(packName);
+    if (!res.ok || !res.result || !Array.isArray(res.result.stickers)) {
+      await telegramApi.sendMessage(ctx.chatId, `❌ Failed to fetch sticker pack <b>${escapeHtml(packName)}</b>: ${res.description || 'Not found or invalid'}`);
+      return;
+    }
+    const stickers = res.result.stickers;
+    let count = 0;
+    for (const s of stickers) {
+      if (s.file_id) {
+        db.addStickerToLibrary(mood, s.file_id);
+        count++;
+      }
+    }
+    await telegramApi.sendMessage(ctx.chatId, `✅ Successfully imported <b>${count}</b> stickers from pack <b>${escapeHtml(packName)}</b> into mood category <code>${escapeHtml(mood)}</code>.`);
+  }
+
+  private static async handleAddSticker(ctx: CommandContext) {
+    const reply = ctx.message.reply_to_message;
+    if (!reply || !reply.sticker) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Please reply to a sticker message with <code>/addsticker [mood]</code>.');
+      return;
+    }
+    const mood = (ctx.args?.[0] || 'normal').toLowerCase();
+    const fileId = reply.sticker.file_id;
+    db.addStickerToLibrary(mood, fileId);
+    await telegramApi.sendMessage(ctx.chatId, `✅ Sticker added successfully to mood category <code>${escapeHtml(mood)}</code>!\nID: <code>${fileId}</code>`);
+  }
+
+  private static async handleAddGif(ctx: CommandContext) {
+    const reply = ctx.message.reply_to_message;
+    if (!reply || (!reply.animation && !reply.document)) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Please reply to an animation/GIF message with <code>/addgif [mood]</code>.');
+      return;
+    }
+    const fileId = reply.animation?.file_id || reply.document?.file_id;
+    if (!fileId) {
+      await telegramApi.sendMessage(ctx.chatId, '❌ Could not extract animation file ID from replied message.');
+      return;
+    }
+    const mood = (ctx.args?.[0] || 'normal').toLowerCase();
+    db.addAnimationToLibrary(mood, fileId);
+    await telegramApi.sendMessage(ctx.chatId, `✅ GIF/animation added successfully to mood category <code>${escapeHtml(mood)}</code>!\nID: <code>${fileId}</code>`);
+  }
+
+  private static async handleListStickers(ctx: CommandContext) {
+    const lib = db.getMediaLibrary();
+    let text = '🎨 <b>Roxie Telegram Media Library</b>\n\n';
+    
+    text += '<b>Stickers by Mood:</b>\n';
+    const stickerMoods = Object.keys(lib.stickers || {});
+    if (stickerMoods.length === 0) {
+      text += '  <i>No custom stickers added yet (using env fallback if configured).</i>\n';
+    } else {
+      for (const m of stickerMoods) {
+        const count = lib.stickers[m]?.length || 0;
+        text += `• <b>${m}</b>: ${count} sticker(s)\n`;
+      }
+    }
+
+    text += '\n<b>GIFs/Animations by Mood:</b>\n';
+    const animMoods = Object.keys(lib.animations || {});
+    if (animMoods.length === 0) {
+      text += '  <i>No custom GIFs added yet (using env fallback if configured).</i>\n';
+    } else {
+      for (const m of animMoods) {
+        const count = lib.animations[m]?.length || 0;
+        text += `• <b>${m}</b>: ${count} animation(s)\n`;
+      }
+    }
+
+    text += '\n<i>Use /addstickerpack, /addsticker, or /addgif to add more. Use /removesticker <file_id> to remove items.</i>';
+    await telegramApi.sendMessage(ctx.chatId, text);
+  }
+
+  private static async handleRemoveSticker(ctx: CommandContext) {
+    const args = ctx.args || [];
+    if (args.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/removesticker <file_id></code>');
+      return;
+    }
+    const fileId = args.join(' ').trim();
+    const removed = db.removeMediaFromLibrary(fileId);
+    if (removed) {
+      await telegramApi.sendMessage(ctx.chatId, `✅ Media item successfully removed from library.`);
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `❌ Media item with specified ID not found in library.`);
+    }
+  }
+
+  private static async handleClearStickers(ctx: CommandContext) {
+    const mood = ctx.args?.[0]?.toLowerCase();
+    db.clearMediaLibrary(mood);
+    if (mood) {
+      await telegramApi.sendMessage(ctx.chatId, `🗑️ Cleared all media items for mood category <code>${escapeHtml(mood)}</code>.`);
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `🗑️ Cleared entire media library.`);
+    }
+  }
 }
 
 export function parseClearDuration(input: string): { seconds: number; formatted: string } | null {
@@ -5257,3 +5403,11 @@ function escapeHtml(text: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
+
+export class CommandHandlerMediaExt {
+  // Placeholder or extension methods for CommandHandler
+}
+
+// Add static media methods to CommandHandler class via extension or inside CommandHandler
+// We can add them as static methods directly inside CommandHandler in commands.ts. Let's append helper handlers or add them to CommandHandler class.
+
