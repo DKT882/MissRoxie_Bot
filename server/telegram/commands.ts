@@ -104,7 +104,7 @@ export class CommandHandler {
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
   public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
-    '/report', '/getnote', '/notes', '/note', '/delnote', '/all', '/rules'
+    '/report', '/getnote', '/notes', '/note', '/delnote', '/rules'
   ]);
 
   public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
@@ -125,7 +125,7 @@ export class CommandHandler {
     '/adminlog', '/modlog', '/logs',
     '/free', '/unfree', '/freelist', '/freed',
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse', '/listabuse', '/clearabuse', '/stoppromotion', '/file',
-    '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/automation', '/setrules', '/clearrules',
+    '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/automation', '/setrules', '/clearrules', '/chatbot',
     '/say', '/schedule', '/listschedules', '/deleteschedule',
     '/exportconfig', '/importconfig',
     '/live', '/start', '/ping', '/status', '/settings', '/help'
@@ -141,7 +141,7 @@ export class CommandHandler {
     '/warn', '/warnings', '/resetwarns', '/setwarnlimit',
     '/promote', '/demote', '/permissions', '/permission',
     '/setmod', '/delmod',
-    '/security', '/antiraid', '/captcha', '/autoaccept',
+    '/security', '/antiraid', '/captcha', '/autoaccept', '/chatbot',
     '/automation', '/settings', '/setrules', '/clearrules',
     '/flood', '/setflood', '/antiflood',
     '/filter', '/unfilter', '/stop', '/filters', '/filterlist',
@@ -157,6 +157,7 @@ export class CommandHandler {
     '/free', '/unfree', '/freelist', '/freed',
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse',
     '/listabuse', '/clearabuse', '/stoppromotion', '/file',
+    '/note', '/delnote',
     '/exportconfig', '/importconfig'
   ]);
 
@@ -489,6 +490,9 @@ export class CommandHandler {
       case '/antiraid':
         await this.handleAntiRaidSetting(ctx);
         return true;
+      case '/chatbot':
+        await this.handleChatbot(ctx);
+        return true;
       case '/joinmode':
         await this.handleJoinMode(ctx);
         return true;
@@ -698,6 +702,43 @@ export class CommandHandler {
       await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Anti-Raid Protection</b> disabled.');
     } else {
       await telegramApi.sendMessage(ctx.chatId, `🛡️ <b>Anti-Raid Status</b>: ${settings.raidEnabled ? 'ON' : 'OFF'}`);
+    }
+  }
+
+  private static async handleChatbot(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const action = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (action === 'on') {
+      settings.chatbotEnabled = true;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'chatbot',
+        action: 'setting_change',
+        result: 'success',
+        reason: 'Roxie AI chatbot enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🤖 <b>Roxie AI Chatbot</b> is now ENABLED in this group.');
+    } else if (action === 'off') {
+      settings.chatbotEnabled = false;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'chatbot',
+        action: 'setting_change',
+        result: 'success',
+        reason: 'Roxie AI chatbot disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🤖 <b>Roxie AI Chatbot</b> is now DISABLED in this group.');
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `🤖 <b>Roxie AI Chatbot Status</b>: ${settings.chatbotEnabled ? 'ON' : 'OFF'}\nUse <code>/chatbot on</code> or <code>/chatbot off</code> to toggle.`);
     }
   }
 

@@ -308,6 +308,8 @@ export interface GroupSettings {
   slowModeSeconds: number; // 0 = off
   // Reports
   reportsEnabled: boolean; // default true
+  // AI Chatbot
+  chatbotEnabled?: boolean; // default false
   // Phase 9A Smart Content Protection & Message Control
   stopSpamEnabled?: boolean;
   stopAbusiveEnabled?: boolean;

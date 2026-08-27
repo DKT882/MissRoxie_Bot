@@ -462,7 +462,12 @@ export default function App() {
                           <span className="w-2 h-2 rounded-full bg-emerald-500" />
                           {g.chatTitle}
                         </h4>
-                        <p className="text-[11px] text-stone-400 mt-1 font-mono">Chat ID: {g.chatId}</p>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <span className="text-[11px] text-stone-400 font-mono">Chat ID: {g.chatId}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${g.settings?.chatbotEnabled ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-stone-800 text-stone-400'}`}>
+                            AI Chatbot: {g.settings?.chatbotEnabled ? 'ON' : 'OFF'}
+                          </span>
+                        </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <button

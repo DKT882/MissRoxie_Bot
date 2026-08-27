@@ -6,6 +6,7 @@ import { ModerationService } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { TelegramMiddleware, CommandContext } from './middleware.js';
 import { RateLimiterService } from './rateLimiter.js';
+import { ChatbotService } from './chatbot.js';
 
 function escapeHtml(text: string): string {
   return text
@@ -281,6 +282,10 @@ export class TelegramBotManager {
       const linkIntercepted = await ModerationService.handleLinkProtection(message);
       if (linkIntercepted) return;
     }
+
+    // 7. Check Roxie AI Chatbot triggers
+    const chatbotHandled = await ChatbotService.handleMessage(message, this.botUser);
+    if (chatbotHandled) return;
   }
 
   private async handleChatMemberUpdate(chatMemberUpdate: {
