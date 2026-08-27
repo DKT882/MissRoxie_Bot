@@ -23,6 +23,12 @@ async function startServer() {
   app.use(enterpriseRouter);
   app.use(phase8Router);
 
+  // Health check route as requested
+  app.get('/health', (req, res) => {
+    console.log('The server is running on this port');
+    res.json({ status: 'healthy', port: PORT });
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
