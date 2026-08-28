@@ -29,6 +29,7 @@ export class ChatbotService {
   private static RANDOM_CHAT_PROBABILITY = 0.03; // 3% chance
   private static STICKER_PROBABILITY = 0.15; // 15% chance to send occasional sticker or GIF
   private static processedMessageKeys: Set<string> = new Set();
+  private static activeProcessingKeys: Set<string> = new Set();
 
   public static reset() {
     this.conversations.clear();
@@ -38,6 +39,7 @@ export class ChatbotService {
     this.recentStickers.clear();
     this.recentAnimations.clear();
     this.processedMessageKeys.clear();
+    this.activeProcessingKeys.clear();
   }
 
   private static isValidFileId(id: string | null | undefined): boolean {
@@ -157,241 +159,264 @@ export class ChatbotService {
 
     const msgId = message.message_id || 0;
     const msgKey = `${chatId}_${msgId}`;
-    if (this.processedMessageKeys.has(msgKey)) {
+    if (this.processedMessageKeys.has(msgKey) || this.activeProcessingKeys.has(msgKey)) {
       return false;
     }
-    this.processedMessageKeys.add(msgKey);
-    if (this.processedMessageKeys.size > 500) {
-      const first = this.processedMessageKeys.values().next().value;
-      if (first) this.processedMessageKeys.delete(first);
-    }
+    this.activeProcessingKeys.add(msgKey);
 
-    const isPrivate = message.chat?.type === 'private';
-
-    if (!isPrivate) {
-      // Check if chatbot is enabled for this group
-      const settings = db.getGroupSettings(chatId);
-      if (!settings.chatbotEnabled) {
-        return false;
+    try {
+      this.processedMessageKeys.add(msgKey);
+      if (this.processedMessageKeys.size > 500) {
+        const first = this.processedMessageKeys.values().next().value;
+        if (first) this.processedMessageKeys.delete(first);
       }
-    }
 
-    const isExplicitTrigger = isPrivate || this.isTriggered(message, botUser);
+      const isPrivate = message.chat?.type === 'private';
 
-    if (!isExplicitTrigger) {
-      // Check for Random Natural Chat trigger (only in groups)
-      const now = Date.now();
-      const lastRandom = this.chatRandomCooldowns.get(chatId) || 0;
-      if (now - lastRandom > this.RANDOM_CHAT_COOLDOWN_MS) {
-        if (Math.random() < this.RANDOM_CHAT_PROBABILITY) {
-          // Trigger random natural chat
-          this.chatRandomCooldowns.set(chatId, now);
-          await this.handleRandomNaturalChat(message);
-          return true;
+      if (!isPrivate) {
+        // Check if chatbot is enabled for this group
+        const settings = db.getGroupSettings(chatId);
+        if (!settings.chatbotEnabled) {
+          return false;
         }
       }
-      return false;
-    }
 
-    const userId = message.from?.id || 0;
-    const userKey = `${chatId}_${userId}`;
+      const isExplicitTrigger = isPrivate || this.isTriggered(message, botUser);
 
-    // Rate limiting check
-    if (userId) {
+      if (!isExplicitTrigger) {
+        // Check for Random Natural Chat trigger (only in groups)
+        const now = Date.now();
+        const lastRandom = this.chatRandomCooldowns.get(chatId) || 0;
+        if (now - lastRandom > this.RANDOM_CHAT_COOLDOWN_MS) {
+          if (Math.random() < this.RANDOM_CHAT_PROBABILITY) {
+            // Trigger random natural chat
+            this.chatRandomCooldowns.set(chatId, now);
+            await this.handleRandomNaturalChat(message);
+            return true;
+          }
+        }
+        return false;
+      }
+
+      const userId = message.from?.id || 0;
+      const userKey = `${chatId}_${userId}`;
+
+      // Rate limiting check
+      if (userId) {
+        const now = Date.now();
+        let record = this.userRateLimits.get(userKey);
+        if (!record || now - record.windowStart > this.RATE_LIMIT_WINDOW_MS) {
+          record = { count: 0, windowStart: now };
+          this.userRateLimits.set(userKey, record);
+        }
+        if (record.count >= this.RATE_LIMIT_MAX) {
+          await telegramApi.sendMessage(chatId, `⚠️ Arrey yaar! You've sent too many messages to Roxie right now. Please wait a few minutes before chatting again.`);
+          return true;
+        }
+        record.count++;
+      }
+
+      const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+      if (!apiKey) {
+        return false;
+      }
+
+      const configuredModels = process.env.OPENROUTER_MODELS
+        ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim()).filter(Boolean)
+        : [
+            process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
+            process.env.OPENROUTER_FALLBACK_1?.trim(),
+            process.env.OPENROUTER_FALLBACK_2?.trim(),
+            process.env.OPENROUTER_FALLBACK_3?.trim()
+          ].filter(Boolean) as string[];
+
+      const userText = message.text || message.caption || (message.sticker ? '[Sent a sticker]' : message.photo ? '[Sent a photo]' : message.video ? '[Sent a video]' : 'Hello');
+
+      // Get or initialize conversation memory
       const now = Date.now();
-      let record = this.userRateLimits.get(userKey);
-      if (!record || now - record.windowStart > this.RATE_LIMIT_WINDOW_MS) {
-        record = { count: 0, windowStart: now };
-        this.userRateLimits.set(userKey, record);
+      let conv = this.conversations.get(userKey);
+      if (!conv || now - conv.lastActivity > this.TIMEOUT_MS) {
+        conv = {
+          messages: [],
+          lastActivity: now
+        };
+        this.conversations.set(userKey, conv);
       }
-      if (record.count >= this.RATE_LIMIT_MAX) {
-        await telegramApi.sendMessage(chatId, `⚠️ Arrey yaar! You've sent too many messages to Roxie right now. Please wait a few minutes before chatting again.`);
-        return true;
-      }
-      record.count++;
-    }
+      conv.lastActivity = now;
 
-    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-    if (!apiKey) {
-      return false;
-    }
+      const mood = this.inferMood(userText, conv.messages);
 
-    const configuredModels = process.env.OPENROUTER_MODELS
-      ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim()).filter(Boolean)
-      : [
-          process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
-          process.env.OPENROUTER_FALLBACK_1?.trim(),
-          process.env.OPENROUTER_FALLBACK_2?.trim(),
-          process.env.OPENROUTER_FALLBACK_3?.trim()
-        ].filter(Boolean) as string[];
+      const systemPrompt = `You are Roxie, a natural Indian girl chatting casually in a Telegram group chat.
+CURRENT ACTIVE MOOD FOR THIS MESSAGE: [${mood}]
 
-    const userText = message.text || message.caption || (message.sticker ? '[Sent a sticker]' : message.photo ? '[Sent a photo]' : message.video ? '[Sent a video]' : 'Hello');
-
-    // 1. TYPING INDICATOR: show typing status immediately
-    await telegramApi.sendChatAction(chatId, 'typing');
-
-    // Get or initialize conversation memory
-    const now = Date.now();
-    let conv = this.conversations.get(userKey);
-    if (!conv || now - conv.lastActivity > this.TIMEOUT_MS) {
-      conv = {
-        messages: [],
-        lastActivity: now
-      };
-      this.conversations.set(userKey, conv);
-    }
-    conv.lastActivity = now;
-
-    const systemPrompt = `You are Roxie, a natural Indian girl chatting casually in a Telegram group chat.
-Personality & Tone Modes:
-- Automatically detect the user's tone/mood and choose an appropriate personality mode dynamically:
-  • normal → friendly, casual, chill ("acha", "hmm", "arre")
-  • cute → sweet, endearing
-  • flirty → playful, flirtatious, teasing
-  • romantic → affectionate, cute, loving ("jaan", "dil")
-  • teasing/roasting → witty, playful banter, non-abusive roast
-  • angry → irritated, attitude, sharp comeback
-  • playful → funny, humorous, lighthearted
-  • sarcastic → witty, cynical, dry humor
-- Keep responses varied, conversational, and short (1-3 sentences max). Avoid repetitive or predefined replies.
+Personality & Tone Rules:
+- You MUST strictly adopt and match the CURRENT ACTIVE MOOD (${mood}) for this response.
+- Mode definitions:
+  • normal → friendly, casual, chill ("acha", "hmm", "arre"), respectful when asked to be left alone.
+  • friendly → warm, welcoming, conversational.
+  • cute → sweet, endearing.
+  • playful → funny, humorous, lighthearted.
+  • teasing/roasting → witty, playful banter, non-abusive roast.
+  • sarcastic → witty, cynical, dry humor.
+  • angry → irritated, attitude, sharp comeback.
+  • sad/comforting → empathetic, supportive, comforting.
+  • romantic → affectionate, cute, loving ("jaan", "dil"). ONLY use if mood is romantic.
+  • flirty → playful, flirtatious, teasing. ONLY use if mood is flirty.
+- CRITICAL: Flirting must NEVER be the default mood. If the mood is normal, friendly, sad/comforting, angry, or sarcastic, do NOT flirt or use romantic terms.
+- Keep responses varied, conversational, and short (1-3 sentences max).
 - Mix Hindi, Hinglish, and English naturally and authentically.
 - Maintain conversation context and stay completely in character.
 - Never sound like an AI assistant or robot.
 - Never claim to be a real human if directly asked; remain Roxie.`;
 
-    const apiMessages: ChatMessage[] = [
-      { role: 'system', content: systemPrompt },
-      ...conv.messages,
-      { role: 'user', content: userText }
-    ];
+      const apiMessages: ChatMessage[] = [
+        { role: 'system', content: systemPrompt },
+        ...conv.messages,
+        { role: 'user', content: userText }
+      ];
 
-    metricsTracker.increment('ai_requests');
+      // 1. TYPING INDICATOR: show typing status immediately
+      await telegramApi.sendChatAction(chatId, 'typing');
 
-    let replyContent: string | null = null;
-    let successfulModel = '';
+      metricsTracker.increment('ai_requests');
 
-    for (const modelToTry of configuredModels) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      let replyContent: string | null = null;
+      let successfulModel = '';
 
-      try {
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'HTTP-Referer': 'https://ai.studio',
-            'X-Title': 'Roxie Telegram Bot',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: modelToTry,
-            messages: apiMessages,
-            max_tokens: 300,
-            temperature: 0.8
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+      for (const modelToTry of configuredModels) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-        if (response.ok) {
-          const data = await response.json();
-          const content = data.choices?.[0]?.message?.content?.trim();
-          if (content) {
-            replyContent = content;
-            successfulModel = modelToTry;
-            break;
+        try {
+          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'HTTP-Referer': 'https://ai.studio',
+              'X-Title': 'Roxie Telegram Bot',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: modelToTry,
+              messages: apiMessages,
+              max_tokens: 300,
+              temperature: 0.8
+            }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const data = await response.json();
+            const content = data.choices?.[0]?.message?.content?.trim();
+            if (content) {
+              replyContent = content;
+              successfulModel = modelToTry;
+              break;
+            }
+          } else {
+            const errText = await response.text();
+            console.warn(`[AI Fallback] Model ${modelToTry} failed with status ${response.status}: ${errText.slice(0, 80)}. Trying next fallback...`);
+            errorTracker.recordError({
+              source: 'AI',
+              severity: 'WARN',
+              message: `Model ${modelToTry} failed (status ${response.status}), trying fallback`,
+              chatId
+            });
           }
-        } else {
-          const errText = await response.text();
-          console.warn(`[AI Fallback] Model ${modelToTry} failed with status ${response.status}: ${errText.slice(0, 80)}. Trying next fallback...`);
-          errorTracker.recordError({
-            source: 'AI',
-            severity: 'WARN',
-            message: `Model ${modelToTry} failed (status ${response.status}), trying fallback`,
-            chatId
-          });
+        } catch (err: any) {
+          clearTimeout(timeoutId);
+          if (err.name === 'AbortError') {
+            metricsTracker.increment('ai_timeouts');
+            errorTracker.recordError({
+              source: 'AI',
+              severity: 'WARN',
+              message: `Model ${modelToTry} request timed out after 20s`,
+              chatId
+            });
+          } else {
+            metricsTracker.increment('ai_failures');
+            errorTracker.recordError({
+              source: 'AI',
+              severity: 'ERROR',
+              message: `Model ${modelToTry} error: ${err.message}`,
+              chatId
+            });
+          }
+          console.warn(`[AI Fallback] Model ${modelToTry} error: ${err.message}. Trying next fallback...`);
         }
-      } catch (err: any) {
-        clearTimeout(timeoutId);
-        if (err.name === 'AbortError') {
-          metricsTracker.increment('ai_timeouts');
-          errorTracker.recordError({
-            source: 'AI',
-            severity: 'WARN',
-            message: `Model ${modelToTry} request timed out after 20s`,
-            chatId
-          });
-        } else {
-          metricsTracker.increment('ai_failures');
-          errorTracker.recordError({
-            source: 'AI',
-            severity: 'ERROR',
-            message: `Model ${modelToTry} error: ${err.message}`,
-            chatId
-          });
-        }
-        console.warn(`[AI Fallback] Model ${modelToTry} error: ${err.message}. Trying next fallback...`);
       }
-    }
 
-    if (!replyContent) {
-      metricsTracker.increment('ai_failures');
+      if (!replyContent) {
+        metricsTracker.increment('ai_failures');
+        return false;
+      }
+
+      // Exact response deduplication check per message ID
+      const respDupKey = `${chatId}_resp_${msgId}`;
+      if (this.recentResponseTracker.has(respDupKey)) {
+        return false;
+      }
+      this.recentResponseTracker.set(respDupKey, now);
+
+      // Duplicate response content check (within 10s)
+      const dupKey = `${chatId}_${replyContent}`;
+      const lastSentTime = this.recentResponseTracker.get(dupKey) || 0;
+      if (now - lastSentTime < 10000) {
+        return false;
+      }
+      this.recentResponseTracker.set(dupKey, now);
+
+      // 2. STICKER OR GIF/ANIMATION: send sticker or GIF when requested or contextually triggered via backend code
+      const userLower = userText.toLowerCase();
+      const isStickerRequest = userLower.includes('sticker') || userLower.includes('stkr') || userLower.includes('bhej');
+      const isAnimationRequest = userLower.includes('gif') || userLower.includes('animation');
+      const shouldTriggerMedia = isStickerRequest || isAnimationRequest || Math.random() < this.STICKER_PROBABILITY;
+
+      let mediaSent = false;
+      if (shouldTriggerMedia) {
+        const sendAnimationInstead = isAnimationRequest || (!isStickerRequest && Math.random() < 0.3);
+        const stickerId = this.selectSticker(mood);
+
+        if (sendAnimationInstead) {
+          const animId = this.selectAnimation(mood);
+          if (animId && this.isValidFileId(animId)) {
+            const res = await telegramApi.sendAnimation(chatId, animId, {
+              reply_to_message_id: message.message_id
+            });
+            if (res.ok) mediaSent = true;
+          }
+        }
+
+        if (!mediaSent) {
+          if (stickerId && this.isValidFileId(stickerId)) {
+            const res = await telegramApi.sendSticker(chatId, stickerId, {
+              reply_to_message_id: message.message_id
+            });
+            if (res.ok) mediaSent = true;
+          }
+        }
+      }
+
+      // If no valid media was sent (missing media library or no valid media exists), gracefully fall back to normal AI text response
+      if (!mediaSent || (!isStickerRequest && !isAnimationRequest)) {
+        await telegramApi.sendMessage(chatId, replyContent, { reply_to_message_id: message.message_id });
+      }
+
+      conv.messages.push({ role: 'user', content: userText });
+      conv.messages.push({ role: 'assistant', content: replyContent });
+
+      if (conv.messages.length > this.MAX_HISTORY * 2) {
+        conv.messages = conv.messages.slice(-this.MAX_HISTORY * 2);
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error('Error in ChatbotService.handleMessage:', err);
       return false;
+    } finally {
+      this.activeProcessingKeys.delete(msgKey);
     }
-
-    // Duplicate response prevention check (within 10s)
-    const dupKey = `${chatId}_${replyContent}`;
-    const lastSentTime = this.recentResponseTracker.get(dupKey) || 0;
-    if (now - lastSentTime < 10000) {
-      return false;
-    }
-    this.recentResponseTracker.set(dupKey, now);
-
-    // 2. STICKER OR GIF/ANIMATION: send sticker or GIF when requested or contextually triggered via backend code
-    const userLower = userText.toLowerCase();
-    const isStickerRequest = userLower.includes('sticker') || userLower.includes('stkr') || userLower.includes('bhej');
-    const isAnimationRequest = userLower.includes('gif') || userLower.includes('animation');
-    const shouldTriggerMedia = isStickerRequest || isAnimationRequest || Math.random() < this.STICKER_PROBABILITY;
-
-    let mediaSent = false;
-    if (shouldTriggerMedia) {
-      const mood = this.inferMood(userText + ' ' + replyContent);
-      const sendAnimationInstead = isAnimationRequest || (!isStickerRequest && Math.random() < 0.3);
-      const stickerId = this.selectSticker(mood);
-
-      if (sendAnimationInstead) {
-        const animId = this.selectAnimation(mood);
-        if (animId && this.isValidFileId(animId)) {
-          const res = await telegramApi.sendAnimation(chatId, animId, {
-            reply_to_message_id: message.message_id
-          });
-          if (res.ok) mediaSent = true;
-        }
-      }
-
-      if (!mediaSent) {
-        if (stickerId && this.isValidFileId(stickerId)) {
-          const res = await telegramApi.sendSticker(chatId, stickerId, {
-            reply_to_message_id: message.message_id
-          });
-          if (res.ok) mediaSent = true;
-        }
-      }
-    }
-
-    // If no valid media was sent (missing media library or no valid media exists), gracefully fall back to normal AI text response
-    if (!mediaSent || (!isStickerRequest && !isAnimationRequest)) {
-      await telegramApi.sendMessage(chatId, replyContent, { reply_to_message_id: message.message_id });
-    }
-
-    conv.messages.push({ role: 'user', content: userText });
-    conv.messages.push({ role: 'assistant', content: replyContent });
-
-    if (conv.messages.length > this.MAX_HISTORY * 2) {
-      conv.messages = conv.messages.slice(-this.MAX_HISTORY * 2);
-    }
-
-    return true;
   }
 
   private static async handleRandomNaturalChat(message: TelegramMessage) {
@@ -453,15 +478,40 @@ If you have nothing interesting or natural to add, reply with exactly the single
     }
   }
 
-  public static inferMood(text: string): string {
+  public static inferMood(text: string, messages?: ChatMessage[]): string {
     const lower = text.toLowerCase();
-    if (lower.includes('❤️') || lower.includes('love') || lower.includes('jaan') || lower.includes('dil') || lower.includes('romantic')) return 'romantic';
-    if (lower.includes('😡') || lower.includes('angry') || lower.includes('pagal') || lower.includes('dimag') || lower.includes('hate') || lower.includes('irritat')) return 'angry';
-    if (lower.includes('😂') || lower.includes('haha') || lower.includes('funny') || lower.includes('lol') || lower.includes('joke')) return 'playful';
-    if (lower.includes('🙄') || lower.includes('seriously') || lower.includes('duh') || lower.includes('sarcas')) return 'sarcastic';
-    if (lower.includes('aww') || lower.includes('cute') || lower.includes('sweet')) return 'cute';
-    if (lower.includes('flirt') || lower.includes('hot') || lower.includes('handsome') || lower.includes('wink')) return 'flirty';
-    if (lower.includes('tease') || lower.includes('roast') || lower.includes('noob') || lower.includes('dumb')) return 'teasing/roasting';
+
+    if (lower.includes('upset') || lower.includes('sad') || lower.includes('crying') || lower.includes('depressed') || lower.includes('bad day') || lower.includes('hurt') || lower.includes('really upset')) {
+      return 'sad/comforting';
+    }
+    if (lower.includes('❤️') || lower.includes('love') || lower.includes('jaan') || lower.includes('dil') || lower.includes('romantic') || lower.includes('my heart')) {
+      return 'romantic';
+    }
+    if (lower.includes('flirt') || lower.includes('hot') || lower.includes('handsome') || lower.includes('wink') || lower.includes('you are cute') || lower.includes('you\'re cute')) {
+      return 'flirty';
+    }
+    if (lower.includes('😡') || lower.includes('angry') || lower.includes('pagal') || lower.includes('dimag') || lower.includes('hate') || lower.includes('irritat') || lower.includes('stupid') || lower.includes('idiot') || lower.includes('annoying')) {
+      return 'angry';
+    }
+    if (lower.includes('😂') || lower.includes('haha') || lower.includes('funny') || lower.includes('lol') || lower.includes('joke') || lower.includes('rofl')) {
+      return 'playful';
+    }
+    if (lower.includes('🙄') || lower.includes('seriously') || lower.includes('duh') || lower.includes('sarcas') || lower.includes('oh wow')) {
+      return 'sarcastic';
+    }
+    if (lower.includes('aww') || lower.includes('cute') || lower.includes('sweet')) {
+      return 'cute';
+    }
+    if (lower.includes('tease') || lower.includes('roast') || lower.includes('noob') || lower.includes('dumb')) {
+      return 'teasing/roasting';
+    }
+    if (lower.includes('leave me alone') || lower.includes('go away') || lower.includes('stop') || lower.includes('busy')) {
+      return 'normal';
+    }
+    if (lower.includes('hello') || lower.includes('hi') || lower.includes('how are you') || lower.includes('what\'s up') || lower.includes('gm')) {
+      return 'friendly';
+    }
+
     return 'normal';
   }
 

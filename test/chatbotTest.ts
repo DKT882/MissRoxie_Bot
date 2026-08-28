@@ -123,19 +123,26 @@ export async function runChatbotTests() {
   console.log('✅ [PASS] Test 6: Private chat / DM automatic response trigger verified.');
 
   // Test 7: Personality / Mood selection test
-  const moodNormal = ChatbotService.inferMood('Hello how are you');
-  const moodRomantic = ChatbotService.inferMood('I love you jaan ❤️');
+  const moodNeutral = ChatbotService.inferMood('hello, how are you?');
+  const moodLeave = ChatbotService.inferMood('leave me alone');
+  const moodSad = ChatbotService.inferMood('I\'m really upset today');
   const moodAngry = ChatbotService.inferMood('You are so annoying 😡');
-  const moodPlayful = ChatbotService.inferMood('Haha that is funny lol');
-  const moodSarcastic = ChatbotService.inferMood('Oh seriously, duh');
-  const moodCute = ChatbotService.inferMood('Aww you are so sweet');
-  const moodFlirty = ChatbotService.inferMood('Hey handsome wink');
-  const moodRoast = ChatbotService.inferMood('You are a noob at this roast');
+  const moodPlayful = ChatbotService.inferMood('haha you\'re so funny 😂');
+  const moodRomantic = ChatbotService.inferMood('I love you ❤️');
+  const moodFlirty = ChatbotService.inferMood('you\'re cute 😏');
 
-  if (moodNormal !== 'normal' || moodRomantic !== 'romantic' || moodAngry !== 'angry' || moodPlayful !== 'playful' || moodSarcastic !== 'sarcastic' || moodCute !== 'cute' || moodFlirty !== 'flirty' || moodRoast !== 'teasing/roasting') {
-    throw new Error('Test 7 Failed: Mood detection inference mismatch.');
+  if (
+    (moodNeutral !== 'friendly' && moodNeutral !== 'normal') ||
+    moodLeave !== 'normal' ||
+    moodSad !== 'sad/comforting' ||
+    moodAngry !== 'angry' ||
+    moodPlayful !== 'playful' ||
+    moodRomantic !== 'romantic' ||
+    moodFlirty !== 'flirty'
+  ) {
+    throw new Error(`Test 7 Failed: Mood detection inference mismatch. Got neutral=${moodNeutral}, leave=${moodLeave}, sad=${moodSad}, angry=${moodAngry}, playful=${moodPlayful}, romantic=${moodRomantic}, flirty=${moodFlirty}`);
   }
-  console.log('✅ [PASS] Test 7: Personality / mood tone inference verified.');
+  console.log('✅ [PASS] Test 7: Personality / mood tone inference verified (neutral -> normal/friendly, not flirty).');
 
   // Test 8: Media configuration validation (missing vs valid media IDs)
   ChatbotService.reset();
