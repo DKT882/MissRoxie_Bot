@@ -7,6 +7,7 @@ import { messageScheduler } from './scheduler.js';
 import { TelegramMiddleware, CommandContext } from './middleware.js';
 import { RateLimiterService } from './rateLimiter.js';
 import { ChatbotService } from './chatbot.js';
+import { SmartProtectionService } from './smartProtection.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
 
@@ -320,12 +321,16 @@ export class TelegramBotManager {
           command
         };
 
-        const handled = await CommandHandler.handleCommand(ctx);
-        if (handled) return;
+        await CommandHandler.handleCommand(ctx);
+        return;
       }
     }
 
-    // 3. Check Anti-Flood protection
+    // 3. Check Smart User Protection
+    const smartProtected = await SmartProtectionService.handleMessage(message);
+    if (smartProtected) return;
+
+    // 4. Check Anti-Flood protection
     const floodIntercepted = await ModerationService.handleAntiFlood(message);
     if (floodIntercepted) return;
 

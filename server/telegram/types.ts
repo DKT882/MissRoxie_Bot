@@ -311,6 +311,12 @@ export interface GroupSettings {
   // AI Chatbot
   chatbotEnabled?: boolean; // default true
   chatbotMode?: 'normal' | 'friendly' | 'auto'; // default 'auto'
+  // Phase 17 Smart User Protection
+  protectionEnabled?: boolean;
+  protectionFloodCount?: number;
+  protectionFloodWindow?: number;
+  protectionDuplicateLimit?: number;
+  protectionLinkBurstLimit?: number;
   // Phase 9A Smart Content Protection & Message Control
   stopSpamEnabled?: boolean;
   stopAbusiveEnabled?: boolean;

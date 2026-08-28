@@ -360,6 +360,11 @@ class StorageManager {
         automations: [],
         rules: '',
         lastAllTimestamp: 0,
+        protectionEnabled: true,
+        protectionFloodCount: 5,
+        protectionFloodWindow: 5,
+        protectionDuplicateLimit: 3,
+        protectionLinkBurstLimit: 3,
         updatedAt: new Date().toISOString()
       };
       this.scheduleSave();
@@ -406,6 +411,11 @@ class StorageManager {
       if (s.lastAllTimestamp === undefined) { s.lastAllTimestamp = 0; needsSave = true; }
       if (s.chatbotEnabled === undefined) { s.chatbotEnabled = true; needsSave = true; }
       if (s.chatbotMode === undefined) { s.chatbotMode = 'auto'; needsSave = true; }
+      if (s.protectionEnabled === undefined) { s.protectionEnabled = true; needsSave = true; }
+      if (s.protectionFloodCount === undefined) { s.protectionFloodCount = 5; needsSave = true; }
+      if (s.protectionFloodWindow === undefined) { s.protectionFloodWindow = 5; needsSave = true; }
+      if (s.protectionDuplicateLimit === undefined) { s.protectionDuplicateLimit = 3; needsSave = true; }
+      if (s.protectionLinkBurstLimit === undefined) { s.protectionLinkBurstLimit = 3; needsSave = true; }
 
       if (chatTitle && s.chatTitle !== chatTitle) {
         s.chatTitle = chatTitle;

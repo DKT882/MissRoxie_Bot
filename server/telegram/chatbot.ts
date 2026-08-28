@@ -131,6 +131,15 @@ export class ChatbotService {
 
   private static recentAnimations: Set<string> = new Set();
 
+  private static cleanAiText(text: string): string {
+    if (!text) return '';
+    return text
+      .replace(/\*(sends a sticker|sticker|gif|animation|laughs|smiles|giggles|winks|blushes|sighs|shrugs|chuckles|rolls eyes|hugs|high fives)\*/gi, '')
+      .replace(/\*.*?\b(sticker|gif|animation|sends)\b.*?\*/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
   public static isTriggered(message: TelegramMessage, botUser: TelegramUser | null): boolean {
     const text = (message.text || message.caption || '').trim();
     if (!text) return false;
@@ -282,29 +291,19 @@ export class ChatbotService {
         ? `\nStored Memory Facts about this user in this chat:\n- ${userMemories.join('\n- ')}` 
         : '';
 
-      const systemPrompt = `You are Roxie, a natural Indian girl chatting casually in a Telegram group chat.
+      const systemPrompt = `You are Roxie, a natural Indian girl chatting casually in a Telegram group/chat.
 CURRENT ACTIVE MOOD FOR THIS MESSAGE: [${mood}]
 ${memoryContext}
 
-Personality & Tone Rules:
-- You MUST strictly adopt and match the CURRENT ACTIVE MOOD (${mood}) for this response.
-- Mode definitions:
-  • normal → friendly, casual, chill ("acha", "hmm", "arre"), respectful when asked to be left alone.
-  • friendly → warm, welcoming, conversational.
-  • cute → sweet, endearing.
-  • playful → funny, humorous, lighthearted.
-  • teasing/roasting → witty, playful banter, non-abusive roast.
-  • sarcastic → witty, cynical, dry humor.
-  • angry → irritated, attitude, sharp comeback.
-  • sad/comforting → empathetic, supportive, comforting.
-  • romantic → affectionate, cute, loving ("jaan", "dil"). ONLY use if mood is romantic.
-  • flirty → playful, flirtatious, teasing. ONLY use if mood is flirty.
-- CRITICAL: Flirting must NEVER be the default mood. If the mood is normal, friendly, sad/comforting, angry, or sarcastic, do NOT flirt or use romantic terms.
-- Keep responses varied, conversational, and short (1-3 sentences max).
-- Mix Hindi, Hinglish, and English naturally and authentically.
-- Maintain conversation context and stay completely in character.
-- Never sound like an AI assistant or robot.
-- Never claim to be a real human if directly asked; remain Roxie.`;
+Core Instructions & Tone Rules:
+- Strictly adopt the CURRENT ACTIVE MOOD (${mood}).
+- Length: Keep replies extremely short and punchy: 1 to 2 short sentences (about 5 to 25 words). Never over-explain or write paragraphs.
+- Conversation Style: Answer the user's point directly and occasionally add a small casual follow-up or comment. Do NOT ask a question in every single reply.
+- Language: Mix Hindi, Hinglish, and English naturally ("acha", "hmm", "arre", "na", "sahi hai").
+- Flirting Policy: NEVER flirt or use romantic terms ("jaan", "baby") by default. Only use romantic/flirty tone if the user's message is explicitly romantic or flirty.
+- Clarity & Context: Stay strictly on-topic using recent conversation context. If the user message is unclear or nonsensical, ask a short natural clarification ("matlab?", "kya bol rhe ho?").
+- Action Bans: NEVER write action descriptions like *sends a sticker*, *laughs*, *smiles*, or *blushes* in text.
+- Persona: Never sound like an AI assistant, bot, or formal customer support. Sound like a real college girl chatting on Telegram.`;
 
       const apiMessages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
@@ -336,7 +335,7 @@ Personality & Tone Rules:
             body: JSON.stringify({
               model: modelToTry,
               messages: apiMessages,
-              max_tokens: 300,
+              max_tokens: 120,
               temperature: 0.8
             }),
             signal: controller.signal
@@ -389,6 +388,9 @@ Personality & Tone Rules:
         return false;
       }
 
+      const cleanedReplyContent = this.cleanAiText(replyContent);
+      const finalReply = cleanedReplyContent || 'Acha!';
+
       // Exact response deduplication check per message ID
       const respDupKey = `${chatId}_resp_${msgId}`;
       if (this.recentResponseTracker.has(respDupKey)) {
@@ -397,7 +399,7 @@ Personality & Tone Rules:
       this.recentResponseTracker.set(respDupKey, now);
 
       // Duplicate response content check (within 10s)
-      const dupKey = `${chatId}_${replyContent}`;
+      const dupKey = `${chatId}_${finalReply}`;
       const lastSentTime = this.recentResponseTracker.get(dupKey) || 0;
       if (now - lastSentTime < 10000) {
         return false;
@@ -419,9 +421,15 @@ Personality & Tone Rules:
           const animId = this.selectAnimation(mood);
           if (animId && this.isValidFileId(animId)) {
             const res = await telegramApi.sendAnimation(chatId, animId, {
-              reply_to_message_id: message.message_id
+              reply_to_message_id: message.message_id,
+              caption: finalReply.length <= 200 ? finalReply : undefined
             });
-            if (res.ok) mediaSent = true;
+            if (res.ok) {
+              mediaSent = true;
+              if (finalReply.length > 200) {
+                await telegramApi.sendMessage(chatId, finalReply, { reply_to_message_id: message.message_id });
+              }
+            }
           }
         }
 
@@ -430,18 +438,22 @@ Personality & Tone Rules:
             const res = await telegramApi.sendSticker(chatId, stickerId, {
               reply_to_message_id: message.message_id
             });
-            if (res.ok) mediaSent = true;
+            if (res.ok) {
+              mediaSent = true;
+              if (finalReply) {
+                await telegramApi.sendMessage(chatId, finalReply, { reply_to_message_id: message.message_id });
+              }
+            }
           }
         }
       }
 
-      // If no valid media was sent (missing media library or no valid media exists), gracefully fall back to normal AI text response
-      if (!mediaSent || (!isStickerRequest && !isAnimationRequest)) {
-        await telegramApi.sendMessage(chatId, replyContent, { reply_to_message_id: message.message_id });
+      if (!mediaSent && finalReply) {
+        await telegramApi.sendMessage(chatId, finalReply, { reply_to_message_id: message.message_id });
       }
 
       conv.messages.push({ role: 'user', content: userText });
-      conv.messages.push({ role: 'assistant', content: replyContent });
+      conv.messages.push({ role: 'assistant', content: finalReply });
 
       if (conv.messages.length > this.MAX_HISTORY * 2) {
         conv.messages = conv.messages.slice(-this.MAX_HISTORY * 2);

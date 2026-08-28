@@ -95,8 +95,12 @@ export class CommandHandler {
   private static sayCooldowns: Map<number, number> = new Map();
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
+  private static catalogMap = new Map<string, any>(
+    COMMAND_CATALOG.map(item => [item.command.toLowerCase(), item])
+  );
+
   public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
-    '/help', '/start', '/ping', '/live', '/report', '/getnote', '/notes', '/rules', '/mymemory', '/forgetme'
+    '/help', '/start', '/ping', '/live', '/report', '/getnote', '/notes', '/rules', '/mymemory', '/forgetme', '/settings'
   ]);
 
   public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
@@ -121,7 +125,7 @@ export class CommandHandler {
     '/roxie', '/roxiemode',
     '/clearmemory',
     '/say', '/schedule', '/listschedules', '/deleteschedule',
-    '/exportconfig', '/importconfig', '/status', '/settings',
+    '/exportconfig', '/importconfig', '/status',
     '/addstickerpack', '/addsticker', '/addgif', '/liststickers', '/removesticker', '/clearstickers'
   ]);
 
@@ -164,11 +168,13 @@ export class CommandHandler {
     console.log(`[COMMAND] received command=${rawCmd} chatId=${ctx.chatId} userId=${ctx.sender?.id}`);
     console.log(`[COMMAND] parsed name=${cmd.replace(/^\//, '')} args=${JSON.stringify(ctx.args || [])}`);
 
-    const isPublic = CommandHandler.PUBLIC_GROUP_COMMANDS.has(cmd);
-    const isAdminOnly = CommandHandler.ADMIN_ONLY_COMMANDS.has(cmd);
-    const isSensitive = CommandHandler.SENSITIVE_COMMANDS.has(cmd);
+    const catalogItem = CommandHandler.catalogMap.get(cmd);
+    const isPublic = CommandHandler.PUBLIC_GROUP_COMMANDS.has(cmd) || (catalogItem?.permission === 'Everyone');
+    const isAdminOnly = CommandHandler.ADMIN_ONLY_COMMANDS.has(cmd) || (catalogItem && catalogItem.permission !== 'Everyone');
+    const isSensitive = CommandHandler.SENSITIVE_COMMANDS.has(cmd) || (catalogItem?.modifiesState === true);
+    const isRegistered = isPublic || isAdminOnly || isSensitive || Boolean(catalogItem);
 
-    if (!isPublic && !isAdminOnly && !isSensitive) {
+    if (!isRegistered) {
       console.log(`[COMMAND] registry lookup command=${cmd.replace(/^\//, '')} result=NOT_FOUND`);
       return false;
     }
@@ -526,6 +532,9 @@ export class CommandHandler {
       case '/chatbot':
         await this.handleChatbot(ctx);
         return true;
+      case '/protection':
+        await this.handleProtection(ctx);
+        return true;
       case '/roxie':
         await this.handleRoxie(ctx);
         return true;
@@ -778,6 +787,53 @@ export class CommandHandler {
       await telegramApi.sendMessage(ctx.chatId, '🤖 <b>Roxie AI Chatbot</b> is now DISABLED in this group.');
     } else {
       await telegramApi.sendMessage(ctx.chatId, `🤖 <b>Roxie AI Chatbot Status</b>: ${settings.chatbotEnabled ? 'ON' : 'OFF'}\nUse <code>/chatbot on</code> or <code>/chatbot off</code> to toggle.`);
+    }
+  }
+
+  private static async handleProtection(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const action = (ctx.args[0] || 'status').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    if (action === 'on') {
+      settings.protectionEnabled = true;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'protection',
+        action: 'setting_change',
+        result: 'success',
+        reason: 'Smart user protection enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Smart User Protection</b> is now <b>ENABLED</b>.');
+    } else if (action === 'off') {
+      settings.protectionEnabled = false;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'protection',
+        action: 'setting_change',
+        result: 'success',
+        reason: 'Smart user protection disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Smart User Protection</b> is now <b>DISABLED</b>.');
+    } else {
+      const isEnabled = settings.protectionEnabled !== false;
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🛡️ <b>Smart User Protection Status</b>\n\n` +
+        `• Status: <b>${isEnabled ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+        `• Flood Threshold: <b>${settings.protectionFloodCount || 5}</b> msgs in <b>${settings.protectionFloodWindow || 5}s</b>\n` +
+        `• Duplicate Limit: <b>${settings.protectionDuplicateLimit || 3}</b> identical msgs\n` +
+        `• Link Burst Limit: <b>${settings.protectionLinkBurstLimit || 3}</b> links in 15s\n\n` +
+        `Use <code>/protection on</code>, <code>/protection off</code>, or <code>/protection status</code>.`
+      );
     }
   }
 
@@ -5011,30 +5067,253 @@ export class CommandHandler {
 
   private static async handleSettings(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
 
-    const s = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const sub = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    const isAdmin = actor.actorRank >= RoleRank.ADMIN;
+
+    const isConfigChange = ctx.args.length > (sub ? 1 : 0);
+    if (isConfigChange && !isAdmin) {
+      await telegramApi.sendMessage(ctx.chatId, '❌ Command requires administrator privileges.');
+      return;
+    }
+
+    if (sub === 'security') {
+      const action = (ctx.args[1] || '').toLowerCase();
+      if (action) {
+        if (action === 'on' || action === 'off') {
+          const val = action === 'on';
+          settings.securityEnabled = val;
+          settings.captchaEnabled = val;
+          settings.raidEnabled = val;
+          db.scheduleSave();
+          TelegramMiddleware.logAudit({
+            chatId: ctx.chatId,
+            chatTitle: ctx.chatTitle,
+            actor,
+            command: 'settings',
+            action: 'setting_change',
+            result: 'success',
+            reason: `Security center toggled ${action}`
+          });
+          await telegramApi.sendMessage(ctx.chatId, `🔒 <b>Security Center</b> is now <b>${val ? '🟢 ON' : '🔴 OFF'}</b>.`);
+        } else {
+          await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings security <on|off>');
+        }
+      } else {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `🔒 <b>Security Configuration</b>\n\n` +
+          `• Security Center: <b>${settings.securityEnabled !== false ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+          `• CAPTCHA Verification: <b>${settings.captchaEnabled ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+          `• Anti-Raid Protection: <b>${settings.raidEnabled ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+          `• Join Mode: <b>${settings.joinmode || 'normal'}</b>\n\n` +
+          `<i>Usage: /settings security <on|off></i>`
+        );
+      }
+      return;
+    }
+
+    if (sub === 'moderation') {
+      const subOpt = (ctx.args[1] || '').toLowerCase();
+      if (subOpt) {
+        if (subOpt === 'warn_limit') {
+          const limit = parseInt(ctx.args[2], 10);
+          if (!isNaN(limit) && limit >= 1 && limit <= 10) {
+            settings.warnLimit = limit;
+            db.scheduleSave();
+            TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Warn limit set to ${limit}` });
+            await telegramApi.sendMessage(ctx.chatId, `⚠️ Warning limit updated to <b>${limit}</b>.`);
+          } else {
+            await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings moderation warn_limit <1-10>');
+          }
+        } else if (subOpt === 'warn_action') {
+          const act = ctx.args[2]?.toLowerCase() as any;
+          if (['ban', 'mute', 'kick', 'warn_only'].includes(act)) {
+            settings.warnAction = act;
+            db.scheduleSave();
+            TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Warn action set to ${act}` });
+            await telegramApi.sendMessage(ctx.chatId, `⚠️ Warning threshold default action updated to <b>${act.toUpperCase()}</b>.`);
+          } else {
+            await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings moderation warn_action <ban|mute|kick|warn_only>');
+          }
+        } else if (subOpt === 'mute_duration') {
+          const secs = parseInt(ctx.args[2], 10);
+          if (!isNaN(secs) && secs >= 10) {
+            settings.warnExpireSeconds = secs;
+            db.scheduleSave();
+            TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Mute duration set to ${secs}s` });
+            await telegramApi.sendMessage(ctx.chatId, `⏱️ Default mute / warning expire duration updated to <b>${secs}s</b>.`);
+          } else {
+            await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings moderation mute_duration <seconds >= 10>');
+          }
+        } else {
+          await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings moderation <warn_limit <num> | warn_action <ban|mute|kick|warn_only> | mute_duration <secs>>');
+        }
+      } else {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `⚠️ <b>Moderation Configuration</b>\n\n` +
+          `• Warn Limit: <b>${settings.warnLimit || 3}</b> warnings ➔ <b>${(settings.warnAction || 'ban').toUpperCase()}</b>\n` +
+          `• Mute / Expire Duration: <b>${settings.warnExpireSeconds || 300}s</b>\n` +
+          `• Slow Mode: <b>${settings.slowModeSeconds ? settings.slowModeSeconds + 's' : 'OFF'}</b>\n\n` +
+          `<i>Usage: /settings moderation warn_limit <num> | warn_action <ban|mute|kick|warn_only> | mute_duration <secs></i>`
+        );
+      }
+      return;
+    }
+
+    if (sub === 'chatbot') {
+      const action = (ctx.args[1] || '').toLowerCase();
+      if (action) {
+        if (action === 'on' || action === 'off') {
+          const val = action === 'on';
+          settings.chatbotEnabled = val;
+          db.scheduleSave();
+          TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Chatbot toggled ${action}` });
+          await telegramApi.sendMessage(ctx.chatId, `🤖 <b>Roxie AI Chatbot</b> is now <b>${val ? '🟢 ON' : '🔴 OFF'}</b>.`);
+        } else if (action === 'mode') {
+          const modeArg = (ctx.args[2] || '').toLowerCase() as any;
+          if (['normal', 'friendly', 'auto'].includes(modeArg)) {
+            settings.chatbotMode = modeArg;
+            db.scheduleSave();
+            TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Chatbot mode set to ${modeArg}` });
+            await telegramApi.sendMessage(ctx.chatId, `🤖 Chatbot mode updated to <b>${modeArg}</b>.`);
+          } else {
+            await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings chatbot mode <normal|friendly|auto>');
+          }
+        } else {
+          await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings chatbot <on|off|mode <normal|friendly|auto>>');
+        }
+      } else {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `🤖 <b>AI Chatbot Configuration</b>\n\n` +
+          `• Status: <b>${settings.chatbotEnabled !== false ? '🟢 ENABLED' : '🔴 DISABLED'}</b>\n` +
+          `• Behavior Mode: <b>${settings.chatbotMode || 'auto'}</b>\n\n` +
+          `<i>Usage: /settings chatbot on | off | mode <normal|friendly|auto></i>`
+        );
+      }
+      return;
+    }
+
+    if (sub === 'welcome') {
+      const action = (ctx.args[1] || '').toLowerCase();
+      if (action) {
+        if (action === 'on' || action === 'off') {
+          const val = action === 'on';
+          settings.welcomeEnabled = val;
+          settings.goodbyeEnabled = val;
+          db.scheduleSave();
+          TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Welcome/Goodbye toggled ${action}` });
+          await telegramApi.sendMessage(ctx.chatId, `👋 <b>Welcome & Goodbye Messages</b> are now <b>${val ? '🟢 ON' : '🔴 OFF'}</b>.`);
+        } else if (action === 'autodelete' || action === 'auto-delete') {
+          const delAct = (ctx.args[2] || '').toLowerCase();
+          if (delAct === 'on' || delAct === 'off') {
+            const val = delAct === 'on';
+            settings.autoDeleteJoinLeave = val;
+            db.scheduleSave();
+            TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Auto-delete join/leave toggled ${delAct}` });
+            await telegramApi.sendMessage(ctx.chatId, `🗑️ <b>Auto-Delete Join/Leave System Messages</b> is now <b>${val ? '🟢 ON' : '🔴 OFF'}</b>.`);
+          } else {
+            await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings welcome autodelete <on|off>');
+          }
+        } else {
+          await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings welcome <on|off|autodelete <on|off>>');
+        }
+      } else {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `👋 <b>Welcome & Automation Configuration</b>\n\n` +
+          `• Welcome Message: <b>${settings.welcomeEnabled ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+          `• Goodbye Message: <b>${settings.goodbyeEnabled ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+          `• Auto-Delete Join/Leave: <b>${settings.autoDeleteJoinLeave ? '🟢 ON' : '🔴 OFF'}</b>\n\n` +
+          `<i>Usage: /settings welcome on | off | autodelete <on|off></i>`
+        );
+      }
+      return;
+    }
+
+    if (sub === 'protection') {
+      const action = (ctx.args[1] || '').toLowerCase();
+      if (action) {
+        if (action === 'on' || action === 'off') {
+          const val = action === 'on';
+          settings.protectionEnabled = val;
+          db.scheduleSave();
+          TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Smart protection toggled ${action}` });
+          await telegramApi.sendMessage(ctx.chatId, `🛡️ <b>Smart User Protection</b> is now <b>${val ? '🟢 ON' : '🔴 OFF'}</b>.`);
+        } else if (action === 'flood') {
+          const count = parseInt(ctx.args[2], 10);
+          const windowSec = parseInt(ctx.args[3], 10);
+          if (!isNaN(count) && count >= 1 && !isNaN(windowSec) && windowSec >= 1) {
+            settings.protectionFloodCount = count;
+            settings.protectionFloodWindow = windowSec;
+            db.scheduleSave();
+            TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Flood threshold set to ${count} msgs in ${windowSec}s` });
+            await telegramApi.sendMessage(ctx.chatId, `🛡️ Flood threshold updated: <b>${count}</b> messages in <b>${windowSec}s</b>.`);
+          } else {
+            await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings protection flood <count> <window_seconds>');
+          }
+        } else if (action === 'duplicate' || action === 'dup') {
+          const limit = parseInt(ctx.args[2], 10);
+          if (!isNaN(limit) && limit >= 2) {
+            settings.protectionDuplicateLimit = limit;
+            db.scheduleSave();
+            TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Duplicate message limit set to ${limit}` });
+            await telegramApi.sendMessage(ctx.chatId, `🛡️ Duplicate message limit updated to <b>${limit}</b>.`);
+          } else {
+            await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings protection duplicate <limit >= 2>');
+          }
+        } else if (action === 'link' || action === 'spam') {
+          const limit = parseInt(ctx.args[2], 10);
+          if (!isNaN(limit) && limit >= 1) {
+            settings.protectionLinkBurstLimit = limit;
+            db.scheduleSave();
+            TelegramMiddleware.logAudit({ chatId: ctx.chatId, chatTitle: ctx.chatTitle, actor, command: 'settings', action: 'setting_change', result: 'success', reason: `Link burst limit set to ${limit}` });
+            await telegramApi.sendMessage(ctx.chatId, `🛡️ Link burst limit updated to <b>${limit}</b>.`);
+          } else {
+            await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings protection link <limit >= 1>');
+          }
+        } else {
+          await telegramApi.sendMessage(ctx.chatId, 'Usage: /settings protection <on|off|flood <count> <window>|duplicate <limit>|link <limit>>');
+        }
+      } else {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `🛡️ <b>Smart User Protection Configuration</b>\n\n` +
+          `• Status: <b>${settings.protectionEnabled !== false ? '🟢 ON' : '🔴 OFF'}</b>\n` +
+          `• Flood Threshold: <b>${settings.protectionFloodCount || 5}</b> msgs in <b>${settings.protectionFloodWindow || 5}s</b>\n` +
+          `• Duplicate Limit: <b>${settings.protectionDuplicateLimit || 3}</b> identical msgs\n` +
+          `• Link Burst Limit: <b>${settings.protectionLinkBurstLimit || 3}</b> links in 15s\n\n` +
+          `<i>Usage: /settings protection on | off | flood <count> <window> | duplicate <limit> | link <limit></i>`
+        );
+      }
+      return;
+    }
+
     const filters = Object.keys(db.getFilters(ctx.chatId)).length;
     const allowedDomains = db.getLinkWhitelist(ctx.chatId).length;
     const freedUsers = db.getFreedUsers(ctx.chatId).length;
-    const activeLocks = Object.entries(s.locks || {}).filter(([_, v]) => v).map(([k]) => k);
+    const activeLocks = Object.entries(settings.locks || {}).filter(([_, v]) => v).map(([k]) => k);
 
     const text =
-      `⚙️ <b>Group Settings & Policy: ${escapeHtml(ctx.chatTitle || 'Group')}</b>\n\n` +
-      `🛡️ <b>Protections:</b>\n` +
-      `• Links Filter: <b>${s.linksProtection ? '🟢 ON' : '🔴 OFF'}</b> (${allowedDomains} whitelisted)\n` +
-      `• Photos/Media: <b>${s.mediaProtection ? '🟢 ON' : '🔴 OFF'}</b> (${freedUsers} freed users)\n` +
-      `• Stickers: <b>${s.stickerProtection ? '🟢 ON' : '🔴 OFF'}</b>\n` +
-      `• Anti-Flood: <b>${s.floodEnabled ? '🟢 ON' : '🔴 OFF'}</b> (${s.floodCount || 8} msgs/${s.floodWindow || 5}s ➔ ${(s.floodAction || 'mute').toUpperCase()})\n` +
-      `• Content Locks: <b>${activeLocks.length > 0 ? activeLocks.join(', ') : 'None'}</b>\n\n` +
-      `⚠️ <b>Moderation Thresholds:</b>\n` +
-      `• Warn Limit: <b>${s.warnLimit}</b> warnings ➔ <b>${(s.warnAction || 'ban').toUpperCase()}</b>\n` +
-      `• Slow Mode: <b>${s.slowModeSeconds ? s.slowModeSeconds + 's' : 'OFF'}</b>\n\n` +
-      `👋 <b>Automation:</b>\n` +
-      `• Welcome Message: <b>${s.welcomeEnabled ? '🟢 ON' : '🔴 OFF'}</b>\n` +
-      `• Goodbye Message: <b>${s.goodbyeEnabled ? '🟢 ON' : '🔴 OFF'}</b>\n` +
-      `• Custom Filters: <b>${filters}</b> configured\n\n` +
-      `<i>Use <code>/help</code> to view full admin command toolkit.</i>`;
+      `⚙️ <b>Centralized Group Configuration: ${escapeHtml(ctx.chatTitle || 'Group')}</b>\n\n` +
+      `🔒 <b>Security:</b> <b>${settings.securityEnabled !== false ? 'ON' : 'OFF'}</b> (<code>/settings security</code>)\n` +
+      `🛡️ <b>Protection:</b> <b>${settings.protectionEnabled !== false ? 'ON' : 'OFF'}</b> (<code>/settings protection</code>)\n` +
+      `🤖 <b>AI Chatbot:</b> <b>${settings.chatbotEnabled !== false ? 'ON' : 'OFF'}</b> (<code>/settings chatbot</code>)\n` +
+      `👋 <b>Welcome & Automation:</b> <b>${settings.welcomeEnabled ? 'ON' : 'OFF'}</b> (<code>/settings welcome</code>)\n` +
+      `⚠️ <b>Moderation:</b> <b>${settings.warnLimit} warns = ${(settings.warnAction || 'ban').toUpperCase()}</b> (<code>/settings moderation</code>)\n\n` +
+      `• Links Whitelist: ${allowedDomains} domains\n` +
+      `• Media Exemptions: ${freedUsers} users\n` +
+      `• Active Locks: ${activeLocks.length > 0 ? activeLocks.join(', ') : 'None'}\n\n` +
+      `<i>Tip: Use subcommands to view or modify settings:</i>\n` +
+      `• <code>/settings security [on|off]</code>\n` +
+      `• <code>/settings moderation [warn_limit|warn_action|mute_duration]</code>\n` +
+      `• <code>/settings chatbot [on|off|mode]</code>\n` +
+      `• <code>/settings welcome [on|off|autodelete]</code>\n` +
+      `• <code>/settings protection [on|off|flood|duplicate|link]</code>`;
 
     await telegramApi.sendMessage(ctx.chatId, text);
   }
