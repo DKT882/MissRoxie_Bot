@@ -96,7 +96,7 @@ export class CommandHandler {
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
   public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
-    '/help', '/start', '/ping', '/live', '/report', '/getnote', '/notes', '/rules'
+    '/help', '/start', '/ping', '/live', '/report', '/getnote', '/notes', '/rules', '/mymemory', '/forgetme'
   ]);
 
   public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
@@ -118,6 +118,8 @@ export class CommandHandler {
     '/free', '/unfree', '/freelist', '/freed',
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse', '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/automation', '/setrules', '/clearrules', '/chatbot',
+    '/roxie', '/roxiemode',
+    '/clearmemory',
     '/say', '/schedule', '/listschedules', '/deleteschedule',
     '/exportconfig', '/importconfig', '/status', '/settings',
     '/addstickerpack', '/addsticker', '/addgif', '/liststickers', '/removesticker', '/clearstickers'
@@ -134,6 +136,8 @@ export class CommandHandler {
     '/promote', '/demote', '/permissions', '/permission',
     '/setmod', '/delmod',
     '/security', '/antiraid', '/captcha', '/autoaccept', '/chatbot',
+    '/roxie', '/roxiemode',
+    '/clearmemory',
     '/automation', '/settings', '/setrules', '/clearrules',
     '/flood', '/setflood', '/antiflood',
     '/filter', '/unfilter', '/stop', '/filters', '/filterlist',
@@ -513,8 +517,20 @@ export class CommandHandler {
       case '/clearmemory':
         await this.handleClearMemory(ctx);
         return true;
+      case '/mymemory':
+        await this.handleMyMemory(ctx);
+        return true;
+      case '/forgetme':
+        await this.handleForgetMe(ctx);
+        return true;
       case '/chatbot':
         await this.handleChatbot(ctx);
+        return true;
+      case '/roxie':
+        await this.handleRoxie(ctx);
+        return true;
+      case '/roxiemode':
+        await this.handleRoxieMode(ctx);
         return true;
       case '/joinmode':
         await this.handleJoinMode(ctx);
@@ -765,6 +781,79 @@ export class CommandHandler {
     }
   }
 
+  private static async handleRoxie(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const action = (ctx.args[0] || 'status').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    if (action === 'on') {
+      settings.chatbotEnabled = true;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'roxie',
+        action: 'setting_change',
+        result: 'success',
+        reason: 'Roxie AI chatbot enabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🤖 <b>Roxie AI Chatbot</b> is now ENABLED in this group.');
+    } else if (action === 'off') {
+      settings.chatbotEnabled = false;
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'roxie',
+        action: 'setting_change',
+        result: 'success',
+        reason: 'Roxie AI chatbot disabled'
+      });
+      await telegramApi.sendMessage(ctx.chatId, '🤖 <b>Roxie AI Chatbot</b> is now DISABLED in this group.');
+    } else {
+      const statusText = settings.chatbotEnabled ? '🟢 ENABLED' : '🔴 DISABLED';
+      const modeText = settings.chatbotMode || 'auto';
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🤖 <b>Roxie AI Control Center Status</b>\n\n• <b>Chatbot Status</b>: ${statusText}\n• <b>Behavior Mode</b>: <code>${modeText}</code>\n\n<i>Use <code>/roxie on</code>, <code>/roxie off</code>, or <code>/roxiemode &lt;normal|friendly|auto&gt;</code> to manage.</i>`
+      );
+    }
+  }
+
+  private static async handleRoxieMode(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    const modeArg = (ctx.args[0] || '').toLowerCase();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    const validModes = ['normal', 'friendly', 'auto'];
+    if (validModes.includes(modeArg)) {
+      settings.chatbotMode = modeArg as 'normal' | 'friendly' | 'auto';
+      db.scheduleSave();
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'roxiemode',
+        action: 'setting_change',
+        result: 'success',
+        reason: `Roxie AI mode set to ${modeArg}`
+      });
+      await telegramApi.sendMessage(ctx.chatId, `🤖 <b>Roxie AI Mode</b> successfully updated to: <code>${modeArg}</code>.`);
+    } else {
+      const currentMode = settings.chatbotMode || 'auto';
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🤖 <b>Roxie AI Behavior Mode</b>\nCurrent Mode: <code>${currentMode}</code>\n\n<b>Available Modes:</b>\n• <code>/roxiemode auto</code> (Default: dynamic tone detection)\n• <code>/roxiemode normal</code> (Chill & casual)\n• <code>/roxiemode friendly</code> (Warm & conversational)\n\n<i>Note: Flirting is never the default mode.</i>`
+      );
+    }
+  }
+
   private static async handleClearMemory(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
     if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
@@ -782,6 +871,55 @@ export class CommandHandler {
     await telegramApi.sendMessage(
       ctx.chatId,
       `🧠 <b>Roxie's conversation memory has been cleared for this chat.</b>\n<i>Fresh slate for new conversations!</i>`,
+      { reply_to_message_id: ctx.message.message_id }
+    );
+  }
+
+  private static async handleMyMemory(ctx: CommandContext) {
+    const userId = ctx.sender?.id || 0;
+    if (!userId) {
+      await telegramApi.sendMessage(ctx.chatId, '❌ Could not resolve your user ID.');
+      return;
+    }
+    const memories = db.getUserMemory(ctx.chatId, userId);
+    if (memories.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🧠 <b>Your Stored Memory:</b>\n\n<i>No memory facts stored for you in this chat yet. Roxie learns about you as you chat naturally!</i>`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+    const list = memories.map((m, idx) => `${idx + 1}. ${escapeHtml(m)}`).join('\n');
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `🧠 <b>Your Stored Memory (${memories.length}/8 facts):</b>\n\n${list}\n\n<i>Use /forgetme to clear your memory facts.</i>`,
+      { reply_to_message_id: ctx.message.message_id }
+    );
+  }
+
+  private static async handleForgetMe(ctx: CommandContext) {
+    const userId = ctx.sender?.id || 0;
+    if (!userId) {
+      await telegramApi.sendMessage(ctx.chatId, '❌ Could not resolve your user ID.');
+      return;
+    }
+    const cleared = db.clearUserMemory(ctx.chatId, userId);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'forgetme',
+      action: 'setting_change',
+      result: 'success',
+      reason: 'User cleared their personal memory'
+    });
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      cleared 
+        ? `🗑️ <b>Your stored memory has been completely forgotten for this chat.</b>\n<i>Starting with a clean slate!</i>`
+        : `ℹ️ No stored memory found for you in this chat.`,
       { reply_to_message_id: ctx.message.message_id }
     );
   }

@@ -35,7 +35,16 @@
       "welcomeMessage": "Welcome {user} to {chat}!",
       "goodbyeEnabled": false,
       "goodbyeMessage": "Goodbye {user}!",
-      "slowModeSeconds": 0
+      "slowModeSeconds": 0,
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0
     },
     "-1004356470022": {
       "chatId": -1004356470022,
@@ -288,7 +297,8 @@
       "autoAcceptEnabled": false,
       "automations": [],
       "rules": "",
-      "lastAllTimestamp": 0
+      "lastAllTimestamp": 0,
+      "chatbotEnabled": true
     },
     "-5255291610": {
       "chatId": -5255291610,
@@ -621,7 +631,7 @@
       "imageProtection": true,
       "fileProtection": true,
       "customAbusiveWords": [],
-      "updatedAt": "2026-08-28T07:56:25.884Z",
+      "updatedAt": "2026-08-28T07:46:28.600Z",
       "automodEnabled": false,
       "mediaAction": "delete",
       "warnEscalation": [],
@@ -1296,34 +1306,34 @@
     {
       "id": "ZYWSXD",
       "createdAt": "2026-08-25T18:41:32.055Z",
-      "runsCount": 12,
+      "runsCount": 13,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
       "id": "55O99P",
       "createdAt": "2026-08-25T18:58:18.112Z",
-      "runsCount": 12,
+      "runsCount": 13,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
       "id": "Z1CLUO",
       "createdAt": "2026-08-25T19:17:55.318Z",
-      "runsCount": 11,
+      "runsCount": 12,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
@@ -1340,12 +1350,12 @@
     {
       "id": "83NSXH",
       "createdAt": "2026-08-25T19:18:12.310Z",
-      "runsCount": 11,
+      "runsCount": 12,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
@@ -1362,12 +1372,12 @@
     {
       "id": "W1HJPK",
       "createdAt": "2026-08-26T08:53:26.672Z",
-      "runsCount": 11,
+      "runsCount": 12,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
@@ -1384,12 +1394,12 @@
     {
       "id": "M8HLLH",
       "createdAt": "2026-08-26T08:54:23.506Z",
-      "runsCount": 11,
+      "runsCount": 12,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
@@ -1405,12 +1415,12 @@
     {
       "id": "YDSVDX",
       "createdAt": "2026-08-26T09:06:54.357Z",
-      "runsCount": 11,
+      "runsCount": 12,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
@@ -1426,12 +1436,12 @@
     {
       "id": "2PHBNL",
       "createdAt": "2026-08-26T09:07:52.077Z",
-      "runsCount": 11,
+      "runsCount": 12,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
@@ -1447,12 +1457,12 @@
     {
       "id": "CM0L6Y",
       "createdAt": "2026-08-26T09:08:35.957Z",
-      "runsCount": 11,
+      "runsCount": 12,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
@@ -1468,12 +1478,12 @@
     {
       "id": "HR6JN8",
       "createdAt": "2026-08-27T07:31:13.748Z",
-      "runsCount": 7,
+      "runsCount": 8,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
@@ -1489,12 +1499,12 @@
     {
       "id": "MD5SE1",
       "createdAt": "2026-08-27T07:32:20.186Z",
-      "runsCount": 7,
+      "runsCount": 8,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
@@ -1510,12 +1520,12 @@
     {
       "id": "Q306OV",
       "createdAt": "2026-08-27T08:30:57.959Z",
-      "runsCount": 6,
+      "runsCount": 7,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-28T08:43:53.812Z",
+      "nextRun": "2026-08-28T09:44:00.050Z",
       "adminId": 999
     },
     {
@@ -1531,7 +1541,7 @@
     {
       "id": "M4G94M",
       "createdAt": "2026-08-27T09:09:23.804Z",
-      "runsCount": 6,
+      "runsCount": 8,
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminId": 111,
@@ -1541,7 +1551,7 @@
       "contentType": "text",
       "intervalMs": 1800000,
       "intervalFormatted": "30 minutes",
-      "nextRun": "2026-08-28T08:13:53.812Z"
+      "nextRun": "2026-08-28T09:14:00.050Z"
     },
     {
       "id": "UPYJ0G",
@@ -1562,7 +1572,7 @@
     {
       "id": "C7PU0C",
       "createdAt": "2026-08-27T09:12:16.913Z",
-      "runsCount": 6,
+      "runsCount": 8,
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminId": 111,
@@ -1572,7 +1582,7 @@
       "contentType": "text",
       "intervalMs": 1800000,
       "intervalFormatted": "30 minutes",
-      "nextRun": "2026-08-28T08:13:53.812Z"
+      "nextRun": "2026-08-28T09:14:00.050Z"
     },
     {
       "id": "N0W2ZJ",
@@ -1593,7 +1603,7 @@
     {
       "id": "RYSM5C",
       "createdAt": "2026-08-27T09:23:36.509Z",
-      "runsCount": 6,
+      "runsCount": 8,
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminId": 111,
@@ -1603,7 +1613,7 @@
       "contentType": "text",
       "intervalMs": 1800000,
       "intervalFormatted": "30 minutes",
-      "nextRun": "2026-08-28T08:13:53.812Z"
+      "nextRun": "2026-08-28T09:14:00.050Z"
     },
     {
       "id": "W7ZVDW",
@@ -1624,104 +1634,40 @@
   ],
   "logs": [
     {
-      "id": "eej5c9m",
-      "timestamp": "2026-08-28T07:43:54.665Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [ZYWSXD]: \"Daily check-in...\""
+      "id": "4unk01k",
+      "timestamp": "2026-08-28T08:06:52.325Z",
+      "chatId": -1004476693823,
+      "chatTitle": "testSubject 2",
+      "groupId": -1004476693823,
+      "actorId": 8204962552,
+      "actorUsername": "palindrome1551",
+      "actorRole": "OWNER",
+      "adminUserId": 8204962552,
+      "adminUsername": "@palindrome1551",
+      "command": "chatbot",
+      "action": "setting_change",
+      "result": "success",
+      "reason": "Roxie AI chatbot enabled"
     },
     {
-      "id": "5mrfi13",
-      "timestamp": "2026-08-28T07:43:55.072Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [55O99P]: \"Daily check-in...\""
+      "id": "5f4pqr7",
+      "timestamp": "2026-08-28T08:06:56.230Z",
+      "chatId": -1004476693823,
+      "chatTitle": "testSubject 2",
+      "groupId": -1004476693823,
+      "actorId": 8204962552,
+      "actorUsername": "palindrome1551",
+      "actorRole": "OWNER",
+      "adminUserId": 8204962552,
+      "adminUsername": "@palindrome1551",
+      "command": "clear",
+      "action": "clear",
+      "result": "success",
+      "details": "Purged 50 messages (all recent messages)"
     },
     {
-      "id": "vfdgvi2",
-      "timestamp": "2026-08-28T07:43:55.470Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [Z1CLUO]: \"Daily check-in...\""
-    },
-    {
-      "id": "l3e5i3f",
-      "timestamp": "2026-08-28T07:43:55.881Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [83NSXH]: \"Daily check-in...\""
-    },
-    {
-      "id": "j1lyqiw",
-      "timestamp": "2026-08-28T07:43:56.317Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [W1HJPK]: \"Daily check-in...\""
-    },
-    {
-      "id": "t1bgcft",
-      "timestamp": "2026-08-28T07:43:56.719Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [M8HLLH]: \"Daily check-in...\""
-    },
-    {
-      "id": "mwpghcx",
-      "timestamp": "2026-08-28T07:43:57.135Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [YDSVDX]: \"Daily check-in...\""
-    },
-    {
-      "id": "9qtxgav",
-      "timestamp": "2026-08-28T07:43:57.538Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [2PHBNL]: \"Daily check-in...\""
-    },
-    {
-      "id": "pz0wfda",
-      "timestamp": "2026-08-28T07:43:57.943Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [CM0L6Y]: \"Daily check-in...\""
-    },
-    {
-      "id": "4qoiglr",
-      "timestamp": "2026-08-28T07:43:58.363Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [HR6JN8]: \"Daily check-in...\""
-    },
-    {
-      "id": "xm9cd2f",
-      "timestamp": "2026-08-28T07:43:58.778Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [MD5SE1]: \"Daily check-in...\""
-    },
-    {
-      "id": "oksqlyp",
-      "timestamp": "2026-08-28T07:43:59.187Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [Q306OV]: \"Daily check-in...\""
-    },
-    {
-      "id": "8qse8he",
-      "timestamp": "2026-08-28T07:43:59.583Z",
+      "id": "te6g2s5",
+      "timestamp": "2026-08-28T08:13:56.816Z",
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminUserId": 111,
@@ -1730,18 +1676,8 @@
       "details": "Executed scheduled broadcast [M4G94M]: \"Check out our new launch! http...\""
     },
     {
-      "id": "3yiyg0x",
-      "timestamp": "2026-08-28T07:43:59.987Z",
-      "chatId": -100888777,
-      "chatTitle": "Scheduler Test Supergroup",
-      "adminUserId": 111,
-      "adminUsername": "SuperAdmin",
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [UPYJ0G]: \"Promo Photo Caption with link ...\""
-    },
-    {
-      "id": "41z88a9",
-      "timestamp": "2026-08-28T07:44:00.395Z",
+      "id": "8qjcvqj",
+      "timestamp": "2026-08-28T08:13:57.514Z",
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminUserId": 111,
@@ -1750,18 +1686,8 @@
       "details": "Executed scheduled broadcast [C7PU0C]: \"Check out our new launch! http...\""
     },
     {
-      "id": "e1nu0na",
-      "timestamp": "2026-08-28T07:44:00.793Z",
-      "chatId": -100888777,
-      "chatTitle": "Scheduler Test Supergroup",
-      "adminUserId": 111,
-      "adminUsername": "SuperAdmin",
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [N0W2ZJ]: \"Promo Photo Caption with link ...\""
-    },
-    {
-      "id": "3xp2eep",
-      "timestamp": "2026-08-28T07:44:01.196Z",
+      "id": "e83ogmy",
+      "timestamp": "2026-08-28T08:13:57.914Z",
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminUserId": 111,
@@ -1770,14 +1696,157 @@
       "details": "Executed scheduled broadcast [RYSM5C]: \"Check out our new launch! http...\""
     },
     {
-      "id": "8bfkcac",
-      "timestamp": "2026-08-28T07:44:01.601Z",
+      "id": "6nr0zhg",
+      "timestamp": "2026-08-28T08:28:03.658Z",
+      "chatId": -1004331070653,
+      "chatTitle": "𓄂❄𝐵𝐴𝐷𝐸 𝐿𝑂𝐺",
+      "targetUserId": 8698059900,
+      "action": "delete_media",
+      "reason": "Links are locked"
+    },
+    {
+      "id": "mqg1pg4",
+      "timestamp": "2026-08-28T08:29:15.107Z",
+      "chatId": -1004331070653,
+      "chatTitle": "𓄂❄𝐵𝐴𝐷𝐸 𝐿𝑂𝐺",
+      "targetUserId": 7751037773,
+      "action": "delete_media",
+      "reason": "Stickers are locked"
+    },
+    {
+      "id": "belpkcc",
+      "timestamp": "2026-08-28T08:34:02.089Z",
+      "chatId": -1004331070653,
+      "chatTitle": "𓄂❄𝐵𝐴𝐷𝐸 𝐿𝑂𝐺",
+      "targetUserId": 7731932175,
+      "action": "delete_media",
+      "reason": "Stickers are locked"
+    },
+    {
+      "id": "udhl7pd",
+      "timestamp": "2026-08-28T08:44:00.458Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [ZYWSXD]: \"Daily check-in...\""
+    },
+    {
+      "id": "sq1iqwe",
+      "timestamp": "2026-08-28T08:44:01.321Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [55O99P]: \"Daily check-in...\""
+    },
+    {
+      "id": "ya3gw8c",
+      "timestamp": "2026-08-28T08:44:01.723Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [Z1CLUO]: \"Daily check-in...\""
+    },
+    {
+      "id": "z5uj2w6",
+      "timestamp": "2026-08-28T08:44:02.128Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [83NSXH]: \"Daily check-in...\""
+    },
+    {
+      "id": "ldohdkq",
+      "timestamp": "2026-08-28T08:44:02.540Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [W1HJPK]: \"Daily check-in...\""
+    },
+    {
+      "id": "o59edq2",
+      "timestamp": "2026-08-28T08:44:02.943Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [M8HLLH]: \"Daily check-in...\""
+    },
+    {
+      "id": "jszljn3",
+      "timestamp": "2026-08-28T08:44:03.349Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [YDSVDX]: \"Daily check-in...\""
+    },
+    {
+      "id": "vsn9psg",
+      "timestamp": "2026-08-28T08:44:03.750Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [2PHBNL]: \"Daily check-in...\""
+    },
+    {
+      "id": "bqtvidc",
+      "timestamp": "2026-08-28T08:44:04.153Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [CM0L6Y]: \"Daily check-in...\""
+    },
+    {
+      "id": "7zsyss2",
+      "timestamp": "2026-08-28T08:44:05.015Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [HR6JN8]: \"Daily check-in...\""
+    },
+    {
+      "id": "6q3uy5b",
+      "timestamp": "2026-08-28T08:44:05.443Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [MD5SE1]: \"Daily check-in...\""
+    },
+    {
+      "id": "73180pf",
+      "timestamp": "2026-08-28T08:44:05.847Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [Q306OV]: \"Daily check-in...\""
+    },
+    {
+      "id": "bmodnjo",
+      "timestamp": "2026-08-28T08:44:06.298Z",
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminUserId": 111,
       "adminUsername": "SuperAdmin",
       "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [W7ZVDW]: \"Promo Photo Caption with link ...\""
+      "details": "Executed scheduled broadcast [M4G94M]: \"Check out our new launch! http...\""
+    },
+    {
+      "id": "er18u1u",
+      "timestamp": "2026-08-28T08:44:06.698Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [C7PU0C]: \"Check out our new launch! http...\""
+    },
+    {
+      "id": "z4npc8l",
+      "timestamp": "2026-08-28T08:44:07.188Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [RYSM5C]: \"Check out our new launch! http...\""
     }
   ],
   "knownUsers": {
@@ -1793,7 +1862,7 @@
       "username": "palindrome1551",
       "firstName": "susss",
       "groupId": -1004476693823,
-      "lastSeen": "2026-08-27T10:20:37.324Z"
+      "lastSeen": "2026-08-28T08:07:07.583Z"
     },
     "missroxie_bot": {
       "userId": 8841013562,
@@ -1929,7 +1998,7 @@
       "username": "Adityahero758",
       "firstName": "Aditya",
       "groupId": -1004331070653,
-      "lastSeen": "2026-08-26T08:52:04.534Z"
+      "lastSeen": "2026-08-28T08:53:20.543Z"
     },
     "dkt_swift": {
       "userId": 5018082627,
@@ -2017,7 +2086,7 @@
       "username": "Yuvi740",
       "firstName": "🧛🏻‍♂️",
       "groupId": -1004331070653,
-      "lastSeen": "2026-08-26T08:53:16.035Z"
+      "lastSeen": "2026-08-28T08:32:54.650Z"
     },
     "ananyahunreee": {
       "userId": 8858815417,
@@ -2226,6 +2295,13 @@
       "firstName": "Emptysoul_113",
       "groupId": -1004331070653,
       "lastSeen": "2026-08-27T18:04:53.402Z"
+    },
+    "exshree": {
+      "userId": 6574283932,
+      "username": "EXSHREE",
+      "firstName": "𝗦 𝚮 𝐑 𝐄 𝐄̽",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:02:34.952Z"
     }
   },
   "knownUsersById": {
@@ -2444,7 +2520,7 @@
       "username": "Adityahero758",
       "firstName": "Aditya",
       "groupId": -1004331070653,
-      "lastSeen": "2026-08-26T08:52:04.534Z"
+      "lastSeen": "2026-08-28T08:53:20.543Z"
     },
     "8864012889": {
       "id": 8864012889,
@@ -2458,7 +2534,7 @@
       "id": 8204962552,
       "username": "palindrome1551",
       "firstName": "susss",
-      "lastSeen": "2026-08-27T10:20:37.324Z",
+      "lastSeen": "2026-08-28T08:07:07.583Z",
       "userId": 8204962552,
       "groupId": -1004476693823
     },
@@ -2638,7 +2714,7 @@
       "username": "Yuvi740",
       "firstName": "🧛🏻‍♂️",
       "groupId": -1004331070653,
-      "lastSeen": "2026-08-26T08:53:16.035Z"
+      "lastSeen": "2026-08-28T08:32:54.650Z"
     },
     "8873647526": {
       "userId": 8873647526,
@@ -2950,6 +3026,57 @@
       "firstName": "S S",
       "groupId": -1004331070653,
       "lastSeen": "2026-08-27T18:15:00.663Z"
+    },
+    "6574283932": {
+      "userId": 6574283932,
+      "username": "EXSHREE",
+      "firstName": "𝗦 𝚮 𝐑 𝐄 𝐄̽",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:02:34.952Z"
+    },
+    "8724726092": {
+      "userId": 8724726092,
+      "firstName": "Jessica",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:25:54.985Z"
+    },
+    "8981521674": {
+      "userId": 8981521674,
+      "firstName": "M",
+      "lastName": "M",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:33:25.774Z"
+    },
+    "8698059900": {
+      "userId": 8698059900,
+      "firstName": "Amelia",
+      "lastName": "USANICEGIRL",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:51:36.451Z"
+    },
+    "7751037773": {
+      "userId": 7751037773,
+      "firstName": "Mariy",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:33:35.751Z"
+    },
+    "7764065474": {
+      "userId": 7764065474,
+      "firstName": "ㅤㅤ.",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T09:01:42.510Z"
+    },
+    "7245274038": {
+      "userId": 7245274038,
+      "firstName": "Anima lover",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:51:35.756Z"
+    },
+    "7731932175": {
+      "userId": 7731932175,
+      "firstName": "*CHOUDHARY KUMAR AAKARSH.",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:34:21.834Z"
     }
   },
   "groupMembers": {
@@ -3164,7 +3291,7 @@
       "username": "Adityahero758",
       "firstName": "Aditya",
       "groupId": -1004331070653,
-      "lastSeen": "2026-08-26T08:52:04.534Z"
+      "lastSeen": "2026-08-28T08:53:20.543Z"
     },
     "-1004331070653_8853956439": {
       "userId": 8853956439,
@@ -3274,7 +3401,7 @@
       "username": "palindrome1551",
       "firstName": "susss",
       "groupId": -1004476693823,
-      "lastSeen": "2026-08-27T10:20:37.324Z"
+      "lastSeen": "2026-08-28T08:07:07.583Z"
     },
     "-1004476693823_8841013562": {
       "userId": 8841013562,
@@ -3432,7 +3559,7 @@
       "username": "Yuvi740",
       "firstName": "🧛🏻‍♂️",
       "groupId": -1004331070653,
-      "lastSeen": "2026-08-26T08:53:16.035Z"
+      "lastSeen": "2026-08-28T08:32:54.650Z"
     },
     "8461893997_8461893997": {
       "userId": 8461893997,
@@ -3922,6 +4049,57 @@
       "lastName": ":(",
       "groupId": -1004331070653,
       "lastSeen": "2026-08-27T18:21:14.918Z"
+    },
+    "-1004331070653_6574283932": {
+      "userId": 6574283932,
+      "username": "EXSHREE",
+      "firstName": "𝗦 𝚮 𝐑 𝐄 𝐄̽",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:02:34.952Z"
+    },
+    "-1004331070653_8724726092": {
+      "userId": 8724726092,
+      "firstName": "Jessica",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:25:54.985Z"
+    },
+    "-1004331070653_8981521674": {
+      "userId": 8981521674,
+      "firstName": "M",
+      "lastName": "M",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:33:25.774Z"
+    },
+    "-1004331070653_8698059900": {
+      "userId": 8698059900,
+      "firstName": "Amelia",
+      "lastName": "USANICEGIRL",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:51:36.451Z"
+    },
+    "-1004331070653_7751037773": {
+      "userId": 7751037773,
+      "firstName": "Mariy",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:33:35.751Z"
+    },
+    "-1004331070653_7764065474": {
+      "userId": 7764065474,
+      "firstName": "ㅤㅤ.",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T09:01:42.510Z"
+    },
+    "-1004331070653_7245274038": {
+      "userId": 7245274038,
+      "firstName": "Anima lover",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:51:35.756Z"
+    },
+    "-1004331070653_7731932175": {
+      "userId": 7731932175,
+      "firstName": "*CHOUDHARY KUMAR AAKARSH.",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-28T08:34:21.834Z"
     }
   },
   "customRoles": {
@@ -3933,5 +4111,6 @@
   "mediaLibrary": {
     "stickers": {},
     "animations": {}
-  }
+  },
+  "userMemories": {}
 }

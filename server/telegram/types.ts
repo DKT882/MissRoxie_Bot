@@ -309,7 +309,8 @@ export interface GroupSettings {
   // Reports
   reportsEnabled: boolean; // default true
   // AI Chatbot
-  chatbotEnabled?: boolean; // default false
+  chatbotEnabled?: boolean; // default true
+  chatbotMode?: 'normal' | 'friendly' | 'auto'; // default 'auto'
   // Phase 9A Smart Content Protection & Message Control
   stopSpamEnabled?: boolean;
   stopAbusiveEnabled?: boolean;

@@ -1,6 +1,6 @@
 import { TelegramMessage, TelegramUser } from './types.js';
 import { telegramApi } from './api.js';
-import { db } from '../db/storage.js';
+import { db, isSensitiveData } from '../db/storage.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
 
@@ -239,6 +239,27 @@ export class ChatbotService {
 
       const userText = message.text || message.caption || (message.sticker ? '[Sent a sticker]' : message.photo ? '[Sent a photo]' : message.video ? '[Sent a video]' : 'Hello');
 
+      // Extract user memory fact if user shares something about themselves
+      if (userId && userText) {
+        const lowerText = userText.toLowerCase();
+        if (
+          !isSensitiveData(userText) &&
+          (lowerText.includes('my name is') ||
+           lowerText.includes('i am ') ||
+           lowerText.includes('i like ') ||
+           lowerText.includes('i love ') ||
+           lowerText.includes('i live in') ||
+           lowerText.includes('i work ') ||
+           lowerText.includes('i use ') ||
+           lowerText.includes('i enjoy '))
+        ) {
+          const fact = userText.trim().replace(/\s+/g, ' ');
+          if (fact.length >= 5 && fact.length <= 120) {
+            db.addUserMemoryFact(chatId, userId, fact);
+          }
+        }
+      }
+
       // Get or initialize conversation memory
       const now = Date.now();
       let conv = this.conversations.get(userKey);
@@ -251,10 +272,19 @@ export class ChatbotService {
       }
       conv.lastActivity = now;
 
-      const mood = this.inferMood(userText, conv.messages);
+      const settings = isPrivate ? null : db.getGroupSettings(chatId);
+      const mode = settings?.chatbotMode || 'auto';
+      const inferredMood = this.inferMood(userText, conv.messages);
+      const mood = mode === 'auto' ? inferredMood : mode;
+
+      const userMemories = userId ? db.getUserMemory(chatId, userId) : [];
+      const memoryContext = userMemories.length > 0 
+        ? `\nStored Memory Facts about this user in this chat:\n- ${userMemories.join('\n- ')}` 
+        : '';
 
       const systemPrompt = `You are Roxie, a natural Indian girl chatting casually in a Telegram group chat.
 CURRENT ACTIVE MOOD FOR THIS MESSAGE: [${mood}]
+${memoryContext}
 
 Personality & Tone Rules:
 - You MUST strictly adopt and match the CURRENT ACTIVE MOOD (${mood}) for this response.

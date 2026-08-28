@@ -13,6 +13,26 @@ export interface MediaLibraryRecord {
   animations: Record<string, string[]>;
 }
 
+export interface UserMemoryRecord {
+  chatId: number | string;
+  userId: number;
+  facts: string[];
+  lastUpdated: number;
+}
+
+export function isSensitiveData(text: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  const sensitiveKeywords = [
+    'password', 'passwd', 'pwd', 'api_key', 'apikey', 'secret', 'token', 'bearer',
+    'credit card', 'debit card', 'cvv', 'bank account', 'ifsc', 'pin', 'ssn',
+    'aadhar', 'pan card', 'passport', 'sk-', 'ghp_', 'otp'
+  ];
+  if (sensitiveKeywords.some(kw => lower.includes(kw))) return true;
+  if (/sk-[a-zA-Z0-9]{20,}/i.test(text) || /\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/.test(text)) return true;
+  return false;
+}
+
 interface DatabaseSchema {
   settings: Record<number, GroupSettings>;
   warnings: WarningRecord[];
@@ -29,6 +49,7 @@ interface DatabaseSchema {
   groupMembers: Record<string, CachedMember>; // `${chatId}_${userId}` -> CachedMember
   customRoles: Record<string, 'MODERATOR' | 'NONE'>; // `${chatId}_${userId}` -> Custom bot role
   mediaLibrary?: MediaLibraryRecord;
+  userMemories?: Record<string, UserMemoryRecord>; // `${chatId}_${userId}` -> UserMemoryRecord
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -84,7 +105,8 @@ class StorageManager {
             knownUsersById: parsed.knownUsersById || {},
             groupMembers: parsed.groupMembers || {},
             customRoles: parsed.customRoles || {},
-            mediaLibrary: parsed.mediaLibrary || { stickers: {}, animations: {} }
+            mediaLibrary: parsed.mediaLibrary || { stickers: {}, animations: {} },
+            userMemories: parsed.userMemories || {}
           };
         }
       }
@@ -92,6 +114,7 @@ class StorageManager {
       console.error('Failed to initialize local bot storage:', err);
     }
     this.cleanOldLogs();
+    this.cleanExpiredMemories();
     this.isLoaded = true;
   }
 
@@ -106,6 +129,7 @@ class StorageManager {
 
   private persist() {
     this.cleanOldLogs();
+    this.cleanExpiredMemories();
     try {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -317,6 +341,8 @@ class StorageManager {
         autoDeleteJoinLeave: false,
         slowModeSeconds: 0,
         reportsEnabled: true,
+        chatbotEnabled: true,
+        chatbotMode: 'auto',
         stopSpamEnabled: false,
         stopAbusiveEnabled: false,
         stopPromotionEnabled: false,
@@ -378,6 +404,8 @@ class StorageManager {
       if (!Array.isArray(s.automations)) { s.automations = []; needsSave = true; }
       if (s.rules === undefined) { s.rules = ''; needsSave = true; }
       if (s.lastAllTimestamp === undefined) { s.lastAllTimestamp = 0; needsSave = true; }
+      if (s.chatbotEnabled === undefined) { s.chatbotEnabled = true; needsSave = true; }
+      if (s.chatbotMode === undefined) { s.chatbotMode = 'auto'; needsSave = true; }
 
       if (chatTitle && s.chatTitle !== chatTitle) {
         s.chatTitle = chatTitle;
@@ -1620,6 +1648,64 @@ class StorageManager {
       lib.animations = {};
     }
     this.scheduleSave();
+  }
+
+  // --- User Memory Management ---
+  public getUserMemory(chatId: number | string, userId: number): string[] {
+    if (!this.data.userMemories) this.data.userMemories = {};
+    const key = `${chatId}_${userId}`;
+    const record = this.data.userMemories[key];
+    if (!record || !Array.isArray(record.facts)) return [];
+    return record.facts;
+  }
+
+  public addUserMemoryFact(chatId: number | string, userId: number, fact: string): void {
+    if (!this.data.userMemories) this.data.userMemories = {};
+    const key = `${chatId}_${userId}`;
+    let record = this.data.userMemories[key];
+    const now = Date.now();
+    if (!record) {
+      record = { chatId, userId, facts: [], lastUpdated: now };
+      this.data.userMemories[key] = record;
+    }
+    record.lastUpdated = now;
+    const trimmed = fact.trim();
+    if (!trimmed) return;
+    if (isSensitiveData(trimmed)) return;
+    if (!record.facts.includes(trimmed)) {
+      record.facts.push(trimmed);
+      if (record.facts.length > 8) {
+        record.facts.shift();
+      }
+      this.scheduleSave();
+    }
+  }
+
+  public clearUserMemory(chatId: number | string, userId: number): boolean {
+    if (!this.data.userMemories) return false;
+    const key = `${chatId}_${userId}`;
+    const existed = !!this.data.userMemories[key];
+    if (existed) {
+      delete this.data.userMemories[key];
+      this.scheduleSave();
+    }
+    return existed;
+  }
+
+  public cleanExpiredMemories(): void {
+    if (!this.data.userMemories) return;
+    const now = Date.now();
+    const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days inactivity
+    let cleaned = false;
+    for (const [key, record] of Object.entries(this.data.userMemories)) {
+      if (now - (record.lastUpdated || 0) > TTL_MS) {
+        delete this.data.userMemories[key];
+        cleaned = true;
+      }
+    }
+    if (cleaned) {
+      this.scheduleSave();
+    }
   }
 }
 
