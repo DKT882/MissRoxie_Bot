@@ -42,6 +42,13 @@ export class ChatbotService {
     this.activeProcessingKeys.clear();
   }
 
+  public static clearConversation(chatId: number | string): boolean {
+    const key = String(chatId);
+    const existed = this.conversations.has(key);
+    this.conversations.delete(key);
+    return existed;
+  }
+
   private static isValidFileId(id: string | null | undefined): boolean {
     if (!id || typeof id !== 'string') return false;
     const trimmed = id.trim();

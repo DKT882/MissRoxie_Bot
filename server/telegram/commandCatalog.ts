@@ -22,6 +22,7 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
   { command: '/status', category: 'General', description: 'View bot status and group configuration.', syntax: '/status', example: '/status', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: false, auditLogged: false },
   { command: '/settings', category: 'General', description: 'View current group security settings.', syntax: '/settings', example: '/settings', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: false, auditLogged: false },
   { command: '/live', category: 'General', description: 'Check live operational status.', syntax: '/live', example: '/live', permission: 'Everyone', targetType: 'None', isPublic: true, modifiesState: false, auditLogged: false },
+  { command: '/clearmemory', category: 'General', description: "Clear Roxie AI chatbot conversation memory for this chat.", syntax: '/clearmemory', example: '/clearmemory', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: true, auditLogged: true },
 
   // Moderation
   { command: '/ban', category: 'Moderation', description: 'Permanently ban a member from the group.', syntax: '/ban @username [reason]', example: '/ban @spammer Advertising links', permission: 'Admin', telegramPermission: 'can_restrict_members', targetType: 'User', isPublic: false, modifiesState: true, auditLogged: true },

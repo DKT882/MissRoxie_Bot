@@ -61,7 +61,7 @@ async function runTests() {
     assert(botSuffixHandled === true, 'DISPATCH-05: /command@BotName parsing correctly normalizes and dispatches command');
 
     // DISPATCH-01, 02, 03, 04: /note, /notes, /delnote, /all dispatch successfully
-    const commandsToTest = ['/note', '/notes', '/delnote', '/all', '/getnote'];
+    const commandsToTest = ['/note', '/notes', '/delnote', '/all', '/getnote', '/clearmemory'];
     for (const cmd of commandsToTest) {
       const res = await CommandHandler.handleCommand({
         command: cmd,
