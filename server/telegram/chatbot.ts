@@ -216,7 +216,15 @@ export class ChatbotService {
       return false;
     }
 
-    const model = process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat';
+    const configuredModels = process.env.OPENROUTER_MODELS
+      ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim()).filter(Boolean)
+      : [
+          process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
+          process.env.OPENROUTER_FALLBACK_1?.trim(),
+          process.env.OPENROUTER_FALLBACK_2?.trim(),
+          process.env.OPENROUTER_FALLBACK_3?.trim()
+        ].filter(Boolean) as string[];
+
     const userText = message.text || message.caption || (message.sticker ? '[Sent a sticker]' : message.photo ? '[Sent a photo]' : message.video ? '[Sent a video]' : 'Hello');
 
     // 1. TYPING INDICATOR: show typing status immediately
@@ -258,123 +266,132 @@ Personality & Tone Modes:
     ];
 
     metricsTracker.increment('ai_requests');
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-    try {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'HTTP-Referer': 'https://ai.studio',
-          'X-Title': 'Roxie Telegram Bot',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model,
-          messages: apiMessages,
-          max_tokens: 300,
-          temperature: 0.8
-        }),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
+    let replyContent: string | null = null;
+    let successfulModel = '';
 
-      if (!response.ok) {
-        metricsTracker.increment('ai_failures');
-        const errText = await response.text();
-        console.error('OpenRouter API error:', response.status, errText);
-        errorTracker.recordError({
-          source: 'AI',
-          severity: 'ERROR',
-          message: `OpenRouter API error ${response.status}: ${errText.slice(0, 100)}`,
-          chatId
+    for (const modelToTry of configuredModels) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+      try {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'HTTP-Referer': 'https://ai.studio',
+            'X-Title': 'Roxie Telegram Bot',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: modelToTry,
+            messages: apiMessages,
+            max_tokens: 300,
+            temperature: 0.8
+          }),
+          signal: controller.signal
         });
-        return false;
-      }
+        clearTimeout(timeoutId);
 
-      const data = await response.json();
-      const replyContent = data.choices?.[0]?.message?.content?.trim();
-
-      if (!replyContent) {
-        return false;
-      }
-
-      // Duplicate response prevention check (within 10s)
-      const dupKey = `${chatId}_${replyContent}`;
-      const lastSentTime = this.recentResponseTracker.get(dupKey) || 0;
-      if (now - lastSentTime < 10000) {
-        return false;
-      }
-      this.recentResponseTracker.set(dupKey, now);
-
-      // 2. STICKER OR GIF/ANIMATION: send sticker or GIF when requested or contextually triggered via backend code
-      const userLower = userText.toLowerCase();
-      const isStickerRequest = userLower.includes('sticker') || userLower.includes('stkr') || userLower.includes('bhej');
-      const isAnimationRequest = userLower.includes('gif') || userLower.includes('animation');
-      const shouldTriggerMedia = isStickerRequest || isAnimationRequest || Math.random() < this.STICKER_PROBABILITY;
-
-      let mediaSent = false;
-      if (shouldTriggerMedia) {
-        const mood = this.inferMood(userText + ' ' + replyContent);
-        const sendAnimationInstead = isAnimationRequest || (!isStickerRequest && Math.random() < 0.3);
-        const stickerId = this.selectSticker(mood);
-
-        if (sendAnimationInstead) {
-          const animId = this.selectAnimation(mood);
-          if (animId && this.isValidFileId(animId)) {
-            const res = await telegramApi.sendAnimation(chatId, animId, {
-              reply_to_message_id: message.message_id
-            });
-            if (res.ok) mediaSent = true;
+        if (response.ok) {
+          const data = await response.json();
+          const content = data.choices?.[0]?.message?.content?.trim();
+          if (content) {
+            replyContent = content;
+            successfulModel = modelToTry;
+            break;
           }
+        } else {
+          const errText = await response.text();
+          console.warn(`[AI Fallback] Model ${modelToTry} failed with status ${response.status}: ${errText.slice(0, 80)}. Trying next fallback...`);
+          errorTracker.recordError({
+            source: 'AI',
+            severity: 'WARN',
+            message: `Model ${modelToTry} failed (status ${response.status}), trying fallback`,
+            chatId
+          });
         }
-
-        if (!mediaSent) {
-          if (stickerId && this.isValidFileId(stickerId)) {
-            const res = await telegramApi.sendSticker(chatId, stickerId, {
-              reply_to_message_id: message.message_id
-            });
-            if (res.ok) mediaSent = true;
-          }
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+          metricsTracker.increment('ai_timeouts');
+          errorTracker.recordError({
+            source: 'AI',
+            severity: 'WARN',
+            message: `Model ${modelToTry} request timed out after 20s`,
+            chatId
+          });
+        } else {
+          metricsTracker.increment('ai_failures');
+          errorTracker.recordError({
+            source: 'AI',
+            severity: 'ERROR',
+            message: `Model ${modelToTry} error: ${err.message}`,
+            chatId
+          });
         }
+        console.warn(`[AI Fallback] Model ${modelToTry} error: ${err.message}. Trying next fallback...`);
       }
+    }
 
-      // If no valid media was sent (missing media library or no valid media exists), gracefully fall back to normal AI text response
-      if (!mediaSent || (!isStickerRequest && !isAnimationRequest)) {
-        await telegramApi.sendMessage(chatId, replyContent, { reply_to_message_id: message.message_id });
-      }
-
-      conv.messages.push({ role: 'user', content: userText });
-      conv.messages.push({ role: 'assistant', content: replyContent });
-
-      if (conv.messages.length > this.MAX_HISTORY * 2) {
-        conv.messages = conv.messages.slice(-this.MAX_HISTORY * 2);
-      }
-
-      return true;
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
-        metricsTracker.increment('ai_timeouts');
-        errorTracker.recordError({
-          source: 'AI',
-          severity: 'WARN',
-          message: 'OpenRouter AI request timed out after 20s',
-          chatId
-        });
-      } else {
-        metricsTracker.increment('ai_failures');
-        errorTracker.recordError({
-          source: 'AI',
-          severity: 'ERROR',
-          message: `OpenRouter AI error: ${err.message}`,
-          chatId
-        });
-      }
-      console.error('Error calling OpenRouter API:', err);
+    if (!replyContent) {
+      metricsTracker.increment('ai_failures');
       return false;
     }
+
+    // Duplicate response prevention check (within 10s)
+    const dupKey = `${chatId}_${replyContent}`;
+    const lastSentTime = this.recentResponseTracker.get(dupKey) || 0;
+    if (now - lastSentTime < 10000) {
+      return false;
+    }
+    this.recentResponseTracker.set(dupKey, now);
+
+    // 2. STICKER OR GIF/ANIMATION: send sticker or GIF when requested or contextually triggered via backend code
+    const userLower = userText.toLowerCase();
+    const isStickerRequest = userLower.includes('sticker') || userLower.includes('stkr') || userLower.includes('bhej');
+    const isAnimationRequest = userLower.includes('gif') || userLower.includes('animation');
+    const shouldTriggerMedia = isStickerRequest || isAnimationRequest || Math.random() < this.STICKER_PROBABILITY;
+
+    let mediaSent = false;
+    if (shouldTriggerMedia) {
+      const mood = this.inferMood(userText + ' ' + replyContent);
+      const sendAnimationInstead = isAnimationRequest || (!isStickerRequest && Math.random() < 0.3);
+      const stickerId = this.selectSticker(mood);
+
+      if (sendAnimationInstead) {
+        const animId = this.selectAnimation(mood);
+        if (animId && this.isValidFileId(animId)) {
+          const res = await telegramApi.sendAnimation(chatId, animId, {
+            reply_to_message_id: message.message_id
+          });
+          if (res.ok) mediaSent = true;
+        }
+      }
+
+      if (!mediaSent) {
+        if (stickerId && this.isValidFileId(stickerId)) {
+          const res = await telegramApi.sendSticker(chatId, stickerId, {
+            reply_to_message_id: message.message_id
+          });
+          if (res.ok) mediaSent = true;
+        }
+      }
+    }
+
+    // If no valid media was sent (missing media library or no valid media exists), gracefully fall back to normal AI text response
+    if (!mediaSent || (!isStickerRequest && !isAnimationRequest)) {
+      await telegramApi.sendMessage(chatId, replyContent, { reply_to_message_id: message.message_id });
+    }
+
+    conv.messages.push({ role: 'user', content: userText });
+    conv.messages.push({ role: 'assistant', content: replyContent });
+
+    if (conv.messages.length > this.MAX_HISTORY * 2) {
+      conv.messages = conv.messages.slice(-this.MAX_HISTORY * 2);
+    }
+
+    return true;
   }
 
   private static async handleRandomNaturalChat(message: TelegramMessage) {

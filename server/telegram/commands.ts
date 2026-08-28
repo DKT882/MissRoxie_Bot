@@ -179,11 +179,15 @@ export class CommandHandler {
       console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED`);
     } else if (isPublic) {
       // Public commands (like /report) are restricted to groups and open to normal members
-      if (!(await TelegramMiddleware.requireGroup(ctx))) {
-        console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DENIED_NOT_GROUP`);
-        return true;
+      if (cmd === '/help' || cmd === '/ping' || cmd === '/rules') {
+        console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED_UNIVERSAL`);
+      } else {
+        if (!(await TelegramMiddleware.requireGroup(ctx))) {
+          console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DENIED_NOT_GROUP`);
+          return true;
+        }
+        console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED`);
       }
-      console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED`);
     } else if (isSensitive) {
       if (!(await TelegramMiddleware.requireGroup(ctx))) {
         console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DENIED_NOT_GROUP`);
@@ -4845,6 +4849,48 @@ export class CommandHandler {
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const isAdmin = actor.actorRank >= RoleRank.ADMIN;
 
+    const query = ctx.args[0]?.toLowerCase()?.trim()?.replace(/^\//, '');
+
+    if (query) {
+      const foundCmd = COMMAND_CATALOG.find(c => c.command.toLowerCase().replace(/^\//, '') === query);
+      if (foundCmd) {
+        if (foundCmd.permission !== 'Everyone' && !isAdmin) {
+          await telegramApi.sendMessage(ctx.chatId, `❌ Command <code>${escapeHtml(foundCmd.command)}</code> requires administrator privileges.`);
+          return;
+        }
+        const text = `📖 <b>Command Help: ${escapeHtml(foundCmd.command)}</b>\n\n` +
+          `• <b>Category:</b> ${escapeHtml(foundCmd.category)}\n` +
+          `• <b>Description:</b> ${escapeHtml(foundCmd.description)}\n` +
+          `• <b>Syntax:</b> <code>${escapeHtml(foundCmd.syntax)}</code>\n` +
+          `• <b>Example:</b> <code>${escapeHtml(foundCmd.example)}</code>\n` +
+          `• <b>Permission:</b> ${escapeHtml(foundCmd.permission)}`;
+        await telegramApi.sendMessage(ctx.chatId, text);
+        return;
+      }
+
+      const matchingCatItems = COMMAND_CATALOG.filter(c => 
+        c.category.toLowerCase().replace(/\s+/g, '') === query.replace(/\s+/g, '') ||
+        c.category.toLowerCase().includes(query)
+      );
+      if (matchingCatItems.length > 0) {
+        const allowedItems = matchingCatItems.filter(item => isAdmin || item.permission === 'Everyone');
+        if (allowedItems.length === 0) {
+          await telegramApi.sendMessage(ctx.chatId, `❌ No accessible commands found in category matching "<b>${escapeHtml(query)}</b>".`);
+          return;
+        }
+        const catName = allowedItems[0].category;
+        let text = `📌 <b>Category: ${escapeHtml(catName)}</b>\n\n`;
+        for (const item of allowedItems) {
+          text += `• <code>${escapeHtml(item.command)}</code> — ${escapeHtml(item.description)}\n  <i>Syntax:</i> <code>${escapeHtml(item.syntax)}</code>\n\n`;
+        }
+        await telegramApi.sendMessage(ctx.chatId, text);
+        return;
+      }
+
+      await telegramApi.sendMessage(ctx.chatId, `❌ Command or category "<b>${escapeHtml(query)}</b>" not found. Use <code>/help</code> to view all commands.`);
+      return;
+    }
+
     const filteredCatalog = COMMAND_CATALOG.filter(item => {
       if (isAdmin) return true;
       return item.permission === 'Everyone';
@@ -4866,7 +4912,7 @@ export class CommandHandler {
     for (const [cat, items] of Object.entries(categories)) {
       let section = `\n📌 <b>${cat.toUpperCase()}</b>\n`;
       for (const item of items) {
-        section += `• <code>${item.command}</code> — ${item.description}\n  <i>Syntax:</i> <code>${item.syntax}</code>\n`;
+        section += `• <code>${escapeHtml(item.command)}</code> — ${escapeHtml(item.description)}\n  <i>Syntax:</i> <code>${escapeHtml(item.syntax)}</code>\n`;
       }
       if (currentMsg.length + section.length > 3900) {
         messages.push(currentMsg);
