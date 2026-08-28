@@ -296,12 +296,11 @@ CURRENT ACTIVE MOOD FOR THIS MESSAGE: [${mood}]
 ${memoryContext}
 
 Core Instructions & Tone Rules:
-- Strictly adopt the CURRENT ACTIVE MOOD (${mood}).
-- Length: Keep replies extremely short and punchy: 1 to 2 short sentences (about 5 to 25 words). Never over-explain or write paragraphs.
-- Conversation Style: Answer the user's point directly and occasionally add a small casual follow-up or comment. Do NOT ask a question in every single reply.
+- COMPREHENSION & TOPIC: Understand the user's latest message accurately. Stay strictly on-topic. Never inject unrelated random words, unprompted jokes, trivia, or change the subject. Mood must never override context.
+- Length: Keep replies extremely concise: 1 to 2 short sentences (about 5 to 25 words). Never over-explain or write filler.
+- Conversation Style: Answer the user's actual point first and directly. If the message is unclear, ask a short natural clarification ("matlab?", "kya bol rhe ho?").
 - Language: Mix Hindi, Hinglish, and English naturally ("acha", "hmm", "arre", "na", "sahi hai").
 - Flirting Policy: NEVER flirt or use romantic terms ("jaan", "baby") by default. Only use romantic/flirty tone if the user's message is explicitly romantic or flirty.
-- Clarity & Context: Stay strictly on-topic using recent conversation context. If the user message is unclear or nonsensical, ask a short natural clarification ("matlab?", "kya bol rhe ho?").
 - Action Bans: NEVER write action descriptions like *sends a sticker*, *laughs*, *smiles*, or *blushes* in text.
 - Persona: Never sound like an AI assistant, bot, or formal customer support. Sound like a real college girl chatting on Telegram.`;
 
@@ -440,9 +439,6 @@ Core Instructions & Tone Rules:
             });
             if (res.ok) {
               mediaSent = true;
-              if (finalReply) {
-                await telegramApi.sendMessage(chatId, finalReply, { reply_to_message_id: message.message_id });
-              }
             }
           }
         }
@@ -470,6 +466,11 @@ Core Instructions & Tone Rules:
 
   private static async handleRandomNaturalChat(message: TelegramMessage) {
     const chatId = message.chat.id;
+    const msgId = message.message_id || 0;
+    const randRespKey = `${chatId}_rand_resp_${msgId}`;
+    if (this.recentResponseTracker.has(randRespKey)) return;
+    this.recentResponseTracker.set(randRespKey, Date.now());
+
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) return;
 
@@ -481,8 +482,11 @@ Core Instructions & Tone Rules:
     await telegramApi.sendChatAction(chatId, 'typing');
 
     const systemPrompt = `You are Roxie, a natural Indian girl in a Telegram group chat. Users are chatting normally.
-Chime in casually with a short, natural, relevant comment (1 sentence) in Hinglish/English reacting to the user's message, occasionally adding light teasing or casual expressions ("acha", "arre", "hmm", "lol") if it fits the vibe.
-If you have nothing interesting or natural to add, reply with exactly the single word: SKIP`;
+Core Rules:
+- Understand the user's latest message precisely and stay strictly on topic.
+- Chime in casually with a short, natural, relevant comment (1 sentence, 5-25 words) in Hinglish/English reacting directly to what the user said.
+- Never inject unrelated random words, jokes, or change subject.
+- If you have nothing interesting or natural to add, reply with exactly the single word: SKIP`;
 
     try {
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -499,8 +503,8 @@ If you have nothing interesting or natural to add, reply with exactly the single
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userText }
           ],
-          max_tokens: 150,
-          temperature: 0.8
+          max_tokens: 100,
+          temperature: 0.7
         })
       });
 
@@ -513,15 +517,18 @@ If you have nothing interesting or natural to add, reply with exactly the single
         return;
       }
 
+      const cleaned = this.cleanAiText(replyContent);
+      if (!cleaned) return;
+
       const now = Date.now();
-      const dupKey = `${chatId}_${replyContent}`;
+      const dupKey = `${chatId}_${cleaned}`;
       const lastSentTime = this.recentResponseTracker.get(dupKey) || 0;
       if (now - lastSentTime < 30000) {
         return;
       }
       this.recentResponseTracker.set(dupKey, now);
 
-      await telegramApi.sendMessage(chatId, replyContent);
+      await telegramApi.sendMessage(chatId, cleaned, { reply_to_message_id: message.message_id });
     } catch (err) {
       console.error('Error in random natural chat:', err);
     }
