@@ -873,9 +873,18 @@ export class CommandHandler {
     } else {
       const statusText = settings.chatbotEnabled ? '🟢 ENABLED' : '🔴 DISABLED';
       const modeText = settings.chatbotMode || 'auto';
+      const mediaLib = db.getMediaLibrary();
+      const stickerCount = Object.values(mediaLib.stickers || {}).reduce((acc: number, list: any) => acc + (Array.isArray(list) ? list.length : 0), 0);
+      const animCount = Object.values(mediaLib.animations || {}).reduce((acc: number, list: any) => acc + (Array.isArray(list) ? list.length : 0), 0);
+
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🤖 <b>Roxie AI Control Center Status</b>\n\n• <b>Chatbot Status</b>: ${statusText}\n• <b>Behavior Mode</b>: <code>${modeText}</code>\n\n<i>Use <code>/roxie on</code>, <code>/roxie off</code>, or <code>/roxiemode &lt;normal|friendly|auto&gt;</code> to manage.</i>`
+        `🤖 <b>Roxie AI Control Center & Diagnostics</b>\n\n` +
+        `• <b>Chatbot Status</b>: ${statusText}\n` +
+        `• <b>Behavior Mode</b>: <code>${modeText}</code>\n` +
+        `• <b>Loaded Stickers</b>: ${stickerCount} file(s)\n` +
+        `• <b>Loaded GIFs</b>: ${animCount} file(s)\n\n` +
+        `<i>Use <code>/roxie on</code>, <code>/roxie off</code>, or <code>/roxiemode &lt;normal|friendly|auto&gt;</code> to manage.</i>`
       );
     }
   }
@@ -5410,7 +5419,8 @@ export class CommandHandler {
     for (const [cat, items] of Object.entries(categories)) {
       let section = `\n📌 <b>${cat.toUpperCase()}</b>\n`;
       for (const item of items) {
-        section += `• <code>${escapeHtml(item.command)}</code> — ${escapeHtml(item.description)}\n  <i>Syntax:</i> <code>${escapeHtml(item.syntax)}</code>\n`;
+        const permBadge = item.permission === 'Owner' ? '👑 Owner' : item.permission === 'Admin' ? '🛡️ Admin' : '👥 Everyone';
+        section += `• <code>${escapeHtml(item.command)}</code> [${permBadge}] — ${escapeHtml(item.description)}\n  <i>Syntax:</i> <code>${escapeHtml(item.syntax)}</code>\n`;
       }
       if (currentMsg.length + section.length > 3900) {
         messages.push(currentMsg);
