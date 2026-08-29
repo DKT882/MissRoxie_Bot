@@ -6,7 +6,7 @@ import { messageScheduler } from './scheduler.js';
 import { mapTelegramError } from './errorMapper.js';
 import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand } from './types.js';
 import { COMMAND_CATALOG } from './commandCatalog.js';
-import { ChatbotService } from './chatbot.js';
+import { ChatbotService, ROXIE_SUPPORTED_MOODS } from './chatbot.js';
 
 export const ADMIN_COMMANDS: BotCommand[] = COMMAND_CATALOG.map(item => ({
   command: item.command.replace(/^\//, ''),
@@ -107,7 +107,7 @@ export class CommandHandler {
     '/clear', '/del', '/delete', '/purge',
     '/kick', '/ban', '/unban', '/mute', '/unmute',
     '/tmute', '/tban', '/dban', '/dmute', '/dkick', '/sban', '/smute', '/skick',
-    '/promote', '/demote', '/permissions',
+    '/promote', '/demote', '/permissions', '/permission',
     '/warn', '/warnings', '/resetwarns', '/setwarnlimit',
     '/setmod', '/delmod',
     '/links', '/link', '/media', '/images', '/image', '/photos', '/photo', '/stickers', '/sticker', '/gifs', '/gif', '/videos', '/video', '/voice', '/audio',
@@ -115,24 +115,25 @@ export class CommandHandler {
     '/linkallow', '/linkwhitelist', '/allowlink', '/linkunallow', '/linkdisallow', '/removelink', '/linkallowlist', '/linkslist',
     '/flood', '/setflood', '/antiflood',
     '/filter', '/unfilter', '/stop', '/filters', '/filterlist',
-    '/welcome', '/setwelcome', '/goodbye', '/setgoodbye',
+    '/welcome', '/setwelcome', '/goodbye', '/setgoodbye', '/autodeljoin',
     '/pin', '/unpin', '/unpinall',
     '/slowmode', '/slow',
     '/adminlog', '/modlog', '/logs',
     '/free', '/unfree', '/freelist', '/freed',
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse', '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/automation', '/setrules', '/clearrules', '/chatbot',
-    '/roxie', '/roxiemode',
+    '/protection', '/roxie', '/roxiemode', '/roxiereaction', '/reaction',
     '/clearmemory',
     '/say', '/schedule', '/listschedules', '/deleteschedule',
     '/exportconfig', '/importconfig', '/status',
-    '/addstickerpack', '/addsticker', '/addgif', '/liststickers', '/removesticker', '/clearstickers'
+    '/addstickerpack', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
+    '/teststicker'
   ]);
 
   public static readonly SENSITIVE_COMMANDS = new Set<string>([
     '/say', '/all',
     '/schedule', '/listschedules', '/deleteschedule',
-    '/welcome', '/setwelcome', '/goodbye', '/setgoodbye',
+    '/welcome', '/setwelcome', '/goodbye', '/setgoodbye', '/autodeljoin',
     '/ban', '/unban', '/kick', '/mute', '/unmute',
     '/tmute', '/tban', '/dban', '/dmute', '/dkick',
     '/sban', '/smute', '/skick',
@@ -140,7 +141,7 @@ export class CommandHandler {
     '/promote', '/demote', '/permissions', '/permission',
     '/setmod', '/delmod',
     '/security', '/antiraid', '/captcha', '/autoaccept', '/chatbot',
-    '/roxie', '/roxiemode',
+    '/protection', '/roxie', '/roxiemode', '/roxiereaction', '/reaction',
     '/clearmemory',
     '/automation', '/settings', '/setrules', '/clearrules',
     '/flood', '/setflood', '/antiflood',
@@ -159,7 +160,8 @@ export class CommandHandler {
     '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/note', '/delnote',
     '/exportconfig', '/importconfig',
-    '/addstickerpack', '/addsticker', '/addgif', '/liststickers', '/removesticker', '/clearstickers'
+    '/addstickerpack', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
+    '/teststicker'
   ]);
 
   public static async handleCommand(ctx: CommandContext): Promise<boolean> {
@@ -336,12 +338,15 @@ export class CommandHandler {
         await this.handleAddGif(ctx);
         return true;
       case '/liststickers':
+      case '/listgifs':
         await this.handleListStickers(ctx);
         return true;
       case '/removesticker':
+      case '/removegif':
         await this.handleRemoveSticker(ctx);
         return true;
       case '/clearstickers':
+      case '/cleargifs':
         await this.handleClearStickers(ctx);
         return true;
       case '/stopspam':
@@ -554,6 +559,13 @@ export class CommandHandler {
       case '/clearrules':
       case '/rules':
         await this.handleRules(ctx);
+        return true;
+      case '/teststicker':
+        await this.handleTestSticker(ctx);
+        return true;
+      case '/roxiereaction':
+      case '/reaction':
+        await this.handleRoxieReaction(ctx);
         return true;
       default:
         return false;
@@ -879,7 +891,7 @@ export class CommandHandler {
 
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🤖 <b>Roxie AI Control Center & Diagnostics</b>\n\n` +
+        `🤖 <b>Roxie AI Control Center Status & Diagnostics</b>\n\n` +
         `• <b>Chatbot Status</b>: ${statusText}\n` +
         `• <b>Behavior Mode</b>: <code>${modeText}</code>\n` +
         `• <b>Loaded Stickers</b>: ${stickerCount} file(s)\n` +
@@ -892,13 +904,55 @@ export class CommandHandler {
   private static async handleRoxieMode(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
     if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
-    const modeArg = (ctx.args[0] || '').toLowerCase();
+    const rawArg = (ctx.args[0] || '').toLowerCase().trim();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
 
-    const validModes = ['normal', 'friendly', 'auto'];
-    if (validModes.includes(modeArg)) {
-      settings.chatbotMode = modeArg as 'normal' | 'friendly' | 'auto';
+    const validModesMap: Record<string, string> = {
+      auto: 'auto',
+      normal: 'normal',
+      friendly: 'friendly',
+      cute: 'cute',
+      playful: 'playful',
+      teasing: 'teasing',
+      roasting: 'roasting',
+      roast: 'roasting',
+      sarcastic: 'sarcastic',
+      caring: 'caring',
+      loving: 'loving',
+      romantic: 'romantic',
+      flirty: 'flirty',
+      flirt: 'flirty',
+      seductive: 'seductive',
+      angry: 'angry',
+      joyful: 'joyful',
+      happy: 'happy',
+      excited: 'excited',
+      fearful: 'fearful',
+      peaceful: 'peaceful',
+      calm: 'calm',
+      gloomy: 'gloomy',
+      sad: 'sad',
+      comforting: 'comforting',
+      'sad/comforting': 'sad/comforting',
+      anxious: 'anxious',
+      apathetic: 'apathetic',
+      moody: 'moody',
+      grumpy: 'grumpy',
+      serious: 'serious',
+      curious: 'curious',
+      confused: 'confused',
+      surprised: 'surprised',
+      embarrassed: 'embarrassed',
+      jealous: 'jealous',
+      protective: 'protective',
+      motivational: 'motivational',
+      sympathetic: 'sympathetic'
+    };
+
+    if (rawArg && validModesMap[rawArg]) {
+      const targetMode = validModesMap[rawArg];
+      settings.chatbotMode = targetMode;
       db.scheduleSave();
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
@@ -907,14 +961,37 @@ export class CommandHandler {
         command: 'roxiemode',
         action: 'setting_change',
         result: 'success',
-        reason: `Roxie AI mode set to ${modeArg}`
+        reason: `Roxie AI mode set to ${targetMode}`
       });
-      await telegramApi.sendMessage(ctx.chatId, `🤖 <b>Roxie AI Mode</b> successfully updated to: <code>${modeArg}</code>.`);
-    } else {
-      const currentMode = settings.chatbotMode || 'auto';
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🤖 <b>Roxie AI Behavior Mode</b>\nCurrent Mode: <code>${currentMode}</code>\n\n<b>Available Modes:</b>\n• <code>/roxiemode auto</code> (Default: dynamic tone detection)\n• <code>/roxiemode normal</code> (Chill & casual)\n• <code>/roxiemode friendly</code> (Warm & conversational)\n\n<i>Note: Flirting is never the default mode.</i>`
+        `🤖 <b>Roxie AI Mode</b> successfully updated to: <code>${targetMode}</code>.`
+      );
+    } else {
+      const currentMode = settings.chatbotMode || 'auto';
+      const mediaLib = db.getMediaLibrary();
+      const stickerCount = Object.values(mediaLib.stickers || {}).reduce((acc: number, list: any) => acc + (Array.isArray(list) ? list.length : 0), 0);
+      const animCount = Object.values(mediaLib.animations || {}).reduce((acc: number, list: any) => acc + (Array.isArray(list) ? list.length : 0), 0);
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🤖 <b>Roxie AI Behavior & Mood Control</b>\n\n` +
+        `• <b>Current Active Mode</b>: <code>${currentMode}</code>\n` +
+        `• <b>Loaded Stickers</b>: ${stickerCount} registered\n` +
+        `• <b>Loaded GIFs</b>: ${animCount} registered\n\n` +
+        `<b>Available Modes:</b>\n` +
+        `• <code>/roxiemode auto</code> (Default: dynamic tone detection)\n` +
+        `• <code>/roxiemode normal</code> (Chill & observant)\n` +
+        `• <code>/roxiemode friendly</code> (Warm & conversational)\n` +
+        `• <code>/roxiemode playful</code> (Witty & energetic)\n` +
+        `• <code>/roxiemode teasing</code> (Playful roasting & banter)\n` +
+        `• <code>/roxiemode sarcastic</code> (Dry wit & irony)\n` +
+        `• <code>/roxiemode serious</code> (Focused & direct)\n` +
+        `• <code>/roxiemode cute</code> (Charming & sweet)\n` +
+        `• <code>/roxiemode romantic</code> (Heartfelt warmth)\n` +
+        `• <code>/roxiemode flirty</code> (Playful flirtation)\n` +
+        `• <code>/roxiemode status</code> (Show status & diagnostics)\n\n` +
+        `<i>Note: Flirting is never the default personality.</i>`
       );
     }
   }
@@ -5680,59 +5757,241 @@ export class CommandHandler {
     });
   }
 
-  private static async handleAddStickerPack(ctx: CommandContext) {
-    const args = ctx.args || [];
-    if (args.length === 0) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/addstickerpack <pack_name> [mood]</code> (e.g. /addstickerpack Animals cute)');
-      return;
+  public static async importStickerPack(
+    setName: string,
+    moodInput: string | undefined,
+    actorId: number,
+    chatId: number,
+    replyToMessageId?: number
+  ): Promise<boolean> {
+    const rawMood = (moodInput || 'normal').toLowerCase().trim();
+    if (!ROXIE_SUPPORTED_MOODS.includes(rawMood as any)) {
+      const moodList = ROXIE_SUPPORTED_MOODS.map(m => `<code>${m}</code>`).join(', ');
+      await telegramApi.sendMessage(
+        chatId,
+        `⚠️ <b>Invalid mood category:</b> <code>${escapeHtml(rawMood)}</code>\n\n<b>Valid moods:</b>\n${moodList}`,
+        { reply_to_message_id: replyToMessageId }
+      );
+      return false;
     }
-    const packName = args[0].replace(/^https:\/\/t\.me\/addstickers\//, '').trim();
-    const mood = (args[1] || 'normal').toLowerCase();
-    const res = await telegramApi.getStickerSet(packName);
-    if (!res.ok || !res.result || !Array.isArray(res.result.stickers)) {
-      await telegramApi.sendMessage(ctx.chatId, `❌ Failed to fetch sticker pack <b>${escapeHtml(packName)}</b>: ${res.description || 'Not found or invalid'}`);
-      return;
+    const mood = rawMood;
+
+    const cleanPackName = setName.replace(/^https:\/\/t\.me\/addstickers\//i, '').trim();
+    if (!cleanPackName) {
+      await telegramApi.sendMessage(
+        chatId,
+        `❌ Couldn't detect the sticker pack.`,
+        { reply_to_message_id: replyToMessageId }
+      );
+      return false;
     }
-    const stickers = res.result.stickers;
-    let count = 0;
-    for (const s of stickers) {
-      if (s.file_id) {
-        db.addStickerToLibrary(mood, s.file_id);
-        count++;
+
+    let res;
+    try {
+      res = await telegramApi.getStickerSet(cleanPackName);
+    } catch (err: any) {
+      await telegramApi.sendMessage(
+        chatId,
+        `❌ Telegram API error while fetching sticker pack: ${escapeHtml(err?.message || 'Unknown error')}`,
+        { reply_to_message_id: replyToMessageId }
+      );
+      return false;
+    }
+
+    if (!res || !res.ok || !res.result) {
+      await telegramApi.sendMessage(
+        chatId,
+        `❌ Couldn't detect or load sticker pack <b>${escapeHtml(cleanPackName)}</b>: ${escapeHtml(res?.description || 'Sticker pack not found')}`,
+        { reply_to_message_id: replyToMessageId }
+      );
+      return false;
+    }
+
+    const pack = res.result;
+    const packTitle = pack.title || pack.name || cleanPackName;
+    const packName = pack.name || cleanPackName;
+    const rawStickers = Array.isArray(pack.stickers) ? pack.stickers : [];
+
+    if (rawStickers.length === 0) {
+      await telegramApi.sendMessage(
+        chatId,
+        `❌ Sticker pack <b>${escapeHtml(packTitle)}</b> contains no stickers.`,
+        { reply_to_message_id: replyToMessageId }
+      );
+      return false;
+    }
+
+    let addedCount = 0;
+    let existedCount = 0;
+    const nowIso = new Date().toISOString();
+
+    for (const s of rawStickers) {
+      const fileId = s.file_id;
+      if (!ChatbotService.isValidFileId(fileId)) {
+        continue;
+      }
+      const added = db.addStickerToLibrary(mood, fileId, {
+        packName,
+        packTitle,
+        fileId,
+        emoji: s.emoji,
+        mood,
+        addedBy: actorId,
+        addedAt: nowIso
+      });
+      if (added) {
+        addedCount++;
+      } else {
+        existedCount++;
       }
     }
-    await telegramApi.sendMessage(ctx.chatId, `✅ Successfully imported <b>${count}</b> stickers from pack <b>${escapeHtml(packName)}</b> into mood category <code>${escapeHtml(mood)}</code>.`);
+
+    if (addedCount === 0 && existedCount === 0) {
+      await telegramApi.sendMessage(
+        chatId,
+        `❌ No valid sticker file IDs found in pack <b>${escapeHtml(packTitle)}</b>.`,
+        { reply_to_message_id: replyToMessageId }
+      );
+      return false;
+    }
+
+    let messageText = '';
+    if (existedCount === 0) {
+      messageText = `✅ Added <b>${addedCount}</b> stickers from <b>${escapeHtml(packTitle)}</b> to <code>${escapeHtml(mood)}</code>.`;
+    } else if (addedCount === 0) {
+      messageText = `ℹ️ All <b>${existedCount}</b> stickers from <b>${escapeHtml(packTitle)}</b> already existed in <code>${escapeHtml(mood)}</code>.`;
+    } else {
+      messageText = `✅ Added <b>${addedCount}</b> new stickers from <b>${escapeHtml(packTitle)}</b> to <code>${escapeHtml(mood)}</code>. <b>${existedCount}</b> already existed.`;
+    }
+
+    await telegramApi.sendMessage(chatId, messageText, {
+      reply_to_message_id: replyToMessageId
+    });
+    return true;
+  }
+
+  private static async handleAddStickerPack(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⛔ You must be an administrator or moderator to manage bot stickers.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const args = ctx.args || [];
+    if (args.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/addstickerpack &lt;pack_name&gt; [mood]</code> (e.g. <code>/addstickerpack Animals cute</code>)', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+    const packName = args[0].replace(/^https:\/\/t\.me\/addstickers\//i, '').trim();
+    const mood = (args[1] || 'normal').toLowerCase().trim();
+
+    await this.importStickerPack(packName, mood, actor.actorUserId, ctx.chatId, ctx.message.message_id);
   }
 
   private static async handleAddSticker(ctx: CommandContext) {
-    const reply = ctx.message.reply_to_message;
-    if (!reply || !reply.sticker) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ Please reply to a sticker message with <code>/addsticker [mood]</code>.');
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⛔ You must be an administrator or moderator to manage bot stickers.', {
+        reply_to_message_id: ctx.message.message_id
+      });
       return;
     }
-    const mood = (ctx.args?.[0] || 'normal').toLowerCase();
-    const fileId = reply.sticker.file_id;
-    db.addStickerToLibrary(mood, fileId);
-    await telegramApi.sendMessage(ctx.chatId, `✅ Sticker added successfully to mood category <code>${escapeHtml(mood)}</code>!\nID: <code>${fileId}</code>`);
+
+    const reply = ctx.message.reply_to_message;
+    if (!reply || !reply.sticker) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Please reply to a sticker message with <code>/addsticker [mood]</code>.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const moodArg = ctx.args?.[0];
+    const mood = (moodArg || 'normal').toLowerCase().trim();
+    if (!ROXIE_SUPPORTED_MOODS.includes(mood as any)) {
+      const moodList = ROXIE_SUPPORTED_MOODS.map(m => `<code>${m}</code>`).join(', ');
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚠️ <b>Invalid mood category:</b> <code>${escapeHtml(mood)}</code>\n\n<b>Valid moods:</b>\n${moodList}`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    const sticker = reply.sticker;
+    const setName = sticker.set_name;
+    if (!setName) {
+      const fileId = sticker.file_id;
+      if (ChatbotService.isValidFileId(fileId)) {
+        const added = db.addStickerToLibrary(mood, fileId, {
+          fileId,
+          emoji: sticker.emoji,
+          mood,
+          addedBy: actor.actorUserId,
+          addedAt: new Date().toISOString()
+        });
+        if (added) {
+          await telegramApi.sendMessage(ctx.chatId, `✅ Added standalone sticker to <code>${escapeHtml(mood)}</code>.`, {
+            reply_to_message_id: ctx.message.message_id
+          });
+        } else {
+          await telegramApi.sendMessage(ctx.chatId, `ℹ️ This sticker already exists in <code>${escapeHtml(mood)}</code>.`, {
+            reply_to_message_id: ctx.message.message_id
+          });
+        }
+        return;
+      }
+      await telegramApi.sendMessage(ctx.chatId, "❌ Couldn't detect the sticker pack.", {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    await this.importStickerPack(setName, mood, actor.actorUserId, ctx.chatId, ctx.message.message_id);
   }
 
   private static async handleAddGif(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⛔ You must be an administrator or moderator to manage bot GIFs.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
     const reply = ctx.message.reply_to_message;
     if (!reply || (!reply.animation && !reply.document)) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ Please reply to an animation/GIF message with <code>/addgif [mood]</code>.');
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Please reply to an animation/GIF message with <code>/addgif [mood]</code>.', {
+        reply_to_message_id: ctx.message.message_id
+      });
       return;
     }
     const fileId = reply.animation?.file_id || reply.document?.file_id;
     if (!fileId) {
-      await telegramApi.sendMessage(ctx.chatId, '❌ Could not extract animation file ID from replied message.');
+      await telegramApi.sendMessage(ctx.chatId, '❌ Could not extract animation file ID from replied message.', {
+        reply_to_message_id: ctx.message.message_id
+      });
       return;
     }
     const mood = (ctx.args?.[0] || 'normal').toLowerCase();
     db.addAnimationToLibrary(mood, fileId);
-    await telegramApi.sendMessage(ctx.chatId, `✅ GIF/animation added successfully to mood category <code>${escapeHtml(mood)}</code>!\nID: <code>${fileId}</code>`);
+    await telegramApi.sendMessage(ctx.chatId, `✅ GIF/animation added successfully to mood category <code>${escapeHtml(mood)}</code>!\nID: <code>${fileId}</code>`, {
+      reply_to_message_id: ctx.message.message_id
+    });
   }
 
   private static async handleListStickers(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⛔ You must be an administrator or moderator to view the media library.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
     const lib = db.getMediaLibrary();
     let text = '🎨 <b>Roxie Telegram Media Library</b>\n\n';
     
@@ -5758,33 +6017,224 @@ export class CommandHandler {
       }
     }
 
-    text += '\n<i>Use /addstickerpack, /addsticker, or /addgif to add more. Use /removesticker <file_id> to remove items.</i>';
-    await telegramApi.sendMessage(ctx.chatId, text);
+    text += '\n<i>Use /addstickerpack, /addsticker, or /addgif to add more. Use /removesticker [file_id] (or reply to media) to remove items.</i>';
+    await telegramApi.sendMessage(ctx.chatId, text, {
+      reply_to_message_id: ctx.message.message_id
+    });
   }
 
   private static async handleRemoveSticker(ctx: CommandContext) {
-    const args = ctx.args || [];
-    if (args.length === 0) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/removesticker <file_id></code>');
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⛔ You must be an administrator or moderator to remove bot media.', {
+        reply_to_message_id: ctx.message.message_id
+      });
       return;
     }
-    const fileId = args.join(' ').trim();
+
+    const reply = ctx.message.reply_to_message;
+    let fileId = reply?.sticker?.file_id || reply?.animation?.file_id || reply?.document?.file_id;
+    if (!fileId && ctx.args && ctx.args.length > 0) {
+      fileId = ctx.args.join(' ').trim();
+    }
+
+    if (!fileId) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: Reply to a sticker/GIF with <code>/removesticker</code> or pass <code>/removesticker <file_id></code>', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
     const removed = db.removeMediaFromLibrary(fileId);
     if (removed) {
-      await telegramApi.sendMessage(ctx.chatId, `✅ Media item successfully removed from library.`);
+      await telegramApi.sendMessage(ctx.chatId, `✅ Media item successfully removed from library.`, {
+        reply_to_message_id: ctx.message.message_id
+      });
     } else {
-      await telegramApi.sendMessage(ctx.chatId, `❌ Media item with specified ID not found in library.`);
+      await telegramApi.sendMessage(ctx.chatId, `❌ Media item with specified ID not found in library.`, {
+        reply_to_message_id: ctx.message.message_id
+      });
     }
   }
 
   private static async handleClearStickers(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⛔ You must be an administrator or moderator to clear the media library.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
     const mood = ctx.args?.[0]?.toLowerCase();
     db.clearMediaLibrary(mood);
     if (mood) {
-      await telegramApi.sendMessage(ctx.chatId, `🗑️ Cleared all media items for mood category <code>${escapeHtml(mood)}</code>.`);
+      await telegramApi.sendMessage(ctx.chatId, `🗑️ Cleared all media items for mood category <code>${escapeHtml(mood)}</code>.`, {
+        reply_to_message_id: ctx.message.message_id
+      });
     } else {
-      await telegramApi.sendMessage(ctx.chatId, `🗑️ Cleared entire media library.`);
+      await telegramApi.sendMessage(ctx.chatId, `🗑️ Cleared entire media library.`, {
+        reply_to_message_id: ctx.message.message_id
+      });
     }
+  }
+
+  public static async handleTestSticker(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⛔ You must be an administrator to use /teststicker.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    // Verified real Telegram sticker file_id from official Telegram sticker set (Animals pack)
+    const REAL_STICKER_FILE_ID = 'CAACAgIAAxUAAWqSpnq-jinkUWh846b3Djhd3CXdAALeAAP0exkAAb2F7273xc49PQQ';
+
+    console.log(`[TESTSTICKER] Executing direct Telegram sticker dispatch for chatId=${ctx.chatId} stickerFileId=${REAL_STICKER_FILE_ID}`);
+
+    const res = await telegramApi.sendSticker(ctx.chatId, REAL_STICKER_FILE_ID, {
+      reply_to_message_id: ctx.message.message_id
+    });
+
+    console.log('[TESTSTICKER] Complete Telegram API result:', {
+      ok: res.ok,
+      error_code: res.error_code,
+      description: res.description,
+      returned_message_id: res.result?.message_id,
+      returned_sticker_file_id: res.result?.sticker?.file_id
+    });
+
+    if (res.ok) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `✅ <b>Direct /teststicker Execution Succeeded!</b>\n\n` +
+        `• <b>ok:</b> <code>${res.ok}</code>\n` +
+        `• <b>Returned Message ID:</b> <code>${res.result?.message_id}</code>\n` +
+        `• <b>Returned Sticker File ID:</b> <code>${res.result?.sticker?.file_id}</code>\n` +
+        `• <b>Emoji:</b> ${res.result?.sticker?.emoji || 'N/A'}\n\n` +
+        `<i>Telegram API sendSticker is 100% operational with real file IDs.</i>`,
+        {
+          reply_to_message_id: res.result?.message_id || ctx.message.message_id
+        }
+      );
+    } else {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `❌ <b>Direct /teststicker Execution Failed!</b>\n\n` +
+        `• <b>ok:</b> <code>${res.ok}</code>\n` +
+        `• <b>error_code:</b> <code>${res.error_code}</code>\n` +
+        `• <b>description:</b> <code>${escapeHtml(res.description || 'Unknown error')}</code>`,
+        {
+          reply_to_message_id: ctx.message.message_id
+        }
+      );
+    }
+  }
+
+  public static async handleRoxieReaction(ctx: CommandContext) {
+    const isGroup = TelegramMiddleware.isGroup(ctx.message);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (isGroup && actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⛔ You must be an administrator to configure reactions.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+    const sub = (ctx.args[0] || '').toLowerCase();
+
+    if (sub === 'on') {
+      db.updateGroupSettings(ctx.chatId, { reactionEnabled: true });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'roxiereaction',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Smart reactions enabled'
+      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `✨ <b>Smart Telegram Reactions:</b> 🟢 <b>ON</b>\n` +
+        `Roxie will occasionally react to messages based on context and mood (Probability: <b>${Math.round((settings.reactionProbability ?? 0.15) * 100)}%</b>).`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    if (sub === 'off') {
+      db.updateGroupSettings(ctx.chatId, { reactionEnabled: false });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'roxiereaction',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Smart reactions disabled'
+      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `✨ <b>Smart Telegram Reactions:</b> 🔴 <b>OFF</b>\n` +
+        `Roxie will not send reactions in this chat.`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    if (sub === 'rate' || sub === 'prob' || sub === 'probability') {
+      const rawVal = ctx.args[1] || '';
+      const num = parseInt(rawVal.replace('%', ''), 10);
+      if (isNaN(num) || num < 1 || num > 100) {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `⚠️ <b>Usage:</b> <code>/roxiereaction rate &lt;1-100&gt;</code>\nExample: <code>/roxiereaction rate 20</code> (sets 20% reaction rate)`,
+          { reply_to_message_id: ctx.message.message_id }
+        );
+        return;
+      }
+
+      const prob = Math.min(Math.max(num / 100, 0.01), 1.0);
+      db.updateGroupSettings(ctx.chatId, { reactionProbability: prob, reactionEnabled: true });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'roxiereaction',
+        action: 'setting_change',
+        result: 'success',
+        details: `Reaction rate updated to ${num}%`
+      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `✨ <b>Smart Reaction Rate Updated:</b> <b>${num}%</b>\n` +
+        `Reactions are active with ~${num} reactions per 100 messages.`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    // Default: status view
+    const isEnabled = settings.reactionEnabled !== false;
+    const currentRate = Math.round((settings.reactionProbability ?? 0.15) * 100);
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `✨ <b>Roxie Smart Reaction System</b>\n\n` +
+      `• <b>Status:</b> ${isEnabled ? '🟢 ACTIVE' : '🔴 DISABLED'}\n` +
+      `• <b>Reaction Rate:</b> <b>${currentRate}%</b>\n` +
+      `• <b>Categorization:</b> Content & Mood-Aware (Funny, Love, Sad, Surprise, Approval, etc.)\n` +
+      `• <b>Deduplication:</b> Enabled (1 reaction per message)\n` +
+      `• <b>Command Immunity:</b> Active (commands never receive reactions)\n\n` +
+      `<b>Admin Commands:</b>\n` +
+      `• <code>/roxiereaction on</code> — Turn reactions on\n` +
+      `• <code>/roxiereaction off</code> — Turn reactions off\n` +
+      `• <code>/roxiereaction rate &lt;1-100&gt;</code> — Set reaction probability\n` +
+      `• <code>/roxiereaction status</code> — View current settings`,
+      { reply_to_message_id: ctx.message.message_id }
+    );
   }
 }
 

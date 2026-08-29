@@ -308,9 +308,11 @@ export interface GroupSettings {
   slowModeSeconds: number; // 0 = off
   // Reports
   reportsEnabled: boolean; // default true
-  // AI Chatbot
+  // AI Chatbot & Smart Reactions
   chatbotEnabled?: boolean; // default true
-  chatbotMode?: 'normal' | 'friendly' | 'auto'; // default 'auto'
+  chatbotMode?: string; // e.g. 'auto' | 'normal' | 'friendly' | 'playful' | 'teasing' | 'sarcastic' | 'serious' | 'cute' | 'romantic' | 'flirty' | string
+  reactionEnabled?: boolean; // default true
+  reactionProbability?: number; // default 0.15 (15%)
   // Phase 17 Smart User Protection
   protectionEnabled?: boolean;
   protectionFloodCount?: number;

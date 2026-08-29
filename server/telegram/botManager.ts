@@ -8,6 +8,7 @@ import { TelegramMiddleware, CommandContext } from './middleware.js';
 import { RateLimiterService } from './rateLimiter.js';
 import { ChatbotService } from './chatbot.js';
 import { SmartProtectionService } from './smartProtection.js';
+import { ReactionService } from './reactionService.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
 
@@ -19,7 +20,9 @@ function escapeHtml(text: string): string {
 }
 
 export class TelegramBotManager {
+  private static activeInstanceId: string | null = null;
   private isRunning: boolean = false;
+  private isStarting: boolean = false;
   private shouldStop: boolean = false;
   private lastUpdateId: number = 0;
   private static processedUpdateIds: Set<number> = new Set();
@@ -78,7 +81,10 @@ export class TelegramBotManager {
   }
 
   public async startPolling() {
-    if (this.isRunning) return;
+    if (this.isRunning || this.isStarting) {
+      console.log('[TELEGRAM] startPolling ignored: already running or starting');
+      return;
+    }
 
     const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
     if (!token) {
@@ -86,8 +92,8 @@ export class TelegramBotManager {
       return;
     }
 
+    this.isStarting = true;
     this.shouldStop = false;
-    this.isRunning = true;
     this.pollingError = null;
 
     try {
@@ -95,6 +101,7 @@ export class TelegramBotManager {
       if (!conn.success || !this.botUser) {
         this.pollingError = conn.error || 'Failed to authenticate bot token with Telegram.';
         this.isRunning = false;
+        this.isStarting = false;
         return;
       }
 
@@ -111,16 +118,23 @@ export class TelegramBotManager {
     } catch (err: any) {
       this.pollingError = err.message;
       this.isRunning = false;
+      this.isStarting = false;
       return;
     }
 
+    this.isRunning = true;
+    this.isStarting = false;
+    const instanceId = Math.random().toString(36).substring(2, 9);
+    TelegramBotManager.activeInstanceId = instanceId;
+    console.log(`[TELEGRAM] polling instance started instanceId=${instanceId}`);
+
     // Run polling loop
-    this.runPollingLoop();
+    this.runPollingLoop(instanceId);
   }
 
-  private async runPollingLoop() {
+  private async runPollingLoop(instanceId: string) {
     let hadError = false;
-    while (!this.shouldStop) {
+    while (!this.shouldStop && TelegramBotManager.activeInstanceId === instanceId) {
       try {
         this.lastPolledAt = new Date().toISOString();
         this.abortController = new AbortController();
@@ -164,7 +178,7 @@ export class TelegramBotManager {
                 continue;
               }
               TelegramBotManager.processedUpdateIds.add(update.update_id);
-              if (TelegramBotManager.processedUpdateIds.size > 1000) {
+              if (TelegramBotManager.processedUpdateIds.size > 2000) {
                 const first = TelegramBotManager.processedUpdateIds.values().next().value;
                 if (first) TelegramBotManager.processedUpdateIds.delete(first);
               }
@@ -197,7 +211,7 @@ export class TelegramBotManager {
           }
         }
       } catch (err: any) {
-        if (this.shouldStop) break;
+        if (this.shouldStop || TelegramBotManager.activeInstanceId !== instanceId) break;
         if (err.name === 'AbortError') break;
 
         metricsTracker.increment('telegram_api_errors');
@@ -216,7 +230,9 @@ export class TelegramBotManager {
       }
     }
 
-    this.isRunning = false;
+    if (TelegramBotManager.activeInstanceId === instanceId) {
+      this.isRunning = false;
+    }
   }
 
   private async handleMessage(message: TelegramMessage, isEdit: boolean = false) {
@@ -348,7 +364,12 @@ export class TelegramBotManager {
       if (linkIntercepted) return;
     }
 
-    // 7. Check Roxie AI Chatbot triggers
+    // 7. Check Smart Telegram Reactions (non-blocking & independent)
+    ReactionService.handleMessageReaction(message).catch((err) => {
+      console.error('[ReactionService] Error handling message reaction:', err);
+    });
+
+    // 8. Check Roxie AI Chatbot triggers
     const chatbotHandled = await ChatbotService.handleMessage(message, this.botUser);
     if (chatbotHandled) return;
   }
@@ -387,11 +408,13 @@ export class TelegramBotManager {
 
   public stopPolling() {
     this.shouldStop = true;
+    TelegramBotManager.activeInstanceId = null;
     if (this.abortController) {
       this.abortController.abort();
     }
     messageScheduler.stop();
     this.isRunning = false;
+    this.isStarting = false;
   }
 }
 

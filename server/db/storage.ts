@@ -8,9 +8,20 @@ interface RaidStateRecord {
   raidActiveUntil: number;
 }
 
+export interface StickerMetaRecord {
+  packName?: string;
+  packTitle?: string;
+  fileId: string;
+  emoji?: string;
+  mood: string;
+  addedBy?: number;
+  addedAt: string;
+}
+
 export interface MediaLibraryRecord {
   stickers: Record<string, string[]>;
   animations: Record<string, string[]>;
+  stickerMetadata?: Record<string, StickerMetaRecord>;
 }
 
 export interface UserMemoryRecord {
@@ -343,6 +354,8 @@ class StorageManager {
         reportsEnabled: true,
         chatbotEnabled: true,
         chatbotMode: 'auto',
+        reactionEnabled: true,
+        reactionProbability: 0.15,
         stopSpamEnabled: false,
         stopAbusiveEnabled: false,
         stopPromotionEnabled: false,
@@ -1595,24 +1608,33 @@ class StorageManager {
 
   public getMediaLibrary(): MediaLibraryRecord {
     if (!this.data.mediaLibrary) {
-      this.data.mediaLibrary = { stickers: {}, animations: {} };
+      this.data.mediaLibrary = { stickers: {}, animations: {}, stickerMetadata: {} };
+    }
+    if (!this.data.mediaLibrary.stickerMetadata) {
+      this.data.mediaLibrary.stickerMetadata = {};
     }
     return this.data.mediaLibrary;
   }
 
-  public addStickerToLibrary(mood: string, fileId: string): void {
+  public addStickerToLibrary(mood: string, fileId: string, meta?: StickerMetaRecord): boolean {
     const lib = this.getMediaLibrary();
     const normalizedMood = mood.toLowerCase().trim();
     if (!lib.stickers[normalizedMood]) {
       lib.stickers[normalizedMood] = [];
     }
+    if (meta) {
+      if (!lib.stickerMetadata) lib.stickerMetadata = {};
+      lib.stickerMetadata[fileId] = meta;
+    }
     if (!lib.stickers[normalizedMood].includes(fileId)) {
       lib.stickers[normalizedMood].push(fileId);
       this.scheduleSave();
+      return true; // newly added
     }
+    return false; // already existed
   }
 
-  public addAnimationToLibrary(mood: string, fileId: string): void {
+  public addAnimationToLibrary(mood: string, fileId: string): boolean {
     const lib = this.getMediaLibrary();
     const normalizedMood = mood.toLowerCase().trim();
     if (!lib.animations[normalizedMood]) {
@@ -1621,7 +1643,9 @@ class StorageManager {
     if (!lib.animations[normalizedMood].includes(fileId)) {
       lib.animations[normalizedMood].push(fileId);
       this.scheduleSave();
+      return true;
     }
+    return false;
   }
 
   public removeMediaFromLibrary(fileId: string): boolean {
@@ -1641,6 +1665,10 @@ class StorageManager {
         removed = true;
       }
     }
+    if (lib.stickerMetadata && lib.stickerMetadata[fileId]) {
+      delete lib.stickerMetadata[fileId];
+      removed = true;
+    }
     if (removed) {
       this.scheduleSave();
     }
@@ -1651,11 +1679,17 @@ class StorageManager {
     const lib = this.getMediaLibrary();
     if (mood) {
       const normalizedMood = mood.toLowerCase().trim();
+      if (lib.stickerMetadata && lib.stickers[normalizedMood]) {
+        for (const fId of lib.stickers[normalizedMood]) {
+          delete lib.stickerMetadata[fId];
+        }
+      }
       delete lib.stickers[normalizedMood];
       delete lib.animations[normalizedMood];
     } else {
       lib.stickers = {};
       lib.animations = {};
+      lib.stickerMetadata = {};
     }
     this.scheduleSave();
   }

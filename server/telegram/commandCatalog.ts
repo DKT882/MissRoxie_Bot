@@ -74,12 +74,17 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
   { command: '/link', category: 'Media', description: 'Toggle link protection filter (on/off).', syntax: '/link <on|off>', example: '/link off', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/image', category: 'Media', description: 'Toggle image/photo protection filter (on/off).', syntax: '/image <on|off>', example: '/image off', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/file', category: 'Media', description: 'Toggle file protection filter (on/off).', syntax: '/file <on|off>', example: '/file off', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/video', category: 'Media', description: 'Toggle video and video note protection filter (on/off).', syntax: '/video <on|off>', example: '/video off', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/voice', category: 'Media', description: 'Toggle voice note protection filter (on/off).', syntax: '/voice <on|off>', example: '/voice off', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/audio', category: 'Media', description: 'Toggle audio file protection filter (on/off).', syntax: '/audio <on|off>', example: '/audio off', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/sticker', category: 'Media', description: 'Toggle sticker protection filter (on/off).', syntax: '/sticker <on|off>', example: '/sticker off', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/addstickerpack', category: 'Media', description: 'Import stickers from a public Telegram sticker pack.', syntax: '/addstickerpack <pack_name> [mood]', example: '/addstickerpack Animals cute', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
-  { command: '/addsticker', category: 'Media', description: 'Add a sticker to bot media library by replying to it.', syntax: '/addsticker [mood]', example: '/addsticker normal', permission: 'Admin', targetType: 'Message', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/addsticker', category: 'Media', description: 'Import entire sticker pack into bot media library by replying to a sticker.', syntax: '/addsticker [mood]', example: '/addsticker cute', permission: 'Admin', targetType: 'Message', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/addgif', category: 'Media', description: 'Add a GIF/animation to bot media library by replying to it.', syntax: '/addgif [mood]', example: '/addgif playful', permission: 'Admin', targetType: 'Message', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/liststickers', category: 'Media', description: 'List stored stickers and GIFs in the media library.', syntax: '/liststickers', example: '/liststickers', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: false, auditLogged: false },
-  { command: '/removesticker', category: 'Media', description: 'Remove a media item by file ID.', syntax: '/removesticker <file_id>', example: '/removesticker CAACAgUAAxkBAAE...', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/listgifs', category: 'Media', description: 'List stored GIFs/animations in the media library.', syntax: '/listgifs', example: '/listgifs', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: false, auditLogged: false },
+  { command: '/removesticker', category: 'Media', description: 'Remove a media item by file ID or reply.', syntax: '/removesticker <file_id>', example: '/removesticker CAACAgUAAxkBAAE...', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/removegif', category: 'Media', description: 'Remove a GIF/animation by file ID or reply.', syntax: '/removegif <file_id>', example: '/removegif CgACAgQAAxkBAAE...', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/clearstickers', category: 'Media', description: 'Clear stored stickers and GIFs for a mood or all.', syntax: '/clearstickers [mood]', example: '/clearstickers cute', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/free', category: 'Media', description: 'Exempt member from sticker/media restrictions.', syntax: '/free @username', example: '/free @trusted_user', permission: 'Admin', targetType: 'User', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/unfree', category: 'Media', description: 'Revoke media exemption from member.', syntax: '/unfree @username', example: '/unfree @trusted_user', permission: 'Admin', targetType: 'User', isPublic: false, modifiesState: true, auditLogged: true },
@@ -121,6 +126,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
   { command: '/promote', category: 'Admin Permissions', description: 'Promote a member to administrator.', syntax: '/promote @username', example: '/promote @admin2', permission: 'Owner', telegramPermission: 'can_promote_members', targetType: 'User', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/demote', category: 'Admin Permissions', description: 'Demote an administrator.', syntax: '/demote @username', example: '/demote @admin2', permission: 'Owner', telegramPermission: 'can_promote_members', targetType: 'User', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/permissions', category: 'Admin Permissions', description: 'Open interactive admin permission editor.', syntax: '/permissions @username', example: '/permissions @admin2', permission: 'Owner', telegramPermission: 'can_promote_members', targetType: 'User', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/setmod', category: 'Admin Permissions', description: 'Assign custom bot moderator role to a member.', syntax: '/setmod @username', example: '/setmod @helper', permission: 'Admin', targetType: 'User', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/delmod', category: 'Admin Permissions', description: 'Revoke custom bot moderator role from a member.', syntax: '/delmod @username', example: '/delmod @helper', permission: 'Admin', targetType: 'User', isPublic: false, modifiesState: true, auditLogged: true },
 
   // Audit
   { command: '/adminlog', category: 'Audit', description: 'View recent moderation audit logs.', syntax: '/adminlog [limit]', example: '/adminlog 15', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: false, auditLogged: false },
@@ -158,5 +165,25 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
   { command: '/rules', category: 'Welcome / Goodbye', description: 'Display group rules.', syntax: '/rules', example: '/rules', permission: 'Everyone', targetType: 'None', isPublic: true, modifiesState: false, auditLogged: false },
   { command: '/clearrules', category: 'Welcome / Goodbye', description: 'Clear group rules.', syntax: '/clearrules', example: '/clearrules', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/chatbot', category: 'Smart Protection', description: 'Toggle Roxie AI chatbot in the group.', syntax: '/chatbot <on|off|status>', example: '/chatbot on', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
-  { command: '/protection', category: 'Smart Protection', description: 'Manage smart user protection (on/off/status).', syntax: '/protection <on|off|status>', example: '/protection on', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true }
+  { command: '/protection', category: 'Smart Protection', description: 'Manage smart user protection (on/off/status).', syntax: '/protection <on|off|status>', example: '/protection on', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/teststicker', category: 'Media', description: 'Test direct Telegram sticker dispatch using a verified sticker file_id.', syntax: '/teststicker', example: '/teststicker', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: false, auditLogged: true },
+  { command: '/roxiereaction', category: 'Smart Protection', description: 'Configure smart Telegram reactions (on/off/status/rate).', syntax: '/roxiereaction <on|off|status|rate 10-100>', example: '/roxiereaction on', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true }
 ];
+
+export function getCatalogItem(cmd: string): CommandCatalogItem | undefined {
+  const normalized = cmd.startsWith('/') ? cmd.toLowerCase() : `/${cmd.toLowerCase()}`;
+  return COMMAND_CATALOG.find(item => item.command.toLowerCase() === normalized);
+}
+
+export function getCatalogByCategory(category: string): CommandCatalogItem[] {
+  return COMMAND_CATALOG.filter(item => item.category.toLowerCase() === category.toLowerCase());
+}
+
+export function getPublicCatalog(): CommandCatalogItem[] {
+  return COMMAND_CATALOG.filter(item => item.permission === 'Everyone' || item.isPublic);
+}
+
+export function getAdminCatalog(): CommandCatalogItem[] {
+  return COMMAND_CATALOG.filter(item => item.permission === 'Admin' || item.permission === 'Owner' || !item.isPublic);
+}
+

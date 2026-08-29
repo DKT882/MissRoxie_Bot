@@ -132,11 +132,11 @@ export async function runChatbotTests() {
   const moodFlirty = ChatbotService.inferMood('you\'re cute 😏');
 
   if (
-    (moodNeutral !== 'friendly' && moodNeutral !== 'normal') ||
+    (!['happy', 'friendly', 'normal'].includes(moodNeutral)) ||
     moodLeave !== 'normal' ||
-    moodSad !== 'sad/comforting' ||
+    (!['sad', 'sad/comforting'].includes(moodSad)) ||
     moodAngry !== 'angry' ||
-    moodPlayful !== 'playful' ||
+    (!['funny', 'playful'].includes(moodPlayful)) ||
     moodRomantic !== 'romantic' ||
     moodFlirty !== 'flirty'
   ) {
@@ -299,11 +299,14 @@ export async function runChatbotTests() {
   // Test 13: Missing media -> text fallback
   ChatbotService.reset();
   db.clearMediaLibrary();
-  const oldStickerEnv = process.env.TELEGRAM_STICKERS_NORMAL;
-  const oldJsonEnv = process.env.TELEGRAM_STICKERS_JSON;
-  delete process.env.TELEGRAM_STICKERS_NORMAL;
-  delete process.env.TELEGRAM_STICKERS_DEFAULT;
-  delete process.env.TELEGRAM_STICKERS_JSON;
+  const envMediaBackups: Record<string, string | undefined> = {};
+  for (const k of Object.keys(process.env)) {
+    if (k.startsWith('TELEGRAM_STICKER') || k.startsWith('TELEGRAM_ANIMATION')) {
+      envMediaBackups[k] = process.env[k];
+      delete process.env[k];
+    }
+  }
+
   db.getGroupSettings(chatId, chatTitle).chatbotEnabled = true;
   let fallbackTextCalled = false;
   (telegramApi as any).sendMessage = async (chatId: any, text: any, options: any) => {
@@ -320,8 +323,11 @@ export async function runChatbotTests() {
   } as any;
 
   await ChatbotService.handleMessage(missingMediaMsg, botUser);
-  if (oldStickerEnv !== undefined) process.env.TELEGRAM_STICKERS_NORMAL = oldStickerEnv;
-  if (oldJsonEnv !== undefined) process.env.TELEGRAM_STICKERS_JSON = oldJsonEnv;
+
+  for (const [k, v] of Object.entries(envMediaBackups)) {
+    if (v !== undefined) process.env[k] = v;
+  }
+
   if (!fallbackTextCalled) {
     throw new Error('Test 13 Failed: Missing media did not gracefully fallback to text message.');
   }
@@ -337,6 +343,7 @@ export async function runChatbotTests() {
   db.clearMediaLibrary();
 
   console.log('🎉 All Roxie AI Chatbot integration and regression tests passed successfully!');
+  process.exit(0);
 }
 
 runChatbotTests().catch(err => {

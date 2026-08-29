@@ -419,6 +419,26 @@ export class TelegramApi {
   public async getStickerSet(name: string): Promise<{ ok: boolean; result?: { stickers: Array<{ file_id: string; [key: string]: any }> }; description?: string; error_code?: number }> {
     return this.call('getStickerSet', { name });
   }
+
+  public async setMessageReaction(
+    chatId: number | string,
+    messageId: number,
+    reaction?: string | Array<{ type: string; emoji: string }>,
+    isBig?: boolean
+  ): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    let reactionPayload: any[] = [];
+    if (typeof reaction === 'string') {
+      reactionPayload = [{ type: 'emoji', emoji: reaction }];
+    } else if (Array.isArray(reaction)) {
+      reactionPayload = reaction;
+    }
+    return this.call('setMessageReaction', {
+      chat_id: chatId,
+      message_id: messageId,
+      reaction: reactionPayload,
+      is_big: isBig
+    });
+  }
 }
 
 export const telegramApi = new TelegramApi();

@@ -225,6 +225,11 @@ export async function runSmartProtectionTests() {
 }
 
 if (process.argv[1] && process.argv[1].includes('smartProtectionTest')) {
-  runSmartProtectionTests();
+  runSmartProtectionTests().then((success) => {
+    process.exit(success ? 0 : 1);
+  }).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }
 
