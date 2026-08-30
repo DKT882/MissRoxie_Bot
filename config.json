@@ -1,6 +1,6 @@
 {
-  "version": "3.0",
-  "exportedAt": "2026-08-26T00:00:00.000Z",
+  "version": "3.1",
+  "exportedAt": "2026-08-30T00:00:00.000Z",
   "chatId": -1001234567890,
   "groupTitle": "Roxie Enterprise Community",
   "settings": {
@@ -38,14 +38,35 @@
       "text": false,
       "media": false,
       "polls": false,
-      "invites": false
+      "invites": false,
+      "stickers": false,
+      "gifs": false,
+      "videos": false,
+      "audio": false,
+      "voice": false
     },
     "welcomeEnabled": true,
     "welcomeMessage": "Welcome {mention} to {chat_title}! Please read our rules and guidelines.",
     "goodbyeEnabled": false,
     "goodbyeMessage": "Goodbye {mention}, we hope to see you again!",
     "slowModeSeconds": 0,
-    "reportsEnabled": true
+    "reportsEnabled": true,
+    "chatbotEnabled": true,
+    "chatbotMode": "auto",
+    "reactionEnabled": true,
+    "reactionProbability": 0.15,
+    "protectionEnabled": true,
+    "protectionFloodCount": 5,
+    "protectionFloodWindow": 5,
+    "protectionDuplicateLimit": 3,
+    "protectionLinkBurstLimit": 3,
+    "stopSpamEnabled": false,
+    "stopAbusiveEnabled": false,
+    "stopPromotionEnabled": false,
+    "automodEnabled": false,
+    "securityEnabled": false,
+    "joinmode": "normal",
+    "autoAcceptEnabled": false
   },
   "filters": {
     "hello": "Hello! Welcome to our community. How can we help you today?",
@@ -65,5 +86,144 @@
       "name": "admins",
       "content": "Group Administration:\n• Owner: @admin1\n• Senior Moderator: @admin2"
     }
-  ]
+  ],
+  "mediaLibrary": {
+    "stickers": {
+      "cute": [
+        "CAACAgIAAxkBAAEB_cute_sample_sticker_01",
+        "CAACAgIAAxkBAAEB_cute_sample_sticker_02"
+      ],
+      "normal": [
+        "CAACAgIAAxkBAAEB_normal_sample_sticker_01"
+      ],
+      "friendly": [
+        "CAACAgIAAxkBAAEB_friendly_sample_sticker_01"
+      ],
+      "playful": [
+        "CAACAgIAAxkBAAEB_playful_sample_sticker_01"
+      ],
+      "teasing": [
+        "CAACAgIAAxkBAAEB_teasing_sample_sticker_01"
+      ],
+      "sarcastic": [
+        "CAACAgIAAxkBAAEB_sarcastic_sample_sticker_01"
+      ],
+      "caring": [
+        "CAACAgIAAxkBAAEB_caring_sample_sticker_01"
+      ],
+      "loving": [
+        "CAACAgIAAxkBAAEB_loving_sample_sticker_01"
+      ],
+      "romantic": [
+        "CAACAgIAAxkBAAEB_romantic_sample_sticker_01"
+      ],
+      "flirty": [
+        "CAACAgIAAxkBAAEB_flirty_sample_sticker_01"
+      ],
+      "angry": [
+        "CAACAgIAAxkBAAEB_angry_sample_sticker_01"
+      ],
+      "joyful": [
+        "CAACAgIAAxkBAAEB_joyful_sample_sticker_01"
+      ],
+      "happy": [
+        "CAACAgIAAxkBAAEB_happy_sample_sticker_01"
+      ],
+      "excited": [
+        "CAACAgIAAxkBAAEB_excited_sample_sticker_01"
+      ],
+      "fearful": [
+        "CAACAgIAAxkBAAEB_fearful_sample_sticker_01"
+      ],
+      "peaceful": [
+        "CAACAgIAAxkBAAEB_peaceful_sample_sticker_01"
+      ],
+      "calm": [
+        "CAACAgIAAxkBAAEB_calm_sample_sticker_01"
+      ],
+      "gloomy": [
+        "CAACAgIAAxkBAAEB_gloomy_sample_sticker_01"
+      ],
+      "sad": [
+        "CAACAgIAAxkBAAEB_sad_sample_sticker_01"
+      ],
+      "comforting": [
+        "CAACAgIAAxkBAAEB_comforting_sample_sticker_01"
+      ],
+      "anxious": [
+        "CAACAgIAAxkBAAEB_anxious_sample_sticker_01"
+      ],
+      "apathetic": [
+        "CAACAgIAAxkBAAEB_apathetic_sample_sticker_01"
+      ],
+      "moody": [
+        "CAACAgIAAxkBAAEB_moody_sample_sticker_01"
+      ],
+      "grumpy": [
+        "CAACAgIAAxkBAAEB_grumpy_sample_sticker_01"
+      ],
+      "serious": [
+        "CAACAgIAAxkBAAEB_serious_sample_sticker_01"
+      ],
+      "curious": [
+        "CAACAgIAAxkBAAEB_curious_sample_sticker_01"
+      ],
+      "confused": [
+        "CAACAgIAAxkBAAEB_confused_sample_sticker_01"
+      ],
+      "surprised": [
+        "CAACAgIAAxkBAAEB_surprised_sample_sticker_01"
+      ],
+      "embarrassed": [
+        "CAACAgIAAxkBAAEB_embarrassed_sample_sticker_01"
+      ],
+      "jealous": [
+        "CAACAgIAAxkBAAEB_jealous_sample_sticker_01"
+      ],
+      "protective": [
+        "CAACAgIAAxkBAAEB_protective_sample_sticker_01"
+      ],
+      "motivational": [
+        "CAACAgIAAxkBAAEB_motivational_sample_sticker_01"
+      ],
+      "sympathetic": [
+        "CAACAgIAAxkBAAEB_sympathetic_sample_sticker_01"
+      ]
+    },
+    "animations": {
+      "cute": [],
+      "joyful": [],
+      "happy": [],
+      "excited": [],
+      "caring": [],
+      "playful": []
+    },
+    "stickerMetadata": {
+      "CAACAgIAAxkBAAEB_cute_sample_sticker_01": {
+        "packName": "CuteAnimePack",
+        "packTitle": "Cute Anime Pack",
+        "fileId": "CAACAgIAAxkBAAEB_cute_sample_sticker_01",
+        "emoji": "🌸",
+        "mood": "cute",
+        "addedAt": "2026-08-30T00:00:00.000Z"
+      },
+      "CAACAgIAAxkBAAEB_cute_sample_sticker_02": {
+        "packName": "CuteAnimePack",
+        "packTitle": "Cute Anime Pack",
+        "fileId": "CAACAgIAAxkBAAEB_cute_sample_sticker_02",
+        "emoji": "✨",
+        "mood": "cute",
+        "addedAt": "2026-08-30T00:00:00.000Z"
+      },
+      "CAACAgIAAxkBAAEB_normal_sample_sticker_01": {
+        "packName": "EverydayMoods",
+        "packTitle": "Everyday Moods",
+        "fileId": "CAACAgIAAxkBAAEB_normal_sample_sticker_01",
+        "emoji": "🙂",
+        "mood": "normal",
+        "addedAt": "2026-08-30T00:00:00.000Z"
+      }
+    }
+  }
 }
+

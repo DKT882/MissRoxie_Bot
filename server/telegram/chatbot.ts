@@ -3,6 +3,11 @@ import { telegramApi } from './api.js';
 import { db, isSensitiveData } from '../db/storage.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
+import {
+  DEFAULT_STICKERS_BY_MOOD,
+  MOOD_FALLBACK_MATRIX,
+  getDefaultStickersForMood
+} from './defaultStickers.js';
 
 export type RoxieMood =
   | 'normal'
@@ -73,7 +78,7 @@ export interface ChatbotDecision {
   userId: number;
   personality: string;
   mood: string;
-  responseType: 'text' | 'sticker' | 'animation' | 'none';
+  responseType: 'text' | 'sticker' | 'animation' | 'text_plus_sticker' | 'none';
   content?: string;
   mediaFileId?: string;
   replyToMessageId: number;
@@ -542,25 +547,38 @@ export class ChatbotService {
     return true;
   }
 
-  // Retrieve registered stickers from DB media library and environment variables
+  // Retrieve registered stickers from default library, DB media library, and environment variables
   public static getStickersByMood(): Record<string, string[]> {
     const stickers: Record<string, string[]> = {};
+
+    // 1. Seed with built-in verified default sticker library
+    for (const [mood, list] of Object.entries(DEFAULT_STICKERS_BY_MOOD)) {
+      stickers[mood.toLowerCase()] = [...list];
+    }
+
+    // 2. Merge global DB media library
     const dbLib = db.getMediaLibrary();
     if (dbLib && dbLib.stickers) {
       for (const [mood, list] of Object.entries(dbLib.stickers)) {
         if (Array.isArray(list) && list.length > 0) {
-          stickers[mood.toLowerCase()] = [...list];
+          const mKey = mood.toLowerCase();
+          const existing = stickers[mKey] || [];
+          const combined = Array.from(new Set([...existing, ...list]));
+          stickers[mKey] = combined;
         }
       }
     }
+
+    // 3. Merge TELEGRAM_STICKERS_JSON if set
     if (process.env.TELEGRAM_STICKERS_JSON) {
       try {
         const parsed = JSON.parse(process.env.TELEGRAM_STICKERS_JSON);
         if (typeof parsed === 'object' && parsed !== null) {
           for (const [m, val] of Object.entries(parsed)) {
             const moodKey = m.toLowerCase();
-            if (!stickers[moodKey] || stickers[moodKey].length === 0) {
-              if (Array.isArray(val)) stickers[moodKey] = val as string[];
+            if (Array.isArray(val)) {
+              const existing = stickers[moodKey] || [];
+              stickers[moodKey] = Array.from(new Set([...existing, ...(val as string[])]));
             }
           }
         }
@@ -568,6 +586,8 @@ export class ChatbotService {
         console.warn('[STICKER-CONFIG] Failed to parse TELEGRAM_STICKERS_JSON:', e);
       }
     }
+
+    // 4. Merge individual TELEGRAM_STICKER_* env variables
     const moods = [
       'normal', 'friendly', 'cute', 'playful', 'teasing', 'roasting', 'sarcastic',
       'caring', 'loving', 'romantic', 'flirty', 'seductive', 'angry', 'joyful',
@@ -579,8 +599,11 @@ export class ChatbotService {
     for (const mood of moods) {
       const sanitized = mood.toUpperCase().replace('/', '_');
       const val = process.env[`TELEGRAM_STICKER_${sanitized}`] || process.env[`TELEGRAM_STICKERS_${sanitized}`];
-      if (val && (!stickers[mood] || stickers[mood].length === 0)) {
-        stickers[mood] = val.split(',').map(s => s.trim()).filter(Boolean);
+      if (val) {
+        const mKey = mood.toLowerCase();
+        const incoming = val.split(',').map(s => s.trim()).filter(Boolean);
+        const existing = stickers[mKey] || [];
+        stickers[mKey] = Array.from(new Set([...existing, ...incoming]));
       }
     }
     return stickers;
@@ -944,47 +967,101 @@ export class ChatbotService {
     return 'normal';
   }
 
-  public static selectSticker(mood: string): string | null {
-    const stickersMap = this.getStickersByMood();
-    const normalizedMood = mood.toLowerCase().replace('sad/comforting', 'sad');
-    
-    let pool = (stickersMap[normalizedMood] || stickersMap['normal'] || stickersMap['default'] || []).filter(id => this.isValidFileId(id));
-    if (!pool || pool.length === 0) {
-      for (const otherMood of Object.keys(stickersMap)) {
-        const validList = (stickersMap[otherMood] || []).filter(id => this.isValidFileId(id));
-        if (validList.length > 0) {
-          pool = validList;
-          break;
+  public static selectSticker(mood: string, chatId?: number): string | null {
+    const normalizedMood = mood.toLowerCase().replace('sad/comforting', 'sad').trim();
+    let candidates: string[] = [];
+
+    // 1. Check group-scoped custom stickers first
+    if (chatId) {
+      const groupLib = db.getMediaLibrary(chatId);
+      if (groupLib && groupLib.stickers) {
+        // Direct match in group library
+        const directList = (groupLib.stickers[normalizedMood] || []).filter(id => this.isValidFileId(id));
+        if (directList.length > 0) {
+          candidates = directList;
+        } else {
+          // Check compatible fallback moods in group library
+          const fallbacks = MOOD_FALLBACK_MATRIX[normalizedMood] || ['normal'];
+          for (const fbMood of fallbacks) {
+            const fbList = (groupLib.stickers[fbMood] || []).filter(id => this.isValidFileId(id));
+            if (fbList.length > 0) {
+              candidates = fbList;
+              break;
+            }
+          }
         }
       }
     }
-    if (!pool || pool.length === 0) return null;
-    const available = pool.filter(id => !this.recentStickers.has(id));
-    const targetPool = available.length > 0 ? available : pool;
+
+    // 2. If no group custom stickers found, use built-in verified default sticker library
+    if (candidates.length === 0) {
+      const defaultList = getDefaultStickersForMood(normalizedMood).filter(id => this.isValidFileId(id));
+      if (defaultList.length > 0) {
+        candidates = defaultList;
+      }
+    }
+
+    // 3. If still empty, fall back to global stickers map
+    if (candidates.length === 0) {
+      const stickersMap = this.getStickersByMood();
+      candidates = (stickersMap[normalizedMood] || stickersMap['normal'] || []).filter(id => this.isValidFileId(id));
+    }
+
+    if (!candidates || candidates.length === 0) return null;
+
+    // Deduplicate candidate IDs
+    const uniquePool = Array.from(new Set(candidates));
+
+    // Avoid recently sent stickers for freshness
+    const available = uniquePool.filter(id => !this.recentStickers.has(id));
+    const targetPool = available.length > 0 ? available : uniquePool;
     if (targetPool.length === 0) return null;
+
     const selected = targetPool[Math.floor(Math.random() * targetPool.length)];
     this.recentStickers.add(selected);
-    if (this.recentStickers.size > 10) {
+    if (this.recentStickers.size > 15) {
       const first = this.recentStickers.values().next().value;
       if (first) this.recentStickers.delete(first);
     }
     return selected;
   }
 
-  public static selectAnimation(mood: string): string | null {
-    const animationsMap = this.getAnimationsByMood();
+  public static selectAnimation(mood: string, chatId?: number): string | null {
     const normalizedMood = mood.toLowerCase().replace('sad/comforting', 'sad');
 
-    let pool = (animationsMap[normalizedMood] || animationsMap['normal'] || animationsMap['default'] || []).filter(id => this.isValidFileId(id));
-    if (!pool || pool.length === 0) {
-      for (const otherMood of Object.keys(animationsMap)) {
-        const validList = (animationsMap[otherMood] || []).filter(id => this.isValidFileId(id));
-        if (validList.length > 0) {
-          pool = validList;
-          break;
+    // 1. Try group-scoped media library if chatId provided
+    let pool: string[] = [];
+    if (chatId) {
+      const groupLib = db.getMediaLibrary(chatId);
+      if (groupLib && groupLib.animations) {
+        pool = (groupLib.animations[normalizedMood] || groupLib.animations['normal'] || groupLib.animations['default'] || []).filter(id => this.isValidFileId(id));
+        if (!pool || pool.length === 0) {
+          for (const otherMood of Object.keys(groupLib.animations)) {
+            const validList = (groupLib.animations[otherMood] || []).filter(id => this.isValidFileId(id));
+            if (validList.length > 0) {
+              pool = validList;
+              break;
+            }
+          }
         }
       }
     }
+
+    // 2. Fallback to global/env if group pool is empty
+    if (!pool || pool.length === 0) {
+      const animationsMap = this.getAnimationsByMood();
+      pool = (animationsMap[normalizedMood] || animationsMap['normal'] || animationsMap['default'] || []).filter(id => this.isValidFileId(id));
+      if (!pool || pool.length === 0) {
+        for (const otherMood of Object.keys(animationsMap)) {
+          const validList = (animationsMap[otherMood] || []).filter(id => this.isValidFileId(id));
+          if (validList.length > 0) {
+            pool = validList;
+            break;
+          }
+        }
+      }
+    }
+
     if (!pool || pool.length === 0) return null;
     const available = pool.filter(id => !this.recentAnimations.has(id));
     const targetPool = available.length > 0 ? available : pool;
@@ -1134,7 +1211,7 @@ export class ChatbotService {
       const targetMediaMood = mediaIntent.requestedMood || mood;
 
       if (mediaIntent.mediaType === 'sticker') {
-        const stickerId = this.selectSticker(targetMediaMood);
+        const stickerId = this.selectSticker(targetMediaMood, chatId);
         if (stickerId && this.isValidFileId(stickerId)) {
           return {
             requestId,
@@ -1162,7 +1239,7 @@ export class ChatbotService {
           };
         }
       } else if (mediaIntent.mediaType === 'animation') {
-        const animId = this.selectAnimation(targetMediaMood);
+        const animId = this.selectAnimation(targetMediaMood, chatId);
         if (animId && this.isValidFileId(animId)) {
           return {
             requestId,
@@ -1222,6 +1299,14 @@ export class ChatbotService {
       ? `\nStored User Facts about this user in this chat:\n- ${userMemories.join('\n- ')}` 
       : '';
 
+    const lustModeContext = (settings?.lustMode)
+      ? `\nLUST / SPICY PERSONALITY MODIFIER ACTIVE:
+- If the user's message is playful, flirty, romantic, or initiates banter, adopt a mildly suggestive, cheeky, and teasing tone.
+- Add playful banter, charming comebacks, and subtle spicy intrigue.
+- SAFETY RULE: STRICTLY DO NOT generate explicit sexual/pornographic content or vulgarity.
+- If the user is sad, distressed, serious, asking for help, or talking about serious topics, IGNORE lust mode and remain empathetic, supportive, and respectful.`
+      : '';
+
     const composedSystemPrompt = `${BASE_PERSONALITY}
 
 CURRENT ACTIVE MOOD: [${mood.toUpperCase()}]
@@ -1233,6 +1318,7 @@ Emoji Tendency: ${moodConfig.emojiTendency}
 Conversation Extension: ${moodConfig.conversationExtension}
 Forbidden Behavior in this Mood: ${moodConfig.forbidden}
 ${memoryContext}
+${lustModeContext}
 
 STRICT CONVERSATION RULES:
 1. LATEST MESSAGE PRIORITY: Answer the latest user message based primarily on what the user just said. Use previous messages only to understand context, intent, references, tone, and continuity. If old context conflicts with the latest message: LATEST USER MESSAGE WINS. Never revive an old topic unless the latest message clearly refers to it.
@@ -1347,6 +1433,44 @@ Reply naturally to the latest user message while strictly continuing the existin
 
     const cleanedText = this.cleanAiText(replyContent) || 'Acha!';
 
+    // Automatic Natural Sticker Decision Engine:
+    // When a relevant sticker exists matching current mood/group library:
+    // ~65% Text Only
+    // ~20% Text + Sticker
+    // ~15% Sticker Only
+    const candidateSticker = this.selectSticker(mood, chatId);
+    if (candidateSticker) {
+      const roll = Math.random();
+      if (roll < 0.20) {
+        return {
+          requestId,
+          chatId,
+          messageId: msgId,
+          userId,
+          personality: 'Psychologist-style',
+          mood,
+          responseType: 'text_plus_sticker',
+          content: cleanedText,
+          mediaFileId: candidateSticker,
+          replyToMessageId: msgId,
+          modelUsed
+        };
+      } else if (roll < 0.35) {
+        return {
+          requestId,
+          chatId,
+          messageId: msgId,
+          userId,
+          personality: 'Psychologist-style',
+          mood,
+          responseType: 'sticker',
+          mediaFileId: candidateSticker,
+          replyToMessageId: msgId,
+          modelUsed
+        };
+      }
+    }
+
     return {
       requestId,
       chatId,
@@ -1443,6 +1567,22 @@ Core Rules:
     if (!conv) {
       conv = { messages: [], lastActivity: Date.now() };
       this.conversations.set(userKey, conv);
+    }
+
+    if (decision.responseType === 'text_plus_sticker' && decision.content && decision.mediaFileId) {
+      const textRes = await telegramApi.sendMessage(decision.chatId, decision.content, {
+        reply_to_message_id: decision.replyToMessageId
+      });
+      const stickerRes = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
+        reply_to_message_id: decision.replyToMessageId
+      });
+      if (textRes.ok || (textRes as any).message_id || stickerRes.ok) {
+        console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text_plus_sticker', replyToMessageId: decision.replyToMessageId })}`);
+        conv.messages.push({ role: 'assistant', content: `${decision.content} [Sent sticker]` });
+        this.trimContext(conv);
+        return true;
+      }
+      return false;
     }
 
     if (decision.responseType === 'sticker' && decision.mediaFileId) {

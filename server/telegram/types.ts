@@ -311,6 +311,7 @@ export interface GroupSettings {
   // AI Chatbot & Smart Reactions
   chatbotEnabled?: boolean; // default true
   chatbotMode?: string; // e.g. 'auto' | 'normal' | 'friendly' | 'playful' | 'teasing' | 'sarcastic' | 'serious' | 'cute' | 'romantic' | 'flirty' | string
+  lustMode?: boolean; // default false (mildly suggestive/spicy teasing personality modifier)
   reactionEnabled?: boolean; // default true
   reactionProbability?: number; // default 0.15 (15%)
   // Phase 17 Smart User Protection

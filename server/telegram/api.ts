@@ -416,7 +416,7 @@ export class TelegramApi {
     });
   }
 
-  public async getStickerSet(name: string): Promise<{ ok: boolean; result?: { stickers: Array<{ file_id: string; [key: string]: any }> }; description?: string; error_code?: number }> {
+  public async getStickerSet(name: string): Promise<{ ok: boolean; result?: { name?: string; title?: string; stickers: Array<{ file_id: string; emoji?: string; [key: string]: any }> }; description?: string; error_code?: number }> {
     return this.call('getStickerSet', { name });
   }
 

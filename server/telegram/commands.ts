@@ -123,10 +123,11 @@ export class CommandHandler {
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse', '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/automation', '/setrules', '/clearrules', '/chatbot',
     '/protection', '/roxie', '/roxiemode', '/roxiereaction', '/reaction',
+    '/lustmod', '/lustmode',
     '/clearmemory',
     '/say', '/schedule', '/listschedules', '/deleteschedule',
     '/exportconfig', '/importconfig', '/status',
-    '/addstickerpack', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
+    '/addstickerpack', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
     '/teststicker'
   ]);
 
@@ -142,6 +143,7 @@ export class CommandHandler {
     '/setmod', '/delmod',
     '/security', '/antiraid', '/captcha', '/autoaccept', '/chatbot',
     '/protection', '/roxie', '/roxiemode', '/roxiereaction', '/reaction',
+    '/lustmod', '/lustmode',
     '/clearmemory',
     '/automation', '/settings', '/setrules', '/clearrules',
     '/flood', '/setflood', '/antiflood',
@@ -160,7 +162,7 @@ export class CommandHandler {
     '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/note', '/delnote',
     '/exportconfig', '/importconfig',
-    '/addstickerpack', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
+    '/addstickerpack', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
     '/teststicker'
   ]);
 
@@ -330,6 +332,9 @@ export class CommandHandler {
         return true;
       case '/addstickerpack':
         await this.handleAddStickerPack(ctx);
+        return true;
+      case '/addbulksticker':
+        await this.handleAddBulkSticker(ctx);
         return true;
       case '/addsticker':
         await this.handleAddSticker(ctx);
@@ -566,6 +571,10 @@ export class CommandHandler {
       case '/roxiereaction':
       case '/reaction':
         await this.handleRoxieReaction(ctx);
+        return true;
+      case '/lustmod':
+      case '/lustmode':
+        await this.handleLustMode(ctx);
         return true;
       default:
         return false;
@@ -3576,12 +3585,15 @@ export class CommandHandler {
         '🔓 <b>Sticker Protection is now OFF.</b>\nAll members may send stickers.',
         { reply_to_message_id: ctx.message.message_id }
       );
-    } else {
+    } else if (arg === 'status') {
       await telegramApi.sendMessage(
         ctx.chatId,
         `ℹ️ <b>Sticker Protection Status:</b> ${currentSettings.stickerProtection ? '🟢 ON' : '🔴 OFF'}\n\nUsage: <code>/stickers on</code> or <code>/stickers off</code>`,
         { reply_to_message_id: ctx.message.message_id }
       );
+    } else {
+      // If called as /stickers or /stickers [page], show group sticker pack summary
+      await this.handleListStickers(ctx);
     }
   }
 
@@ -5762,49 +5774,105 @@ export class CommandHandler {
     moodInput: string | undefined,
     actorId: number,
     chatId: number,
-    replyToMessageId?: number
-  ): Promise<boolean> {
+    replyToMessageId?: number,
+    silent: boolean = false
+  ): Promise<{
+    success: boolean;
+    packName: string;
+    packTitle: string;
+    totalCount: number;
+    addedCount: number;
+    existedCount: number;
+    mood: string;
+    error?: string;
+  }> {
     const rawMood = (moodInput || 'normal').toLowerCase().trim();
     if (!ROXIE_SUPPORTED_MOODS.includes(rawMood as any)) {
       const moodList = ROXIE_SUPPORTED_MOODS.map(m => `<code>${m}</code>`).join(', ');
-      await telegramApi.sendMessage(
-        chatId,
-        `⚠️ <b>Invalid mood category:</b> <code>${escapeHtml(rawMood)}</code>\n\n<b>Valid moods:</b>\n${moodList}`,
-        { reply_to_message_id: replyToMessageId }
-      );
-      return false;
+      if (!silent) {
+        await telegramApi.sendMessage(
+          chatId,
+          `⚠️ <b>Invalid mood category:</b> <code>${escapeHtml(rawMood)}</code>\n\n<b>Valid moods:</b>\n${moodList}`,
+          { reply_to_message_id: replyToMessageId }
+        );
+      }
+      return {
+        success: false,
+        packName: setName,
+        packTitle: setName,
+        totalCount: 0,
+        addedCount: 0,
+        existedCount: 0,
+        mood: rawMood,
+        error: `Invalid mood category: ${rawMood}`
+      };
     }
     const mood = rawMood;
 
-    const cleanPackName = setName.replace(/^https:\/\/t\.me\/addstickers\//i, '').trim();
+    const cleanPackName = setName.replace(/^https:\/\/t\.me\/addstickers\//i, '').replace(/[<>]/g, '').trim();
     if (!cleanPackName) {
-      await telegramApi.sendMessage(
-        chatId,
-        `❌ Couldn't detect the sticker pack.`,
-        { reply_to_message_id: replyToMessageId }
-      );
-      return false;
+      if (!silent) {
+        await telegramApi.sendMessage(
+          chatId,
+          `❌ Couldn't detect the sticker pack.`,
+          { reply_to_message_id: replyToMessageId }
+        );
+      }
+      return {
+        success: false,
+        packName: setName,
+        packTitle: setName,
+        totalCount: 0,
+        addedCount: 0,
+        existedCount: 0,
+        mood,
+        error: "Couldn't detect the sticker pack."
+      };
     }
 
     let res;
     try {
       res = await telegramApi.getStickerSet(cleanPackName);
     } catch (err: any) {
-      await telegramApi.sendMessage(
-        chatId,
-        `❌ Telegram API error while fetching sticker pack: ${escapeHtml(err?.message || 'Unknown error')}`,
-        { reply_to_message_id: replyToMessageId }
-      );
-      return false;
+      const errMessage = err?.message || 'Network error';
+      if (!silent) {
+        await telegramApi.sendMessage(
+          chatId,
+          `❌ Telegram API error while fetching sticker pack: ${escapeHtml(errMessage)}`,
+          { reply_to_message_id: replyToMessageId }
+        );
+      }
+      return {
+        success: false,
+        packName: cleanPackName,
+        packTitle: cleanPackName,
+        totalCount: 0,
+        addedCount: 0,
+        existedCount: 0,
+        mood,
+        error: errMessage
+      };
     }
 
     if (!res || !res.ok || !res.result) {
-      await telegramApi.sendMessage(
-        chatId,
-        `❌ Couldn't detect or load sticker pack <b>${escapeHtml(cleanPackName)}</b>: ${escapeHtml(res?.description || 'Sticker pack not found')}`,
-        { reply_to_message_id: replyToMessageId }
-      );
-      return false;
+      const errMsg = res?.description || 'Sticker pack not found';
+      if (!silent) {
+        await telegramApi.sendMessage(
+          chatId,
+          `❌ Couldn't detect or load sticker pack <b>${escapeHtml(cleanPackName)}</b>: ${escapeHtml(errMsg)}`,
+          { reply_to_message_id: replyToMessageId }
+        );
+      }
+      return {
+        success: false,
+        packName: cleanPackName,
+        packTitle: cleanPackName,
+        totalCount: 0,
+        addedCount: 0,
+        existedCount: 0,
+        mood,
+        error: errMsg
+      };
     }
 
     const pack = res.result;
@@ -5813,12 +5881,23 @@ export class CommandHandler {
     const rawStickers = Array.isArray(pack.stickers) ? pack.stickers : [];
 
     if (rawStickers.length === 0) {
-      await telegramApi.sendMessage(
-        chatId,
-        `❌ Sticker pack <b>${escapeHtml(packTitle)}</b> contains no stickers.`,
-        { reply_to_message_id: replyToMessageId }
-      );
-      return false;
+      if (!silent) {
+        await telegramApi.sendMessage(
+          chatId,
+          `❌ Sticker pack <b>${escapeHtml(packTitle)}</b> contains no stickers.`,
+          { reply_to_message_id: replyToMessageId }
+        );
+      }
+      return {
+        success: false,
+        packName,
+        packTitle,
+        totalCount: 0,
+        addedCount: 0,
+        existedCount: 0,
+        mood,
+        error: 'Sticker pack contains no stickers'
+      };
     }
 
     let addedCount = 0;
@@ -5838,7 +5917,7 @@ export class CommandHandler {
         mood,
         addedBy: actorId,
         addedAt: nowIso
-      });
+      }, chatId);
       if (added) {
         addedCount++;
       } else {
@@ -5846,28 +5925,158 @@ export class CommandHandler {
       }
     }
 
-    if (addedCount === 0 && existedCount === 0) {
+    const totalValid = addedCount + existedCount;
+
+    if (totalValid === 0) {
+      if (!silent) {
+        await telegramApi.sendMessage(
+          chatId,
+          `❌ No valid sticker file IDs found in pack <b>${escapeHtml(packTitle)}</b>.`,
+          { reply_to_message_id: replyToMessageId }
+        );
+      }
+      return {
+        success: false,
+        packName,
+        packTitle,
+        totalCount: 0,
+        addedCount: 0,
+        existedCount: 0,
+        mood,
+        error: 'No valid sticker file IDs found in pack'
+      };
+    }
+
+    if (!silent) {
+      let messageText = '';
+      if (existedCount === 0) {
+        messageText = `✅ <b>Imported ${addedCount} stickers from "${escapeHtml(packTitle)}"</b>\n` +
+          `🎭 <b>Mood:</b> <code>${escapeHtml(mood)}</code>\n` +
+          `♻️ <b>Already existed:</b> 0\n` +
+          `🆕 <b>New:</b> ${addedCount}`;
+      } else if (addedCount === 0) {
+        messageText = `ℹ️ <b>Imported 0 new stickers from "${escapeHtml(packTitle)}"</b>\n` +
+          `🎭 <b>Mood:</b> <code>${escapeHtml(mood)}</code>\n` +
+          `♻️ <b>Already existed:</b> ${existedCount}\n` +
+          `🆕 <b>New:</b> 0`;
+      } else {
+        messageText = `✅ <b>Imported ${totalValid} stickers from "${escapeHtml(packTitle)}"</b>\n` +
+          `🎭 <b>Mood:</b> <code>${escapeHtml(mood)}</code>\n` +
+          `♻️ <b>Already existed:</b> ${existedCount}\n` +
+          `🆕 <b>New:</b> ${addedCount}`;
+      }
+
+      await telegramApi.sendMessage(chatId, messageText, {
+        reply_to_message_id: replyToMessageId
+      });
+    }
+
+    return {
+      success: true,
+      packName,
+      packTitle,
+      totalCount: totalValid,
+      addedCount,
+      existedCount,
+      mood
+    };
+  }
+
+  private static async handleAddBulkSticker(ctx: CommandContext) {
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⛔ You must be an administrator or moderator to manage bot stickers.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const fullText = (ctx.args.join(' ') || (ctx.message.reply_to_message?.text || '')).trim();
+    if (!fullText) {
       await telegramApi.sendMessage(
-        chatId,
-        `❌ No valid sticker file IDs found in pack <b>${escapeHtml(packTitle)}</b>.`,
-        { reply_to_message_id: replyToMessageId }
+        ctx.chatId,
+        `⚠️ <b>Usage:</b> <code>/addbulksticker &lt;pack_link1&gt; &lt;pack_link2&gt; ... [mood]</code>\n\n` +
+        `Paste multiple Telegram sticker pack URLs or names (space or line separated).\n` +
+        `<i>Example:</i> <code>/addbulksticker https://t.me/addstickers/Animals https://t.me/addstickers/Anime cute</code>`,
+        { reply_to_message_id: ctx.message.message_id }
       );
-      return false;
+      return;
     }
 
-    let messageText = '';
-    if (existedCount === 0) {
-      messageText = `✅ Added <b>${addedCount}</b> stickers from <b>${escapeHtml(packTitle)}</b> to <code>${escapeHtml(mood)}</code>.`;
-    } else if (addedCount === 0) {
-      messageText = `ℹ️ All <b>${existedCount}</b> stickers from <b>${escapeHtml(packTitle)}</b> already existed in <code>${escapeHtml(mood)}</code>.`;
-    } else {
-      messageText = `✅ Added <b>${addedCount}</b> new stickers from <b>${escapeHtml(packTitle)}</b> to <code>${escapeHtml(mood)}</code>. <b>${existedCount}</b> already existed.`;
+    // Check if the last token is a valid mood category
+    const tokens = fullText.split(/\s+/).filter(Boolean);
+    let targetMood = 'normal';
+    const lastToken = tokens[tokens.length - 1]?.toLowerCase();
+    if (lastToken && ROXIE_SUPPORTED_MOODS.includes(lastToken as any) && tokens.length > 1) {
+      targetMood = lastToken;
+      tokens.pop();
     }
 
-    await telegramApi.sendMessage(chatId, messageText, {
-      reply_to_message_id: replyToMessageId
+    // Extract pack names (handling URLs and raw names)
+    const packNames: string[] = [];
+    for (const token of tokens) {
+      const clean = token.replace(/^https:\/\/t\.me\/addstickers\//i, '').replace(/[<>]/g, '').trim();
+      if (clean && !packNames.includes(clean)) {
+        packNames.push(clean);
+      }
+    }
+
+    if (packNames.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `❌ No valid sticker pack names or URLs found in your input.`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `⏳ <b>Processing Bulk Sticker Import...</b>\n` +
+      `• Total packs detected: <b>${packNames.length}</b>\n` +
+      `• Target mood category: <code>${targetMood}</code>\n` +
+      `<i>Fetching sticker metadata from Telegram API...</i>`,
+      { reply_to_message_id: ctx.message.message_id }
+    );
+
+    const results: Array<{ pack: string; title: string; added: number; existed: number; error?: string }> = [];
+    let totalAdded = 0;
+    let totalExisted = 0;
+
+    for (const packName of packNames) {
+      const res = await this.importStickerPack(packName, targetMood, actor.actorUserId, ctx.chatId, undefined, true);
+      if (res.success) {
+        totalAdded += res.addedCount;
+        totalExisted += res.existedCount;
+        results.push({ pack: res.packName, title: res.packTitle, added: res.addedCount, existed: res.existedCount });
+      } else {
+        results.push({ pack: packName, title: packName, added: 0, existed: 0, error: res.error || 'Failed to import' });
+      }
+    }
+
+    // Build summary response
+    let summaryText = `📦 <b>Bulk Sticker Import Summary</b>\n\n`;
+    summaryText += `• <b>Mood Category:</b> <code>${escapeHtml(targetMood)}</code>\n`;
+    summaryText += `• <b>Packs Processed:</b> ${results.length}\n`;
+    summaryText += `• <b>Total New Stickers Added:</b> <b>${totalAdded}</b>\n`;
+    summaryText += `• <b>Total Already Existed:</b> ${totalExisted}\n\n`;
+    summaryText += `<b>Breakdown:</b>\n`;
+
+    for (const r of results) {
+      if (r.error) {
+        summaryText += `❌ <b>${escapeHtml(r.title)}</b> — <i>${escapeHtml(r.error)}</i>\n`;
+      } else {
+        summaryText += `✅ <b>${escapeHtml(r.title)}</b> — +${r.added} added (${r.existed} existing)\n`;
+      }
+    }
+
+    const groupSummary = db.getGroupPacksSummary(ctx.chatId, 1, 10);
+    summaryText += `\n📊 <b>Group Sticker Status:</b> ${groupSummary.totalPacks} packs (${groupSummary.totalStickers} stickers total)\n`;
+    summaryText += `<i>Use <code>/stickers</code> to view the complete group media library.</i>`;
+
+    await telegramApi.sendMessage(ctx.chatId, summaryText, {
+      reply_to_message_id: ctx.message.message_id
     });
-    return true;
   }
 
   private static async handleAddStickerPack(ctx: CommandContext) {
@@ -5879,13 +6088,67 @@ export class CommandHandler {
       return;
     }
 
+    const reply = ctx.message.reply_to_message;
     const args = ctx.args || [];
+
+    // Case 1: Replying to a message
+    if (reply) {
+      if (reply.sticker) {
+        const sticker = reply.sticker;
+        const fileId = sticker.file_id;
+        if (!fileId || typeof fileId !== 'string' || !fileId.trim()) {
+          await telegramApi.sendMessage(ctx.chatId, '❌ Invalid sticker file ID in replied message.', {
+            reply_to_message_id: ctx.message.message_id
+          });
+          return;
+        }
+
+        const setName = sticker.set_name;
+        if (!setName || !setName.trim()) {
+          await telegramApi.sendMessage(ctx.chatId, '❌ This sticker does not belong to a Telegram sticker pack.', {
+            reply_to_message_id: ctx.message.message_id
+          });
+          return;
+        }
+
+        const mood = (args[0] || 'normal').toLowerCase().trim();
+        if (!ROXIE_SUPPORTED_MOODS.includes(mood as any)) {
+          const moodList = ROXIE_SUPPORTED_MOODS.map(m => `<code>${m}</code>`).join(', ');
+          await telegramApi.sendMessage(
+            ctx.chatId,
+            `⚠️ <b>Invalid mood category:</b> <code>${escapeHtml(mood)}</code>\n\n<b>Valid moods:</b>\n${moodList}`,
+            { reply_to_message_id: ctx.message.message_id }
+          );
+          return;
+        }
+
+        await this.importStickerPack(setName, mood, actor.actorUserId, ctx.chatId, ctx.message.message_id);
+        return;
+      } else {
+        // Replied to a non-sticker message (e.g., text, photo, animation)
+        // If user didn't explicitly pass a pack name, return helpful error
+        const isExplicitPack = args.length >= 2 || (args.length === 1 && !ROXIE_SUPPORTED_MOODS.includes(args[0].toLowerCase() as any));
+        if (!isExplicitPack) {
+          await telegramApi.sendMessage(
+            ctx.chatId,
+            '⚠️ The replied message is not a Telegram sticker. Please reply to a sticker with <code>/addstickerpack [mood]</code> or provide a sticker pack name.',
+            { reply_to_message_id: ctx.message.message_id }
+          );
+          return;
+        }
+      }
+    }
+
+    // Case 2: Without replying to a sticker (or with explicit pack name)
     if (args.length === 0) {
-      await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/addstickerpack &lt;pack_name&gt; [mood]</code> (e.g. <code>/addstickerpack Animals cute</code>)', {
-        reply_to_message_id: ctx.message.message_id
-      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '⚠️ <b>Usage:</b>\n• Reply to any sticker: <code>/addstickerpack [mood]</code>\n• Direct: <code>/addstickerpack &lt;pack_name&gt; [mood]</code>\n<i>Example:</i> <code>/addstickerpack Animals cute</code>',
+        { reply_to_message_id: ctx.message.message_id }
+      );
       return;
     }
+
     const packName = args[0].replace(/^https:\/\/t\.me\/addstickers\//i, '').trim();
     const mood = (args[1] || 'normal').toLowerCase().trim();
 
@@ -5932,7 +6195,7 @@ export class CommandHandler {
           mood,
           addedBy: actor.actorUserId,
           addedAt: new Date().toISOString()
-        });
+        }, ctx.chatId);
         if (added) {
           await telegramApi.sendMessage(ctx.chatId, `✅ Added standalone sticker to <code>${escapeHtml(mood)}</code>.`, {
             reply_to_message_id: ctx.message.message_id
@@ -5977,7 +6240,7 @@ export class CommandHandler {
       return;
     }
     const mood = (ctx.args?.[0] || 'normal').toLowerCase();
-    db.addAnimationToLibrary(mood, fileId);
+    db.addAnimationToLibrary(mood, fileId, ctx.chatId);
     await telegramApi.sendMessage(ctx.chatId, `✅ GIF/animation added successfully to mood category <code>${escapeHtml(mood)}</code>!\nID: <code>${fileId}</code>`, {
       reply_to_message_id: ctx.message.message_id
     });
@@ -5992,32 +6255,56 @@ export class CommandHandler {
       return;
     }
 
-    const lib = db.getMediaLibrary();
-    let text = '🎨 <b>Roxie Telegram Media Library</b>\n\n';
-    
-    text += '<b>Stickers by Mood:</b>\n';
-    const stickerMoods = Object.keys(lib.stickers || {});
-    if (stickerMoods.length === 0) {
-      text += '  <i>No custom stickers added yet (using env fallback if configured).</i>\n';
-    } else {
-      for (const m of stickerMoods) {
-        const count = lib.stickers[m]?.length || 0;
-        text += `• <b>${m}</b>: ${count} sticker(s)\n`;
+    const rawPage = ctx.args?.[0];
+    const pageNum = rawPage && /^\d+$/.test(rawPage) ? parseInt(rawPage, 10) : 1;
+    const summary = db.getGroupPacksSummary(ctx.chatId, pageNum, 6);
+    const lib = db.getMediaLibrary(ctx.chatId);
+
+    let text = `🎭 <b>Roxie Sticker Library</b>\n\n`;
+    text += `<b>Default:</b> ${summary.defaultStickersCount}\n`;
+    text += `<b>Custom:</b> ${summary.customStickersCount}\n`;
+    text += `<b>Total:</b> ${summary.totalStickers}\n`;
+    text += `<b>Total Packs:</b> ${summary.totalPacks} (${summary.totalDefaultPacks} default + ${summary.totalCustomPacks} custom)\n\n`;
+
+    text += `<b>Mood:</b>\n`;
+    const moodEntries = Object.entries(summary.moodCounts);
+    for (const [m, count] of moodEntries) {
+      const capMood = m.charAt(0).toUpperCase() + m.slice(1);
+      const customCount = summary.customMoodCounts[m] || 0;
+      if (customCount > 0) {
+        text += `${capMood}: ${count} (${customCount} custom)\n`;
+      } else {
+        text += `${capMood}: ${count}\n`;
       }
     }
 
-    text += '\n<b>GIFs/Animations by Mood:</b>\n';
     const animMoods = Object.keys(lib.animations || {});
-    if (animMoods.length === 0) {
-      text += '  <i>No custom GIFs added yet (using env fallback if configured).</i>\n';
-    } else {
+    if (animMoods.length > 0) {
+      text += `\n<b>GIFs/Animations:</b>\n`;
       for (const m of animMoods) {
         const count = lib.animations[m]?.length || 0;
-        text += `• <b>${m}</b>: ${count} animation(s)\n`;
+        text += `• <b>${escapeHtml(m)}</b>: ${count} animation(s)\n`;
       }
     }
 
-    text += '\n<i>Use /addstickerpack, /addsticker, or /addgif to add more. Use /removesticker [file_id] (or reply to media) to remove items.</i>';
+    if (summary.packs.length > 0) {
+      text += `\n<b>Custom Sticker Packs (Page ${summary.page}/${summary.totalPages}):</b>\n`;
+      for (const p of summary.packs) {
+        text += `• <b>${escapeHtml(p.title)}</b> (<code>${escapeHtml(p.name)}</code>) — ${p.count} sticker(s) [${p.moods.join(', ')}]\n`;
+      }
+      if (summary.totalPages > 1) {
+        text += `\n<i>Page ${summary.page} of ${summary.totalPages}. View next page with <code>/stickers ${summary.page < summary.totalPages ? summary.page + 1 : 1}</code></i>\n`;
+      }
+    }
+
+    text += `\n<b>Media Management Commands:</b>\n`;
+    text += `• <code>/addstickerpack &lt;link_or_name&gt; [mood]</code>\n`;
+    text += `• <code>/addbulksticker &lt;link1&gt; &lt;link2&gt; ... [mood]</code>\n`;
+    text += `• <code>/addsticker [mood]</code> (reply to sticker)\n`;
+    text += `• <code>/removesticker [file_id]</code>\n`;
+    text += `• <code>/clearstickers [mood]</code>\n`;
+    text += `• <code>/stickers on|off</code> (toggle protection)`;
+
     await telegramApi.sendMessage(ctx.chatId, text, {
       reply_to_message_id: ctx.message.message_id
     });
@@ -6045,7 +6332,7 @@ export class CommandHandler {
       return;
     }
 
-    const removed = db.removeMediaFromLibrary(fileId);
+    const removed = db.removeMediaFromLibrary(fileId, ctx.chatId);
     if (removed) {
       await telegramApi.sendMessage(ctx.chatId, `✅ Media item successfully removed from library.`, {
         reply_to_message_id: ctx.message.message_id
@@ -6067,16 +6354,92 @@ export class CommandHandler {
     }
 
     const mood = ctx.args?.[0]?.toLowerCase();
-    db.clearMediaLibrary(mood);
+    db.clearMediaLibrary(mood, ctx.chatId);
     if (mood) {
       await telegramApi.sendMessage(ctx.chatId, `🗑️ Cleared all media items for mood category <code>${escapeHtml(mood)}</code>.`, {
         reply_to_message_id: ctx.message.message_id
       });
     } else {
-      await telegramApi.sendMessage(ctx.chatId, `🗑️ Cleared entire media library.`, {
+      await telegramApi.sendMessage(ctx.chatId, `🗑️ Cleared group media library.`, {
         reply_to_message_id: ctx.message.message_id
       });
     }
+  }
+
+  private static async handleLustMode(ctx: CommandContext) {
+    const auth = await TelegramMiddleware.requireLustmodeAdmin(ctx);
+    if (!auth.allowed) {
+      if (auth.actor) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor: auth.actor,
+          command: ctx.command || 'lustmode',
+          action: 'setting_change',
+          result: 'denied',
+          reason: auth.reason || 'Unauthorized access to /lustmode'
+        });
+      }
+      return;
+    }
+
+    const actor = auth.actor || (await TelegramMiddleware.resolveActor(ctx));
+    const sub = (ctx.args[0] || '').toLowerCase().trim();
+    const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+
+    if (sub === 'on' || sub === 'enable' || sub === 'true') {
+      db.updateGroupSettings(ctx.chatId, { lustMode: true });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'lustmod',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Lust mode enabled'
+      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `🔥 <b>Roxie Lust Mode:</b> 🟢 <b>ON</b>\n\n` +
+        `Roxie will adopt a more flirtatious, teasing, and playful tone in this group while strictly maintaining safe, non-explicit interactions.`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    if (sub === 'off' || sub === 'disable' || sub === 'false') {
+      db.updateGroupSettings(ctx.chatId, { lustMode: false });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'lustmod',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Lust mode disabled'
+      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `✨ <b>Roxie Lust Mode:</b> 🔴 <b>OFF</b>\n\n` +
+        `Roxie has returned to standard personality mode.`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    // Default status view
+    const isLustOn = Boolean(settings.lustMode);
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `🔥 <b>Roxie Lust Mode Settings</b>\n\n` +
+      `• <b>Status:</b> ${isLustOn ? '🟢 <b>ON</b> (Flirtatious/Teasing)' : '🔴 <b>OFF</b> (Standard)'}\n` +
+      `• <b>Safety Policy:</b> Always Safe & Non-Explicit (No NSFW/Graphic Content)\n\n` +
+      `<b>Commands:</b>\n` +
+      `• <code>/lustmod on</code> — Enable lust mode\n` +
+      `• <code>/lustmod off</code> — Disable lust mode\n` +
+      `• <code>/lustmod status</code> — View current status`,
+      { reply_to_message_id: ctx.message.message_id }
+    );
   }
 
   public static async handleTestSticker(ctx: CommandContext) {

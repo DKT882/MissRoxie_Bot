@@ -1030,6 +1030,201 @@
       "rules": "",
       "lastAllTimestamp": 0,
       "updatedAt": "2026-08-28T07:45:41.467Z"
+    },
+    "-1004450308963": {
+      "chatId": -1004450308963,
+      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-30T17:10:54.788Z"
+    },
+    "-1004494262619": {
+      "chatId": -1004494262619,
+      "chatTitle": "Horney Log",
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-30T18:04:09.550Z"
+    },
+    "-5377649576": {
+      "chatId": -5377649576,
+      "chatTitle": "Horney Log",
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-30T18:04:10.274Z"
     }
   },
   "warnings": [
@@ -1360,34 +1555,34 @@
     {
       "id": "ZYWSXD",
       "createdAt": "2026-08-25T18:41:32.055Z",
-      "runsCount": 17,
+      "runsCount": 19,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
       "id": "55O99P",
       "createdAt": "2026-08-25T18:58:18.112Z",
-      "runsCount": 17,
+      "runsCount": 19,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
       "id": "Z1CLUO",
       "createdAt": "2026-08-25T19:17:55.318Z",
-      "runsCount": 16,
+      "runsCount": 18,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
@@ -1404,12 +1599,12 @@
     {
       "id": "83NSXH",
       "createdAt": "2026-08-25T19:18:12.310Z",
-      "runsCount": 16,
+      "runsCount": 18,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
@@ -1426,12 +1621,12 @@
     {
       "id": "W1HJPK",
       "createdAt": "2026-08-26T08:53:26.672Z",
-      "runsCount": 16,
+      "runsCount": 18,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
@@ -1448,12 +1643,12 @@
     {
       "id": "M8HLLH",
       "createdAt": "2026-08-26T08:54:23.506Z",
-      "runsCount": 16,
+      "runsCount": 18,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
@@ -1469,12 +1664,12 @@
     {
       "id": "YDSVDX",
       "createdAt": "2026-08-26T09:06:54.357Z",
-      "runsCount": 16,
+      "runsCount": 18,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
@@ -1490,12 +1685,12 @@
     {
       "id": "2PHBNL",
       "createdAt": "2026-08-26T09:07:52.077Z",
-      "runsCount": 16,
+      "runsCount": 18,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
@@ -1511,12 +1706,12 @@
     {
       "id": "CM0L6Y",
       "createdAt": "2026-08-26T09:08:35.957Z",
-      "runsCount": 16,
+      "runsCount": 18,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
@@ -1532,12 +1727,12 @@
     {
       "id": "HR6JN8",
       "createdAt": "2026-08-27T07:31:13.748Z",
-      "runsCount": 12,
+      "runsCount": 14,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
@@ -1553,12 +1748,12 @@
     {
       "id": "MD5SE1",
       "createdAt": "2026-08-27T07:32:20.186Z",
-      "runsCount": 12,
+      "runsCount": 14,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
@@ -1574,12 +1769,12 @@
     {
       "id": "Q306OV",
       "createdAt": "2026-08-27T08:30:57.959Z",
-      "runsCount": 11,
+      "runsCount": 13,
       "chatId": -100111222333,
       "message": "Daily check-in",
       "intervalMs": 3600000,
       "intervalFormatted": "1h",
-      "nextRun": "2026-08-29T09:39:35.075Z",
+      "nextRun": "2026-08-30T19:11:01.361Z",
       "adminId": 999
     },
     {
@@ -1595,7 +1790,7 @@
     {
       "id": "M4G94M",
       "createdAt": "2026-08-27T09:09:23.804Z",
-      "runsCount": 16,
+      "runsCount": 19,
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminId": 111,
@@ -1605,12 +1800,12 @@
       "contentType": "text",
       "intervalMs": 1800000,
       "intervalFormatted": "30 minutes",
-      "nextRun": "2026-08-29T09:39:39.043Z"
+      "nextRun": "2026-08-30T18:41:16.361Z"
     },
     {
       "id": "UPYJ0G",
       "createdAt": "2026-08-27T09:09:23.822Z",
-      "runsCount": 9,
+      "runsCount": 10,
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminId": 111,
@@ -1621,12 +1816,12 @@
       "mediaFileId": "photo_file_id_123",
       "intervalMs": 7200000,
       "intervalFormatted": "2 hours",
-      "nextRun": "2026-08-29T09:39:23.580Z"
+      "nextRun": "2026-08-30T19:10:50.629Z"
     },
     {
       "id": "C7PU0C",
       "createdAt": "2026-08-27T09:12:16.913Z",
-      "runsCount": 15,
+      "runsCount": 18,
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminId": 111,
@@ -1636,12 +1831,12 @@
       "contentType": "text",
       "intervalMs": 1800000,
       "intervalFormatted": "30 minutes",
-      "nextRun": "2026-08-29T09:09:35.075Z"
+      "nextRun": "2026-08-30T18:41:16.361Z"
     },
     {
       "id": "N0W2ZJ",
       "createdAt": "2026-08-27T09:12:16.930Z",
-      "runsCount": 6,
+      "runsCount": 7,
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminId": 111,
@@ -1652,12 +1847,12 @@
       "mediaFileId": "photo_file_id_123",
       "intervalMs": 7200000,
       "intervalFormatted": "2 hours",
-      "nextRun": "2026-08-29T09:39:23.580Z"
+      "nextRun": "2026-08-30T19:10:50.629Z"
     },
     {
       "id": "RYSM5C",
       "createdAt": "2026-08-27T09:23:36.509Z",
-      "runsCount": 15,
+      "runsCount": 18,
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminId": 111,
@@ -1667,12 +1862,12 @@
       "contentType": "text",
       "intervalMs": 1800000,
       "intervalFormatted": "30 minutes",
-      "nextRun": "2026-08-29T09:09:35.075Z"
+      "nextRun": "2026-08-30T18:41:16.361Z"
     },
     {
       "id": "W7ZVDW",
       "createdAt": "2026-08-27T09:23:36.528Z",
-      "runsCount": 6,
+      "runsCount": 7,
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminId": 111,
@@ -1683,12 +1878,12 @@
       "mediaFileId": "photo_file_id_123",
       "intervalMs": 7200000,
       "intervalFormatted": "2 hours",
-      "nextRun": "2026-08-29T09:39:23.580Z"
+      "nextRun": "2026-08-30T19:10:50.629Z"
     },
     {
       "id": "4DBCKR",
       "createdAt": "2026-08-28T10:22:01.227Z",
-      "runsCount": 3,
+      "runsCount": 5,
       "chatId": -100777888999,
       "chatTitle": "Regression Test Group",
       "adminId": 4001,
@@ -1698,314 +1893,85 @@
       "contentType": "text",
       "intervalMs": 3600000,
       "intervalFormatted": "1 hour",
-      "nextRun": "2026-08-29T09:39:35.075Z"
+      "nextRun": "2026-08-30T19:11:01.361Z"
     }
   ],
   "logs": [
     {
-      "id": "9xla7sq",
-      "timestamp": "2026-08-29T08:10:45.074Z",
-      "chatId": -1004331070653,
-      "chatTitle": "𓄂❄𝐵𝐴𝐷𝐸 𝐿𝑂𝐺",
-      "targetUserId": 8920861214,
-      "targetUsername": "mcqbutiaintevenanoption",
+      "id": "s0bm3ql",
+      "timestamp": "2026-08-30T17:14:01.791Z",
+      "chatId": -1004450308963,
+      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
+      "targetUserId": 8665977501,
       "action": "delete_media",
       "reason": "Stickers are locked"
     },
     {
-      "id": "0cm10l9",
-      "timestamp": "2026-08-29T08:11:18.022Z",
-      "chatId": -1004331070653,
-      "chatTitle": "𓄂❄𝐵𝐴𝐷𝐸 𝐿𝑂𝐺",
-      "targetUserId": 8699614049,
+      "id": "af85eti",
+      "timestamp": "2026-08-30T17:14:53.270Z",
+      "chatId": -1004450308963,
+      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
+      "targetUserId": 7200181548,
       "action": "delete_media",
       "reason": "Stickers are locked"
     },
     {
-      "id": "36ktmgn",
-      "timestamp": "2026-08-29T08:11:42.242Z",
-      "chatId": -1004331070653,
-      "chatTitle": "𓄂❄𝐵𝐴𝐷𝐸 𝐿𝑂𝐺",
-      "targetUserId": 8920861214,
-      "targetUsername": "mcqbutiaintevenanoption",
+      "id": "zth4txj",
+      "timestamp": "2026-08-30T17:17:35.279Z",
+      "chatId": -1004450308963,
+      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
+      "targetUserId": 8380012901,
+      "action": "delete_media",
+      "reason": "Photos are locked"
+    },
+    {
+      "id": "8kh8w7y",
+      "timestamp": "2026-08-30T17:30:37.467Z",
+      "chatId": -1004450308963,
+      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
+      "targetUserId": 8380012901,
       "action": "delete_media",
       "reason": "Stickers are locked"
     },
     {
-      "id": "53prral",
-      "timestamp": "2026-08-29T08:11:47.605Z",
-      "chatId": -1004331070653,
-      "chatTitle": "𓄂❄𝐵𝐴𝐷𝐸 𝐿𝑂𝐺",
-      "targetUserId": 8699614049,
+      "id": "sex44lb",
+      "timestamp": "2026-08-30T17:33:59.111Z",
+      "chatId": -1004450308963,
+      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
+      "targetUserId": 8380012901,
       "action": "delete_media",
-      "reason": "Stickers are locked"
+      "reason": "Videos are locked"
     },
     {
-      "id": "mdnf5v4",
-      "timestamp": "2026-08-29T08:11:55.082Z",
-      "chatId": -1004331070653,
-      "chatTitle": "𓄂❄𝐵𝐴𝐷𝐸 𝐿𝑂𝐺",
-      "targetUserId": 8699614049,
+      "id": "7vbdiqz",
+      "timestamp": "2026-08-30T17:34:00.088Z",
+      "chatId": -1004450308963,
+      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
+      "targetUserId": 8380012901,
       "action": "delete_media",
-      "reason": "Stickers are locked"
+      "reason": "Videos are locked"
     },
     {
-      "id": "42p5dw2",
-      "timestamp": "2026-08-29T08:21:24.921Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ I couldn't identify that user. Reply to their message or provide a valid Telegram ID."
+      "id": "kgtmx4j",
+      "timestamp": "2026-08-30T17:34:01.065Z",
+      "chatId": -1004450308963,
+      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
+      "targetUserId": 8380012901,
+      "action": "delete_media",
+      "reason": "Videos are locked"
     },
     {
-      "id": "ysl45w8",
-      "timestamp": "2026-08-29T08:21:24.922Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "targetId": 4001,
-      "targetUserId": 4001,
-      "targetUsername": "member1_user",
-      "targetTelegramStatus": "member",
-      "targetCustomRole": "NONE",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ That user is not currently an administrator."
+      "id": "4t8h4jx",
+      "timestamp": "2026-08-30T17:34:02.019Z",
+      "chatId": -1004450308963,
+      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
+      "targetUserId": 8380012901,
+      "action": "delete_media",
+      "reason": "Videos are locked"
     },
     {
-      "id": "ei6f6y0",
-      "timestamp": "2026-08-29T08:21:24.923Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 2001,
-      "actorUsername": "admin_promote",
-      "actorRole": "ADMIN",
-      "adminUserId": 2001,
-      "adminUsername": "AdminWithPromote",
-      "targetId": 1001,
-      "targetUserId": 1001,
-      "targetUsername": "owner_user",
-      "targetTelegramStatus": "creator",
-      "targetCustomRole": "NONE",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ The group owner cannot have their permissions edited."
-    },
-    {
-      "id": "l9k3uee",
-      "timestamp": "2026-08-29T08:21:24.924Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ Roxie's permissions cannot be edited through this command."
-    },
-    {
-      "id": "v5hljpu",
-      "timestamp": "2026-08-29T08:21:24.925Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 2001,
-      "actorUsername": "admin_promote",
-      "actorRole": "ADMIN",
-      "adminUserId": 2001,
-      "adminUsername": "AdminWithPromote",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ You cannot edit your own permissions."
-    },
-    {
-      "id": "4peqij0",
-      "timestamp": "2026-08-29T08:21:24.926Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ Anonymous administrators and channels cannot have their permissions edited."
-    },
-    {
-      "id": "k03kogb",
-      "timestamp": "2026-08-29T08:21:24.927Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Test Supergroup",
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "targetId": 2004,
-      "targetUserId": 2004,
-      "targetUsername": "target_uneditable",
-      "targetTelegramStatus": "administrator",
-      "targetCustomRole": "NONE",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "denied",
-      "reason": "❌ Telegram does not allow Roxie to modify this administrator."
-    },
-    {
-      "id": "ig6palq",
-      "timestamp": "2026-08-29T08:21:24.932Z",
-      "chatId": -1001234567890,
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "success",
-      "details": "Successfully updated administrator permissions for @target_editable"
-    },
-    {
-      "id": "qlpu9e4",
-      "timestamp": "2026-08-29T08:21:24.937Z",
-      "chatId": -1001234567890,
-      "groupId": -1001234567890,
-      "actorId": 1001,
-      "actorUsername": "owner_user",
-      "actorRole": "OWNER",
-      "adminUserId": 1001,
-      "adminUsername": "OwnerUser",
-      "command": "permissions",
-      "action": "permissions",
-      "result": "error",
-      "details": "Telegram API error: ❌ Telegram does not allow Roxie to modify this administrator.",
-      "telegramError": "CANNOT_EDIT_THIS_USER"
-    },
-    {
-      "id": "aos1kvo",
-      "timestamp": "2026-08-29T08:39:35.969Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [ZYWSXD]: \"Daily check-in...\""
-    },
-    {
-      "id": "2wzk96z",
-      "timestamp": "2026-08-29T08:39:36.815Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [55O99P]: \"Daily check-in...\""
-    },
-    {
-      "id": "auf6b22",
-      "timestamp": "2026-08-29T08:39:37.237Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [Z1CLUO]: \"Daily check-in...\""
-    },
-    {
-      "id": "3ghp829",
-      "timestamp": "2026-08-29T08:39:37.682Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [83NSXH]: \"Daily check-in...\""
-    },
-    {
-      "id": "6ino3oi",
-      "timestamp": "2026-08-29T08:39:38.096Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [W1HJPK]: \"Daily check-in...\""
-    },
-    {
-      "id": "11lxtac",
-      "timestamp": "2026-08-29T08:39:38.541Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [M8HLLH]: \"Daily check-in...\""
-    },
-    {
-      "id": "9ae92vc",
-      "timestamp": "2026-08-29T08:39:38.987Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [YDSVDX]: \"Daily check-in...\""
-    },
-    {
-      "id": "096c2e4",
-      "timestamp": "2026-08-29T08:39:39.451Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [2PHBNL]: \"Daily check-in...\""
-    },
-    {
-      "id": "n5k0evf",
-      "timestamp": "2026-08-29T08:39:39.853Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [CM0L6Y]: \"Daily check-in...\""
-    },
-    {
-      "id": "4x0enc7",
-      "timestamp": "2026-08-29T08:39:40.265Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [HR6JN8]: \"Daily check-in...\""
-    },
-    {
-      "id": "h710g4i",
-      "timestamp": "2026-08-29T08:39:40.737Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [MD5SE1]: \"Daily check-in...\""
-    },
-    {
-      "id": "ghdy08p",
-      "timestamp": "2026-08-29T08:39:41.191Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [Q306OV]: \"Daily check-in...\""
-    },
-    {
-      "id": "3a0oqb3",
-      "timestamp": "2026-08-29T08:39:41.649Z",
+      "id": "xyzx5ce",
+      "timestamp": "2026-08-30T17:41:06.641Z",
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminUserId": 111,
@@ -2014,8 +1980,8 @@
       "details": "Executed scheduled broadcast [M4G94M]: \"Check out our new launch! http...\""
     },
     {
-      "id": "ak6jcri",
-      "timestamp": "2026-08-29T08:39:42.069Z",
+      "id": "85tj4pe",
+      "timestamp": "2026-08-30T17:41:07.155Z",
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminUserId": 111,
@@ -2024,8 +1990,8 @@
       "details": "Executed scheduled broadcast [C7PU0C]: \"Check out our new launch! http...\""
     },
     {
-      "id": "bk7q04x",
-      "timestamp": "2026-08-29T08:39:42.920Z",
+      "id": "llus2rr",
+      "timestamp": "2026-08-30T17:41:07.566Z",
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminUserId": 111,
@@ -2034,8 +2000,125 @@
       "details": "Executed scheduled broadcast [RYSM5C]: \"Check out our new launch! http...\""
     },
     {
-      "id": "y65fj3s",
-      "timestamp": "2026-08-29T08:39:43.318Z",
+      "id": "nwwq1nu",
+      "timestamp": "2026-08-30T18:07:14.140Z",
+      "chatId": -1004494262619,
+      "chatTitle": "Horney Log",
+      "groupId": -1004494262619,
+      "actorId": 8852515124,
+      "actorUsername": "turtle_020",
+      "actorRole": "OWNER",
+      "adminUserId": 8852515124,
+      "adminUsername": "@turtle_020",
+      "targetId": 8943438615,
+      "targetUserId": 8943438615,
+      "targetUsername": "Kidfrom2004",
+      "targetTelegramStatus": "administrator",
+      "targetCustomRole": "NONE",
+      "command": "promote",
+      "action": "promote",
+      "result": "denied",
+      "reason": "❌ That user is already an administrator."
+    },
+    {
+      "id": "r2r7s9j",
+      "timestamp": "2026-08-30T18:11:02.244Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [ZYWSXD]: \"Daily check-in...\""
+    },
+    {
+      "id": "o02tzu5",
+      "timestamp": "2026-08-30T18:11:02.654Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [55O99P]: \"Daily check-in...\""
+    },
+    {
+      "id": "r344ylg",
+      "timestamp": "2026-08-30T18:11:03.087Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [Z1CLUO]: \"Daily check-in...\""
+    },
+    {
+      "id": "hkcb34l",
+      "timestamp": "2026-08-30T18:11:03.525Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [83NSXH]: \"Daily check-in...\""
+    },
+    {
+      "id": "k9at2nc",
+      "timestamp": "2026-08-30T18:11:03.933Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [W1HJPK]: \"Daily check-in...\""
+    },
+    {
+      "id": "68tk6ei",
+      "timestamp": "2026-08-30T18:11:04.338Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [M8HLLH]: \"Daily check-in...\""
+    },
+    {
+      "id": "gzu2126",
+      "timestamp": "2026-08-30T18:11:04.751Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [YDSVDX]: \"Daily check-in...\""
+    },
+    {
+      "id": "6f43q1c",
+      "timestamp": "2026-08-30T18:11:05.162Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [2PHBNL]: \"Daily check-in...\""
+    },
+    {
+      "id": "66d9jhd",
+      "timestamp": "2026-08-30T18:11:05.601Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [CM0L6Y]: \"Daily check-in...\""
+    },
+    {
+      "id": "vu2qfha",
+      "timestamp": "2026-08-30T18:11:06.021Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [HR6JN8]: \"Daily check-in...\""
+    },
+    {
+      "id": "bv8hmjf",
+      "timestamp": "2026-08-30T18:11:06.432Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [MD5SE1]: \"Daily check-in...\""
+    },
+    {
+      "id": "9o3q80e",
+      "timestamp": "2026-08-30T18:11:06.838Z",
+      "chatId": -100111222333,
+      "adminUserId": 999,
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [Q306OV]: \"Daily check-in...\""
+    },
+    {
+      "id": "hqivfo9",
+      "timestamp": "2026-08-30T18:11:07.301Z",
       "chatId": -100777888999,
       "chatTitle": "Regression Test Group",
       "adminUserId": 4001,
@@ -2044,140 +2127,49 @@
       "details": "Executed scheduled broadcast [4DBCKR]: \"test job...\""
     },
     {
-      "id": "rci1pmc",
-      "timestamp": "2026-08-29T08:58:05.235Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 4001,
-      "adminUsername": "member_user",
-      "action": "report",
-      "reason": "spamming links",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "8dldlwt",
-      "timestamp": "2026-08-29T08:58:05.238Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 2001,
-      "adminUsername": "admin_user",
-      "action": "report",
-      "reason": "advertising",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "pi67bk0",
-      "timestamp": "2026-08-29T08:58:05.238Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "action": "report",
-      "reason": "offending content",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "rlcty05",
-      "timestamp": "2026-08-29T08:58:05.239Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 4001,
-      "adminUsername": "member_user",
-      "action": "report",
-      "reason": "malicious user",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "q69smv8",
-      "timestamp": "2026-08-29T08:58:05.239Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 4001,
-      "adminUsername": "member_user",
-      "action": "report",
-      "reason": "Rule 1 violation",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "4wg0n5r",
-      "timestamp": "2026-08-29T09:00:22.984Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 4001,
-      "adminUsername": "member_user",
-      "action": "report",
-      "reason": "spamming links",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "scpefdu",
-      "timestamp": "2026-08-29T09:00:22.986Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 2001,
-      "adminUsername": "admin_user",
-      "action": "report",
-      "reason": "advertising",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "w170e1u",
-      "timestamp": "2026-08-29T09:00:22.986Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "action": "report",
-      "reason": "offending content",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "b4y425c",
-      "timestamp": "2026-08-29T09:00:22.987Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 4001,
-      "adminUsername": "member_user",
-      "action": "report",
-      "reason": "malicious user",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "d6iiowo",
-      "timestamp": "2026-08-29T09:00:22.987Z",
-      "chatId": -1001234567890,
-      "chatTitle": "Security Test Group",
-      "targetUserId": 4002,
-      "targetUsername": "spam_user",
-      "adminUserId": 4001,
-      "adminUsername": "member_user",
-      "action": "report",
-      "reason": "Rule 1 violation",
-      "details": "Reported message: \"Check out this spam link: https://malicious.example.com\""
-    },
-    {
-      "id": "w6jrm3a",
-      "timestamp": "2026-08-29T09:09:39.919Z",
+      "id": "qh7ug8e",
+      "timestamp": "2026-08-30T18:11:17.242Z",
       "chatId": -100888777,
       "chatTitle": "Scheduler Test Supergroup",
       "adminUserId": 111,
       "adminUsername": "SuperAdmin",
       "action": "schedule_sent",
       "details": "Executed scheduled broadcast [M4G94M]: \"Check out our new launch! http...\""
+    },
+    {
+      "id": "uvxhykw",
+      "timestamp": "2026-08-30T18:11:17.655Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [C7PU0C]: \"Check out our new launch! http...\""
+    },
+    {
+      "id": "p0zt6d6",
+      "timestamp": "2026-08-30T18:11:18.067Z",
+      "chatId": -100888777,
+      "chatTitle": "Scheduler Test Supergroup",
+      "adminUserId": 111,
+      "adminUsername": "SuperAdmin",
+      "action": "schedule_sent",
+      "details": "Executed scheduled broadcast [RYSM5C]: \"Check out our new launch! http...\""
+    },
+    {
+      "id": "q0g6edd",
+      "timestamp": "2026-08-30T18:11:28.057Z",
+      "chatId": -1004494262619,
+      "groupId": -1004494262619,
+      "actorId": 8852515124,
+      "actorUsername": "turtle_020",
+      "actorRole": "OWNER",
+      "adminUserId": 8852515124,
+      "adminUsername": "susss",
+      "command": "permissions",
+      "action": "permissions",
+      "result": "success",
+      "details": "Successfully updated administrator permissions for @Kidfrom2004"
     }
   ],
   "knownUsers": {
@@ -2185,8 +2177,8 @@
       "userId": 8864012889,
       "username": "Rojloo",
       "firstName": "Vaani",
-      "groupId": -1004331070653,
-      "lastSeen": "2026-08-27T18:15:25.422Z"
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:12:41.891Z"
     },
     "palindrome1551": {
       "userId": 8204962552,
@@ -2199,8 +2191,8 @@
       "userId": 8841013562,
       "username": "MissRoxie_Bot",
       "firstName": "Roxie",
-      "groupId": 8204962552,
-      "lastSeen": "2026-08-29T08:42:34.451Z"
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:08:16.643Z"
     },
     "owner_user": {
       "userId": 1001,
@@ -2723,6 +2715,99 @@
       "firstName": "𝙃𝙖𝙙𝙞",
       "groupId": -1004331070653,
       "lastSeen": "2026-08-29T09:07:00.440Z"
+    },
+    "oliviaaok": {
+      "userId": 7713289838,
+      "username": "Oliviaaok",
+      "firstName": "❛.𝁘ໍ𝚱 𝛊ᝲ ᧘፝֟ ꧊ꝛ ɑ 𓏲̟🌷𓆪 ˖",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:52:53.261Z"
+    },
+    "itzroy5": {
+      "userId": 8970610775,
+      "username": "ItzRoy5",
+      "firstName": "ARITRA ROY",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:52:53.024Z"
+    },
+    "shrey_18x": {
+      "userId": 862765503,
+      "username": "Shrey_18x",
+      "firstName": "shrey",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T18:02:16.047Z"
+    },
+    "miss_ananyaa": {
+      "userId": 8324017778,
+      "username": "Miss_ananyaa",
+      "firstName": "Ananya",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:20:14.665Z"
+    },
+    "sss_00911": {
+      "userId": 762446082,
+      "username": "Sss_00911",
+      "firstName": "Sss",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:19:02.147Z"
+    },
+    "kidfrom2004": {
+      "userId": 8943438615,
+      "username": "Kidfrom2004",
+      "firstName": "ʟᴏʀᴅ",
+      "lastName": "ᴢᴇɴᴏ / -",
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:12:29.217Z"
+    },
+    "meetsheta": {
+      "userId": 8674967652,
+      "username": "meetsheta",
+      "firstName": "..",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:19:26.259Z"
+    },
+    "drdoom686": {
+      "userId": 8608089554,
+      "username": "drdoom686",
+      "firstName": "Dr.Doom",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:20:13.948Z"
+    },
+    "ursfire": {
+      "userId": 8383556675,
+      "username": "ursfire",
+      "firstName": "¤𝐑𝐀𝐉𝐏𝐔𝐓¤🗡🧬",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:32:39.356Z"
+    },
+    "milleeee": {
+      "userId": 8422105781,
+      "username": "Milleeee",
+      "firstName": "Nothing",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T18:02:15.328Z"
+    },
+    "kran033": {
+      "userId": 8255004258,
+      "username": "Kran033",
+      "firstName": "Karan singh",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:43:17.792Z"
+    },
+    "shiv_tajput": {
+      "userId": 6300441945,
+      "username": "Shiv_tajput",
+      "firstName": "Shivam",
+      "lastName": "Rajput",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:54:08.707Z"
+    },
+    "turtle_020": {
+      "userId": 8852515124,
+      "username": "turtle_020",
+      "firstName": "susss",
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:11:01.547Z"
     }
   },
   "knownUsersById": {
@@ -2863,6 +2948,20 @@
       "lastSeen": "2026-08-24T20:20:27.330Z",
       "customRole": "MODERATOR"
     },
+    "762446082": {
+      "userId": 762446082,
+      "username": "Sss_00911",
+      "firstName": "Sss",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:19:02.147Z"
+    },
+    "862765503": {
+      "userId": 862765503,
+      "username": "Shrey_18x",
+      "firstName": "shrey",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T18:02:16.047Z"
+    },
     "1175552572": {
       "userId": 1175552572,
       "username": "Ag9304",
@@ -2960,9 +3059,9 @@
       "id": 8864012889,
       "username": "Rojloo",
       "firstName": "Vaani",
-      "lastSeen": "2026-08-27T18:15:25.422Z",
+      "lastSeen": "2026-08-30T18:12:41.891Z",
       "userId": 8864012889,
-      "groupId": -1004331070653
+      "groupId": -1004494262619
     },
     "8204962552": {
       "id": 8204962552,
@@ -2976,9 +3075,9 @@
       "id": 8841013562,
       "username": "MissRoxie_Bot",
       "firstName": "Roxie",
-      "lastSeen": "2026-08-29T08:42:34.451Z",
+      "lastSeen": "2026-08-30T18:08:16.643Z",
       "userId": 8841013562,
-      "groupId": 8204962552
+      "groupId": -1004494262619
     },
     "8204969999": {
       "userId": 8204969999,
@@ -3472,7 +3571,7 @@
       "userId": 8724726092,
       "firstName": "Jessica",
       "groupId": -1004331070653,
-      "lastSeen": "2026-08-28T09:36:09.786Z"
+      "lastSeen": "2026-08-30T17:19:26.977Z"
     },
     "8981521674": {
       "userId": 8981521674,
@@ -3644,6 +3743,142 @@
       "firstName": "𝙃𝙖𝙙𝙞",
       "groupId": -1004331070653,
       "lastSeen": "2026-08-29T09:07:00.440Z"
+    },
+    "8380012901": {
+      "userId": 8380012901,
+      "firstName": "✨PINTU 😎singh",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:34:01.066Z"
+    },
+    "8665977501": {
+      "userId": 8665977501,
+      "firstName": "🦋⃝🕊️🇹 𝙖𝙣𝙪 🕊⃝🦚",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:23:07.731Z"
+    },
+    "7200181548": {
+      "userId": 7200181548,
+      "firstName": "Sumit Kumar je 🚉👷",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:23:08.922Z"
+    },
+    "7713289838": {
+      "userId": 7713289838,
+      "username": "Oliviaaok",
+      "firstName": "❛.𝁘ໍ𝚱 𝛊ᝲ ᧘፝֟ ꧊ꝛ ɑ 𓏲̟🌷𓆪 ˖",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:52:53.261Z"
+    },
+    "8782270410": {
+      "userId": 8782270410,
+      "firstName": "Noooo",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:16:12.782Z"
+    },
+    "8970610775": {
+      "userId": 8970610775,
+      "username": "ItzRoy5",
+      "firstName": "ARITRA ROY",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:52:53.024Z"
+    },
+    "8324017778": {
+      "userId": 8324017778,
+      "username": "Miss_ananyaa",
+      "firstName": "Ananya",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:20:14.665Z"
+    },
+    "8809417790": {
+      "userId": 8809417790,
+      "firstName": "ᒪᗩKᕼᕼᗩᑎ",
+      "lastName": "ՏIᑎᘜᕼ",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:18:09.699Z"
+    },
+    "8943438615": {
+      "userId": 8943438615,
+      "username": "Kidfrom2004",
+      "firstName": "ʟᴏʀᴅ",
+      "lastName": "ᴢᴇɴᴏ / -",
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:12:29.217Z"
+    },
+    "8674967652": {
+      "userId": 8674967652,
+      "username": "meetsheta",
+      "firstName": "..",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:19:26.259Z"
+    },
+    "8608089554": {
+      "userId": 8608089554,
+      "username": "drdoom686",
+      "firstName": "Dr.Doom",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:20:13.948Z"
+    },
+    "8383556675": {
+      "userId": 8383556675,
+      "username": "ursfire",
+      "firstName": "¤𝐑𝐀𝐉𝐏𝐔𝐓¤🗡🧬",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:32:39.356Z"
+    },
+    "8422105781": {
+      "userId": 8422105781,
+      "username": "Milleeee",
+      "firstName": "Nothing",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T18:02:15.328Z"
+    },
+    "6090606794": {
+      "userId": 6090606794,
+      "firstName": "Jack",
+      "lastName": "Roy",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:37:41.271Z"
+    },
+    "7696321718": {
+      "userId": 7696321718,
+      "firstName": "veerendra",
+      "lastName": "singh",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:38:05.087Z"
+    },
+    "8255004258": {
+      "userId": 8255004258,
+      "username": "Kran033",
+      "firstName": "Karan singh",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:43:17.792Z"
+    },
+    "8912668642": {
+      "userId": 8912668642,
+      "firstName": "Madhav",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:40:14.877Z"
+    },
+    "6300441945": {
+      "userId": 6300441945,
+      "username": "Shiv_tajput",
+      "firstName": "Shivam",
+      "lastName": "Rajput",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:54:08.707Z"
+    },
+    "8852515124": {
+      "userId": 8852515124,
+      "username": "turtle_020",
+      "firstName": "susss",
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:11:01.547Z"
+    },
+    "8974414303": {
+      "userId": 8974414303,
+      "firstName": "Anshu",
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:10:15.368Z"
     }
   },
   "groupMembers": {
@@ -3885,7 +4120,7 @@
       "username": "MissRoxie_Bot",
       "firstName": "Roxie",
       "groupId": -1004331070653,
-      "lastSeen": "2026-08-28T10:04:36.657Z"
+      "lastSeen": "2026-08-30T18:00:38.897Z"
     },
     "-5350040720_8204962552": {
       "userId": 8204962552,
@@ -4628,7 +4863,7 @@
       "userId": 8724726092,
       "firstName": "Jessica",
       "groupId": -1004331070653,
-      "lastSeen": "2026-08-28T09:36:09.786Z"
+      "lastSeen": "2026-08-30T17:19:26.977Z"
     },
     "-1004331070653_8981521674": {
       "userId": 8981521674,
@@ -4827,6 +5062,185 @@
       "firstName": "𝙃𝙖𝙙𝙞",
       "groupId": -1004331070653,
       "lastSeen": "2026-08-29T09:07:00.440Z"
+    },
+    "-1004450308963_8380012901": {
+      "userId": 8380012901,
+      "firstName": "✨PINTU 😎singh",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:34:01.066Z"
+    },
+    "-1004450308963_8665977501": {
+      "userId": 8665977501,
+      "firstName": "🦋⃝🕊️🇹 𝙖𝙣𝙪 🕊⃝🦚",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:23:07.731Z"
+    },
+    "-1004450308963_7200181548": {
+      "userId": 7200181548,
+      "firstName": "Sumit Kumar je 🚉👷",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:23:08.922Z"
+    },
+    "-1004450308963_7713289838": {
+      "userId": 7713289838,
+      "username": "Oliviaaok",
+      "firstName": "❛.𝁘ໍ𝚱 𝛊ᝲ ᧘፝֟ ꧊ꝛ ɑ 𓏲̟🌷𓆪 ˖",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:52:53.261Z"
+    },
+    "-1004331070653_8782270410": {
+      "userId": 8782270410,
+      "firstName": "Noooo",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:16:12.782Z"
+    },
+    "-1004450308963_8970610775": {
+      "userId": 8970610775,
+      "username": "ItzRoy5",
+      "firstName": "ARITRA ROY",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:52:53.024Z"
+    },
+    "-1004331070653_862765503": {
+      "userId": 862765503,
+      "username": "Shrey_18x",
+      "firstName": "shrey",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T18:02:16.047Z"
+    },
+    "-1004331070653_8324017778": {
+      "userId": 8324017778,
+      "username": "Miss_ananyaa",
+      "firstName": "Ananya",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:20:14.665Z"
+    },
+    "-1004450308963_8809417790": {
+      "userId": 8809417790,
+      "firstName": "ᒪᗩKᕼᕼᗩᑎ",
+      "lastName": "ՏIᑎᘜᕼ",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:18:09.699Z"
+    },
+    "-1004331070653_762446082": {
+      "userId": 762446082,
+      "username": "Sss_00911",
+      "firstName": "Sss",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:19:02.147Z"
+    },
+    "-1004331070653_8943438615": {
+      "userId": 8943438615,
+      "username": "Kidfrom2004",
+      "firstName": "ʟᴏʀᴅ",
+      "lastName": "ᴢᴇɴᴏ / -",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:43:52.127Z"
+    },
+    "-1004331070653_8674967652": {
+      "userId": 8674967652,
+      "username": "meetsheta",
+      "firstName": "..",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:19:26.259Z"
+    },
+    "-1004331070653_8608089554": {
+      "userId": 8608089554,
+      "username": "drdoom686",
+      "firstName": "Dr.Doom",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:20:13.948Z"
+    },
+    "-1004450308963_8383556675": {
+      "userId": 8383556675,
+      "username": "ursfire",
+      "firstName": "¤𝐑𝐀𝐉𝐏𝐔𝐓¤🗡🧬",
+      "groupId": -1004450308963,
+      "lastSeen": "2026-08-30T17:32:39.356Z"
+    },
+    "-1004331070653_8422105781": {
+      "userId": 8422105781,
+      "username": "Milleeee",
+      "firstName": "Nothing",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T18:02:15.328Z"
+    },
+    "-1004331070653_6090606794": {
+      "userId": 6090606794,
+      "firstName": "Jack",
+      "lastName": "Roy",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:37:41.271Z"
+    },
+    "-1004331070653_7696321718": {
+      "userId": 7696321718,
+      "firstName": "veerendra",
+      "lastName": "singh",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:38:05.087Z"
+    },
+    "-1004331070653_8255004258": {
+      "userId": 8255004258,
+      "username": "Kran033",
+      "firstName": "Karan singh",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:43:17.792Z"
+    },
+    "-1004331070653_8912668642": {
+      "userId": 8912668642,
+      "firstName": "Madhav",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:40:14.877Z"
+    },
+    "-1004331070653_6300441945": {
+      "userId": 6300441945,
+      "username": "Shiv_tajput",
+      "firstName": "Shivam",
+      "lastName": "Rajput",
+      "groupId": -1004331070653,
+      "lastSeen": "2026-08-30T17:54:08.707Z"
+    },
+    "-5377649576_8852515124": {
+      "userId": 8852515124,
+      "username": "turtle_020",
+      "firstName": "susss",
+      "groupId": -5377649576,
+      "lastSeen": "2026-08-30T18:04:09.553Z"
+    },
+    "-1004494262619_8852515124": {
+      "userId": 8852515124,
+      "username": "turtle_020",
+      "firstName": "susss",
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:11:01.547Z"
+    },
+    "-1004494262619_8943438615": {
+      "userId": 8943438615,
+      "username": "Kidfrom2004",
+      "firstName": "ʟᴏʀᴅ",
+      "lastName": "ᴢᴇɴᴏ / -",
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:12:29.217Z"
+    },
+    "-1004494262619_8841013562": {
+      "userId": 8841013562,
+      "username": "MissRoxie_Bot",
+      "firstName": "Roxie",
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:08:16.643Z"
+    },
+    "-1004494262619_8974414303": {
+      "userId": 8974414303,
+      "firstName": "Anshu",
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:10:15.368Z"
+    },
+    "-1004494262619_8864012889": {
+      "userId": 8864012889,
+      "username": "Rojloo",
+      "firstName": "Vaani",
+      "groupId": -1004494262619,
+      "lastSeen": "2026-08-30T18:12:41.891Z"
     }
   },
   "customRoles": {
@@ -4837,7 +5251,560 @@
   },
   "mediaLibrary": {
     "stickers": {},
-    "animations": {}
+    "animations": {},
+    "stickerMetadata": {}
+  },
+  "groupMediaLibraries": {
+    "-1004331070653": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "-1004494262619": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "-1001999888777": {
+      "stickers": {
+        "normal": [
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_000_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_001_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_002_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_003_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_004_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_005_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_006_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_007_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_008_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_009_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_010_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_011_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_012_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_013_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_014_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_015_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_016_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_017_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_018_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_019_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_020_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_021_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_022_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_023_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_024_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_025_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_026_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_027_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_028_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_029_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_030_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_031_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_032_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_033_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_034_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_035_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_036_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_037_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_038_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_039_XYZ12345"
+        ],
+        "funny": [
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_000_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_001_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_002_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_003_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_004_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_005_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_006_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_007_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_008_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_009_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_010_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_011_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_012_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_013_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_014_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_015_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_016_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_017_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_018_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_019_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_020_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_021_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_022_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_023_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_024_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_025_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_026_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_027_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_028_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_029_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_030_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_031_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_032_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_033_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_034_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_035_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_036_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_037_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_038_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_039_XYZ12345"
+        ],
+        "roasting": [
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_000_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_001_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_002_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_003_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_004_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_005_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_006_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_007_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_008_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_009_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_010_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_011_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_012_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_013_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_014_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_015_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_016_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_017_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_018_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_019_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_020_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_021_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_022_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_023_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_024_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_025_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_026_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_027_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_028_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_029_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_030_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_031_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_032_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_033_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_034_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_035_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_036_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_037_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_038_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_039_XYZ12345"
+        ],
+        "playful": [
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_000_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_001_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_002_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_003_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_004_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_005_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_006_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_007_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_008_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_009_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_010_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_011_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_012_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_013_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_014_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_015_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_016_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_017_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_018_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_019_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_020_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_021_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_022_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_023_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_024_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_025_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_026_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_027_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_028_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_029_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_030_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_031_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_032_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_033_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_034_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_035_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_036_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_037_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_038_XYZ12345",
+          "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_039_XYZ12345"
+        ]
+      },
+      "animations": {},
+      "stickerMetadata": {
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_000_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_000_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_001_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_001_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_002_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_002_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_003_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_003_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_004_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_004_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_005_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_005_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_006_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_006_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_007_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_007_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_008_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_008_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_009_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_009_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_010_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_010_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_011_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_011_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_012_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_012_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_013_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_013_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_014_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_014_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_015_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_015_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_016_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_016_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_017_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_017_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_018_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_018_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_019_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_019_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_020_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_020_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_021_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_021_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_022_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_022_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_023_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_023_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_024_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_024_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_025_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_025_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_026_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_026_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_027_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_027_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_028_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_028_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_029_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_029_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_030_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_030_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_031_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_031_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_032_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_032_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_033_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_033_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_034_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_034_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_035_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_035_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_036_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_036_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_037_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_037_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_038_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_038_XYZ12345",
+          "emoji": "🐶",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        },
+        "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_039_XYZ12345": {
+          "packName": "AnimalsPackTest",
+          "packTitle": "Cute Animals Pack",
+          "fileId": "CAACAgIAAxkBAAE_SAMPLE_STICKER_FILE_ID_039_XYZ12345",
+          "emoji": "🐱",
+          "mood": "playful",
+          "addedBy": 1001,
+          "addedAt": "2026-08-30T18:12:51.945Z"
+        }
+      }
+    },
+    "-1001111222333": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    }
   },
   "userMemories": {
     "-100555666777_2002": {

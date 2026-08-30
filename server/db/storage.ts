@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession } from '../telegram/types.js';
+import { getDefaultStickersStats } from '../telegram/defaultStickers.js';
 
 interface RaidStateRecord {
   recentJoins: number[];
@@ -60,6 +61,7 @@ interface DatabaseSchema {
   groupMembers: Record<string, CachedMember>; // `${chatId}_${userId}` -> CachedMember
   customRoles: Record<string, 'MODERATOR' | 'NONE'>; // `${chatId}_${userId}` -> Custom bot role
   mediaLibrary?: MediaLibraryRecord;
+  groupMediaLibraries?: Record<string, MediaLibraryRecord>; // `${chatId}` -> MediaLibraryRecord
   userMemories?: Record<string, UserMemoryRecord>; // `${chatId}_${userId}` -> UserMemoryRecord
 }
 
@@ -67,6 +69,8 @@ const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'bot_storage.json');
 
 class StorageManager {
+  public static readonly MAX_PACKS_PER_GROUP = 1000;
+
   private data: DatabaseSchema = {
     settings: {},
     warnings: [],
@@ -82,7 +86,9 @@ class StorageManager {
     knownUsersById: {},
     groupMembers: {},
     customRoles: {},
-    mediaLibrary: { stickers: {}, animations: {} }
+    mediaLibrary: { stickers: {}, animations: {}, stickerMetadata: {} },
+    groupMediaLibraries: {},
+    userMemories: {}
   };
   private raidStates: Record<number, RaidStateRecord> = {};
   private isLoaded: boolean = false;
@@ -116,7 +122,8 @@ class StorageManager {
             knownUsersById: parsed.knownUsersById || {},
             groupMembers: parsed.groupMembers || {},
             customRoles: parsed.customRoles || {},
-            mediaLibrary: parsed.mediaLibrary || { stickers: {}, animations: {} },
+            mediaLibrary: parsed.mediaLibrary || { stickers: {}, animations: {}, stickerMetadata: {} },
+            groupMediaLibraries: parsed.groupMediaLibraries || {},
             userMemories: parsed.userMemories || {}
           };
         }
@@ -895,11 +902,13 @@ class StorageManager {
     const notes = this.getAllNotes(chatId);
     const whitelist = this.getLinkWhitelist(chatId);
     const locks = this.getLocks(chatId);
+    const mediaLib = this.getMediaLibrary();
 
     return {
-      version: '3.0',
+      version: '3.1',
       exportedAt: new Date().toISOString(),
       chatId,
+      groupTitle: s.chatTitle || 'Roxie Protected Group',
       settings: {
         warnLimit: s.warnLimit,
         warnAction: s.warnAction,
@@ -926,16 +935,38 @@ class StorageManager {
         photosProtection: s.photosProtection,
         voiceProtection: s.voiceProtection,
         audioProtection: s.audioProtection,
+        autoDeleteJoinLeave: s.autoDeleteJoinLeave ?? true,
         locks,
         welcomeEnabled: s.welcomeEnabled,
         welcomeMessage: s.welcomeMessage,
         goodbyeEnabled: s.goodbyeEnabled,
         goodbyeMessage: s.goodbyeMessage,
         slowModeSeconds: s.slowModeSeconds,
-        reportsEnabled: s.reportsEnabled
+        reportsEnabled: s.reportsEnabled,
+        chatbotEnabled: s.chatbotEnabled ?? true,
+        chatbotMode: s.chatbotMode || 'auto',
+        reactionEnabled: s.reactionEnabled ?? true,
+        reactionProbability: s.reactionProbability ?? 0.15,
+        protectionEnabled: s.protectionEnabled ?? true,
+        protectionFloodCount: s.protectionFloodCount ?? 5,
+        protectionFloodWindow: s.protectionFloodWindow ?? 5,
+        protectionDuplicateLimit: s.protectionDuplicateLimit ?? 3,
+        protectionLinkBurstLimit: s.protectionLinkBurstLimit ?? 3,
+        stopSpamEnabled: s.stopSpamEnabled ?? false,
+        stopAbusiveEnabled: s.stopAbusiveEnabled ?? false,
+        stopPromotionEnabled: s.stopPromotionEnabled ?? false,
+        automodEnabled: s.automodEnabled ?? false,
+        securityEnabled: s.securityEnabled ?? false,
+        joinmode: s.joinmode || 'normal',
+        autoAcceptEnabled: s.autoAcceptEnabled ?? false
       },
       filters,
-      notes: notes.map((n) => ({ name: n.name, content: n.content }))
+      notes: notes.map((n) => ({ name: n.name, content: n.content })),
+      mediaLibrary: {
+        stickers: mediaLib.stickers || {},
+        animations: mediaLib.animations || {},
+        stickerMetadata: mediaLib.stickerMetadata || {}
+      }
     };
   }
 
@@ -977,12 +1008,29 @@ class StorageManager {
     if (typeof s.photosProtection === 'boolean') { updates.photosProtection = s.photosProtection; appliedCount++; }
     if (typeof s.voiceProtection === 'boolean') { updates.voiceProtection = s.voiceProtection; appliedCount++; }
     if (typeof s.audioProtection === 'boolean') { updates.audioProtection = s.audioProtection; appliedCount++; }
+    if (typeof s.autoDeleteJoinLeave === 'boolean') { updates.autoDeleteJoinLeave = s.autoDeleteJoinLeave; appliedCount++; }
     if (s.locks && typeof s.locks === 'object') { updates.locks = s.locks; appliedCount++; }
     if (typeof s.welcomeEnabled === 'boolean') { updates.welcomeEnabled = s.welcomeEnabled; appliedCount++; }
     if (typeof s.welcomeMessage === 'string') { updates.welcomeMessage = s.welcomeMessage; appliedCount++; }
     if (typeof s.goodbyeEnabled === 'boolean') { updates.goodbyeEnabled = s.goodbyeEnabled; appliedCount++; }
     if (typeof s.goodbyeMessage === 'string') { updates.goodbyeMessage = s.goodbyeMessage; appliedCount++; }
     if (typeof s.reportsEnabled === 'boolean') { updates.reportsEnabled = s.reportsEnabled; appliedCount++; }
+    if (typeof s.chatbotEnabled === 'boolean') { updates.chatbotEnabled = s.chatbotEnabled; appliedCount++; }
+    if (typeof s.chatbotMode === 'string') { updates.chatbotMode = s.chatbotMode; appliedCount++; }
+    if (typeof s.reactionEnabled === 'boolean') { updates.reactionEnabled = s.reactionEnabled; appliedCount++; }
+    if (typeof s.reactionProbability === 'number') { updates.reactionProbability = s.reactionProbability; appliedCount++; }
+    if (typeof s.protectionEnabled === 'boolean') { updates.protectionEnabled = s.protectionEnabled; appliedCount++; }
+    if (typeof s.protectionFloodCount === 'number') { updates.protectionFloodCount = s.protectionFloodCount; appliedCount++; }
+    if (typeof s.protectionFloodWindow === 'number') { updates.protectionFloodWindow = s.protectionFloodWindow; appliedCount++; }
+    if (typeof s.protectionDuplicateLimit === 'number') { updates.protectionDuplicateLimit = s.protectionDuplicateLimit; appliedCount++; }
+    if (typeof s.protectionLinkBurstLimit === 'number') { updates.protectionLinkBurstLimit = s.protectionLinkBurstLimit; appliedCount++; }
+    if (typeof s.stopSpamEnabled === 'boolean') { updates.stopSpamEnabled = s.stopSpamEnabled; appliedCount++; }
+    if (typeof s.stopAbusiveEnabled === 'boolean') { updates.stopAbusiveEnabled = s.stopAbusiveEnabled; appliedCount++; }
+    if (typeof s.stopPromotionEnabled === 'boolean') { updates.stopPromotionEnabled = s.stopPromotionEnabled; appliedCount++; }
+    if (typeof s.automodEnabled === 'boolean') { updates.automodEnabled = s.automodEnabled; appliedCount++; }
+    if (typeof s.securityEnabled === 'boolean') { updates.securityEnabled = s.securityEnabled; appliedCount++; }
+    if (['normal', 'captcha', 'strict'].includes(s.joinmode)) { updates.joinmode = s.joinmode; appliedCount++; }
+    if (typeof s.autoAcceptEnabled === 'boolean') { updates.autoAcceptEnabled = s.autoAcceptEnabled; appliedCount++; }
 
     this.updateGroupSettings(chatId, updates);
 
@@ -1002,6 +1050,36 @@ class StorageManager {
         if (n && typeof n.name === 'string' && typeof n.content === 'string') {
           this.saveNote(chatId, n.name, n.content, importedBy);
           appliedCount++;
+        }
+      }
+    }
+
+    // Import media library stickers & animations & metadata if present
+    if (config.mediaLibrary && typeof config.mediaLibrary === 'object') {
+      const ml = config.mediaLibrary;
+      if (ml.stickers && typeof ml.stickers === 'object') {
+        for (const [mood, fileIds] of Object.entries(ml.stickers)) {
+          if (Array.isArray(fileIds)) {
+            for (const fId of fileIds) {
+              if (typeof fId === 'string' && fId.length >= 15) {
+                const meta = ml.stickerMetadata && ml.stickerMetadata[fId] ? ml.stickerMetadata[fId] : undefined;
+                this.addStickerToLibrary(mood, fId, meta);
+                appliedCount++;
+              }
+            }
+          }
+        }
+      }
+      if (ml.animations && typeof ml.animations === 'object') {
+        for (const [mood, fileIds] of Object.entries(ml.animations)) {
+          if (Array.isArray(fileIds)) {
+            for (const fId of fileIds) {
+              if (typeof fId === 'string' && fId.length >= 15) {
+                this.addAnimationToLibrary(mood, fId);
+                appliedCount++;
+              }
+            }
+          }
         }
       }
     }
@@ -1606,26 +1684,69 @@ class StorageManager {
     return false;
   }
 
-  public getMediaLibrary(): MediaLibraryRecord {
+  public getMediaLibrary(chatId?: number | string): MediaLibraryRecord {
+    if (chatId !== undefined && chatId !== null && String(chatId).trim() !== '') {
+      const key = String(chatId);
+      if (!this.data.groupMediaLibraries) {
+        this.data.groupMediaLibraries = {};
+      }
+      if (!this.data.groupMediaLibraries[key]) {
+        this.data.groupMediaLibraries[key] = { stickers: {}, animations: {}, stickerMetadata: {} };
+      }
+      if (!this.data.groupMediaLibraries[key].stickerMetadata) {
+        this.data.groupMediaLibraries[key].stickerMetadata = {};
+      }
+      if (!this.data.groupMediaLibraries[key].stickers) {
+        this.data.groupMediaLibraries[key].stickers = {};
+      }
+      if (!this.data.groupMediaLibraries[key].animations) {
+        this.data.groupMediaLibraries[key].animations = {};
+      }
+      return this.data.groupMediaLibraries[key];
+    }
+
     if (!this.data.mediaLibrary) {
       this.data.mediaLibrary = { stickers: {}, animations: {}, stickerMetadata: {} };
     }
     if (!this.data.mediaLibrary.stickerMetadata) {
       this.data.mediaLibrary.stickerMetadata = {};
     }
+    if (!this.data.mediaLibrary.stickers) {
+      this.data.mediaLibrary.stickers = {};
+    }
+    if (!this.data.mediaLibrary.animations) {
+      this.data.mediaLibrary.animations = {};
+    }
     return this.data.mediaLibrary;
   }
 
-  public addStickerToLibrary(mood: string, fileId: string, meta?: StickerMetaRecord): boolean {
-    const lib = this.getMediaLibrary();
+  public addStickerToLibrary(mood: string, fileId: string, meta?: StickerMetaRecord, chatId?: number | string): boolean {
+    const lib = this.getMediaLibrary(chatId);
     const normalizedMood = mood.toLowerCase().trim();
     if (!lib.stickers[normalizedMood]) {
       lib.stickers[normalizedMood] = [];
     }
+
+    // Check capacity limit for distinct sticker packs if adding with pack metadata
+    if (meta && meta.packName) {
+      if (!lib.stickerMetadata) lib.stickerMetadata = {};
+      const existingPackNames = new Set(
+        Object.values(lib.stickerMetadata)
+          .map((m) => m.packName)
+          .filter(Boolean)
+      );
+
+      if (existingPackNames.size >= StorageManager.MAX_PACKS_PER_GROUP && !existingPackNames.has(meta.packName)) {
+        console.warn(`[STORAGE] Group sticker pack limit reached (${StorageManager.MAX_PACKS_PER_GROUP} packs). Cannot add new pack: ${meta.packName}`);
+        return false;
+      }
+    }
+
     if (meta) {
       if (!lib.stickerMetadata) lib.stickerMetadata = {};
       lib.stickerMetadata[fileId] = meta;
     }
+
     if (!lib.stickers[normalizedMood].includes(fileId)) {
       lib.stickers[normalizedMood].push(fileId);
       this.scheduleSave();
@@ -1634,8 +1755,8 @@ class StorageManager {
     return false; // already existed
   }
 
-  public addAnimationToLibrary(mood: string, fileId: string): boolean {
-    const lib = this.getMediaLibrary();
+  public addAnimationToLibrary(mood: string, fileId: string, chatId?: number | string): boolean {
+    const lib = this.getMediaLibrary(chatId);
     const normalizedMood = mood.toLowerCase().trim();
     if (!lib.animations[normalizedMood]) {
       lib.animations[normalizedMood] = [];
@@ -1648,17 +1769,17 @@ class StorageManager {
     return false;
   }
 
-  public removeMediaFromLibrary(fileId: string): boolean {
-    const lib = this.getMediaLibrary();
+  public removeMediaFromLibrary(fileId: string, chatId?: number | string): boolean {
+    const lib = this.getMediaLibrary(chatId);
     let removed = false;
-    for (const mood of Object.keys(lib.stickers)) {
+    for (const mood of Object.keys(lib.stickers || {})) {
       const idx = lib.stickers[mood].indexOf(fileId);
       if (idx !== -1) {
         lib.stickers[mood].splice(idx, 1);
         removed = true;
       }
     }
-    for (const mood of Object.keys(lib.animations)) {
+    for (const mood of Object.keys(lib.animations || {})) {
       const idx = lib.animations[mood].indexOf(fileId);
       if (idx !== -1) {
         lib.animations[mood].splice(idx, 1);
@@ -1675,8 +1796,18 @@ class StorageManager {
     return removed;
   }
 
-  public clearMediaLibrary(mood?: string): void {
-    const lib = this.getMediaLibrary();
+  public clearMediaLibrary(moodOrChatId?: string | number, chatId?: number | string): void {
+    let mood: string | undefined;
+    let targetChatId: number | string | undefined = chatId;
+
+    if (typeof moodOrChatId === 'number' || (typeof moodOrChatId === 'string' && /^-?\d+$/.test(moodOrChatId) && !chatId)) {
+      targetChatId = moodOrChatId;
+      mood = undefined;
+    } else if (typeof moodOrChatId === 'string') {
+      mood = moodOrChatId;
+    }
+
+    const lib = this.getMediaLibrary(targetChatId);
     if (mood) {
       const normalizedMood = mood.toLowerCase().trim();
       if (lib.stickerMetadata && lib.stickers[normalizedMood]) {
@@ -1692,6 +1823,86 @@ class StorageManager {
       lib.stickerMetadata = {};
     }
     this.scheduleSave();
+  }
+
+  public getGroupPacksSummary(chatId: number | string, page: number = 1, pageSize: number = 6) {
+    const defaultStats = getDefaultStickersStats();
+    const lib = this.getMediaLibrary(chatId);
+    const customMoodCounts: Record<string, number> = {};
+    let customStickersCount = 0;
+
+    for (const [mood, list] of Object.entries(lib.stickers || {})) {
+      const count = Array.isArray(list) ? list.length : 0;
+      customMoodCounts[mood] = count;
+      customStickersCount += count;
+    }
+
+    // Merged aggregate mood counts
+    const allMoods = new Set([...Object.keys(defaultStats.moodCounts), ...Object.keys(customMoodCounts)]);
+    const mergedMoodCounts: Record<string, number> = {};
+    for (const m of allMoods) {
+      const def = defaultStats.moodCounts[m] || 0;
+      const cust = customMoodCounts[m] || 0;
+      mergedMoodCounts[m] = def + cust;
+    }
+
+    // Group sticker metadata by custom pack
+    const packMap: Record<string, { name: string; title: string; count: number; moods: Set<string>; addedAt?: string }> = {};
+
+    for (const [fileId, meta] of Object.entries(lib.stickerMetadata || {})) {
+      const packKey = meta.packName || 'standalone_stickers';
+      if (!packMap[packKey]) {
+        packMap[packKey] = {
+          name: meta.packName || 'standalone',
+          title: meta.packTitle || meta.packName || 'Standalone Stickers',
+          count: 0,
+          moods: new Set<string>(),
+          addedAt: meta.addedAt
+        };
+      }
+      packMap[packKey].count++;
+      if (meta.mood) {
+        packMap[packKey].moods.add(meta.mood);
+      }
+    }
+
+    const allCustomPacks = Object.values(packMap).map((p) => ({
+      name: p.name,
+      title: p.title,
+      count: p.count,
+      moods: Array.from(p.moods),
+      addedAt: p.addedAt
+    }));
+
+    // Sort by count descending
+    allCustomPacks.sort((a, b) => b.count - a.count);
+
+    const totalCustomPacks = allCustomPacks.length;
+    const totalDefaultPacks = defaultStats.totalPacks;
+    const totalPacks = totalDefaultPacks + totalCustomPacks;
+    const totalStickers = defaultStats.totalStickers + customStickersCount;
+
+    const totalPages = Math.max(1, Math.ceil(totalCustomPacks / pageSize));
+    const safePage = Math.max(1, Math.min(page, totalPages));
+    const startIndex = (safePage - 1) * pageSize;
+    const paginatedPacks = allCustomPacks.slice(startIndex, startIndex + pageSize);
+
+    return {
+      defaultStickersCount: defaultStats.totalStickers,
+      customStickersCount,
+      totalStickers,
+      totalDefaultPacks,
+      totalCustomPacks,
+      totalPacks,
+      maxPacks: StorageManager.MAX_PACKS_PER_GROUP,
+      defaultMoodCounts: defaultStats.moodCounts,
+      customMoodCounts,
+      moodCounts: mergedMoodCounts,
+      packs: paginatedPacks,
+      page: safePage,
+      totalPages,
+      pageSize
+    };
   }
 
   // --- User Memory Management ---

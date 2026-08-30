@@ -293,6 +293,92 @@ export class TelegramMiddleware {
     };
   }
 
+  /**
+   * STRICT LUSTMODE PERMISSION CHECK
+   * Permitted:
+   * 1. Group Owner (creator status in current group) -> ALLOWED
+   * 2. Administrator directly promoted by the group owner (administrator status AND can_be_edited !== true) -> ALLOWED
+   * 3. Anonymous Admin (acting on behalf of group) -> ALLOWED
+   *
+   * Denied:
+   * - Private chats / DMs -> DENIED
+   * - Other administrators (can_be_edited === true, e.g. promoted by bot/other admins) -> DENIED
+   * - Moderators (custom role MODERATOR or non-owner promoted) -> DENIED
+   * - Regular members -> DENIED
+   */
+  public static async requireLustmodeAdmin(
+    ctx: CommandContext,
+    silent: boolean = false
+  ): Promise<AdminAuthResult> {
+    // 1. Group Check
+    if (!this.isGroup(ctx.message)) {
+      const reason = '❌ /lustmode is available only inside groups.';
+      if (!silent) {
+        await telegramApi.sendMessage(ctx.chatId, reason, {
+          reply_to_message_id: ctx.message?.message_id
+        });
+      }
+      return {
+        allowed: false,
+        reason
+      };
+    }
+
+    // 2. Resolve Actor with current Telegram group membership status
+    const actor = await this.resolveActor(ctx);
+
+    // Anonymous Admin matching current group
+    if (actor.isAnonymousAdmin) {
+      return {
+        allowed: true,
+        actor
+      };
+    }
+
+    // Group Owner
+    if (actor.actorRole === 'OWNER' || actor.actorStatus === 'creator') {
+      return {
+        allowed: true,
+        actor
+      };
+    }
+
+    // Fetch / inspect live Telegram ChatMember to ensure fresh membership verification
+    const member = actor.actorMember || (actor.actorUserId ? await this.getTargetMember(ctx.chatId, actor.actorUserId) : null);
+    if (member && member.status === 'creator') {
+      return {
+        allowed: true,
+        actor
+      };
+    }
+
+    // Directly promoted by owner check: In Telegram Bot API, owner-promoted admins have can_be_edited !== true (false/undefined).
+    // Admins promoted by the bot or other sub-admins have can_be_edited === true.
+    const isActualAdmin = (actor.actorRole === 'ADMIN' || actor.actorStatus === 'administrator' || member?.status === 'administrator') && member?.status === 'administrator';
+    const isDirectlyPromotedByOwner = isActualAdmin && member?.can_be_edited !== true;
+
+    if (isDirectlyPromotedByOwner) {
+      return {
+        allowed: true,
+        actor
+      };
+    }
+
+    // All others: Other admins (can_be_edited === true), moderators, regular members -> DENIED
+    const reason = '❌ Only the group owner and administrators directly promoted by the owner can use /lustmode.';
+    if (!silent) {
+      await telegramApi.sendMessage(ctx.chatId, reason, {
+        reply_to_message_id: ctx.message?.message_id
+      });
+    }
+
+    return {
+      allowed: false,
+      reason,
+      actor
+    };
+  }
+
   public static async requireModeratorOrAdmin(ctx: CommandContext, silent: boolean = false): Promise<boolean> {
     const actor = await this.resolveActor(ctx);
     if (actor.actorRank < RoleRank.MODERATOR) {

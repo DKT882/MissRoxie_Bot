@@ -29,6 +29,7 @@ async function runSecurityTestSuite() {
   const otherChatId = -1009999999999;
   const ownerId = 1001;
   const adminId = 2001;
+  const otherAdminId = 2002;
   const customModId = 3001;
   const normalMemberId = 4001;
   const restrictedUserId = 5001;
@@ -78,6 +79,14 @@ async function runSecurityTestSuite() {
       can_delete_messages: true,
       can_be_edited: false,
       user: { id: adminId, is_bot: false, first_name: 'AdminUser', username: 'admin_user' }
+    },
+    [otherAdminId]: {
+      status: 'administrator',
+      can_restrict_members: true,
+      can_promote_members: true,
+      can_delete_messages: true,
+      can_be_edited: true,
+      user: { id: otherAdminId, is_bot: false, first_name: 'OtherAdminUser', username: 'other_admin_user' }
     },
     [customModId]: {
       status: 'member',
@@ -507,6 +516,100 @@ async function runSecurityTestSuite() {
       allProtected === true,
       'AUTH-25 All admin commands protected by the same centralized admin guard'
     );
+  }
+
+  // ==========================================
+  // AUTH-26 TO AUTH-32: STRICT /LUSTMODE PERMISSION TESTS
+  // ==========================================
+  
+  // AUTH-26: Group Owner allowed to configure /lustmode (on, off, status)
+  {
+    db.updateGroupSettings(chatId, { lustMode: false });
+    lastSentMessage = null;
+    const ctxOn = makeContext(ownerId, '/lustmode', ['on']);
+    await CommandHandler.handleCommand(ctxOn);
+    assert(db.getGroupSettings(chatId).lustMode === true, 'AUTH-26.1 Group Owner allowed /lustmode on');
+
+    lastSentMessage = null;
+    const ctxStatus = makeContext(ownerId, '/lustmode', ['status']);
+    await CommandHandler.handleCommand(ctxStatus);
+    assert(lastSentMessage?.text.includes('Roxie Lust Mode Settings'), 'AUTH-26.2 Group Owner allowed /lustmode status');
+
+    lastSentMessage = null;
+    const ctxOff = makeContext(ownerId, '/lustmode', ['off']);
+    await CommandHandler.handleCommand(ctxOff);
+    assert(db.getGroupSettings(chatId).lustMode === false, 'AUTH-26.3 Group Owner allowed /lustmode off');
+  }
+
+  // AUTH-27: Directly promoted admin (can_be_edited: false) allowed to configure /lustmode
+  {
+    db.updateGroupSettings(chatId, { lustMode: false });
+    lastSentMessage = null;
+    const ctxOn = makeContext(adminId, '/lustmode', ['on']);
+    await CommandHandler.handleCommand(ctxOn);
+    assert(db.getGroupSettings(chatId).lustMode === true, 'AUTH-27.1 Directly promoted admin allowed /lustmode on');
+
+    lastSentMessage = null;
+    const ctxStatus = makeContext(adminId, '/lustmode', ['status']);
+    await CommandHandler.handleCommand(ctxStatus);
+    assert(lastSentMessage?.text.includes('Roxie Lust Mode Settings'), 'AUTH-27.2 Directly promoted admin allowed /lustmode status');
+
+    lastSentMessage = null;
+    const ctxOff = makeContext(adminId, '/lustmode', ['off']);
+    await CommandHandler.handleCommand(ctxOff);
+    assert(db.getGroupSettings(chatId).lustMode === false, 'AUTH-27.3 Directly promoted admin allowed /lustmode off');
+  }
+
+  // AUTH-28: Other admin (promoted by bot/other admin, can_be_edited: true) denied /lustmode
+  {
+    db.updateGroupSettings(chatId, { lustMode: false });
+    lastSentMessage = null;
+    const ctxOn = makeContext(otherAdminId, '/lustmode', ['on']);
+    await CommandHandler.handleCommand(ctxOn);
+    assert(db.getGroupSettings(chatId).lustMode === false, 'AUTH-28.1 Other admin denied /lustmode on');
+    assert(lastSentMessage?.text.includes('Only the group owner and administrators directly promoted by the owner'), 'AUTH-28.1 Error message sent to other admin');
+
+    lastSentMessage = null;
+    const ctxStatus = makeContext(otherAdminId, '/lustmode', ['status']);
+    await CommandHandler.handleCommand(ctxStatus);
+    assert(lastSentMessage?.text.includes('Only the group owner and administrators directly promoted by the owner'), 'AUTH-28.2 Other admin denied /lustmode status');
+  }
+
+  // AUTH-29: Custom Moderator denied /lustmode
+  {
+    db.updateGroupSettings(chatId, { lustMode: false });
+    lastSentMessage = null;
+    const ctxOn = makeContext(customModId, '/lustmode', ['on']);
+    await CommandHandler.handleCommand(ctxOn);
+    assert(db.getGroupSettings(chatId).lustMode === false, 'AUTH-29.1 Custom Moderator denied /lustmode on');
+  }
+
+  // AUTH-30: Regular Member denied /lustmode
+  {
+    db.updateGroupSettings(chatId, { lustMode: false });
+    lastSentMessage = null;
+    const ctxOn = makeContext(normalMemberId, '/lustmode', ['on']);
+    await CommandHandler.handleCommand(ctxOn);
+    assert(db.getGroupSettings(chatId).lustMode === false, 'AUTH-30.1 Regular Member denied /lustmode on');
+  }
+
+  // AUTH-31: DM / Private Chat denied /lustmode
+  {
+    lastSentMessage = null;
+    const ctxDM = makeContext(ownerId, '/lustmode', ['on'], undefined, false, 'private');
+    await CommandHandler.handleCommand(ctxDM);
+    assert(lastSentMessage?.text.includes('groups'), 'AUTH-31.1 Owner in DM denied /lustmode');
+  }
+
+  // AUTH-32: ChatId isolation and audit logging
+  {
+    db.updateGroupSettings(chatId, { lustMode: true });
+    db.updateGroupSettings(otherChatId, { lustMode: false });
+    assert(db.getGroupSettings(chatId).lustMode === true, 'AUTH-32.1 ChatId isolation group 1');
+    assert(db.getGroupSettings(otherChatId).lustMode === false, 'AUTH-32.2 ChatId isolation group 2');
+    const logs = db.getGroupLogs(chatId, 20);
+    const lustLogs = logs.filter(l => l.command === 'lustmod' || l.command === 'lustmode' || l.command === '/lustmode');
+    assert(lustLogs.length > 0, 'AUTH-32.3 Audit logging verified for lustmode');
   }
 
   // ==========================================
