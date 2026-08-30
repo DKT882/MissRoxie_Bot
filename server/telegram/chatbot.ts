@@ -530,9 +530,9 @@ export class ChatbotService {
     return existed || groupCleared;
   }
 
-  public static getOrCreateConversation(chatId: number, userId?: number): ConversationContext {
+  public static getOrCreateConversation(chatId: number, _userId?: number): ConversationContext {
     const isGroup = Number(chatId) < 0;
-    const key = isGroup ? String(chatId) : `${chatId}_${userId || 0}`;
+    const key = String(chatId);
     let conv = this.conversations.get(key);
     if (!conv) {
       conv = { messages: [], lastActivity: Date.now() };
@@ -1347,7 +1347,7 @@ export class ChatbotService {
     const msgId = message.message_id;
     const userId = message.from?.id || 0;
     const isPrivate = message.chat.type === 'private';
-    const convKey = isPrivate ? `dm_${chatId}` : String(chatId);
+    const convKey = String(chatId);
     const userName = message.from?.first_name 
       ? (message.from.last_name ? `${message.from.first_name} ${message.from.last_name}` : message.from.first_name)
       : (message.from?.username ? `@${message.from.username}` : (userId ? `User ${userId}` : 'User'));
@@ -1403,7 +1403,8 @@ export class ChatbotService {
           userId,
           name: userName,
           content: userText,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          messageId: msgId
         });
       }
     }
@@ -1676,20 +1677,11 @@ STRICT CONVERSATION RULES:
     let transcript = '(No previous messages)';
     let contextCount = 0;
     if (!isPrivate) {
-      // Sensible context selection: prioritize in-memory conv if explicitly populated, otherwise rolling group memory
-      const sourceList = (conv.messages.length > priorGroupEntries.length)
-        ? conv.messages.slice(-this.MAX_CONTEXT_MESSAGES).map(m => ({
-            name: m.role === 'assistant' ? 'Roxie' : 'User',
-            content: m.content
-          }))
-        : priorGroupEntries.slice(-25).map(e => ({
-            name: e.name || (e.role === 'assistant' ? 'Roxie' : 'User'),
-            content: e.content
-          }));
-
+      // In group chats, ALWAYS read from the ONE shared group conversation memory containing all members' messages
+      const sourceList = priorGroupEntries.slice(-25);
       contextCount = sourceList.length;
       if (sourceList.length > 0) {
-        transcript = sourceList.map(e => `${e.name}: ${e.content}`).join('\n');
+        transcript = sourceList.map(e => `${e.name || (e.role === 'assistant' ? 'Roxie' : 'User')}: ${e.content}`).join('\n');
       }
     } else {
       const boundedHistory = conv.messages.slice(-this.MAX_CONTEXT_MESSAGES);
@@ -1944,6 +1936,31 @@ Reply naturally to the latest user message while strictly continuing the existin
     const userText = message.text || message.caption || '';
     if (!userText) return null;
 
+    const isGroup = message.chat.type !== 'private';
+    const userName = message.from?.first_name 
+      ? (message.from.last_name ? `${message.from.first_name} ${message.from.last_name}` : message.from.first_name)
+      : (message.from?.username ? `@${message.from.username}` : (userId ? `User ${userId}` : 'User'));
+
+    let contextPrefix = '';
+    if (isGroup) {
+      const priorGroupMsgs = db.getGroupMemory(chatId);
+      if (priorGroupMsgs.length > 0) {
+        contextPrefix = `RECENT GROUP CONVERSATION:\n` +
+          priorGroupMsgs.slice(-15).map(m => `${m.name || (m.role === 'assistant' ? 'Roxie' : 'User')}: ${m.content}`).join('\n') +
+          `\n\n`;
+      }
+      if (userText && !isSensitiveData(userText)) {
+        db.addGroupConversationEntry(chatId, {
+          role: 'user',
+          userId,
+          name: userName,
+          content: userText,
+          timestamp: Date.now(),
+          messageId: msgId
+        });
+      }
+    }
+
     await telegramApi.sendChatAction(chatId, 'typing');
 
     const systemPrompt = `You are Roxie, a sharp, confident, psychologically observant female friend in a Telegram group chat.
@@ -1967,7 +1984,7 @@ Core Rules:
           model,
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: userText }
+            { role: 'user', content: `${contextPrefix}LATEST MESSAGE:\n${userName}: ${userText}` }
           ],
           max_tokens: 100,
           temperature: 0.7
@@ -2030,7 +2047,7 @@ Core Rules:
     console.log(`CHATBOT_DECISION ${JSON.stringify(decision)}`);
 
     const isGroup = decision.chatId < 0;
-    const convKey = isGroup ? String(decision.chatId) : `${decision.chatId}_${decision.userId}`;
+    const convKey = String(decision.chatId);
     let conv = this.conversations.get(convKey);
     if (!conv) {
       conv = { messages: [], lastActivity: Date.now() };

@@ -27,19 +27,25 @@ export interface MediaLibraryRecord {
 
 export const GROUP_MEMORY_LIMIT = 80;
 
-export interface GroupConversationEntry {
+export interface GroupConversationMessage {
   role: 'user' | 'assistant';
-  userId?: number;
+  userId?: number | string;
   name: string; // username or display name
   content: string;
   timestamp: number;
+  messageId?: number;
 }
 
-export interface GroupMemoryRecord {
+export type GroupConversationEntry = GroupConversationMessage;
+
+export interface GroupConversationMemory {
   chatId: number | string;
-  entries: GroupConversationEntry[];
+  messages: GroupConversationMessage[];
+  entries?: GroupConversationMessage[]; // backward-compatible alias
   lastUpdated: number;
 }
+
+export type GroupMemoryRecord = GroupConversationMemory;
 
 export interface UserMemoryRecord {
   chatId: number | string;
@@ -78,8 +84,9 @@ interface DatabaseSchema {
   customRoles: Record<string, 'MODERATOR' | 'NONE'>; // `${chatId}_${userId}` -> Custom bot role
   mediaLibrary?: MediaLibraryRecord;
   groupMediaLibraries?: Record<string, MediaLibraryRecord>; // `${chatId}` -> MediaLibraryRecord
-  userMemories?: Record<string, UserMemoryRecord>; // `${chatId}_${userId}` -> UserMemoryRecord
-  groupMemories?: Record<string, GroupMemoryRecord>; // `${chatId}` -> GroupMemoryRecord
+  userMemories?: Record<string, UserMemoryRecord>; // `${chatId}_${userId}` -> UserMemoryRecord (personal facts only)
+  groupConversationMemories?: Record<string, GroupConversationMemory>; // `${chatId}` -> GroupConversationMemory (ONE shared group memory per chatId)
+  groupMemories?: Record<string, any>; // legacy backward-compatible alias
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -107,6 +114,7 @@ class StorageManager {
     mediaLibrary: { stickers: {}, animations: {}, stickerMetadata: {} },
     groupMediaLibraries: {},
     userMemories: {},
+    groupConversationMemories: {},
     groupMemories: {}
   };
   private raidStates: Record<number, RaidStateRecord> = {};
@@ -126,6 +134,24 @@ class StorageManager {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         if (raw) {
           const parsed = JSON.parse(raw);
+
+          const groupConversationMemories: Record<string, GroupConversationMemory> = parsed.groupConversationMemories || {};
+          // Safe migration from legacy groupMemories if present
+          if (parsed.groupMemories && typeof parsed.groupMemories === 'object') {
+            for (const [cId, rec] of Object.entries(parsed.groupMemories)) {
+              if (!groupConversationMemories[cId]) {
+                const msgs = Array.isArray((rec as any).messages)
+                  ? (rec as any).messages
+                  : (Array.isArray((rec as any).entries) ? (rec as any).entries : []);
+                groupConversationMemories[cId] = {
+                  chatId: (rec as any).chatId || cId,
+                  messages: msgs.slice(-GROUP_MEMORY_LIMIT),
+                  lastUpdated: (rec as any).lastUpdated || Date.now()
+                };
+              }
+            }
+          }
+
           this.data = {
             settings: parsed.settings || {},
             warnings: parsed.warnings || [],
@@ -144,7 +170,8 @@ class StorageManager {
             mediaLibrary: parsed.mediaLibrary || { stickers: {}, animations: {}, stickerMetadata: {} },
             groupMediaLibraries: parsed.groupMediaLibraries || {},
             userMemories: parsed.userMemories || {},
-            groupMemories: parsed.groupMemories || {}
+            groupConversationMemories,
+            groupMemories: groupConversationMemories
           };
         }
       }
@@ -1968,14 +1995,23 @@ class StorageManager {
   }
 
   public cleanExpiredMemories(): void {
-    if (!this.data.userMemories) return;
     const now = Date.now();
     const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days inactivity
     let cleaned = false;
-    for (const [key, record] of Object.entries(this.data.userMemories)) {
-      if (now - (record.lastUpdated || 0) > TTL_MS) {
-        delete this.data.userMemories[key];
-        cleaned = true;
+    if (this.data.userMemories) {
+      for (const [key, record] of Object.entries(this.data.userMemories)) {
+        if (now - (record.lastUpdated || 0) > TTL_MS) {
+          delete this.data.userMemories[key];
+          cleaned = true;
+        }
+      }
+    }
+    if (this.data.groupConversationMemories) {
+      for (const [key, record] of Object.entries(this.data.groupConversationMemories)) {
+        if (now - (record.lastUpdated || 0) > TTL_MS) {
+          delete this.data.groupConversationMemories[key];
+          cleaned = true;
+        }
       }
     }
     if (cleaned) {
@@ -1984,37 +2020,68 @@ class StorageManager {
   }
 
   // --- Group Conversation Memory Management (Shared per ChatId) ---
-  public getGroupMemory(chatId: number | string): GroupConversationEntry[] {
-    if (!this.data.groupMemories) this.data.groupMemories = {};
+  public getGroupMemory(chatId: number | string): GroupConversationMessage[] {
+    if (!this.data.groupConversationMemories) this.data.groupConversationMemories = {};
     const key = String(chatId);
-    const record = this.data.groupMemories[key];
-    if (!record || !Array.isArray(record.entries)) return [];
-    return record.entries;
+    let record = this.data.groupConversationMemories[key];
+    if (!record && this.data.groupMemories && this.data.groupMemories[key]) {
+      const legacy = this.data.groupMemories[key];
+      const msgs = Array.isArray(legacy.messages) ? legacy.messages : (Array.isArray(legacy.entries) ? legacy.entries : []);
+      record = {
+        chatId,
+        messages: msgs,
+        lastUpdated: legacy.lastUpdated || Date.now()
+      };
+      this.data.groupConversationMemories[key] = record;
+    }
+    if (!record || !Array.isArray(record.messages)) return [];
+    return record.messages;
   }
 
-  public addGroupConversationEntry(chatId: number | string, entry: GroupConversationEntry): void {
-    if (!this.data.groupMemories) this.data.groupMemories = {};
+  public addGroupConversationEntry(chatId: number | string, entry: GroupConversationMessage): void {
+    if (!this.data.groupConversationMemories) this.data.groupConversationMemories = {};
     const key = String(chatId);
-    let record = this.data.groupMemories[key];
+    let record = this.data.groupConversationMemories[key];
     const now = Date.now();
     if (!record) {
-      record = { chatId, entries: [], lastUpdated: now };
-      this.data.groupMemories[key] = record;
+      record = { chatId, messages: [], lastUpdated: now };
+      this.data.groupConversationMemories[key] = record;
     }
     record.lastUpdated = now;
-    record.entries.push(entry);
-    while (record.entries.length > GROUP_MEMORY_LIMIT) {
-      record.entries.shift();
+
+    // Deduplication check: do not add duplicate message with same messageId
+    if (entry.messageId && record.messages.some(m => m.messageId === entry.messageId)) {
+      return;
+    }
+    const last = record.messages[record.messages.length - 1];
+    if (last && last.role === entry.role && last.content === entry.content && Math.abs(last.timestamp - entry.timestamp) < 1000) {
+      return;
+    }
+
+    record.messages.push(entry);
+    while (record.messages.length > GROUP_MEMORY_LIMIT) {
+      record.messages.shift();
+    }
+    // Backward compatibility alias for entries
+    record.entries = record.messages;
+    if (this.data.groupMemories) {
+      this.data.groupMemories[key] = record;
     }
     this.scheduleSave();
   }
 
   public clearGroupMemory(chatId: number | string): boolean {
-    if (!this.data.groupMemories) return false;
     const key = String(chatId);
-    const existed = !!this.data.groupMemories[key];
-    if (existed) {
+    let existed = false;
+    if (this.data.groupConversationMemories && this.data.groupConversationMemories[key]) {
+      delete this.data.groupConversationMemories[key];
+      existed = true;
+    }
+    if (this.data.groupMemories && this.data.groupMemories[key]) {
       delete this.data.groupMemories[key];
+      existed = true;
+    }
+    if (existed) {
       this.scheduleSave();
     }
     return existed;
