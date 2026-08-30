@@ -10,11 +10,13 @@ interface RaidStateRecord {
 }
 
 export interface StickerMetaRecord {
+  chatId?: number | string;
   packName?: string;
   packTitle?: string;
   fileId: string;
   emoji?: string;
   mood: string;
+  source?: 'custom' | 'default';
   addedBy?: number;
   addedAt: string;
 }
@@ -1789,10 +1791,20 @@ class StorageManager {
       }
     }
 
-    if (meta) {
-      if (!lib.stickerMetadata) lib.stickerMetadata = {};
-      lib.stickerMetadata[fileId] = meta;
+    if (!lib.stickerMetadata) lib.stickerMetadata = {};
+    const metaRecord: StickerMetaRecord = {
+      chatId,
+      source: chatId ? 'custom' : 'default',
+      addedAt: new Date().toISOString(),
+      ...(meta || {}),
+      fileId,
+      mood: normalizedMood
+    };
+    if (chatId) {
+      metaRecord.source = 'custom';
+      metaRecord.chatId = chatId;
     }
+    lib.stickerMetadata[fileId] = metaRecord;
 
     if (!lib.stickers[normalizedMood].includes(fileId)) {
       lib.stickers[normalizedMood].push(fileId);

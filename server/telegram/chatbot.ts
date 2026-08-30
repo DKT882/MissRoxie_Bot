@@ -1106,7 +1106,74 @@ export class ChatbotService {
     return 'normal';
   }
 
+  private static defaultStickerIdsSet: Set<string> | null = null;
+
+  public static isDefaultSticker(fileId: string): boolean {
+    if (!fileId) return false;
+    if (!this.defaultStickerIdsSet) {
+      this.defaultStickerIdsSet = new Set<string>();
+      for (const list of Object.values(DEFAULT_STICKERS_BY_MOOD)) {
+        if (Array.isArray(list)) {
+          for (const id of list) {
+            if (id) this.defaultStickerIdsSet.add(id);
+          }
+        }
+      }
+    }
+    return this.defaultStickerIdsSet.has(fileId);
+  }
+
+  public static isCustomSticker(fileId: string, chatId?: number | string): boolean {
+    if (!chatId || !fileId) return false;
+
+    // A default sticker from the default collection can NEVER be a custom sticker
+    if (this.isDefaultSticker(fileId)) return false;
+
+    const groupLib = db.getMediaLibrary(chatId);
+    if (!groupLib) return false;
+
+    let inGroupList = false;
+    if (groupLib.stickers) {
+      for (const list of Object.values(groupLib.stickers)) {
+        if (Array.isArray(list) && list.includes(fileId)) {
+          inGroupList = true;
+          break;
+        }
+      }
+    }
+
+    const meta = groupLib.stickerMetadata?.[fileId];
+    if (!inGroupList && !meta) return false;
+
+    // Check metadata: source must be custom and chatId must match
+    if (meta) {
+      if (meta.source && meta.source !== 'custom') return false;
+      if (meta.chatId && String(meta.chatId) !== String(chatId)) return false;
+    }
+
+    return true;
+  }
+
+  public static isStickerAllowedForMode(
+    fileId: string,
+    chatId?: number | string,
+    isLustMode: boolean = false
+  ): boolean {
+    if (!fileId || !this.isValidFileId(fileId)) return false;
+    if (!isLustMode) return true;
+    if (!chatId) return false;
+    return this.isCustomSticker(fileId, chatId);
+  }
+
   public static selectSticker(mood: string, chatId?: number): string | null {
+    // If Lust Mode is active for this group, delegate strictly to custom stickers
+    if (chatId) {
+      const settings = db.getGroupSettings(chatId);
+      if (settings?.lustMode) {
+        return this.selectCustomStickerForLustMode(mood, chatId);
+      }
+    }
+
     const normalizedMood = mood.toLowerCase().replace('sad/comforting', 'sad').trim();
     let candidates: string[] = [];
 
@@ -1170,10 +1237,16 @@ export class ChatbotService {
    * Under NO circumstances does this fall back to default or global stickers.
    */
   public static selectCustomStickerForLustMode(mood: string, chatId?: number, suppressRomance: boolean = false): string | null {
-    if (!chatId) return null;
+    if (!chatId) {
+      console.log(`[LUST] No custom sticker available\nchatId: undefined\nmood: ${mood}`);
+      return null;
+    }
 
     const groupLib = db.getMediaLibrary(chatId);
-    if (!groupLib || !groupLib.stickers) return null;
+    if (!groupLib || !groupLib.stickers) {
+      console.log(`[LUST] No custom sticker available\nchatId: ${chatId}\nmood: ${mood}`);
+      return null;
+    }
 
     let normalizedMood = mood.toLowerCase().replace('sad/comforting', 'sad').trim();
     if (suppressRomance && (normalizedMood === 'flirty' || normalizedMood === 'romantic')) {
@@ -1181,8 +1254,12 @@ export class ChatbotService {
     }
     let candidates: string[] = [];
 
+    const filterCustom = (ids: string[]): string[] => {
+      return ids.filter(id => this.isValidFileId(id) && this.isCustomSticker(id, chatId));
+    };
+
     // 1. Direct match in group's custom sticker library
-    const directList = (groupLib.stickers[normalizedMood] || []).filter(id => this.isValidFileId(id));
+    const directList = filterCustom(groupLib.stickers[normalizedMood] || []);
     if (directList.length > 0) {
       candidates = directList;
     } else {
@@ -1190,7 +1267,7 @@ export class ChatbotService {
       const fallbacks = (MOOD_FALLBACK_MATRIX[normalizedMood] || ['normal'])
         .filter(m => !suppressRomance || (m !== 'flirty' && m !== 'romantic'));
       for (const fbMood of fallbacks) {
-        const fbList = (groupLib.stickers[fbMood] || []).filter(id => this.isValidFileId(id));
+        const fbList = filterCustom(groupLib.stickers[fbMood] || []);
         if (fbList.length > 0) {
           candidates = fbList;
           break;
@@ -1204,7 +1281,7 @@ export class ChatbotService {
         ? ['friendly', 'playful', 'happy', 'teasing', 'cute', 'normal']
         : ['flirty', 'romantic', 'playful', 'teasing', 'cute', 'loving', 'happy', 'normal'];
       for (const lmMood of lustModeFallbacks) {
-        const lmList = (groupLib.stickers[lmMood] || []).filter(id => this.isValidFileId(id));
+        const lmList = filterCustom(groupLib.stickers[lmMood] || []);
         if (lmList.length > 0) {
           candidates = lmList;
           break;
@@ -1212,10 +1289,10 @@ export class ChatbotService {
       }
     }
 
-    // 4. If still empty, pick ANY valid custom sticker available in the group's custom library (Rule 10 option 1)
+    // 4. If still empty, pick ANY valid custom sticker available in the group's custom library
     if (candidates.length === 0) {
       for (const anyMood of Object.keys(groupLib.stickers)) {
-        const anyList = (groupLib.stickers[anyMood] || []).filter(id => this.isValidFileId(id));
+        const anyList = filterCustom(groupLib.stickers[anyMood] || []);
         if (anyList.length > 0) {
           candidates.push(...anyList);
         }
@@ -1223,7 +1300,10 @@ export class ChatbotService {
     }
 
     // STRICT: Under NO circumstances fall back to default or global stickers!
-    if (!candidates || candidates.length === 0) return null;
+    if (!candidates || candidates.length === 0) {
+      console.log(`[LUST] No custom sticker available\nchatId: ${chatId}\nmood: ${mood}`);
+      return null;
+    }
 
     // Deduplicate candidate IDs
     const uniquePool = Array.from(new Set(candidates));
@@ -1231,7 +1311,10 @@ export class ChatbotService {
     // Avoid recently sent stickers for freshness
     const available = uniquePool.filter(id => !this.recentStickers.has(id));
     const targetPool = available.length > 0 ? available : uniquePool;
-    if (targetPool.length === 0) return null;
+    if (targetPool.length === 0) {
+      console.log(`[LUST] No custom sticker available\nchatId: ${chatId}\nmood: ${mood}`);
+      return null;
+    }
 
     const selected = targetPool[Math.floor(Math.random() * targetPool.length)];
     this.recentStickers.add(selected);
@@ -1239,20 +1322,9 @@ export class ChatbotService {
       const first = this.recentStickers.values().next().value;
       if (first) this.recentStickers.delete(first);
     }
-    return selected;
-  }
 
-  public static isCustomSticker(fileId: string, chatId?: number): boolean {
-    if (!chatId || !fileId) return false;
-    const groupLib = db.getMediaLibrary(chatId);
-    if (!groupLib || !groupLib.stickers) return false;
-    for (const list of Object.values(groupLib.stickers)) {
-      if (Array.isArray(list) && list.includes(fileId)) return true;
-    }
-    if (groupLib.stickerMetadata && groupLib.stickerMetadata[fileId]) {
-      return true;
-    }
-    return false;
+    console.log(`[LUST] Custom sticker selected\nchatId: ${chatId}\nfileId: ${selected}\nmood: ${mood}\nsource: custom`);
+    return selected;
   }
 
   public static selectAnimation(mood: string, chatId?: number): string | null {
@@ -2065,7 +2137,26 @@ Core Rules:
       }
     };
 
+    const settings = db.getGroupSettings(decision.chatId);
+    const isLustMode = Boolean(settings?.lustMode);
+
     if (decision.responseType === 'text_plus_sticker' && decision.content && decision.mediaFileId) {
+      if (isLustMode && !this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true)) {
+        console.warn(`[LUST] BLOCKED DEFAULT STICKER\nchatId: ${decision.chatId}\nfileId: ${decision.mediaFileId}\nsource: default`);
+        // Fallback: send text only, blocking default sticker from Telegram
+        const textRes = await telegramApi.sendMessage(decision.chatId, decision.content, {
+          reply_to_message_id: decision.replyToMessageId
+        });
+        if (textRes.ok || (textRes as any).message_id) {
+          console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
+          conv.messages.push({ role: 'assistant', content: decision.content });
+          this.trimContext(conv);
+          recordAssistantEntry(decision.content);
+          return true;
+        }
+        return false;
+      }
+
       const textRes = await telegramApi.sendMessage(decision.chatId, decision.content, {
         reply_to_message_id: decision.replyToMessageId
       });
@@ -2084,6 +2175,12 @@ Core Rules:
     }
 
     if (decision.responseType === 'sticker' && decision.mediaFileId) {
+      if (isLustMode && !this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true)) {
+        console.warn(`[LUST] BLOCKED DEFAULT STICKER\nchatId: ${decision.chatId}\nfileId: ${decision.mediaFileId}\nsource: default`);
+        // Block default sticker from reaching Telegram
+        return false;
+      }
+
       const res = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
         reply_to_message_id: decision.replyToMessageId
       });
