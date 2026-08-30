@@ -1,5 +1,3 @@
-import { ADMIN_COMMANDS } from './commands.js';
-
 export interface CommandCatalogItem {
   command: string;
   category: 'General' | 'Moderation' | 'Warnings' | 'Message Cleaning' | 'Links' | 'Media' | 'Locks' | 'Flood / Anti-Spam' | 'Filters' | 'Reports' | 'Welcome / Goodbye' | 'Pin Management' | 'Slow Mode' | 'Admin Permissions' | 'Audit' | 'Announcements' | 'Scheduler' | 'Notes' | 'Configuration' | 'Smart Protection' | 'Custom Abuse';
@@ -133,11 +131,12 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
   { command: '/adminlog', category: 'Audit', description: 'View recent moderation audit logs.', syntax: '/adminlog [limit]', example: '/adminlog 15', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: false, auditLogged: false },
 
   // Announcements
-  { command: '/say', category: 'Announcements', description: 'Broadcast announcement as bot or reply to user.', syntax: '/say <message>', example: '/say Welcome everyone!', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
-  { command: '/all', category: 'Announcements', description: 'Mention all known group members in broadcast.', syntax: '/all [message]', example: '/all Meeting starts at 6 PM', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/say', category: 'Announcements', description: 'Broadcast announcement as bot or reply to user. Preserves original line breaks, paragraph spaces, emojis, and formatting.', syntax: '/say <message>', example: '/say Welcome everyone!\nHow are you today?', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/announce', category: 'Announcements', description: 'Broadcast announcement as bot or reply to user (alias for /say). Preserves multiline formatting.', syntax: '/announce <message>', example: '/announce Welcome everyone!', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/all', category: 'Announcements', description: 'Mention all known group members in broadcast. Preserves multiline text and paragraph breaks.', syntax: '/all [message]', example: '/all\n🔔 Important Announcement\n\nTomorrow:\n10 AM meeting\n12 PM submission', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
 
   // Scheduler
-  { command: '/schedule', category: 'Scheduler', description: 'Schedule a recurring/one-shot message.', syntax: '/schedule <interval> <message>', example: '/schedule 2h Meeting time!', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/schedule', category: 'Scheduler', description: 'Schedule recurring or one-shot announcements, reminders, or media. Supports text, multiline text, links, or reply to photo/video/sticker/document/GIF.', syntax: '/schedule <interval> [message] (or reply to media with /schedule <interval> [caption])', example: '/schedule 10m Meeting starts soon.\n/schedule 1h\n📢 Reminder\nBring:\n• ID Card\n• Notebook\n(Media: reply to photo/video/sticker/document with /schedule 2h)', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/listschedules', category: 'Scheduler', description: 'List active scheduled messages.', syntax: '/listschedules', example: '/listschedules', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: false, auditLogged: false },
   { command: '/deleteschedule', category: 'Scheduler', description: 'Delete scheduled job by ID.', syntax: '/deleteschedule <id>', example: '/deleteschedule 12', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
 
@@ -170,6 +169,7 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
   { command: '/stickers', category: 'Media', description: 'List registered sticker packs and mood summary for this chat.', syntax: '/stickers [page]', example: '/stickers 1', permission: 'Admin', targetType: 'None', isPublic: false, modifiesState: false, auditLogged: false },
   { command: '/addbulksticker', category: 'Media', description: 'Import multiple sticker packs by links or names into media library.', syntax: '/addbulksticker <pack_urls_or_names...>', example: '/addbulksticker t.me/addstickers/pack1 t.me/addstickers/pack2', permission: 'Admin', targetType: 'Text', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/lustmod', category: 'General', description: 'Toggle Roxie lust / spicy personality mode (on/off/status).', syntax: '/lustmod <on|off|status>', example: '/lustmod on', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
+  { command: '/lustmode', category: 'General', description: 'Toggle Roxie lust / spicy personality mode with custom stickers (on/off/status).', syntax: '/lustmode <on|off|status>', example: '/lustmode on', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true },
   { command: '/roxiereaction', category: 'Smart Protection', description: 'Configure smart Telegram reactions (on/off/status/rate).', syntax: '/roxiereaction <on|off|status|rate 10-100>', example: '/roxiereaction on', permission: 'Admin', targetType: 'Config', isPublic: false, modifiesState: true, auditLogged: true }
 ];
 

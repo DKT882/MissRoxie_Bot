@@ -125,14 +125,14 @@ export class CommandHandler {
     '/protection', '/roxie', '/roxiemode', '/roxiereaction', '/reaction',
     '/lustmod', '/lustmode',
     '/clearmemory',
-    '/say', '/schedule', '/listschedules', '/deleteschedule',
+    '/say', '/announce', '/schedule', '/listschedules', '/deleteschedule',
     '/exportconfig', '/importconfig', '/status',
     '/addstickerpack', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
     '/teststicker'
   ]);
 
   public static readonly SENSITIVE_COMMANDS = new Set<string>([
-    '/say', '/all',
+    '/say', '/announce', '/all',
     '/schedule', '/listschedules', '/deleteschedule',
     '/welcome', '/setwelcome', '/goodbye', '/setgoodbye', '/autodeljoin',
     '/ban', '/unban', '/kick', '/mute', '/unmute',
@@ -461,6 +461,7 @@ export class CommandHandler {
       case '/all':
         await this.handleAll(ctx);
         return true;
+      case '/announce':
       case '/say':
         await this.handleSay(ctx);
         return true;
@@ -579,6 +580,43 @@ export class CommandHandler {
       default:
         return false;
     }
+  }
+
+  /**
+   * Retrieves the uncorrupted message body from a command context, preserving
+   * all original line breaks, paragraph breaks, indentation, emojis, punctuation, and URLs.
+   * If skipArgCount > 0, skips the first `skipArgCount` whitespace-delimited tokens
+   * (e.g. interval like '10m' or note name like 'rules') and returns the exact remainder.
+   */
+  public static getCommandText(ctx: CommandContext, skipArgCount: number = 0): string {
+    // 1. Determine raw text source
+    let source = ctx.rawArgs;
+    if (source === undefined || source === null) {
+      const fullText = ctx.message?.text || ctx.message?.caption || '';
+      const cmdMatch = fullText.match(/^([\/!][^\s]+)([\s\S]*)$/);
+      if (cmdMatch) {
+        source = cmdMatch[2].replace(/^[ \t]*\r?\n/, '').replace(/^[ \t]+/, '');
+      } else {
+        source = ctx.args.slice(skipArgCount).join(' ');
+        return source.trim();
+      }
+    }
+
+    if (skipArgCount === 0) {
+      return source.trimEnd();
+    }
+
+    // Skip the requested number of whitespace-delimited tokens from source
+    let remainder = source.trimStart();
+    for (let i = 0; i < skipArgCount; i++) {
+      const tokenMatch = remainder.match(/^[^\s]+([\s\S]*)$/);
+      if (!tokenMatch) {
+        return '';
+      }
+      remainder = tokenMatch[1].replace(/^[ \t]*\r?\n/, '').replace(/^[ \t]+/, '');
+    }
+
+    return remainder.trimEnd();
   }
 
   // ==========================================
@@ -1213,7 +1251,7 @@ export class CommandHandler {
     const actor = await TelegramMiddleware.resolveActor(ctx);
     if (ctx.command.toLowerCase().includes('setrules')) {
       if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
-      const text = ctx.args.join(' ');
+      const text = CommandHandler.getCommandText(ctx, 0);
       if (!text) {
         await telegramApi.sendMessage(ctx.chatId, 'Usage: /setrules <rules text>');
         return;
@@ -3744,7 +3782,7 @@ export class CommandHandler {
     }
 
     const intervalStr = ctx.args[0];
-    let messageText = ctx.args.slice(1).join(' ');
+    let messageText = CommandHandler.getCommandText(ctx, 1);
     let contentType: 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation' = 'text';
     let mediaFileId: string | undefined;
 
@@ -3882,7 +3920,7 @@ export class CommandHandler {
       return;
     }
 
-    const customText = ctx.args.join(' ').trim();
+    const customText = CommandHandler.getCommandText(ctx, 0);
     const defaultMsg = customText || 'Hiee';
     const members = db.getGroupMembersList(ctx.chatId);
 
@@ -3963,14 +4001,14 @@ export class CommandHandler {
       return;
     }
 
-    if (ctx.args.length === 0) {
+    const messageText = CommandHandler.getCommandText(ctx, 0);
+    if (!messageText) {
       await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/say &lt;message text&gt;</code>', {
         reply_to_message_id: ctx.message.message_id
       });
       return;
     }
 
-    const messageText = ctx.args.join(' ');
     const targetMessageId = ctx.message.reply_to_message?.message_id;
 
     const sendOptions: any = {};
@@ -4647,7 +4685,7 @@ export class CommandHandler {
     }
 
     const keyword = ctx.args[0];
-    const replyText = ctx.args.slice(1).join(' ');
+    const replyText = CommandHandler.getCommandText(ctx, 1);
     const actor = await TelegramMiddleware.resolveActor(ctx);
 
     db.setFilter(ctx.chatId, keyword, replyText);
@@ -4791,7 +4829,7 @@ export class CommandHandler {
       return;
     }
 
-    const text = ctx.args.join(' ');
+    const text = CommandHandler.getCommandText(ctx, 0);
     const actor = await TelegramMiddleware.resolveActor(ctx);
 
     db.updateGroupSettings(ctx.chatId, { welcomeMessage: text, welcomeEnabled: true });
@@ -4871,7 +4909,7 @@ export class CommandHandler {
       return;
     }
 
-    const text = ctx.args.join(' ');
+    const text = CommandHandler.getCommandText(ctx, 0);
     const actor = await TelegramMiddleware.resolveActor(ctx);
 
     db.updateGroupSettings(ctx.chatId, { goodbyeMessage: text, goodbyeEnabled: true });
@@ -5454,12 +5492,32 @@ export class CommandHandler {
           await telegramApi.sendMessage(ctx.chatId, `❌ Command <code>${escapeHtml(foundCmd.command)}</code> requires administrator privileges.`);
           return;
         }
-        const text = `📖 <b>Command Help: ${escapeHtml(foundCmd.command)}</b>\n\n` +
+        let text = `📖 <b>Command Help: ${escapeHtml(foundCmd.command)}</b>\n\n` +
           `• <b>Category:</b> ${escapeHtml(foundCmd.category)}\n` +
           `• <b>Description:</b> ${escapeHtml(foundCmd.description)}\n` +
           `• <b>Syntax:</b> <code>${escapeHtml(foundCmd.syntax)}</code>\n` +
           `• <b>Example:</b> <code>${escapeHtml(foundCmd.example)}</code>\n` +
           `• <b>Permission:</b> ${escapeHtml(foundCmd.permission)}`;
+
+        if (foundCmd.command === '/schedule') {
+          text += `\n\n📅 <b>SCHEDULE</b>\n\n` +
+            `<b>Schedule text:</b>\n` +
+            `<code>/schedule 10m Your reminder</code>\n\n` +
+            `<b>Schedule multiline text:</b>\n` +
+            `<code>/schedule 1h\nLine 1\nLine 2\nLine 3</code>\n\n` +
+            `<b>Schedule media:</b>\n` +
+            `Reply to a supported photo/video/sticker/file/GIF and use the schedule command:\n` +
+            `<code>/schedule &lt;interval&gt; [caption]</code>\n\n` +
+            `<b>Supported scheduled content:</b>\n` +
+            `• Text\n` +
+            `• Multiline text\n` +
+            `• Links\n` +
+            `• Photos\n` +
+            `• Stickers\n` +
+            `• Videos\n` +
+            `• Files/Documents\n` +
+            `• Animations/GIFs`;
+        }
         await telegramApi.sendMessage(ctx.chatId, text);
         return;
       }
@@ -5538,7 +5596,7 @@ export class CommandHandler {
     }
 
     const name = ctx.args[0]?.toLowerCase()?.trim()?.replace(/^#/, '');
-    const content = ctx.args.slice(1).join(' ').trim();
+    const content = CommandHandler.getCommandText(ctx, 1);
 
     if (!name || !content) {
       await telegramApi.sendMessage(ctx.chatId, 'Usage:\n/note <name> <content>', {

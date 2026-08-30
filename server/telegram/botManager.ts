@@ -309,8 +309,15 @@ export class TelegramBotManager {
     if (textOrCaption) {
       const trimmed = textOrCaption.trim();
       if (trimmed.startsWith('/') || trimmed.startsWith('!')) {
+        // Extract raw command and raw remainder preserving all line breaks, paragraphs, and indentation
+        const cmdMatch = textOrCaption.match(/^([\/!][^\s]+)([\s\S]*)$/);
+        const rawCmd = cmdMatch ? cmdMatch[1] : trimmed.split(/\s+/)[0];
+        const rawRemainder = cmdMatch ? cmdMatch[2] : '';
+        // Strip only the single leading separator (space or newline) immediately following the command token
+        const rawArgs = rawRemainder.replace(/^[ \t]*\r?\n/, '').replace(/^[ \t]+/, '');
+
         const parts = trimmed.split(/\s+/);
-        const command = parts[0].startsWith('!') ? `/${parts[0].slice(1)}` : parts[0];
+        const command = rawCmd.startsWith('!') ? `/${rawCmd.slice(1)}` : rawCmd;
         const args = parts.slice(1);
 
         const isAnonymousAdmin = TelegramMiddleware.isAnonymousAdminMessage(message, message.chat.id);
@@ -334,7 +341,8 @@ export class TelegramBotManager {
           authorSignature,
           adminDisplayName,
           args,
-          command
+          command,
+          rawArgs
         };
 
         await CommandHandler.handleCommand(ctx);

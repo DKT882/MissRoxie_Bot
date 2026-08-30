@@ -21,6 +21,7 @@ export interface CommandContext {
   adminDisplayName: string;
   args: string[];
   command: string;
+  rawArgs?: string;
 }
 
 export type ResolvedTarget =
