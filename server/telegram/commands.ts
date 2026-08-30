@@ -4799,6 +4799,23 @@ export class CommandHandler {
         details: 'Welcome messages disabled'
       });
       await telegramApi.sendMessage(ctx.chatId, '👋 <b>Welcome messages are now OFF.</b>');
+    } else if (ctx.args.length > 0 && arg !== 'status') {
+      // Direct welcome template configuration via /welcome <message text>
+      const text = CommandHandler.getCommandText(ctx, 0);
+      db.updateGroupSettings(ctx.chatId, { welcomeMessage: text, welcomeEnabled: true });
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'welcome',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Updated welcome template via /welcome'
+      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `✅ <b>Welcome Message Updated & Activated:</b>\n\n${escapeHtml(text)}`
+      );
     } else {
       await telegramApi.sendMessage(
         ctx.chatId,
@@ -4806,7 +4823,8 @@ export class CommandHandler {
         `<b>Current Template:</b>\n<i>${escapeHtml(settings.welcomeMessage || 'Default greeting')}</i>\n\n` +
         `Usage:\n` +
         `• <code>/welcome on</code> / <code>/welcome off</code>\n` +
-        `• <code>/setwelcome &lt;text&gt;</code> (Supports {first_name}, {username}, {chat_title}, {mention})`
+        `• <code>/welcome &lt;text&gt;</code> or <code>/setwelcome &lt;text&gt;</code>\n` +
+        `<i>Tags: {name}, {first_name}, {username}, {chat_title}, {mention}, {id}</i>`
       );
     }
   }

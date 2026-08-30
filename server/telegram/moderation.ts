@@ -658,14 +658,7 @@ export class ModerationService {
           .replace(/{chat}/gi, settings.chatTitle || 'the group')
           .replace(/{id}/gi, String(member.id));
 
-        const res = await telegramApi.sendMessage(session.chatId, text, { parse_mode: 'HTML' });
-        if (settings.autoDeleteJoinLeave && res.ok && res.result?.message_id) {
-          const sentMsgId = res.result.message_id;
-          const sChatId = session.chatId;
-          setTimeout(() => {
-            telegramApi.deleteMessage(sChatId, sentMsgId).catch(() => {});
-          }, 3500);
-        }
+        await telegramApi.sendMessage(session.chatId, text, { parse_mode: 'HTML' });
       }
     }
 
@@ -966,14 +959,7 @@ export class ModerationService {
           .replace(/{chat}/gi, chatTitle)
           .replace(/{id}/gi, String(member.id));
 
-        const res = await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
-        if (settings.autoDeleteJoinLeave && res.ok && res.result?.message_id) {
-          const sentMsgId = res.result.message_id;
-          const cId = chatId;
-          setTimeout(() => {
-            telegramApi.deleteMessage(cId, sentMsgId).catch(() => {});
-          }, 3500);
-        }
+        await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
       }
     }
 

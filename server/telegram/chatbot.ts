@@ -684,22 +684,33 @@ export class ChatbotService {
       .trim();
   }
 
-  public static sanitizeLustModeText(text: string, userText: string): string {
+  public static sanitizeLustModeText(text: string, userText: string, hasRelationshipSignal: boolean = false): string {
     if (!text) return '';
     const userLower = userText ? userText.toLowerCase() : '';
     let sanitized = text;
 
-    // Vocabulary rules: NEVER address user using bhai, bro, bhaiya, brother, behen, dost, dude, sir
-    // unless user explicitly used such terminology in their message.
-    const forbiddenTerms = ['bhai', 'bro', 'bhaiya', 'brother', 'behen', 'dost', 'dude', 'sir'];
-    for (const term of forbiddenTerms) {
-      const userHasTerm = new RegExp(`\\b${term}\\b`, 'i').test(userLower);
-      if (!userHasTerm) {
-        // Strip vocative address usage
+    if (hasRelationshipSignal) {
+      // Sibling/friend relationship signal detected: strip romantic/couple pet names
+      const romanticTerms = ['baby', 'babe', 'jaan', 'sona', 'shona', 'sweetheart', 'darling', 'love', 'cutie'];
+      for (const term of romanticTerms) {
         sanitized = sanitized.replace(new RegExp(`,\\s*${term}\\b`, 'gi'), '');
         sanitized = sanitized.replace(new RegExp(`\\b${term}\\s*,`, 'gi'), '');
         sanitized = sanitized.replace(new RegExp(`\\b(haan|arre|oye|suno|accha|acha)\\s+${term}\\b`, 'gi'), '$1');
         sanitized = sanitized.replace(new RegExp(`\\b${term}\\b`, 'gi'), '');
+      }
+    } else {
+      // Vocabulary rules: NEVER address user using bhai, bro, bhaiya, brother, behen, dost, dude, sir
+      // unless user explicitly used such terminology in their message.
+      const forbiddenTerms = ['bhai', 'bro', 'bhaiya', 'brother', 'behen', 'dost', 'dude', 'sir'];
+      for (const term of forbiddenTerms) {
+        const userHasTerm = new RegExp(`\\b${term}\\b`, 'i').test(userLower);
+        if (!userHasTerm) {
+          // Strip vocative address usage
+          sanitized = sanitized.replace(new RegExp(`,\\s*${term}\\b`, 'gi'), '');
+          sanitized = sanitized.replace(new RegExp(`\\b${term}\\s*,`, 'gi'), '');
+          sanitized = sanitized.replace(new RegExp(`\\b(haan|arre|oye|suno|accha|acha)\\s+${term}\\b`, 'gi'), '$1');
+          sanitized = sanitized.replace(new RegExp(`\\b${term}\\b`, 'gi'), '');
+        }
       }
     }
 
@@ -778,7 +789,67 @@ export class ChatbotService {
     return { isExplicitMedia: false, mediaType: 'none', requestedMood };
   }
 
-  public static inferMood(text: string, messages?: ChatMessage[]): RoxieMood {
+  /**
+   * Normalizes incoming user text and detects relationship-denying / sibling / friend signals
+   * (e.g. bhai, bro, didi, sis, behen, dost, yaar, friend, buddy).
+   * Uses token-boundary matching after lowercasing, unicode normalization, and emoji/punctuation separation
+   * to ensure zero false positives on words like 'problem', 'brought', 'brown', or 'broadcast'.
+   */
+  public static detectRelationshipSignal(text: string): { isRelationshipSignal: boolean; detectedTerm?: string } {
+    if (!text || typeof text !== 'string') {
+      return { isRelationshipSignal: false };
+    }
+
+    // 1. Unicode normalization and lowercasing
+    const norm = text.normalize('NFKD').toLowerCase();
+
+    // 2. Tokenize by replacing punctuation/emojis with whitespace
+    const cleanText = norm.replace(/[^\p{L}\p{N}\s]/gu, ' ');
+    const tokens = cleanText.split(/\s+/).filter(Boolean);
+
+    // 3. Match against relationship roots (token-boundary safe)
+    const patterns: Array<{ regex: RegExp; term: string }> = [
+      { regex: /^bha+i+y?a*$/i, term: 'bhai' },        // bhai, bhaii, bhaiii, bhaiya, bhaiyaa
+      { regex: /^bha+y+a*$/i, term: 'bhaya' },          // bhaya, bhayya
+      { regex: /^bhaijaan$/i, term: 'bhaijaan' },
+      { regex: /^bro+$/i, term: 'bro' },                // bro, broo, brooo, broooo
+      { regex: /^brother$/i, term: 'brother' },
+      { regex: /^brah+$/i, term: 'brah' },
+      { regex: /^bruh+$/i, term: 'bruh' },
+      { regex: /^broski$/i, term: 'broski' },
+      { regex: /^si+s+$/i, term: 'sis' },               // sis, siss, sisss
+      { regex: /^sissy$/i, term: 'sissy' },
+      { regex: /^sister$/i, term: 'sister' },
+      { regex: /^di+di+$/i, term: 'didi' },             // didi, didii, didiii
+      { regex: /^di+$/i, term: 'di' },                  // di, dii
+      { regex: /^didu+$/i, term: 'didu' },
+      { regex: /^be+he*n+a*$/i, term: 'behen' },        // behen, behna, behn
+      { regex: /^be+he*n+ji+$/i, term: 'behenji' },     // behenji
+      { regex: /^be+ha+n+a*$/i, term: 'behan' },        // behan
+      { regex: /^ya+a*r+$/i, term: 'yaar' },            // yaar, yaarr, yaarrr
+      { regex: /^ya+a*ra+$/i, term: 'yaara' },
+      { regex: /^do+st+$/i, term: 'dost' },             // dost, dostt, dosttt
+      { regex: /^dosti+$/i, term: 'dosti' },
+      { regex: /^friends?$/i, term: 'friend' },
+      { regex: /^friendship$/i, term: 'friendship' },
+      { regex: /^bestie$/i, term: 'bestie' },
+      { regex: /^buddy$/i, term: 'buddy' },
+      { regex: /^buddies$/i, term: 'buddies' },
+      { regex: /^mate$/i, term: 'mate' }
+    ];
+
+    for (const token of tokens) {
+      for (const { regex, term } of patterns) {
+        if (regex.test(token)) {
+          return { isRelationshipSignal: true, detectedTerm: term };
+        }
+      }
+    }
+
+    return { isRelationshipSignal: false };
+  }
+
+  public static inferMood(text: string, messages?: ChatMessage[], suppressRomance: boolean = false): RoxieMood {
     const lower = text.toLowerCase();
 
     // 1. Angry (check explicit anger/irritation first)
@@ -822,33 +893,36 @@ export class ChatbotService {
       return 'sad/comforting';
     }
 
-    // 3. Romantic (only when explicitly romantic words/emojis used)
-    if (
-      lower.includes('i love you') ||
-      lower.includes('love you') ||
-      lower.includes('meri jaan') ||
-      lower.includes('pyaar') ||
-      lower.includes('ishq') ||
-      lower.includes('my heart') ||
-      lower.includes('❤️') ||
-      lower.includes('romantic') ||
-      lower.includes('miss you') ||
-      lower.includes('miss u') ||
-      lower.includes('yaad aa rahi')
-    ) {
-      return 'romantic';
-    }
+    // Romantic and Flirty moods are STRICTLY suppressed if relationship signal is present (bhai, bro, didi, etc.)
+    if (!suppressRomance) {
+      // 3. Romantic (only when explicitly romantic words/emojis used)
+      if (
+        lower.includes('i love you') ||
+        lower.includes('love you') ||
+        lower.includes('meri jaan') ||
+        lower.includes('pyaar') ||
+        lower.includes('ishq') ||
+        lower.includes('my heart') ||
+        lower.includes('❤️') ||
+        lower.includes('romantic') ||
+        lower.includes('miss you') ||
+        lower.includes('miss u') ||
+        lower.includes('yaad aa rahi')
+      ) {
+        return 'romantic';
+      }
 
-    // 4. Flirty / Seductive (only when user actively flirts)
-    if (
-      /\b(flirt|flirty|hot|handsome|sexy|hotty|hottie)\b/i.test(lower) ||
-      lower.includes('marry me') ||
-      lower.includes('date pe') ||
-      lower.includes('wink') ||
-      lower.includes('😉') ||
-      lower.includes('😏')
-    ) {
-      return 'flirty';
+      // 4. Flirty / Seductive (only when user actively flirts)
+      if (
+        /\b(flirt|flirty|hot|handsome|sexy|hotty|hottie)\b/i.test(lower) ||
+        lower.includes('marry me') ||
+        lower.includes('date pe') ||
+        lower.includes('wink') ||
+        lower.includes('😉') ||
+        lower.includes('😏')
+      ) {
+        return 'flirty';
+      }
     }
 
     // 5. Excited
@@ -1095,13 +1169,16 @@ export class ChatbotService {
    * Selects a sticker strictly from the group's custom/imported sticker library.
    * Under NO circumstances does this fall back to default or global stickers.
    */
-  public static selectCustomStickerForLustMode(mood: string, chatId?: number): string | null {
+  public static selectCustomStickerForLustMode(mood: string, chatId?: number, suppressRomance: boolean = false): string | null {
     if (!chatId) return null;
 
     const groupLib = db.getMediaLibrary(chatId);
     if (!groupLib || !groupLib.stickers) return null;
 
-    const normalizedMood = mood.toLowerCase().replace('sad/comforting', 'sad').trim();
+    let normalizedMood = mood.toLowerCase().replace('sad/comforting', 'sad').trim();
+    if (suppressRomance && (normalizedMood === 'flirty' || normalizedMood === 'romantic')) {
+      normalizedMood = 'friendly';
+    }
     let candidates: string[] = [];
 
     // 1. Direct match in group's custom sticker library
@@ -1110,7 +1187,8 @@ export class ChatbotService {
       candidates = directList;
     } else {
       // 2. Check compatible fallback moods from MOOD_FALLBACK_MATRIX in group custom library
-      const fallbacks = MOOD_FALLBACK_MATRIX[normalizedMood] || ['normal'];
+      const fallbacks = (MOOD_FALLBACK_MATRIX[normalizedMood] || ['normal'])
+        .filter(m => !suppressRomance || (m !== 'flirty' && m !== 'romantic'));
       for (const fbMood of fallbacks) {
         const fbList = (groupLib.stickers[fbMood] || []).filter(id => this.isValidFileId(id));
         if (fbList.length > 0) {
@@ -1120,9 +1198,11 @@ export class ChatbotService {
       }
     }
 
-    // 3. If still empty, check related LustMode/couple moods in group custom library
+    // 3. If still empty, check related moods in group custom library
     if (candidates.length === 0) {
-      const lustModeFallbacks = ['flirty', 'romantic', 'playful', 'teasing', 'cute', 'loving', 'happy', 'normal'];
+      const lustModeFallbacks = suppressRomance
+        ? ['friendly', 'playful', 'happy', 'teasing', 'cute', 'normal']
+        : ['flirty', 'romantic', 'playful', 'teasing', 'cute', 'loving', 'happy', 'normal'];
       for (const lmMood of lustModeFallbacks) {
         const lmList = (groupLib.stickers[lmMood] || []).filter(id => this.isValidFileId(id));
         if (lmList.length > 0) {
@@ -1376,11 +1456,19 @@ export class ChatbotService {
     const settings = isPrivate ? null : db.getGroupSettings(chatId);
     const isLustMode = Boolean(settings?.lustMode);
     const mode = (settings?.chatbotMode || 'auto').toLowerCase();
-    const inferredMood = this.inferMood(userText, conv.messages);
+
+    // 1. Detect relationship-denying / sibling / friend signals BEFORE mood inference
+    const relationshipSignal = ChatbotService.detectRelationshipSignal(userText);
+    const hasRelationshipSignal = relationshipSignal.isRelationshipSignal;
+
+    // 2. Infer mood with romance suppression if relationship signal is present
+    const inferredMood = this.inferMood(userText, conv.messages, hasRelationshipSignal);
     const targetMoodKey = (mode === 'auto' || !MOOD_PROMPTS[mode]) ? inferredMood : mode;
     const moodConfig = MOOD_PROMPTS[targetMoodKey] || MOOD_PROMPTS['normal'];
     const mood = moodConfig.name;
-    const personalityLabel = isLustMode ? 'LustMode-Couple' : 'Psychologist-style';
+    const personalityLabel = isLustMode 
+      ? (hasRelationshipSignal ? 'LustMode-FriendSafety' : 'LustMode-Couple') 
+      : 'Psychologist-style';
 
     // Check Explicit Media Requests
     const mediaIntent = this.detectMediaIntent(userText);
@@ -1389,7 +1477,7 @@ export class ChatbotService {
 
       if (isLustMode) {
         // In Lust Mode: STRICT custom-sticker-only rule (Rule 1, 11)
-        const customSticker = this.selectCustomStickerForLustMode(targetMediaMood, chatId);
+        const customSticker = this.selectCustomStickerForLustMode(targetMediaMood, chatId, hasRelationshipSignal);
         if (customSticker) {
           return {
             requestId,
@@ -1507,8 +1595,24 @@ export class ChatbotService {
       ? `\nStored User Facts about this user in this chat:\n- ${userMemories.join('\n- ')}` 
       : '';
 
-    const lustModeContext = isLustMode
+    const relationshipContextOverride = hasRelationshipSignal
       ? `\n==================================================
+RELATIONSHIP CONTEXT:
+==================================================
+The user is addressing Roxie in a sibling/friend/casual relationship context (detected: "${relationshipSignal.detectedTerm}").
+
+RULE:
+- Do not interpret this interaction as romantic or sexual.
+- Respond naturally as a friend/sibling.
+- Do not use seductive or sexual tone.
+- STRICTLY NEVER use romantic or sexual pet names (no "baby", "babe", "jaan", "sona", "shona", "sweetheart", "darling", "cutie", "love").
+- Do not tease in a romantic or couple-like way.`
+      : '';
+
+    const lustModeContext = isLustMode
+      ? (hasRelationshipSignal
+          ? relationshipContextOverride
+          : `\n==================================================
 LUSTMODE / COUPLE PERSONALITY MODIFIER ACTIVE:
 ==================================================
 1. ROLE & VIBE:
@@ -1545,7 +1649,7 @@ LUSTMODE / COUPLE PERSONALITY MODIFIER ACTIVE:
 - STRICTLY FORBIDDEN: Do NOT generate explicit sexual descriptions, graphic sexual anatomy, pornographic acts, or explicit sexual roleplay.
 
 7. CONVERSATION CONTINUITY:
-- Use the existing 15-message conversation transcript and user memory to maintain seamless relationship continuity across turns. Do not reset the dynamic or re-introduce yourself.`
+- Use the existing 15-message conversation transcript and user memory to maintain seamless relationship continuity across turns. Do not reset the dynamic or re-introduce yourself.`)
       : '';
 
     const composedSystemPrompt = `${BASE_PERSONALITY}
@@ -1707,7 +1811,7 @@ Reply naturally to the latest user message while strictly continuing the existin
 
     let cleanedText = this.cleanAiText(replyContent);
     if (isLustMode) {
-      cleanedText = this.sanitizeLustModeText(cleanedText, userText);
+      cleanedText = this.sanitizeLustModeText(cleanedText, userText, hasRelationshipSignal);
     }
     cleanedText = cleanedText || 'Acha!';
 
@@ -1717,7 +1821,7 @@ Reply naturally to the latest user message while strictly continuing the existin
       // FORMAT B: exactly 1 custom sticker only
       // NO text-only response is allowed when custom stickers are available!
       // Default stickers are NEVER used in Lust Mode.
-      const customSticker = this.selectCustomStickerForLustMode(mood, chatId);
+      const customSticker = this.selectCustomStickerForLustMode(mood, chatId, hasRelationshipSignal);
       if (customSticker) {
         // Choose between Format A (Text + Custom Sticker) and Format B (Custom Sticker Only)
         // Context-aware: short reactions or teases have higher probability of sticker-only
