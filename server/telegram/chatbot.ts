@@ -1091,6 +1091,90 @@ export class ChatbotService {
     return selected;
   }
 
+  /**
+   * Selects a sticker strictly from the group's custom/imported sticker library.
+   * Under NO circumstances does this fall back to default or global stickers.
+   */
+  public static selectCustomStickerForLustMode(mood: string, chatId?: number): string | null {
+    if (!chatId) return null;
+
+    const groupLib = db.getMediaLibrary(chatId);
+    if (!groupLib || !groupLib.stickers) return null;
+
+    const normalizedMood = mood.toLowerCase().replace('sad/comforting', 'sad').trim();
+    let candidates: string[] = [];
+
+    // 1. Direct match in group's custom sticker library
+    const directList = (groupLib.stickers[normalizedMood] || []).filter(id => this.isValidFileId(id));
+    if (directList.length > 0) {
+      candidates = directList;
+    } else {
+      // 2. Check compatible fallback moods from MOOD_FALLBACK_MATRIX in group custom library
+      const fallbacks = MOOD_FALLBACK_MATRIX[normalizedMood] || ['normal'];
+      for (const fbMood of fallbacks) {
+        const fbList = (groupLib.stickers[fbMood] || []).filter(id => this.isValidFileId(id));
+        if (fbList.length > 0) {
+          candidates = fbList;
+          break;
+        }
+      }
+    }
+
+    // 3. If still empty, check related LustMode/couple moods in group custom library
+    if (candidates.length === 0) {
+      const lustModeFallbacks = ['flirty', 'romantic', 'playful', 'teasing', 'cute', 'loving', 'happy', 'normal'];
+      for (const lmMood of lustModeFallbacks) {
+        const lmList = (groupLib.stickers[lmMood] || []).filter(id => this.isValidFileId(id));
+        if (lmList.length > 0) {
+          candidates = lmList;
+          break;
+        }
+      }
+    }
+
+    // 4. If still empty, pick ANY valid custom sticker available in the group's custom library (Rule 10 option 1)
+    if (candidates.length === 0) {
+      for (const anyMood of Object.keys(groupLib.stickers)) {
+        const anyList = (groupLib.stickers[anyMood] || []).filter(id => this.isValidFileId(id));
+        if (anyList.length > 0) {
+          candidates.push(...anyList);
+        }
+      }
+    }
+
+    // STRICT: Under NO circumstances fall back to default or global stickers!
+    if (!candidates || candidates.length === 0) return null;
+
+    // Deduplicate candidate IDs
+    const uniquePool = Array.from(new Set(candidates));
+
+    // Avoid recently sent stickers for freshness
+    const available = uniquePool.filter(id => !this.recentStickers.has(id));
+    const targetPool = available.length > 0 ? available : uniquePool;
+    if (targetPool.length === 0) return null;
+
+    const selected = targetPool[Math.floor(Math.random() * targetPool.length)];
+    this.recentStickers.add(selected);
+    if (this.recentStickers.size > 15) {
+      const first = this.recentStickers.values().next().value;
+      if (first) this.recentStickers.delete(first);
+    }
+    return selected;
+  }
+
+  public static isCustomSticker(fileId: string, chatId?: number): boolean {
+    if (!chatId || !fileId) return false;
+    const groupLib = db.getMediaLibrary(chatId);
+    if (!groupLib || !groupLib.stickers) return false;
+    for (const list of Object.values(groupLib.stickers)) {
+      if (Array.isArray(list) && list.includes(fileId)) return true;
+    }
+    if (groupLib.stickerMetadata && groupLib.stickerMetadata[fileId]) {
+      return true;
+    }
+    return false;
+  }
+
   public static selectAnimation(mood: string, chatId?: number): string | null {
     const normalizedMood = mood.toLowerCase().replace('sad/comforting', 'sad');
 
@@ -1290,16 +1374,49 @@ export class ChatbotService {
     conv.lastActivity = now;
 
     const settings = isPrivate ? null : db.getGroupSettings(chatId);
+    const isLustMode = Boolean(settings?.lustMode);
     const mode = (settings?.chatbotMode || 'auto').toLowerCase();
     const inferredMood = this.inferMood(userText, conv.messages);
     const targetMoodKey = (mode === 'auto' || !MOOD_PROMPTS[mode]) ? inferredMood : mode;
     const moodConfig = MOOD_PROMPTS[targetMoodKey] || MOOD_PROMPTS['normal'];
     const mood = moodConfig.name;
+    const personalityLabel = isLustMode ? 'LustMode-Couple' : 'Psychologist-style';
 
     // Check Explicit Media Requests
     const mediaIntent = this.detectMediaIntent(userText);
     if (mediaIntent.isExplicitMedia) {
       const targetMediaMood = mediaIntent.requestedMood || mood;
+
+      if (isLustMode) {
+        // In Lust Mode: STRICT custom-sticker-only rule (Rule 1, 11)
+        const customSticker = this.selectCustomStickerForLustMode(targetMediaMood, chatId);
+        if (customSticker) {
+          return {
+            requestId,
+            chatId,
+            messageId: msgId,
+            userId,
+            personality: personalityLabel,
+            mood,
+            responseType: 'sticker',
+            mediaFileId: customSticker,
+            replyToMessageId: msgId
+          };
+        } else {
+          return {
+            requestId,
+            chatId,
+            messageId: msgId,
+            userId,
+            personality: personalityLabel,
+            mood,
+            responseType: 'text',
+            content: 'Jaan, iss group mein abhi koi custom sticker nahi hai! Admin se bolo /addsticker ya /addstickerpack se custom stickers add karein.',
+            replyToMessageId: msgId,
+            reason: 'LustMode custom sticker requested but library empty'
+          };
+        }
+      }
 
       if (mediaIntent.mediaType === 'sticker') {
         const stickerId = this.selectSticker(targetMediaMood, chatId);
@@ -1389,8 +1506,6 @@ export class ChatbotService {
     const memoryContext = userMemories.length > 0 
       ? `\nStored User Facts about this user in this chat:\n- ${userMemories.join('\n- ')}` 
       : '';
-
-    const isLustMode = Boolean(settings?.lustMode);
 
     const lustModeContext = isLustMode
       ? `\n==================================================
@@ -1596,9 +1711,70 @@ Reply naturally to the latest user message while strictly continuing the existin
     }
     cleanedText = cleanedText || 'Acha!';
 
-    const personalityLabel = isLustMode ? 'LustMode-Couple' : 'Psychologist-style';
+    if (isLustMode) {
+      // Lust Mode ONLY uses CUSTOM stickers and STRICTLY allows ONLY TWO response formats:
+      // FORMAT A: exactly 1 short text reply + exactly 1 custom sticker
+      // FORMAT B: exactly 1 custom sticker only
+      // NO text-only response is allowed when custom stickers are available!
+      // Default stickers are NEVER used in Lust Mode.
+      const customSticker = this.selectCustomStickerForLustMode(mood, chatId);
+      if (customSticker) {
+        // Choose between Format A (Text + Custom Sticker) and Format B (Custom Sticker Only)
+        // Context-aware: short reactions or teases have higher probability of sticker-only
+        const isShortTeaseOrEmoji = userText.trim().length <= 15 || /^[^\w\s]+$/.test(userText.trim());
+        const stickerOnlyProb = isShortTeaseOrEmoji ? 0.45 : 0.25;
+        const roll = Math.random();
 
-    // Automatic Natural Sticker Decision Engine:
+        if (roll < stickerOnlyProb) {
+          // FORMAT B: exactly 1 custom sticker only
+          return {
+            requestId,
+            chatId,
+            messageId: msgId,
+            userId,
+            personality: personalityLabel,
+            mood,
+            responseType: 'sticker',
+            mediaFileId: customSticker,
+            replyToMessageId: msgId,
+            modelUsed
+          };
+        } else {
+          // FORMAT A: 1 short text reply + exactly 1 custom sticker
+          return {
+            requestId,
+            chatId,
+            messageId: msgId,
+            userId,
+            personality: personalityLabel,
+            mood,
+            responseType: 'text_plus_sticker',
+            content: cleanedText,
+            mediaFileId: customSticker,
+            replyToMessageId: msgId,
+            modelUsed
+          };
+        }
+      } else {
+        // Group has ZERO custom stickers registered!
+        // Per Rule 10: "If the group has ZERO custom stickers: send a single harmless custom-sticker-unavailable fallback behavior that does NOT use a default sticker."
+        return {
+          requestId,
+          chatId,
+          messageId: msgId,
+          userId,
+          personality: personalityLabel,
+          mood,
+          responseType: 'text',
+          content: `${cleanedText}\n\n<i>(💡 Lust Mode requires custom stickers! Add some with /addsticker or /addstickerpack to enable visual couple responses.)</i>`,
+          replyToMessageId: msgId,
+          modelUsed,
+          reason: 'LustMode zero custom stickers in group'
+        };
+      }
+    }
+
+    // Standard Non-LustMode Automatic Natural Sticker Decision Engine:
     // When a relevant sticker exists matching current mood/group library:
     // ~65% Text Only
     // ~20% Text + Sticker
@@ -1705,6 +1881,28 @@ Core Rules:
 
       const cleaned = this.cleanAiText(replyContent);
       if (!cleaned) return null;
+
+      const settings = db.getGroupSettings(chatId);
+      const isLustMode = Boolean(settings?.lustMode);
+      if (isLustMode) {
+        const customSticker = this.selectCustomStickerForLustMode('playful', chatId);
+        if (customSticker) {
+          return {
+            requestId,
+            chatId,
+            messageId: msgId,
+            userId,
+            personality: 'LustMode-Couple',
+            mood: 'playful',
+            responseType: 'text_plus_sticker',
+            content: this.sanitizeLustModeText(cleaned, userText),
+            mediaFileId: customSticker,
+            replyToMessageId: msgId,
+            modelUsed: model
+          };
+        }
+        return null;
+      }
 
       return {
         requestId,

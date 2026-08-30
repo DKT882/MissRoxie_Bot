@@ -6422,12 +6422,16 @@ export class CommandHandler {
     await telegramApi.sendMessage(
       ctx.chatId,
       `🔥 <b>Roxie Lust Mode Settings</b>\n\n` +
-      `• <b>Status:</b> ${isLustOn ? '🟢 <b>ON</b> (Flirtatious/Teasing)' : '🔴 <b>OFF</b> (Standard)'}\n` +
+      `• <b>Lust Mode:</b> ${isLustOn ? '🟢 <b>ON</b>' : '🔴 <b>OFF</b>'}\n` +
+      `• <b>Media:</b> Custom stickers only\n` +
+      `• <b>Response formats:</b>\n` +
+      `  - Text + 1 custom sticker\n` +
+      `  - 1 custom sticker\n` +
       `• <b>Safety Policy:</b> Always Safe & Non-Explicit (No NSFW/Graphic Content)\n\n` +
       `<b>Commands:</b>\n` +
-      `• <code>/lustmod on</code> — Enable lust mode\n` +
-      `• <code>/lustmod off</code> — Disable lust mode\n` +
-      `• <code>/lustmod status</code> — View current status`,
+      `• <code>/lustmode on</code> — Enable lust mode\n` +
+      `• <code>/lustmode off</code> — Disable lust mode\n` +
+      `• <code>/lustmode status</code> — View current status`,
       { reply_to_message_id: ctx.message.message_id }
     );
   }
