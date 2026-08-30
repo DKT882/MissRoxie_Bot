@@ -25,6 +25,22 @@ export interface MediaLibraryRecord {
   stickerMetadata?: Record<string, StickerMetaRecord>;
 }
 
+export const GROUP_MEMORY_LIMIT = 80;
+
+export interface GroupConversationEntry {
+  role: 'user' | 'assistant';
+  userId?: number;
+  name: string; // username or display name
+  content: string;
+  timestamp: number;
+}
+
+export interface GroupMemoryRecord {
+  chatId: number | string;
+  entries: GroupConversationEntry[];
+  lastUpdated: number;
+}
+
 export interface UserMemoryRecord {
   chatId: number | string;
   userId: number;
@@ -63,6 +79,7 @@ interface DatabaseSchema {
   mediaLibrary?: MediaLibraryRecord;
   groupMediaLibraries?: Record<string, MediaLibraryRecord>; // `${chatId}` -> MediaLibraryRecord
   userMemories?: Record<string, UserMemoryRecord>; // `${chatId}_${userId}` -> UserMemoryRecord
+  groupMemories?: Record<string, GroupMemoryRecord>; // `${chatId}` -> GroupMemoryRecord
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -70,6 +87,7 @@ const DB_FILE = path.join(DATA_DIR, 'bot_storage.json');
 
 class StorageManager {
   public static readonly MAX_PACKS_PER_GROUP = 1000;
+  public static readonly GROUP_MEMORY_LIMIT = GROUP_MEMORY_LIMIT;
 
   private data: DatabaseSchema = {
     settings: {},
@@ -88,7 +106,8 @@ class StorageManager {
     customRoles: {},
     mediaLibrary: { stickers: {}, animations: {}, stickerMetadata: {} },
     groupMediaLibraries: {},
-    userMemories: {}
+    userMemories: {},
+    groupMemories: {}
   };
   private raidStates: Record<number, RaidStateRecord> = {};
   private isLoaded: boolean = false;
@@ -124,7 +143,8 @@ class StorageManager {
             customRoles: parsed.customRoles || {},
             mediaLibrary: parsed.mediaLibrary || { stickers: {}, animations: {}, stickerMetadata: {} },
             groupMediaLibraries: parsed.groupMediaLibraries || {},
-            userMemories: parsed.userMemories || {}
+            userMemories: parsed.userMemories || {},
+            groupMemories: parsed.groupMemories || {}
           };
         }
       }
@@ -1961,6 +1981,43 @@ class StorageManager {
     if (cleaned) {
       this.scheduleSave();
     }
+  }
+
+  // --- Group Conversation Memory Management (Shared per ChatId) ---
+  public getGroupMemory(chatId: number | string): GroupConversationEntry[] {
+    if (!this.data.groupMemories) this.data.groupMemories = {};
+    const key = String(chatId);
+    const record = this.data.groupMemories[key];
+    if (!record || !Array.isArray(record.entries)) return [];
+    return record.entries;
+  }
+
+  public addGroupConversationEntry(chatId: number | string, entry: GroupConversationEntry): void {
+    if (!this.data.groupMemories) this.data.groupMemories = {};
+    const key = String(chatId);
+    let record = this.data.groupMemories[key];
+    const now = Date.now();
+    if (!record) {
+      record = { chatId, entries: [], lastUpdated: now };
+      this.data.groupMemories[key] = record;
+    }
+    record.lastUpdated = now;
+    record.entries.push(entry);
+    while (record.entries.length > GROUP_MEMORY_LIMIT) {
+      record.entries.shift();
+    }
+    this.scheduleSave();
+  }
+
+  public clearGroupMemory(chatId: number | string): boolean {
+    if (!this.data.groupMemories) return false;
+    const key = String(chatId);
+    const existed = !!this.data.groupMemories[key];
+    if (existed) {
+      delete this.data.groupMemories[key];
+      this.scheduleSave();
+    }
+    return existed;
   }
 }
 

@@ -502,3 +502,5 @@ export interface TelegramBotStatus {
   };
   recentLogs: ModerationLog[];
 }
+
+export type { CommandContext } from './middleware.js';

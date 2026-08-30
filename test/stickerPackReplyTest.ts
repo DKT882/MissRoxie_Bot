@@ -3,6 +3,7 @@ import { CommandHandler } from '../server/telegram/commands';
 import { telegramApi } from '../server/telegram/api';
 import { CommandContext, TelegramMessage } from '../server/telegram/types';
 import { ChatbotService } from '../server/telegram/chatbot';
+import { COMMAND_CATALOG } from '../server/telegram/commandCatalog';
 
 function assert(condition: boolean, msg: string) {
   if (!condition) {
@@ -113,13 +114,14 @@ async function runStickerPackReplyTests() {
     return {
       chatId: targetChatId,
       chatTitle: 'Roxie Sticker Test Group',
-      chatType: 'supergroup',
       sender: {
         id: userId,
         is_bot: false,
         first_name: userId === adminUserId ? 'AdminRoxie' : 'RegularUser',
         username: userId === adminUserId ? 'admin_roxie' : 'regular_user'
       },
+      isAnonymousAdmin: false,
+      adminDisplayName: userId === adminUserId ? '@admin_roxie' : 'RegularUser',
       message: {
         message_id: Math.floor(Math.random() * 100000) + 100,
         date: Math.floor(Date.now() / 1000),
@@ -134,8 +136,7 @@ async function runStickerPackReplyTests() {
         reply_to_message: replyMessage as any
       },
       command: cmdWithSlash,
-      args,
-      rawText: `${cmdWithSlash} ${args.join(' ')}`.trim()
+      args
     };
   }
 
@@ -356,9 +357,69 @@ async function runStickerPackReplyTests() {
   assert(lastMsg9?.text.includes('administrator') || lastMsg9?.text.includes('⛔') || lastMsg9?.text.includes('❌'), 'TEST 9.1: Regular user denied /addstickerpack');
 
   // ----------------------------------------------------
-  // TEST 10: Live Real Telegram API Test
+  // TEST 10: Command Catalog Integrity
   // ----------------------------------------------------
-  console.log('\n--- TEST 10: Live Telegram API Integration with Real Sticker Pack ---');
+  console.log('\n--- TEST 10: Command Catalog Integrity ---');
+  const addPackEntries = COMMAND_CATALOG.filter(c => c.command === '/addstickerpack');
+  assert(addPackEntries.length === 1, `TEST 10.1: /addstickerpack registered exactly once in COMMAND_CATALOG (found ${addPackEntries.length})`);
+  assert(addPackEntries[0].category === 'Media', 'TEST 10.2: /addstickerpack belongs to "Media" category');
+  assert(addPackEntries[0].permission === 'Admin', 'TEST 10.3: /addstickerpack permission is Admin');
+  const addStickerEntries = COMMAND_CATALOG.filter(c => c.command === '/addsticker');
+  assert(addStickerEntries.length === 1, `TEST 10.4: /addsticker registered exactly once in COMMAND_CATALOG (found ${addStickerEntries.length})`);
+
+  // ----------------------------------------------------
+  // TEST 11: /help Integration
+  // ----------------------------------------------------
+  console.log('\n--- TEST 11: /help System Integration ---');
+  sentMessages.length = 0;
+  const ctxHelpDirect = makeContext(adminUserId, 'help', ['addstickerpack']);
+  await CommandHandler.handleCommand(ctxHelpDirect);
+  const lastHelpMsg1 = sentMessages[sentMessages.length - 1];
+  assert(lastHelpMsg1?.text.includes('/addstickerpack'), 'TEST 11.1: /help addstickerpack displays command details');
+  assert(lastHelpMsg1?.text.includes('Media'), 'TEST 11.2: Help mentions Media category');
+
+  sentMessages.length = 0;
+  const ctxHelpAll = makeContext(adminUserId, 'help', []);
+  await CommandHandler.handleCommand(ctxHelpAll);
+  const helpMsgs = sentMessages.map(m => m.text).join('\n');
+  assert(helpMsgs.includes('/addstickerpack'), 'TEST 11.3: /help includes /addstickerpack');
+  assert(helpMsgs.includes('/addsticker'), 'TEST 11.4: /help includes /addsticker');
+
+  // ----------------------------------------------------
+  // TEST 12: Command Isolation (Commands Never Trigger Chatbot)
+  // ----------------------------------------------------
+  console.log('\n--- TEST 12: Command Isolation & Chatbot Protection ---');
+  assert(CommandHandler.ADMIN_ONLY_COMMANDS.has('/addstickerpack'), 'TEST 12.1: /addstickerpack is in ADMIN_ONLY_COMMANDS');
+  assert(CommandHandler.SENSITIVE_COMMANDS.has('/addstickerpack'), 'TEST 12.2: /addstickerpack is in SENSITIVE_COMMANDS');
+  
+  const isCommandTrigger = (text: string) => {
+    const trimmed = text.trim();
+    return trimmed.startsWith('/') || trimmed.startsWith('!');
+  };
+  assert(isCommandTrigger('/addstickerpack cute'), 'TEST 12.3: /addstickerpack is recognized as command prefix');
+  assert(isCommandTrigger('/addsticker funny'), 'TEST 12.4: /addsticker is recognized as command prefix');
+
+  // ----------------------------------------------------
+  // TEST 13: /addsticker Command Saves ONLY Replied Sticker (Not Entire Pack)
+  // ----------------------------------------------------
+  console.log('\n--- TEST 13: /addsticker Saves Only The Replied Sticker ---');
+  db.clearMediaLibrary(chatId);
+  sentMessages.length = 0;
+  const ctx13 = makeContext(adminUserId, 'addsticker', ['caring'], replyStickerMsg1);
+  await CommandHandler.handleCommand(ctx13);
+
+  const libAfter13 = db.getMediaLibrary(chatId);
+  const caringStickers = libAfter13.stickers['caring'] || [];
+  assert(caringStickers.length === 1, `TEST 13.1: /addsticker saved EXACTLY 1 sticker, not whole pack (got ${caringStickers.length})`);
+  assert(caringStickers[0] === mockPackStickers[0].file_id, 'TEST 13.2: The saved sticker matches the replied sticker file_id');
+  assert(!caringStickers.includes(mockPackStickers[1].file_id), 'TEST 13.3: Other stickers from the pack were NOT imported by /addsticker');
+  const lastMsg13 = sentMessages[sentMessages.length - 1];
+  assert(lastMsg13?.text.includes('Sticker added successfully') || lastMsg13?.text.includes('Added sticker'), 'TEST 13.4: /addsticker responded with single sticker success');
+
+  // ----------------------------------------------------
+  // TEST 14: Live Real Telegram API Test
+  // ----------------------------------------------------
+  console.log('\n--- TEST 14: Live Telegram API Integration with Real Sticker Pack ---');
   try {
     const realPackRes = await originalGetStickerSet('Animals');
     if (realPackRes.ok && realPackRes.result && realPackRes.result.stickers?.length > 0) {
@@ -389,12 +450,12 @@ async function runStickerPackReplyTests() {
 
       const libLive = db.getMediaLibrary(chatId);
       const cuteStickers = libLive.stickers['cute'] || [];
-      assert(cuteStickers.length >= realPack.stickers.length, `TEST 10.1: Live pack "${realPack.title}" imported ${cuteStickers.length} stickers from Telegram Bot API into "cute" mood`);
-      assert(cuteStickers.includes(realFirstSticker.file_id), 'TEST 10.2: First real sticker file_id is in library');
+      assert(cuteStickers.length >= realPack.stickers.length, `TEST 14.1: Live pack "${realPack.title}" imported ${cuteStickers.length} stickers from Telegram Bot API into "cute" mood`);
+      assert(cuteStickers.includes(realFirstSticker.file_id), 'TEST 14.2: First real sticker file_id is in library');
       
       const lastLiveMsg = sentMessages[sentMessages.length - 1];
       console.log(`💬 Live Command Reply: ${lastLiveMsg?.text}`);
-      assert(lastLiveMsg?.text.includes('Imported') || lastLiveMsg?.text.includes('Added'), 'TEST 10.3: Live import sent successful reply');
+      assert(lastLiveMsg?.text.includes('Imported') || lastLiveMsg?.text.includes('Added'), 'TEST 14.3: Live import sent successful reply');
     } else {
       console.log('ℹ️ Live Telegram API returned non-ok or empty for "Animals" (or test offline), skipping live assertion.');
     }
@@ -408,7 +469,7 @@ async function runStickerPackReplyTests() {
   telegramApi.getStickerSet = originalGetStickerSet;
 
   console.log('\n======================================================');
-  console.log('🎉 ALL 10 /ADDSTICKERPACK REPLY TESTS PASSED SUCCESSFULLY!');
+  console.log('🎉 ALL 14 /ADDSTICKERPACK & /ADDSTICKER TESTS PASSED SUCCESSFULLY!');
   console.log('======================================================\n');
 
   process.exit(0);
@@ -418,3 +479,4 @@ runStickerPackReplyTests().catch((err) => {
   console.error('Fatal Test Error:', err);
   process.exit(1);
 });
+

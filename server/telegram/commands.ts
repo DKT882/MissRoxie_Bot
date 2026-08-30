@@ -5948,23 +5948,16 @@ export class CommandHandler {
     }
 
     if (!silent) {
-      let messageText = '';
-      if (existedCount === 0) {
-        messageText = `✅ <b>Imported ${addedCount} stickers from "${escapeHtml(packTitle)}"</b>\n` +
-          `🎭 <b>Mood:</b> <code>${escapeHtml(mood)}</code>\n` +
-          `♻️ <b>Already existed:</b> 0\n` +
-          `🆕 <b>New:</b> ${addedCount}`;
-      } else if (addedCount === 0) {
-        messageText = `ℹ️ <b>Imported 0 new stickers from "${escapeHtml(packTitle)}"</b>\n` +
-          `🎭 <b>Mood:</b> <code>${escapeHtml(mood)}</code>\n` +
-          `♻️ <b>Already existed:</b> ${existedCount}\n` +
-          `🆕 <b>New:</b> 0`;
-      } else {
-        messageText = `✅ <b>Imported ${totalValid} stickers from "${escapeHtml(packTitle)}"</b>\n` +
-          `🎭 <b>Mood:</b> <code>${escapeHtml(mood)}</code>\n` +
-          `♻️ <b>Already existed:</b> ${existedCount}\n` +
-          `🆕 <b>New:</b> ${addedCount}`;
-      }
+      const header = addedCount > 0
+        ? `✅ <b>Sticker pack imported</b>`
+        : `ℹ️ <b>Sticker pack already imported</b>`;
+      const messageText = `${header}\n\n` +
+        `📦 <b>Pack:</b> ${escapeHtml(packTitle)}\n` +
+        `🎭 <b>Mood:</b> <code>${escapeHtml(mood)}</code>\n` +
+        `🆕 <b>Added:</b> ${addedCount}\n` +
+        `♻️ <b>Already saved:</b> ${existedCount}\n` +
+        `📊 <b>Total in pack:</b> ${totalValid}\n\n` +
+        `<i>Imported ${addedCount} stickers from "${escapeHtml(packTitle)}" (${totalValid} total in pack). Already existed: ${existedCount}.</i>`;
 
       await telegramApi.sendMessage(chatId, messageText, {
         reply_to_message_id: replyToMessageId
@@ -6185,35 +6178,32 @@ export class CommandHandler {
     }
 
     const sticker = reply.sticker;
-    const setName = sticker.set_name;
-    if (!setName) {
-      const fileId = sticker.file_id;
-      if (ChatbotService.isValidFileId(fileId)) {
-        const added = db.addStickerToLibrary(mood, fileId, {
-          fileId,
-          emoji: sticker.emoji,
-          mood,
-          addedBy: actor.actorUserId,
-          addedAt: new Date().toISOString()
-        }, ctx.chatId);
-        if (added) {
-          await telegramApi.sendMessage(ctx.chatId, `✅ Added standalone sticker to <code>${escapeHtml(mood)}</code>.`, {
-            reply_to_message_id: ctx.message.message_id
-          });
-        } else {
-          await telegramApi.sendMessage(ctx.chatId, `ℹ️ This sticker already exists in <code>${escapeHtml(mood)}</code>.`, {
-            reply_to_message_id: ctx.message.message_id
-          });
-        }
-        return;
-      }
-      await telegramApi.sendMessage(ctx.chatId, "❌ Couldn't detect the sticker pack.", {
+    const fileId = sticker.file_id;
+    if (!ChatbotService.isValidFileId(fileId)) {
+      await telegramApi.sendMessage(ctx.chatId, "❌ Couldn't extract a valid sticker file ID.", {
         reply_to_message_id: ctx.message.message_id
       });
       return;
     }
 
-    await this.importStickerPack(setName, mood, actor.actorUserId, ctx.chatId, ctx.message.message_id);
+    const added = db.addStickerToLibrary(mood, fileId, {
+      packName: sticker.set_name,
+      fileId,
+      emoji: sticker.emoji,
+      mood,
+      addedBy: actor.actorUserId,
+      addedAt: new Date().toISOString()
+    }, ctx.chatId);
+
+    if (added) {
+      await telegramApi.sendMessage(ctx.chatId, `✅ Sticker added successfully to mood category <code>${escapeHtml(mood)}</code>!\nID: <code>${fileId}</code>`, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    } else {
+      await telegramApi.sendMessage(ctx.chatId, `ℹ️ This sticker already exists in mood category <code>${escapeHtml(mood)}</code>.`, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
   }
 
   private static async handleAddGif(ctx: CommandContext) {

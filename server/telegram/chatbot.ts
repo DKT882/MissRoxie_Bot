@@ -1,6 +1,6 @@
 import { TelegramMessage, TelegramUser } from './types.js';
 import { telegramApi } from './api.js';
-import { db, isSensitiveData } from '../db/storage.js';
+import { db, isSensitiveData, GROUP_MEMORY_LIMIT, GroupConversationEntry } from '../db/storage.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
 import {
@@ -521,12 +521,34 @@ export class ChatbotService {
     const key = String(chatId);
     let existed = false;
     for (const k of this.conversations.keys()) {
-      if (k.startsWith(`${key}_`) || k === key) {
+      if (k.startsWith(`${key}_`) || k === key || k === `group_${key}` || k === `dm_${key}`) {
         this.conversations.delete(k);
         existed = true;
       }
     }
-    return existed;
+    const groupCleared = db.clearGroupMemory(chatId);
+    return existed || groupCleared;
+  }
+
+  public static getOrCreateConversation(chatId: number, userId?: number): ConversationContext {
+    const isGroup = Number(chatId) < 0;
+    const key = isGroup ? String(chatId) : `${chatId}_${userId || 0}`;
+    let conv = this.conversations.get(key);
+    if (!conv) {
+      conv = { messages: [], lastActivity: Date.now() };
+      if (isGroup) {
+        const stored = db.getGroupMemory(chatId);
+        if (stored.length > 0) {
+          conv.messages = stored.map(e => ({
+            role: e.role,
+            content: e.content,
+            timestamp: e.timestamp
+          }));
+        }
+      }
+      this.conversations.set(key, conv);
+    }
+    return conv;
   }
 
   public static isValidFileId(id: string | null | undefined): boolean {
@@ -662,6 +684,34 @@ export class ChatbotService {
       .trim();
   }
 
+  public static sanitizeLustModeText(text: string, userText: string): string {
+    if (!text) return '';
+    const userLower = userText ? userText.toLowerCase() : '';
+    let sanitized = text;
+
+    // Vocabulary rules: NEVER address user using bhai, bro, bhaiya, brother, behen, dost, dude, sir
+    // unless user explicitly used such terminology in their message.
+    const forbiddenTerms = ['bhai', 'bro', 'bhaiya', 'brother', 'behen', 'dost', 'dude', 'sir'];
+    for (const term of forbiddenTerms) {
+      const userHasTerm = new RegExp(`\\b${term}\\b`, 'i').test(userLower);
+      if (!userHasTerm) {
+        // Strip vocative address usage
+        sanitized = sanitized.replace(new RegExp(`,\\s*${term}\\b`, 'gi'), '');
+        sanitized = sanitized.replace(new RegExp(`\\b${term}\\s*,`, 'gi'), '');
+        sanitized = sanitized.replace(new RegExp(`\\b(haan|arre|oye|suno|accha|acha)\\s+${term}\\b`, 'gi'), '$1');
+        sanitized = sanitized.replace(new RegExp(`\\b${term}\\b`, 'gi'), '');
+      }
+    }
+
+    // Safety: strip graphic/explicit sexual words if any
+    const explicitRegex = /\b(pussy|dick|cock|vagina|boobs|tits|penis|cum|clitoris|blowjob|orgasm|nude|sex karo)\b/gi;
+    if (explicitRegex.test(sanitized)) {
+      sanitized = sanitized.replace(explicitRegex, '***');
+    }
+
+    return sanitized.replace(/\s{2,}/g, ' ').trim();
+  }
+
   public static isTriggered(message: TelegramMessage, botUser: TelegramUser | null): boolean {
     const text = (message.text || message.caption || '').trim();
     if (!text) return false;
@@ -781,7 +831,10 @@ export class ChatbotService {
       lower.includes('ishq') ||
       lower.includes('my heart') ||
       lower.includes('❤️') ||
-      lower.includes('romantic')
+      lower.includes('romantic') ||
+      lower.includes('miss you') ||
+      lower.includes('miss u') ||
+      lower.includes('yaad aa rahi')
     ) {
       return 'romantic';
     }
@@ -891,7 +944,19 @@ export class ChatbotService {
       return 'teasing';
     }
 
-    // 12. Playful
+    // 12. Happy
+    if (
+      lower.includes('khush') ||
+      lower.includes('happy') ||
+      lower.includes('great day') ||
+      lower.includes('feeling good') ||
+      lower.includes('achha lag raha') ||
+      lower.includes('bahut khush')
+    ) {
+      return 'happy';
+    }
+
+    // 13. Playful
     if (
       lower.includes('hehe') ||
       lower.includes('haha') ||
@@ -994,7 +1059,7 @@ export class ChatbotService {
     }
 
     // 2. If no group custom stickers found, use built-in verified default sticker library
-    if (candidates.length === 0) {
+    if (candidates.length === 0 && process.env.TELEGRAM_STICKERS_JSON !== '') {
       const defaultList = getDefaultStickersForMood(normalizedMood).filter(id => this.isValidFileId(id));
       if (defaultList.length > 0) {
         candidates = defaultList;
@@ -1109,7 +1174,7 @@ export class ChatbotService {
     }
   }
 
-  private static async generateResponseDecision(
+  public static async generateResponseDecision(
     requestId: string,
     message: TelegramMessage,
     botUser: TelegramUser | null
@@ -1117,8 +1182,11 @@ export class ChatbotService {
     const chatId = message.chat.id;
     const msgId = message.message_id;
     const userId = message.from?.id || 0;
-    const userKey = `${chatId}_${userId}`;
     const isPrivate = message.chat.type === 'private';
+    const convKey = isPrivate ? `dm_${chatId}` : String(chatId);
+    const userName = message.from?.first_name 
+      ? (message.from.last_name ? `${message.from.first_name} ${message.from.last_name}` : message.from.first_name)
+      : (message.from?.username ? `@${message.from.username}` : (userId ? `User ${userId}` : 'User'));
 
     if (!isPrivate) {
       const settings = db.getGroupSettings(chatId);
@@ -1134,6 +1202,45 @@ export class ChatbotService {
           replyToMessageId: msgId,
           reason: 'Chatbot disabled for group'
         };
+      }
+    }
+
+    const userText = message.text || message.caption || (message.sticker ? `[sticker: ${message.sticker.emoji || 'sticker'}]` : message.photo ? '[photo]' : message.video ? '[video]' : 'Hello');
+
+    // Extract user personal memory fact if user shares personal facts
+    if (userId && userText) {
+      const lowerText = userText.toLowerCase();
+      if (
+        !isSensitiveData(userText) &&
+        (lowerText.includes('my name is') ||
+         lowerText.includes('i am ') ||
+         lowerText.includes('i like ') ||
+         lowerText.includes('i love ') ||
+         lowerText.includes('i live in') ||
+         lowerText.includes('i work ') ||
+         lowerText.includes('i use ') ||
+         lowerText.includes('i enjoy '))
+      ) {
+        const fact = userText.trim().replace(/\s+/g, ' ');
+        if (fact.length >= 5 && fact.length <= 120) {
+          db.addUserMemoryFact(chatId, userId, fact);
+        }
+      }
+    }
+
+    // Capture prior group entries before appending current message to persistent group memory
+    let priorGroupEntries: GroupConversationEntry[] = [];
+    if (!isPrivate) {
+      priorGroupEntries = db.getGroupMemory(chatId);
+      // Append current user message to persistent group-shared memory
+      if (userText && !isSensitiveData(userText)) {
+        db.addGroupConversationEntry(chatId, {
+          role: 'user',
+          userId,
+          name: userName,
+          content: userText,
+          timestamp: Date.now()
+        });
       }
     }
 
@@ -1163,38 +1270,22 @@ export class ChatbotService {
       };
     }
 
-    const userText = message.text || message.caption || (message.sticker ? '[Sent a sticker]' : message.photo ? '[Sent a photo]' : message.video ? '[Sent a video]' : 'Hello');
-
-    // Extract user memory fact if user shares personal facts
-    if (userId && userText) {
-      const lowerText = userText.toLowerCase();
-      if (
-        !isSensitiveData(userText) &&
-        (lowerText.includes('my name is') ||
-         lowerText.includes('i am ') ||
-         lowerText.includes('i like ') ||
-         lowerText.includes('i love ') ||
-         lowerText.includes('i live in') ||
-         lowerText.includes('i work ') ||
-         lowerText.includes('i use ') ||
-         lowerText.includes('i enjoy '))
-      ) {
-        const fact = userText.trim().replace(/\s+/g, ' ');
-        if (fact.length >= 5 && fact.length <= 120) {
-          db.addUserMemoryFact(chatId, userId, fact);
-        }
-      }
-    }
-
-    // Rolling Context Window
+    // Rolling In-Memory Context Window (Shared per Group Chat or DM)
     const now = Date.now();
-    let conv = this.conversations.get(userKey);
+    let conv = this.conversations.get(convKey);
     if (!conv || now - conv.lastActivity > this.TIMEOUT_MS) {
       conv = {
         messages: [],
         lastActivity: now
       };
-      this.conversations.set(userKey, conv);
+      if (!isPrivate && priorGroupEntries.length > 0) {
+        conv.messages = priorGroupEntries.map(e => ({
+          role: e.role,
+          content: e.content,
+          timestamp: e.timestamp
+        }));
+      }
+      this.conversations.set(convKey, conv);
     }
     conv.lastActivity = now;
 
@@ -1299,12 +1390,47 @@ export class ChatbotService {
       ? `\nStored User Facts about this user in this chat:\n- ${userMemories.join('\n- ')}` 
       : '';
 
-    const lustModeContext = (settings?.lustMode)
-      ? `\nLUST / SPICY PERSONALITY MODIFIER ACTIVE:
-- If the user's message is playful, flirty, romantic, or initiates banter, adopt a mildly suggestive, cheeky, and teasing tone.
-- Add playful banter, charming comebacks, and subtle spicy intrigue.
-- SAFETY RULE: STRICTLY DO NOT generate explicit sexual/pornographic content or vulgarity.
-- If the user is sad, distressed, serious, asking for help, or talking about serious topics, IGNORE lust mode and remain empathetic, supportive, and respectful.`
+    const isLustMode = Boolean(settings?.lustMode);
+
+    const lustModeContext = isLustMode
+      ? `\n==================================================
+LUSTMODE / COUPLE PERSONALITY MODIFIER ACTIVE:
+==================================================
+1. ROLE & VIBE:
+- You are in /lustmode. Behave like a confident, affectionate, playful, flirtatious adult woman in a natural romantic couple dynamic.
+- The mode MUST feel like a natural couple conversation, NOT like an AI repeatedly saying "😏" or inserting random romantic sentences.
+- Personality characteristics: confident, playful, affectionate, teasing, cheeky, romantic, emotionally expressive, slightly mischievous, conversational, natural Hinglish/English, concise, context-aware.
+
+2. VOCABULARY RULES (MANDATORY):
+- FORBIDDEN TERMS: When lustmode is ON, STRICTLY NEVER address the user using: "bhai", "bro", "bhaiya", "brother", "behen", "dost", "dude", or "sir" (unless the user explicitly uses such terminology in their message and you are teasingly calling it out, e.g. "Bhai kisko bola? 😂").
+- AFFECTIONATE TERMS: Prefer natural affectionate terms when appropriate: "baby", "babe", "jaan", "sona", "shona", "cutie", "darling", "sweetheart", "love".
+- DO NOT use an affectionate nickname in every single message. Choose naturally based on the conversation context.
+- AVOID REPETITIVE PATTERNS: Never end every line with repetitive clichés such as "baby 😏", "jaan 😏", or "sona 😏". Vary emojis naturally (e.g. 😉, 😂, 👀, 😌, ❤️, ✨, 🙈) without overusing any single emoji.
+
+3. MOOD & EMOTIONAL INTEGRATION:
+- Lustmode is a personality modifier that blends with the user's CURRENT active mood:
+  * Playful / Banter / Teasing ("tum pagal ho 😂"): Tease back playfully and cheekily.
+  * Flirty / Compliments ("you're cute", "looking good"): Affectionate, charming, cheeky teasing ("Achhaaa, itna notice karte ho mujhe? 👀").
+  * Romantic / Closeness ("miss you", "love you"): Warm, heartfelt, sweet, genuinely affectionate ("Hmm... aaj bade sweet ban rahe ho, jaan.").
+  * Sad / Distressed / Vulnerable ("mera mood kharab hai"): Caring, gentle, emotionally supportive and affectionate; NEVER be inappropriately flippant or flirtatious when the user is hurting.
+  * Angry / Upset ("mujhe gussa aa raha hai"): Caring, calm, reassuring; never mock them or force shallow romance.
+  * Happy / Celebratory ("aaj bahut khush hoon"): Joyful, upbeat, playful affection.
+  * Neutral / Technical Questions ("what is JavaScript?", "what is Node.js?"): ALWAYS answer the question accurately, directly, and on-topic! Add at most a subtle, natural warm couple touch without derailing the explanation (e.g. "Node.js basically JavaScript ko server-side run karne deta hai, baby.").
+
+4. NO TOPIC JUMPING (STRICT):
+- The latest user message ALWAYS has absolute priority.
+- NEVER generate an unrelated romantic or flirty sentence merely because lustmode is enabled. Stay on the topic the user brought up.
+
+5. NATURAL CONVERSATION & LENGTH:
+- Keep replies short, natural, and human-like (normally 5–25 words, 1–2 sentences).
+- Avoid robotic wording, long paragraphs, repetitive flirting, forced pet names, and generic AI phrases.
+
+6. ADULT CONTENT & BOUNDARY (STRICT):
+- Keep the mode flirtatious, romantic, teasing, and affectionate ("flirty adult couple vibe").
+- STRICTLY FORBIDDEN: Do NOT generate explicit sexual descriptions, graphic sexual anatomy, pornographic acts, or explicit sexual roleplay.
+
+7. CONVERSATION CONTINUITY:
+- Use the existing 15-message conversation transcript and user memory to maintain seamless relationship continuity across turns. Do not reset the dynamic or re-introduce yourself.`
       : '';
 
     const composedSystemPrompt = `${BASE_PERSONALITY}
@@ -1327,16 +1453,49 @@ STRICT CONVERSATION RULES:
 4. CONVERSATIONAL STYLE: Speak like a real human chat user in natural Hinglish or English. Avoid generic AI clichés ("That's a great question", "I completely understand", "Certainly!", "I'd be happy to help").
 5. ACTION BAN: NEVER output asterisks actions like *laughs*, *sends a sticker*, *smiles*, or *blushes*.`;
 
-    // Construct single chronological transcript from bounded history (up to MAX_CONTEXT_MESSAGES)
-    const boundedHistory = conv.messages.slice(-this.MAX_CONTEXT_MESSAGES);
-    const transcriptLines: string[] = [];
-    for (const msg of boundedHistory) {
-      const speaker = msg.role === 'assistant' ? 'Roxie' : 'User';
-      transcriptLines.push(`${speaker}: ${msg.content}`);
-    }
-    const transcript = transcriptLines.length > 0 ? transcriptLines.join('\n') : '(No previous messages)';
+    // Construct single chronological transcript from group-shared memory or DM history
+    let transcript = '(No previous messages)';
+    let contextCount = 0;
+    if (!isPrivate) {
+      // Sensible context selection: prioritize in-memory conv if explicitly populated, otherwise rolling group memory
+      const sourceList = (conv.messages.length > priorGroupEntries.length)
+        ? conv.messages.slice(-this.MAX_CONTEXT_MESSAGES).map(m => ({
+            name: m.role === 'assistant' ? 'Roxie' : 'User',
+            content: m.content
+          }))
+        : priorGroupEntries.slice(-25).map(e => ({
+            name: e.name || (e.role === 'assistant' ? 'Roxie' : 'User'),
+            content: e.content
+          }));
 
-    const userPromptContent = `CONVERSATION HISTORY:
+      contextCount = sourceList.length;
+      if (sourceList.length > 0) {
+        transcript = sourceList.map(e => `${e.name}: ${e.content}`).join('\n');
+      }
+    } else {
+      const boundedHistory = conv.messages.slice(-this.MAX_CONTEXT_MESSAGES);
+      contextCount = boundedHistory.length;
+      if (boundedHistory.length > 0) {
+        transcript = boundedHistory.map(m => `${m.role === 'assistant' ? 'Roxie' : 'User'}: ${m.content}`).join('\n');
+      }
+    }
+
+    const userPromptContent = !isPrivate
+      ? `GROUP CONVERSATION:
+${transcript}
+
+LATEST MESSAGE:
+${userName}: ${userText}
+
+CURRENT MOOD:
+${mood}
+
+CURRENT PERSONALITY:
+${isLustMode ? 'confident, affectionate, playful, flirtatious adult woman (flirty adult couple vibe)' : 'psychologist-style, tactical, witty, confident female conversational personality'}
+
+TASK:
+Reply naturally to the latest message from ${userName} based primarily on what they just said, while using previous group conversation for context and continuity.`
+      : `CONVERSATION HISTORY:
 ${transcript}
 
 LATEST USER MESSAGE:
@@ -1346,7 +1505,7 @@ CURRENT MOOD:
 ${mood}
 
 CURRENT PERSONALITY:
-psychologist-style, tactical, witty, confident female conversational personality
+${isLustMode ? 'confident, affectionate, playful, flirtatious adult woman (flirty adult couple vibe)' : 'psychologist-style, tactical, witty, confident female conversational personality'}
 
 TASK:
 Reply naturally to the latest user message while strictly continuing the existing conversation topic.`;
@@ -1360,10 +1519,10 @@ Reply naturally to the latest user message while strictly continuing the existin
       requestId,
       chatId,
       messageId: msgId,
-      contextMessageCount: boundedHistory.length,
+      contextMessageCount: contextCount,
       latestUserMessage: userText.slice(0, 100),
       currentMood: mood,
-      personality: 'psychologist-style'
+      personality: isLustMode ? 'LustMode-Couple' : 'psychologist-style'
     })}`);
 
     await telegramApi.sendChatAction(chatId, 'typing');
@@ -1431,7 +1590,13 @@ Reply naturally to the latest user message while strictly continuing the existin
     // Add user message to conversation history
     conv.messages.push({ role: 'user', content: userText, timestamp: Date.now() });
 
-    const cleanedText = this.cleanAiText(replyContent) || 'Acha!';
+    let cleanedText = this.cleanAiText(replyContent);
+    if (isLustMode) {
+      cleanedText = this.sanitizeLustModeText(cleanedText, userText);
+    }
+    cleanedText = cleanedText || 'Acha!';
+
+    const personalityLabel = isLustMode ? 'LustMode-Couple' : 'Psychologist-style';
 
     // Automatic Natural Sticker Decision Engine:
     // When a relevant sticker exists matching current mood/group library:
@@ -1447,7 +1612,7 @@ Reply naturally to the latest user message while strictly continuing the existin
           chatId,
           messageId: msgId,
           userId,
-          personality: 'Psychologist-style',
+          personality: personalityLabel,
           mood,
           responseType: 'text_plus_sticker',
           content: cleanedText,
@@ -1461,7 +1626,7 @@ Reply naturally to the latest user message while strictly continuing the existin
           chatId,
           messageId: msgId,
           userId,
-          personality: 'Psychologist-style',
+          personality: personalityLabel,
           mood,
           responseType: 'sticker',
           mediaFileId: candidateSticker,
@@ -1476,7 +1641,7 @@ Reply naturally to the latest user message while strictly continuing the existin
       chatId,
       messageId: msgId,
       userId,
-      personality: 'Psychologist-style',
+      personality: personalityLabel,
       mood,
       responseType: 'text',
       content: cleanedText,
@@ -1562,12 +1727,24 @@ Core Rules:
   private static async dispatchResponse(decision: ChatbotDecision): Promise<boolean> {
     console.log(`CHATBOT_DECISION ${JSON.stringify(decision)}`);
 
-    const userKey = `${decision.chatId}_${decision.userId}`;
-    let conv = this.conversations.get(userKey);
+    const isGroup = decision.chatId < 0;
+    const convKey = isGroup ? String(decision.chatId) : `${decision.chatId}_${decision.userId}`;
+    let conv = this.conversations.get(convKey);
     if (!conv) {
       conv = { messages: [], lastActivity: Date.now() };
-      this.conversations.set(userKey, conv);
+      this.conversations.set(convKey, conv);
     }
+
+    const recordAssistantEntry = (content: string) => {
+      if (isGroup) {
+        db.addGroupConversationEntry(decision.chatId, {
+          role: 'assistant',
+          name: 'Roxie',
+          content,
+          timestamp: Date.now()
+        });
+      }
+    };
 
     if (decision.responseType === 'text_plus_sticker' && decision.content && decision.mediaFileId) {
       const textRes = await telegramApi.sendMessage(decision.chatId, decision.content, {
@@ -1578,8 +1755,10 @@ Core Rules:
       });
       if (textRes.ok || (textRes as any).message_id || stickerRes.ok) {
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text_plus_sticker', replyToMessageId: decision.replyToMessageId })}`);
-        conv.messages.push({ role: 'assistant', content: `${decision.content} [Sent sticker]` });
+        const fullContent = `${decision.content} [Sent sticker]`;
+        conv.messages.push({ role: 'assistant', content: fullContent });
         this.trimContext(conv);
+        recordAssistantEntry(fullContent);
         return true;
       }
       return false;
@@ -1593,6 +1772,7 @@ Core Rules:
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'sticker', replyToMessageId: decision.replyToMessageId })}`);
         conv.messages.push({ role: 'assistant', content: '[Sent sticker]' });
         this.trimContext(conv);
+        recordAssistantEntry('[Sent sticker]');
         return true;
       }
       return false;
@@ -1606,6 +1786,7 @@ Core Rules:
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'animation', replyToMessageId: decision.replyToMessageId })}`);
         conv.messages.push({ role: 'assistant', content: '[Sent animation]' });
         this.trimContext(conv);
+        recordAssistantEntry('[Sent animation]');
         return true;
       }
       return false;
@@ -1619,6 +1800,7 @@ Core Rules:
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
         conv.messages.push({ role: 'assistant', content: decision.content });
         this.trimContext(conv);
+        recordAssistantEntry(decision.content);
         return true;
       }
       return false;
@@ -1628,8 +1810,8 @@ Core Rules:
   }
 
   private static trimContext(conv: ConversationContext): void {
-    if (conv.messages.length > this.MAX_CONTEXT_MESSAGES * 2) {
-      conv.messages = conv.messages.slice(-this.MAX_CONTEXT_MESSAGES * 2);
+    if (conv.messages.length > GROUP_MEMORY_LIMIT) {
+      conv.messages = conv.messages.slice(-GROUP_MEMORY_LIMIT);
     }
   }
 
