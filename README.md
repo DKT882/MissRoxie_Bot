@@ -362,37 +362,7 @@ User + group scoped state
 Moderation and AI are separate
 Moderation + conversation in one bot
 🧩 Designed as a System, Not Just a Bot
-
-Roxie is built around separate behavioral layers:
-
-┌─────────────────────────────────────┐
-│              TELEGRAM               │
-└──────────────────┬──────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────┐
-│          COMMAND / EVENT LAYER      │
-└──────────────────┬──────────────────┘
-                   │
-          ┌────────┴────────┐
-          ▼                 ▼
-┌─────────────────┐ ┌─────────────────┐
-│   MODERATION    │ │  CONVERSATION   │
-│     ENGINE      │ │     ENGINE      │
-└────────┬────────┘ └────────┬────────┘
-         │                   │
-         ▼                   ▼
-┌─────────────────┐ ┌─────────────────┐
-│    POLICY &     │ │ LANGUAGE &      │
-│    CONTENT      │ │ PERSONALITY    │
-│   PROTECTION    │ │     LAYER      │
-└────────┬────────┘ └────────┬────────┘
-         │                   │
-         └─────────┬─────────┘
-                   ▼
-          ┌─────────────────┐
-          │     STORAGE     │
-          └─────────────────┘
+===
 
 This separation makes it easier to extend Roxie without turning every new feature into one large block of logic.
 
