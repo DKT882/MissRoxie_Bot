@@ -1693,7 +1693,14 @@ export class ChatbotService {
     let candidates: string[] = [];
 
     const filterCustom = (ids: string[]): string[] => {
-      return ids.filter(id => this.isValidFileId(id) && this.isCustomSticker(id, chatId));
+      return ids.filter(id => {
+        if (!this.isValidFileId(id) || !this.isCustomSticker(id, chatId)) return false;
+        const meta = groupLib.stickerMetadata?.[id];
+        if (meta && meta.packName && !db.isStickerPackEnabled(chatId, meta.packName)) {
+          return false;
+        }
+        return true;
+      });
     };
 
     // 1. Explicit Lust Mode stickers configured for this group (highest priority)
@@ -1917,9 +1924,39 @@ export class ChatbotService {
           reason: 'Chatbot disabled for group'
         };
       }
+
+      // Check Auto Response frequency & cooldown (anti-spam protection)
+      const autoResponseEligibility = db.checkAutoResponseEligibility(chatId);
+      if (!autoResponseEligibility.allowed) {
+        return {
+          requestId,
+          chatId,
+          messageId: msgId,
+          userId,
+          personality: 'Psychologist-style',
+          mood: 'normal',
+          responseType: 'none',
+          replyToMessageId: msgId,
+          reason: `Auto response cooldown or disabled: ${autoResponseEligibility.reason || 'cooldown'}`
+        };
+      }
     }
 
     const userText = message.text || message.caption || (message.sticker ? `[sticker: ${message.sticker.emoji || 'sticker'}]` : message.photo ? '[photo]' : message.video ? '[video]' : 'Hello');
+
+    // Track incoming private message in storage for Control Center dashboard
+    if (isPrivate && userId) {
+      db.addPrivateMessage(chatId, userId, {
+        role: 'user',
+        content: userText,
+        timestamp: message.date ? message.date * 1000 : Date.now(),
+        messageId: msgId,
+        direction: 'in',
+        username: message.from?.username,
+        name: userName,
+        language: ChatbotService.detectLanguage(userText).language
+      });
+    }
 
     // Extract user personal memory fact if user shares personal facts
     if (userId && userText) {
@@ -2425,7 +2462,8 @@ Reply naturally to the latest user message while strictly continuing the existin
       // NO text-only response is allowed when custom stickers are available!
       // Default stickers are NEVER used in Lust Mode.
       const customSticker = this.selectCustomStickerForLustMode(mood, chatId, false);
-      if (customSticker) {
+      const autoStickerAllowed = isPrivate || db.checkAutoStickerEligibility(chatId).allowed;
+      if (customSticker && autoStickerAllowed) {
         // Choose between Format A (Text + Custom Sticker) and Format B (Custom Sticker Only)
         // Context-aware: short reactions or teases have higher probability of sticker-only
         const isShortTeaseOrEmoji = userText.trim().length <= 15 || /^[^\w\s]+$/.test(userText.trim());
@@ -2462,6 +2500,20 @@ Reply naturally to the latest user message while strictly continuing the existin
             modelUsed
           };
         }
+      } else if (customSticker && !autoStickerAllowed) {
+        // Auto sticker is on cooldown or disabled: send text response only (independent controls)
+        return {
+          requestId,
+          chatId,
+          messageId: msgId,
+          userId,
+          personality: personalityLabel,
+          mood,
+          responseType: 'text',
+          content: cleanedText,
+          replyToMessageId: msgId,
+          modelUsed
+        };
       } else {
         // Group has ZERO custom stickers registered!
         // Per Rule 10: "If the group has ZERO custom stickers: send a single harmless custom-sticker-unavailable fallback behavior that does NOT use a default sticker."
@@ -2487,7 +2539,8 @@ Reply naturally to the latest user message while strictly continuing the existin
     // ~20% Text + Sticker
     // ~15% Sticker Only
     const candidateSticker = this.selectSticker(mood, chatId);
-    if (candidateSticker) {
+    const autoStickerAllowed = isPrivate || db.checkAutoStickerEligibility(chatId).allowed;
+    if (candidateSticker && autoStickerAllowed) {
       const roll = Math.random();
       if (roll < 0.20) {
         return {
@@ -2673,6 +2726,13 @@ Core Rules:
           content,
           timestamp: Date.now()
         });
+      } else {
+        db.addPrivateMessage(decision.chatId, decision.userId, {
+          role: 'assistant',
+          content,
+          timestamp: Date.now(),
+          direction: 'out'
+        });
       }
     };
 
@@ -2691,6 +2751,7 @@ Core Rules:
           conv.messages.push({ role: 'assistant', content: decision.content });
           this.trimContext(conv);
           recordAssistantEntry(decision.content);
+          db.recordAutoResponseSent(decision.chatId);
           return true;
         }
         return false;
@@ -2708,6 +2769,12 @@ Core Rules:
         conv.messages.push({ role: 'assistant', content: fullContent });
         this.trimContext(conv);
         recordAssistantEntry(fullContent);
+        if (textRes.ok || (textRes as any).message_id) {
+          db.recordAutoResponseSent(decision.chatId);
+        }
+        if (stickerRes.ok) {
+          db.recordAutoStickerSent(decision.chatId);
+        }
         return true;
       }
       return false;
@@ -2728,6 +2795,7 @@ Core Rules:
         conv.messages.push({ role: 'assistant', content: '[Sent sticker]' });
         this.trimContext(conv);
         recordAssistantEntry('[Sent sticker]');
+        db.recordAutoStickerSent(decision.chatId);
         return true;
       }
       return false;
@@ -2756,6 +2824,7 @@ Core Rules:
         conv.messages.push({ role: 'assistant', content: decision.content });
         this.trimContext(conv);
         recordAssistantEntry(decision.content);
+        db.recordAutoResponseSent(decision.chatId);
         return true;
       }
       return false;

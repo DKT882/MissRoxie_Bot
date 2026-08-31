@@ -339,7 +339,46 @@ export interface GroupSettings {
   automations?: Array<{ id: string; trigger: string; action: string; parameters?: string; enabled: boolean; createdBy: number; createdAt: string }>;
   rules?: string;
   lastAllTimestamp?: number;
+  autoResponse?: AutoResponseConfig;
+  autoSticker?: AutoStickerConfig;
+  stickerPacks?: Record<string, GroupStickerPackConfig>;
+  botLeft?: boolean;
+  leftAt?: string;
   updatedAt: string;
+}
+
+export interface AutoResponseConfig {
+  enabled: boolean;
+  mode: 'every_message' | 'cooldown' | 'random' | 'disabled';
+  cooldownSeconds: number;
+  randomize?: boolean;
+  minSeconds?: number;
+  maxSeconds?: number;
+  lastResponseTimestamp?: number;
+  nextIntervalSeconds?: number;
+  nextAllowedAt?: number;
+}
+
+export interface AutoStickerConfig {
+  enabled: boolean;
+  mode: 'every_message' | 'cooldown' | 'random' | 'disabled';
+  cooldownSeconds: number;
+  randomize?: boolean;
+  minSeconds?: number;
+  maxSeconds?: number;
+  lastStickerTimestamp?: number;
+  nextIntervalSeconds?: number;
+  nextAllowedAt?: number;
+}
+
+export interface GroupStickerPackConfig {
+  name: string;
+  title: string;
+  enabled: boolean;
+  stickerCount: number;
+  stickers?: Array<{ fileId: string; emoji?: string }>;
+  addedBy?: string | number;
+  addedAt: string;
 }
 
 export interface WarningRecord {
@@ -472,7 +511,7 @@ export interface ModerationLog {
   adminUserId?: number;
   adminUsername?: string;
   command?: string;
-  action: 'kick' | 'ban' | 'unban' | 'mute' | 'unmute' | 'tmute' | 'tban' | 'dban' | 'dmute' | 'dkick' | 'sban' | 'smute' | 'skick' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'delete_sticker_pack' | 'delete_image' | 'delete_media' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'clear' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change' | 'lock' | 'unlock' | 'flood_action' | 'filter_match' | 'set_slowmode' | 'pin' | 'unpin' | 'auto_accept' | 'automod_toggle' | 'security_toggle' | 'captcha_toggle' | 'antiraid_toggle' | 'joinmode_change' | 'automation_add' | 'automation_remove' | 'automation_toggle' | 'rules_update' | 'all_broadcast';
+  action: 'kick' | 'ban' | 'unban' | 'mute' | 'unmute' | 'tmute' | 'tban' | 'dban' | 'dmute' | 'dkick' | 'sban' | 'smute' | 'skick' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'delete_sticker_pack' | 'delete_image' | 'delete_media' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'clear' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change' | 'lock' | 'unlock' | 'flood_action' | 'filter_match' | 'set_slowmode' | 'pin' | 'unpin' | 'auto_accept' | 'automod_toggle' | 'security_toggle' | 'captcha_toggle' | 'antiraid_toggle' | 'joinmode_change' | 'automation_add' | 'automation_remove' | 'automation_toggle' | 'rules_update' | 'all_broadcast' | 'leave_group' | 'send_message' | 'broadcast';
   result?: 'success' | 'denied' | 'error';
   telegramError?: string;
   reason?: string;

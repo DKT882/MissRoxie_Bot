@@ -447,6 +447,28 @@ export class TelegramApi {
       is_big: isBig
     });
   }
+
+  public async leaveChat(chatId: number | string): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    return this.call('leaveChat', { chat_id: chatId });
+  }
+
+  public async getChat(chatId: number | string): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
+    return this.call('getChat', { chat_id: chatId });
+  }
+
+  public async getChatMemberCount(chatId: number | string): Promise<{ ok: boolean; result?: number; description?: string; error_code?: number }> {
+    return this.call('getChatMemberCount', { chat_id: chatId });
+  }
+
+  public async setChatPermissions(
+    chatId: number | string,
+    permissions: Record<string, boolean>
+  ): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    return this.call('setChatPermissions', {
+      chat_id: chatId,
+      permissions
+    });
+  }
 }
 
 export const telegramApi = new TelegramApi();

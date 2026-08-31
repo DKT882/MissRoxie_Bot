@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession } from '../telegram/types.js';
+import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig } from '../telegram/types.js';
 import { getDefaultStickersStats } from '../telegram/defaultStickers.js';
 
 interface RaidStateRecord {
@@ -65,6 +65,27 @@ export interface UserLustLevelRecord {
   lastUpdated: number;
 }
 
+export interface PrivateConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  messageId?: number;
+  mediaType?: string;
+  mediaFileId?: string;
+  direction: 'in' | 'out';
+  language?: string;
+}
+
+export interface PrivateConversationRecord {
+  chatId: number | string;
+  userId: number;
+  username?: string;
+  name?: string;
+  language?: string;
+  lastUpdated: number;
+  messages: PrivateConversationMessage[];
+}
+
 export function isSensitiveData(text: string): boolean {
   if (!text) return false;
   const lower = text.toLowerCase();
@@ -99,6 +120,7 @@ interface DatabaseSchema {
   groupConversationMemories?: Record<string, GroupConversationMemory>; // `${chatId}` -> GroupConversationMemory (ONE shared group memory per chatId)
   groupMemories?: Record<string, any>; // legacy backward-compatible alias
   userLustLevels?: Record<string, UserLustLevelRecord>; // `${groupId}_${userId}` -> UserLustLevelRecord
+  privateConversations?: Record<string, PrivateConversationRecord>; // `${chatId}` -> PrivateConversationRecord
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -446,6 +468,25 @@ class StorageManager {
         protectionFloodWindow: 5,
         protectionDuplicateLimit: 3,
         protectionLinkBurstLimit: 3,
+        autoResponse: {
+          enabled: true,
+          mode: 'every_message',
+          cooldownSeconds: 30,
+          randomize: false,
+          minSeconds: 30,
+          maxSeconds: 120,
+          lastResponseTimestamp: 0
+        },
+        autoSticker: {
+          enabled: true,
+          mode: 'cooldown',
+          cooldownSeconds: 60,
+          randomize: false,
+          minSeconds: 60,
+          maxSeconds: 300,
+          lastStickerTimestamp: 0
+        },
+        stickerPacks: {},
         updatedAt: new Date().toISOString()
       };
       this.scheduleSave();
@@ -497,6 +538,34 @@ class StorageManager {
       if (s.protectionFloodWindow === undefined) { s.protectionFloodWindow = 5; needsSave = true; }
       if (s.protectionDuplicateLimit === undefined) { s.protectionDuplicateLimit = 3; needsSave = true; }
       if (s.protectionLinkBurstLimit === undefined) { s.protectionLinkBurstLimit = 3; needsSave = true; }
+      if (!s.autoResponse) {
+        s.autoResponse = {
+          enabled: true,
+          mode: 'every_message',
+          cooldownSeconds: 30,
+          randomize: false,
+          minSeconds: 30,
+          maxSeconds: 120,
+          lastResponseTimestamp: 0
+        };
+        needsSave = true;
+      }
+      if (!s.autoSticker) {
+        s.autoSticker = {
+          enabled: true,
+          mode: 'cooldown',
+          cooldownSeconds: 60,
+          randomize: false,
+          minSeconds: 60,
+          maxSeconds: 300,
+          lastStickerTimestamp: 0
+        };
+        needsSave = true;
+      }
+      if (!s.stickerPacks) {
+        s.stickerPacks = {};
+        needsSave = true;
+      }
 
       if (chatTitle && s.chatTitle !== chatTitle) {
         s.chatTitle = chatTitle;
@@ -511,9 +580,25 @@ class StorageManager {
 
   public updateGroupSettings(chatId: number, updates: Partial<GroupSettings>): GroupSettings {
     const current = this.getGroupSettings(chatId);
+    const mergedAutoResponse = updates.autoResponse
+      ? { ...(current.autoResponse || {}), ...updates.autoResponse }
+      : current.autoResponse;
+    if (mergedAutoResponse && updates.autoResponse?.lastResponseTimestamp === 0 && !updates.autoResponse.nextAllowedAt) {
+      mergedAutoResponse.nextAllowedAt = 0;
+    }
+
+    const mergedAutoSticker = updates.autoSticker
+      ? { ...(current.autoSticker || {}), ...updates.autoSticker }
+      : current.autoSticker;
+    if (mergedAutoSticker && updates.autoSticker?.lastStickerTimestamp === 0 && !updates.autoSticker.nextAllowedAt) {
+      mergedAutoSticker.nextAllowedAt = 0;
+    }
+
     const updated = {
       ...current,
       ...updates,
+      autoResponse: mergedAutoResponse,
+      autoSticker: mergedAutoSticker,
       updatedAt: new Date().toISOString()
     };
     this.data.settings[chatId] = updated;
@@ -1523,6 +1608,10 @@ class StorageManager {
     return entry;
   }
 
+  public logAction(log: any): ModerationLog {
+    return this.addLog(log);
+  }
+
   public getRecentLogs(limit: number = 30): ModerationLog[] {
     this.cleanOldLogs();
     return this.data.logs.slice(-limit);
@@ -2303,6 +2392,398 @@ class StorageManager {
       this.scheduleSave();
     }
     return existed;
+  }
+
+  // --- Private Conversations (DMs) Tracking ---
+  public addPrivateMessage(
+    chatId: number | string,
+    userId: number,
+    msg: {
+      role: 'user' | 'assistant';
+      content: string;
+      timestamp?: number;
+      messageId?: number;
+      mediaType?: string;
+      mediaFileId?: string;
+      direction?: 'in' | 'out';
+      username?: string;
+      name?: string;
+      language?: string;
+    }
+  ): void {
+    if (!this.data.privateConversations) this.data.privateConversations = {};
+    const key = String(chatId);
+    let record = this.data.privateConversations[key];
+    const now = msg.timestamp || Date.now();
+    if (!record) {
+      record = {
+        chatId,
+        userId,
+        username: msg.username,
+        name: msg.name,
+        language: msg.language,
+        lastUpdated: now,
+        messages: []
+      };
+      this.data.privateConversations[key] = record;
+    }
+
+    if (msg.username) record.username = msg.username;
+    if (msg.name) record.name = msg.name;
+    if (msg.language) record.language = msg.language;
+    record.lastUpdated = now;
+
+    // Deduplication by messageId if present
+    if (msg.messageId && record.messages.some(m => m.messageId === msg.messageId)) {
+      return;
+    }
+
+    record.messages.push({
+      role: msg.role,
+      content: msg.content,
+      timestamp: now,
+      messageId: msg.messageId,
+      mediaType: msg.mediaType,
+      mediaFileId: msg.mediaFileId,
+      direction: msg.direction || (msg.role === 'assistant' ? 'out' : 'in'),
+      language: msg.language
+    });
+
+    if (record.messages.length > 200) {
+      record.messages.shift();
+    }
+    this.scheduleSave();
+  }
+
+  public getPrivateChatsList(): Array<{
+    chatId: number | string;
+    userId: number;
+    username?: string;
+    name?: string;
+    language?: string;
+    lastUpdated: number;
+    messageCount: number;
+    lastMessage?: string;
+  }> {
+    if (!this.data.privateConversations) return [];
+    return Object.values(this.data.privateConversations)
+      .map(c => {
+        const lastMsg = c.messages[c.messages.length - 1];
+        return {
+          chatId: c.chatId,
+          userId: c.userId,
+          username: c.username,
+          name: c.name || (c.username ? `@${c.username}` : `User ${c.userId}`),
+          language: c.language || 'English',
+          lastUpdated: c.lastUpdated,
+          messageCount: c.messages.length,
+          lastMessage: lastMsg?.content || ''
+        };
+      })
+      .sort((a, b) => b.lastUpdated - a.lastUpdated);
+  }
+
+  public getPrivateChatMessages(chatId: number | string): PrivateConversationMessage[] {
+    if (!this.data.privateConversations) return [];
+    const key = String(chatId);
+    return this.data.privateConversations[key]?.messages || [];
+  }
+
+  public markBotLeftGroup(chatId: number | string): void {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    settings.botLeft = true;
+    settings.leftAt = new Date().toISOString();
+    this.scheduleSave();
+  }
+
+  public getTotalStoredMessagesCount(): number {
+    let count = 0;
+    // 1. Group conversation messages
+    if (this.data.groupConversationMemories) {
+      for (const m of Object.values(this.data.groupConversationMemories)) {
+        if (Array.isArray(m?.messages)) count += m.messages.length;
+      }
+    }
+    // 2. Private conversation messages
+    if (this.data.privateConversations) {
+      for (const c of Object.values(this.data.privateConversations)) {
+        if (Array.isArray(c?.messages)) count += c.messages.length;
+      }
+    }
+    // 3. Moderation log events
+    if (Array.isArray(this.data.logs)) {
+      count += this.data.logs.length;
+    }
+    return count;
+  }
+
+  public getGroupStickerPacks(chatId: number | string): GroupStickerPackConfig[] {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    if (!settings.stickerPacks) {
+      settings.stickerPacks = {};
+    }
+
+    // Auto-discover any packs that were previously imported via commands into stickerMetadata
+    const lib = this.getMediaLibrary(numId);
+    if (lib.stickerMetadata) {
+      for (const meta of Object.values(lib.stickerMetadata)) {
+        const packName = meta.packName;
+        if (packName && !settings.stickerPacks[packName.toLowerCase()]) {
+          settings.stickerPacks[packName.toLowerCase()] = {
+            name: packName,
+            title: meta.packTitle || packName,
+            enabled: true,
+            stickerCount: 1,
+            addedAt: meta.addedAt || new Date().toISOString()
+          };
+        }
+      }
+    }
+
+    return Object.values(settings.stickerPacks);
+  }
+
+  public addGroupStickerPack(chatId: number | string, pack: GroupStickerPackConfig): GroupStickerPackConfig {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    if (!settings.stickerPacks) {
+      settings.stickerPacks = {};
+    }
+    const cleanKey = pack.name.toLowerCase().trim();
+    settings.stickerPacks[cleanKey] = {
+      ...pack,
+      addedAt: pack.addedAt || new Date().toISOString()
+    };
+    this.scheduleSave();
+    return settings.stickerPacks[cleanKey];
+  }
+
+  public updateGroupStickerPack(
+    chatId: number | string,
+    packName: string,
+    updates: Partial<GroupStickerPackConfig>
+  ): GroupStickerPackConfig | null {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    if (!settings.stickerPacks) return null;
+    const cleanKey = packName.toLowerCase().trim();
+    if (!settings.stickerPacks[cleanKey]) return null;
+
+    settings.stickerPacks[cleanKey] = {
+      ...settings.stickerPacks[cleanKey],
+      ...updates
+    };
+    this.scheduleSave();
+    return settings.stickerPacks[cleanKey];
+  }
+
+  public removeGroupStickerPack(chatId: number | string, packName: string): number {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    const cleanKey = packName.toLowerCase().trim();
+    if (settings.stickerPacks && settings.stickerPacks[cleanKey]) {
+      delete settings.stickerPacks[cleanKey];
+      this.scheduleSave();
+    }
+    return this.removeStickerPackFromLibrary(packName, numId);
+  }
+
+  public isStickerPackEnabled(chatId: number | string, packName?: string): boolean {
+    if (!packName) return true;
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    if (!settings.stickerPacks) return true;
+    const pack = settings.stickerPacks[packName.toLowerCase().trim()];
+    if (!pack) return true;
+    return pack.enabled !== false;
+  }
+
+  public checkAutoResponseEligibility(chatId: number | string): { allowed: boolean; remainingSeconds?: number; reason?: string } {
+    const numId = Number(chatId);
+    if (numId > 0) return { allowed: true }; // DMs are separate, not subject to group cooldown
+
+    const settings = this.getGroupSettings(numId);
+    const cfg = settings.autoResponse;
+    if (!cfg || !cfg.enabled || cfg.mode === 'disabled') {
+      return { allowed: false, reason: 'disabled' };
+    }
+
+    if (cfg.mode === 'every_message') {
+      return { allowed: true };
+    }
+
+    const last = cfg.lastResponseTimestamp || 0;
+    if (last === 0) {
+      return { allowed: true };
+    }
+
+    const now = Date.now();
+
+    // Check explicit nextAllowedAt if available and valid
+    if (cfg.nextAllowedAt && cfg.nextAllowedAt > now) {
+      const remainingSeconds = Math.ceil((cfg.nextAllowedAt - now) / 1000);
+      if (remainingSeconds <= 86400) {
+        return { allowed: false, remainingSeconds, reason: 'cooldown' };
+      }
+    }
+
+    const elapsed = (now - last) / 1000;
+
+    if (cfg.mode === 'cooldown') {
+      const cooldown = Math.max(10, Math.min(86400, Number(cfg.cooldownSeconds || 30)));
+      if (elapsed < cooldown) {
+        return { allowed: false, remainingSeconds: Math.ceil(cooldown - elapsed), reason: 'cooldown' };
+      }
+      return { allowed: true };
+    }
+
+    if (cfg.mode === 'random' || cfg.randomize) {
+      const rawMin = Number(cfg.minSeconds ?? 30);
+      const rawMax = Number(cfg.maxSeconds ?? 120);
+      const safeMin = Math.max(10, Math.min(86400, isNaN(rawMin) ? 30 : rawMin));
+      const safeMax = Math.max(safeMin, Math.min(86400, isNaN(rawMax) ? 120 : rawMax));
+      const target = cfg.nextIntervalSeconds || safeMin;
+      if (elapsed < target) {
+        return { allowed: false, remainingSeconds: Math.ceil(target - elapsed), reason: 'cooldown' };
+      }
+      return { allowed: true };
+    }
+
+    return { allowed: true };
+  }
+
+  public recordAutoResponseSent(chatId: number | string): void {
+    const numId = Number(chatId);
+    if (numId > 0) return;
+
+    const settings = this.getGroupSettings(numId);
+    if (!settings.autoResponse) {
+      settings.autoResponse = {
+        enabled: true,
+        mode: 'every_message',
+        cooldownSeconds: 30,
+        randomize: false,
+        minSeconds: 30,
+        maxSeconds: 120
+      };
+    }
+
+    const now = Date.now();
+    settings.autoResponse.lastResponseTimestamp = now;
+
+    if (settings.autoResponse.mode === 'random' || settings.autoResponse.randomize) {
+      const rawMin = Number(settings.autoResponse.minSeconds ?? 30);
+      const rawMax = Number(settings.autoResponse.maxSeconds ?? 120);
+      const safeMin = Math.max(10, Math.min(86400, isNaN(rawMin) ? 30 : rawMin));
+      const safeMax = Math.max(safeMin, Math.min(86400, isNaN(rawMax) ? 120 : rawMax));
+      const randomSeconds = Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
+      settings.autoResponse.nextIntervalSeconds = randomSeconds;
+      settings.autoResponse.nextAllowedAt = now + (randomSeconds * 1000);
+    } else if (settings.autoResponse.mode === 'cooldown') {
+      const cd = Math.max(10, Math.min(86400, Number(settings.autoResponse.cooldownSeconds || 30)));
+      settings.autoResponse.nextIntervalSeconds = cd;
+      settings.autoResponse.nextAllowedAt = now + (cd * 1000);
+    } else {
+      settings.autoResponse.nextIntervalSeconds = 0;
+      settings.autoResponse.nextAllowedAt = 0;
+    }
+
+    this.scheduleSave();
+  }
+
+  public checkAutoStickerEligibility(chatId: number | string): { allowed: boolean; remainingSeconds?: number; reason?: string } {
+    const numId = Number(chatId);
+    if (numId > 0) return { allowed: true };
+
+    const settings = this.getGroupSettings(numId);
+    const cfg = settings.autoSticker;
+    if (!cfg || !cfg.enabled || cfg.mode === 'disabled') {
+      return { allowed: false, reason: 'disabled' };
+    }
+
+    if (cfg.mode === 'every_message') {
+      return { allowed: true };
+    }
+
+    const last = cfg.lastStickerTimestamp || 0;
+    if (last === 0) {
+      return { allowed: true };
+    }
+
+    const now = Date.now();
+
+    // Check explicit nextAllowedAt if available and valid
+    if (cfg.nextAllowedAt && cfg.nextAllowedAt > now) {
+      const remainingSeconds = Math.ceil((cfg.nextAllowedAt - now) / 1000);
+      if (remainingSeconds <= 86400) {
+        return { allowed: false, remainingSeconds, reason: 'cooldown' };
+      }
+    }
+
+    const elapsed = (now - last) / 1000;
+
+    if (cfg.mode === 'cooldown') {
+      const cooldown = Math.max(10, Math.min(86400, Number(cfg.cooldownSeconds || 60)));
+      if (elapsed < cooldown) {
+        return { allowed: false, remainingSeconds: Math.ceil(cooldown - elapsed), reason: 'cooldown' };
+      }
+      return { allowed: true };
+    }
+
+    if (cfg.mode === 'random' || cfg.randomize) {
+      const rawMin = Number(cfg.minSeconds ?? 60);
+      const rawMax = Number(cfg.maxSeconds ?? 300);
+      const safeMin = Math.max(10, Math.min(86400, isNaN(rawMin) ? 60 : rawMin));
+      const safeMax = Math.max(safeMin, Math.min(86400, isNaN(rawMax) ? 300 : rawMax));
+      const target = cfg.nextIntervalSeconds || safeMin;
+      if (elapsed < target) {
+        return { allowed: false, remainingSeconds: Math.ceil(target - elapsed), reason: 'cooldown' };
+      }
+      return { allowed: true };
+    }
+
+    return { allowed: true };
+  }
+
+  public recordAutoStickerSent(chatId: number | string): void {
+    const numId = Number(chatId);
+    if (numId > 0) return;
+
+    const settings = this.getGroupSettings(numId);
+    if (!settings.autoSticker) {
+      settings.autoSticker = {
+        enabled: true,
+        mode: 'cooldown',
+        cooldownSeconds: 60,
+        randomize: false,
+        minSeconds: 60,
+        maxSeconds: 300
+      };
+    }
+
+    const now = Date.now();
+    settings.autoSticker.lastStickerTimestamp = now;
+
+    if (settings.autoSticker.mode === 'random' || settings.autoSticker.randomize) {
+      const rawMin = Number(settings.autoSticker.minSeconds ?? 60);
+      const rawMax = Number(settings.autoSticker.maxSeconds ?? 300);
+      const safeMin = Math.max(10, Math.min(86400, isNaN(rawMin) ? 60 : rawMin));
+      const safeMax = Math.max(safeMin, Math.min(86400, isNaN(rawMax) ? 300 : rawMax));
+      const randomSeconds = Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
+      settings.autoSticker.nextIntervalSeconds = randomSeconds;
+      settings.autoSticker.nextAllowedAt = now + (randomSeconds * 1000);
+    } else if (settings.autoSticker.mode === 'cooldown') {
+      const cd = Math.max(10, Math.min(86400, Number(settings.autoSticker.cooldownSeconds || 60)));
+      settings.autoSticker.nextIntervalSeconds = cd;
+      settings.autoSticker.nextAllowedAt = now + (cd * 1000);
+    } else {
+      settings.autoSticker.nextIntervalSeconds = 0;
+      settings.autoSticker.nextAllowedAt = 0;
+    }
+
+    this.scheduleSave();
   }
 }
 
