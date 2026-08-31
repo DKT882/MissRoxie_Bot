@@ -472,7 +472,7 @@ export interface ModerationLog {
   adminUserId?: number;
   adminUsername?: string;
   command?: string;
-  action: 'kick' | 'ban' | 'unban' | 'mute' | 'unmute' | 'tmute' | 'tban' | 'dban' | 'dmute' | 'dkick' | 'sban' | 'smute' | 'skick' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'delete_image' | 'delete_media' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'clear' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change' | 'lock' | 'unlock' | 'flood_action' | 'filter_match' | 'set_slowmode' | 'pin' | 'unpin' | 'auto_accept' | 'automod_toggle' | 'security_toggle' | 'captcha_toggle' | 'antiraid_toggle' | 'joinmode_change' | 'automation_add' | 'automation_remove' | 'automation_toggle' | 'rules_update' | 'all_broadcast';
+  action: 'kick' | 'ban' | 'unban' | 'mute' | 'unmute' | 'tmute' | 'tban' | 'dban' | 'dmute' | 'dkick' | 'sban' | 'smute' | 'skick' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'delete_sticker_pack' | 'delete_image' | 'delete_media' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'clear' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change' | 'lock' | 'unlock' | 'flood_action' | 'filter_match' | 'set_slowmode' | 'pin' | 'unpin' | 'auto_accept' | 'automod_toggle' | 'security_toggle' | 'captcha_toggle' | 'antiraid_toggle' | 'joinmode_change' | 'automation_add' | 'automation_remove' | 'automation_toggle' | 'rules_update' | 'all_broadcast';
   result?: 'success' | 'denied' | 'error';
   telegramError?: string;
   reason?: string;

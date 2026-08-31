@@ -424,6 +424,10 @@ export class TelegramBotManager {
     this.isRunning = false;
     this.isStarting = false;
   }
+
+  public getBotUser(): TelegramUser | null {
+    return this.botUser;
+  }
 }
 
 export const telegramBot = new TelegramBotManager();

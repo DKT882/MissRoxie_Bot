@@ -19,12 +19,14 @@ export interface StickerMetaRecord {
   source?: 'custom' | 'default';
   addedBy?: number;
   addedAt: string;
+  isLustMode?: boolean;
 }
 
 export interface MediaLibraryRecord {
   stickers: Record<string, string[]>;
   animations: Record<string, string[]>;
   stickerMetadata?: Record<string, StickerMetaRecord>;
+  lustStickers?: Record<string, string[]>;
 }
 
 export const GROUP_MEMORY_LIMIT = 80;
@@ -1848,6 +1850,15 @@ class StorageManager {
         removed = true;
       }
     }
+    if (lib.lustStickers) {
+      for (const mood of Object.keys(lib.lustStickers)) {
+        const idx = lib.lustStickers[mood].indexOf(fileId);
+        if (idx !== -1) {
+          lib.lustStickers[mood].splice(idx, 1);
+          removed = true;
+        }
+      }
+    }
     for (const mood of Object.keys(lib.animations || {})) {
       const idx = lib.animations[mood].indexOf(fileId);
       if (idx !== -1) {
@@ -1863,6 +1874,110 @@ class StorageManager {
       this.scheduleSave();
     }
     return removed;
+  }
+
+  public removeStickerPackFromLibrary(packName: string, chatId?: number | string): number {
+    const lib = this.getMediaLibrary(chatId);
+    let removedCount = 0;
+    const cleanPack = packName.replace(/^https:\/\/t\.me\/addstickers\//i, '').replace(/[<>]/g, '').trim().toLowerCase();
+
+    if (!lib.stickerMetadata) return 0;
+
+    const fileIdsToRemove: string[] = [];
+    for (const [fileId, meta] of Object.entries(lib.stickerMetadata)) {
+      const pName = (meta.packName || '').trim().toLowerCase();
+      if (pName === cleanPack) {
+        fileIdsToRemove.push(fileId);
+      }
+    }
+
+    for (const fileId of fileIdsToRemove) {
+      if (this.removeMediaFromLibrary(fileId, chatId)) {
+        removedCount++;
+      }
+    }
+
+    if (removedCount > 0) {
+      this.scheduleSave();
+    }
+    return removedCount;
+  }
+
+  public addLustSticker(mood: string, fileId: string, meta?: StickerMetaRecord, chatId?: number | string): boolean {
+    const lib = this.getMediaLibrary(chatId);
+    const normalizedMood = mood.toLowerCase().trim();
+    if (!lib.lustStickers) {
+      lib.lustStickers = {};
+    }
+    if (!lib.lustStickers[normalizedMood]) {
+      lib.lustStickers[normalizedMood] = [];
+    }
+
+    if (!lib.stickerMetadata) lib.stickerMetadata = {};
+    const metaRecord: StickerMetaRecord = {
+      chatId,
+      source: 'custom',
+      addedAt: new Date().toISOString(),
+      ...(meta || {}),
+      fileId,
+      mood: normalizedMood,
+      isLustMode: true
+    };
+    lib.stickerMetadata[fileId] = metaRecord;
+
+    if (!lib.lustStickers[normalizedMood].includes(fileId)) {
+      lib.lustStickers[normalizedMood].push(fileId);
+      // Also register in group stickers for general consistency
+      if (!lib.stickers[normalizedMood]) lib.stickers[normalizedMood] = [];
+      if (!lib.stickers[normalizedMood].includes(fileId)) {
+        lib.stickers[normalizedMood].push(fileId);
+      }
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  public getLustStickers(chatId?: number | string, mood?: string): string[] {
+    if (!chatId) return [];
+    const lib = this.getMediaLibrary(chatId);
+    if (!lib.lustStickers) return [];
+    if (mood) {
+      return lib.lustStickers[mood.toLowerCase().trim()] || [];
+    }
+    const all: string[] = [];
+    for (const list of Object.values(lib.lustStickers)) {
+      if (Array.isArray(list)) all.push(...list);
+    }
+    return Array.from(new Set(all));
+  }
+
+  public removeLustSticker(fileId: string, chatId?: number | string): boolean {
+    if (!chatId) return false;
+    const lib = this.getMediaLibrary(chatId);
+    let removed = false;
+    if (lib.lustStickers) {
+      for (const mood of Object.keys(lib.lustStickers)) {
+        const idx = lib.lustStickers[mood].indexOf(fileId);
+        if (idx !== -1) {
+          lib.lustStickers[mood].splice(idx, 1);
+          removed = true;
+        }
+      }
+    }
+    const generalRemoved = this.removeMediaFromLibrary(fileId, chatId);
+    return removed || generalRemoved;
+  }
+
+  public clearLustStickers(chatId: number | string, mood?: string): void {
+    const lib = this.getMediaLibrary(chatId);
+    if (!lib.lustStickers) return;
+    if (mood) {
+      delete lib.lustStickers[mood.toLowerCase().trim()];
+    } else {
+      lib.lustStickers = {};
+    }
+    this.scheduleSave();
   }
 
   public clearMediaLibrary(moodOrChatId?: string | number, chatId?: number | string): void {
@@ -1886,10 +2001,14 @@ class StorageManager {
       }
       delete lib.stickers[normalizedMood];
       delete lib.animations[normalizedMood];
+      if (lib.lustStickers) {
+        delete lib.lustStickers[normalizedMood];
+      }
     } else {
       lib.stickers = {};
       lib.animations = {};
       lib.stickerMetadata = {};
+      lib.lustStickers = {};
     }
     this.scheduleSave();
   }

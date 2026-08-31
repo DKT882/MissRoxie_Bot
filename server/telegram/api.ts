@@ -420,6 +420,14 @@ export class TelegramApi {
     return this.call('getStickerSet', { name });
   }
 
+  public async deleteStickerSet(name: string): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    return this.call('deleteStickerSet', { name });
+  }
+
+  public async deleteStickerFromSet(sticker: string): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    return this.call('deleteStickerFromSet', { sticker });
+  }
+
   public async setMessageReaction(
     chatId: number | string,
     messageId: number,

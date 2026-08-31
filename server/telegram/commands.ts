@@ -128,7 +128,7 @@ export class CommandHandler {
     '/say', '/announce', '/schedule', '/listschedules', '/deleteschedule',
     '/exportconfig', '/importconfig', '/status',
     '/addstickerpack', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
-    '/teststicker'
+    '/teststicker', '/stickerpackremove', '/removestickerpack', '/delstickerpack'
   ]);
 
   public static readonly SENSITIVE_COMMANDS = new Set<string>([
@@ -163,7 +163,7 @@ export class CommandHandler {
     '/note', '/delnote',
     '/exportconfig', '/importconfig',
     '/addstickerpack', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
-    '/teststicker'
+    '/teststicker', '/stickerpackremove', '/removestickerpack', '/delstickerpack'
   ]);
 
   public static async handleCommand(ctx: CommandContext): Promise<boolean> {
@@ -349,6 +349,11 @@ export class CommandHandler {
       case '/removesticker':
       case '/removegif':
         await this.handleRemoveSticker(ctx);
+        return true;
+      case '/stickerpackremove':
+      case '/removestickerpack':
+      case '/delstickerpack':
+        await this.handleStickerPackRemove(ctx);
         return true;
       case '/clearstickers':
       case '/cleargifs':
@@ -6431,6 +6436,186 @@ export class CommandHandler {
         reply_to_message_id: ctx.message.message_id
       });
     }
+  }
+
+  private static cachedBotUsername: string | null = null;
+
+  private static async handleStickerPackRemove(ctx: CommandContext) {
+    // 1. Verify that the command is being used inside a group
+    if (!ctx.chatId || ctx.chatId > 0) {
+      await telegramApi.sendMessage(ctx.chatId, '❌ This command can only be used in groups.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    // 2. Verify that the actor has permission to manage sticker packs
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, '⛔ You must be an administrator or moderator to manage sticker packs.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    // 3. Verify that the command is a reply
+    const reply = ctx.message.reply_to_message;
+    if (!reply) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ <b>Usage:</b> Reply to a sticker with <code>/stickerpackremove</code> to delete its entire sticker pack.', {
+        parse_mode: 'HTML',
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    // 4. Verify that the replied-to message contains a sticker
+    const sticker = reply.sticker;
+    if (!sticker) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ The replied message is not a sticker. Please reply to a Telegram sticker.', {
+        parse_mode: 'HTML',
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    // 5. Read the sticker's set_name / sticker-set information
+    const setName = sticker.set_name;
+    if (!setName || !setName.trim()) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ This sticker is a standalone sticker and does not belong to a Telegram sticker pack.', {
+        parse_mode: 'HTML',
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    // 6. Resolve the complete sticker set
+    let setRes;
+    try {
+      setRes = await telegramApi.getStickerSet(setName);
+    } catch (err: any) {
+      await telegramApi.sendMessage(ctx.chatId, `❌ Failed to fetch sticker pack details from Telegram: ${escapeHtml(err?.message || 'Unknown error')}`, {
+        parse_mode: 'HTML',
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    if (!setRes || !setRes.ok || !setRes.result) {
+      await telegramApi.sendMessage(ctx.chatId, `❌ Could not find sticker pack <b>${escapeHtml(setName)}</b>: ${escapeHtml(setRes?.description || 'Pack not found')}`, {
+        parse_mode: 'HTML',
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const stickerSet = setRes.result;
+    const packTitle = stickerSet.title || setName;
+
+    // 7. Determine whether Roxie owns/created that sticker set
+    if (!this.cachedBotUsername) {
+      try {
+        const meRes = await telegramApi.getMe();
+        if (meRes && meRes.ok && meRes.result?.username) {
+          this.cachedBotUsername = meRes.result.username;
+        }
+      } catch {}
+    }
+    const botUsername = this.cachedBotUsername;
+
+    const isOwnedByBot = Boolean(
+      botUsername &&
+      setName.toLowerCase().endsWith(`_by_${botUsername.toLowerCase()}`)
+    );
+
+    // 8. If Roxie owns the set:
+    // Delete the entire sticker set using Telegram's supported sticker-set deletion capability.
+    if (isOwnedByBot) {
+      let deleteRes;
+      try {
+        deleteRes = await telegramApi.deleteStickerSet(setName);
+      } catch (err: any) {
+        await telegramApi.sendMessage(ctx.chatId, `❌ Telegram API error while deleting sticker pack: ${escapeHtml(err?.message || 'Unknown error')}`, {
+          parse_mode: 'HTML',
+          reply_to_message_id: ctx.message.message_id
+        });
+        return;
+      }
+
+      if (!deleteRes || !deleteRes.ok) {
+        await telegramApi.sendMessage(ctx.chatId, `❌ Telegram refused to delete sticker pack <b>${escapeHtml(packTitle)}</b>: ${escapeHtml(deleteRes?.description || 'Permission denied')}`, {
+          parse_mode: 'HTML',
+          reply_to_message_id: ctx.message.message_id
+        });
+        return;
+      }
+
+      // Purge pack from group media library if it was stored
+      db.removeStickerPackFromLibrary(setName, ctx.chatId);
+
+      // Log the audit action
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'stickerpackremove',
+        action: 'delete_sticker_pack',
+        result: 'success',
+        details: `Deleted bot-owned sticker set: ${setName} (${packTitle})`
+      });
+
+      // 10. Delete moderator's command message when possible so the group remains clean
+      try {
+        await telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id);
+      } catch {}
+
+      await telegramApi.sendMessage(ctx.chatId, `🗑️ Sticker pack <b>${escapeHtml(packTitle)}</b> (<code>${escapeHtml(setName)}</code>) owned by Roxie has been permanently deleted from Telegram.`, {
+        parse_mode: 'HTML'
+      });
+      return;
+    }
+
+    // 9. If Roxie does NOT own the set:
+    // Do NOT falsely claim that Roxie deleted the entire pack.
+    // Telegram does not allow a bot to delete arbitrary sticker sets owned by someone else.
+    // Instead, clearly report that the pack cannot be globally deleted by Roxie and offer
+    // the supported fallback of deleting the replied sticker message from the current group.
+    let messageDeleted = false;
+    try {
+      const delRes = await telegramApi.deleteMessage(ctx.chatId, reply.message_id);
+      if (delRes && delRes.ok) {
+        messageDeleted = true;
+      }
+    } catch {}
+
+    // Also remove from the group's local media library if it was imported
+    db.removeStickerPackFromLibrary(setName, ctx.chatId);
+
+    // 11. Log the action
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'stickerpackremove',
+      action: 'delete_sticker_pack',
+      result: 'denied',
+      reason: 'Sticker set not owned by bot',
+      details: `Pack ${setName} not created by bot; message fallback deleted=${messageDeleted}`
+    });
+
+    // 10. Delete moderator's command message when possible so the group remains clean
+    try {
+      await telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id);
+    } catch {}
+
+    const ownerMsg =
+      `⚠️ <b>Cannot Delete Third-Party Pack:</b> Sticker pack <b>${escapeHtml(packTitle)}</b> (<code>${escapeHtml(setName)}</code>) was not created by @${botUsername || 'Roxie'}. Telegram only permits a bot to delete sticker sets it created.\n\n` +
+      (messageDeleted
+        ? `✅ Removed the replied sticker message from this group as a local fallback.`
+        : `💡 <i>Tip:</i> To moderate stickers in this group, enable <code>/stickers on</code>.`);
+
+    await telegramApi.sendMessage(ctx.chatId, ownerMsg, {
+      parse_mode: 'HTML'
+    });
   }
 
   private static async handleLustMode(ctx: CommandContext) {

@@ -1491,7 +1491,22 @@ export class ChatbotService {
         }
       }
     }
-    return this.defaultStickerIdsSet.has(fileId);
+    if (this.defaultStickerIdsSet.has(fileId)) return true;
+
+    // Check if the sticker exists in common/global storage without a chatId or with source === 'default'
+    const commonLib = db.getMediaLibrary();
+    if (commonLib) {
+      const meta = commonLib.stickerMetadata?.[fileId];
+      if (meta && (meta.source === 'default' || !meta.chatId)) return true;
+      if (commonLib.stickers) {
+        for (const list of Object.values(commonLib.stickers)) {
+          if (Array.isArray(list) && list.includes(fileId)) {
+            if (!meta || meta.source !== 'custom') return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 
   public static isCustomSticker(fileId: string, chatId?: number | string): boolean {
@@ -1504,7 +1519,15 @@ export class ChatbotService {
     if (!groupLib) return false;
 
     let inGroupList = false;
-    if (groupLib.stickers) {
+    if (groupLib.lustStickers) {
+      for (const list of Object.values(groupLib.lustStickers)) {
+        if (Array.isArray(list) && list.includes(fileId)) {
+          inGroupList = true;
+          break;
+        }
+      }
+    }
+    if (!inGroupList && groupLib.stickers) {
       for (const list of Object.values(groupLib.stickers)) {
         if (Array.isArray(list) && list.includes(fileId)) {
           inGroupList = true;
@@ -1523,6 +1546,27 @@ export class ChatbotService {
     }
 
     return true;
+  }
+
+  public static hasCustomStickers(chatId: number | string): boolean {
+    if (!chatId) return false;
+    const groupLib = db.getMediaLibrary(chatId);
+    if (!groupLib) return false;
+    if (groupLib.lustStickers) {
+      for (const list of Object.values(groupLib.lustStickers)) {
+        if (Array.isArray(list) && list.some(id => this.isCustomSticker(id, chatId))) {
+          return true;
+        }
+      }
+    }
+    if (groupLib.stickers) {
+      for (const list of Object.values(groupLib.stickers)) {
+        if (Array.isArray(list) && list.some(id => this.isCustomSticker(id, chatId))) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   public static isStickerAllowedForMode(
@@ -1637,7 +1681,7 @@ export class ChatbotService {
     }
 
     const groupLib = db.getMediaLibrary(chatId);
-    if (!groupLib || !groupLib.stickers) {
+    if (!groupLib || (!groupLib.stickers && !groupLib.lustStickers)) {
       console.log(`[LUST] No custom sticker available\nchatId: ${chatId}\nmood: ${mood}`);
       return null;
     }
@@ -1652,43 +1696,83 @@ export class ChatbotService {
       return ids.filter(id => this.isValidFileId(id) && this.isCustomSticker(id, chatId));
     };
 
-    // 1. Direct match in group's custom sticker library
-    const directList = filterCustom(groupLib.stickers[normalizedMood] || []);
-    if (directList.length > 0) {
-      candidates = directList;
-    } else {
-      // 2. Check compatible fallback moods from MOOD_FALLBACK_MATRIX in group custom library
+    // 1. Explicit Lust Mode stickers configured for this group (highest priority)
+    if (groupLib.lustStickers) {
+      const directLust = filterCustom(groupLib.lustStickers[normalizedMood] || []);
+      if (directLust.length > 0) {
+        candidates = directLust;
+      }
+    }
+
+    // 2. Direct match in group's custom sticker library
+    if (candidates.length === 0 && groupLib.stickers) {
+      const directList = filterCustom(groupLib.stickers[normalizedMood] || []);
+      if (directList.length > 0) {
+        candidates = directList;
+      }
+    }
+
+    // 3. Compatible fallback moods from MOOD_FALLBACK_MATRIX
+    if (candidates.length === 0) {
       const fallbacks = (MOOD_FALLBACK_MATRIX[normalizedMood] || ['normal'])
         .filter(m => !suppressRomance || (m !== 'flirty' && m !== 'romantic'));
       for (const fbMood of fallbacks) {
-        const fbList = filterCustom(groupLib.stickers[fbMood] || []);
-        if (fbList.length > 0) {
-          candidates = fbList;
-          break;
+        if (groupLib.lustStickers) {
+          const fbLust = filterCustom(groupLib.lustStickers[fbMood] || []);
+          if (fbLust.length > 0) {
+            candidates = fbLust;
+            break;
+          }
+        }
+        if (groupLib.stickers) {
+          const fbList = filterCustom(groupLib.stickers[fbMood] || []);
+          if (fbList.length > 0) {
+            candidates = fbList;
+            break;
+          }
         }
       }
     }
 
-    // 3. If still empty, check related moods in group custom library
+    // 4. Check related moods in group custom / lust library
     if (candidates.length === 0) {
       const lustModeFallbacks = suppressRomance
         ? ['friendly', 'playful', 'happy', 'teasing', 'cute', 'normal']
         : ['flirty', 'romantic', 'playful', 'teasing', 'cute', 'loving', 'happy', 'normal'];
       for (const lmMood of lustModeFallbacks) {
-        const lmList = filterCustom(groupLib.stickers[lmMood] || []);
-        if (lmList.length > 0) {
-          candidates = lmList;
-          break;
+        if (groupLib.lustStickers) {
+          const lmLust = filterCustom(groupLib.lustStickers[lmMood] || []);
+          if (lmLust.length > 0) {
+            candidates = lmLust;
+            break;
+          }
+        }
+        if (groupLib.stickers) {
+          const lmList = filterCustom(groupLib.stickers[lmMood] || []);
+          if (lmList.length > 0) {
+            candidates = lmList;
+            break;
+          }
         }
       }
     }
 
-    // 4. If still empty, pick ANY valid custom sticker available in the group's custom library
+    // 5. Pick ANY valid custom sticker available in the group's custom or lust library
     if (candidates.length === 0) {
-      for (const anyMood of Object.keys(groupLib.stickers)) {
-        const anyList = filterCustom(groupLib.stickers[anyMood] || []);
-        if (anyList.length > 0) {
-          candidates.push(...anyList);
+      if (groupLib.lustStickers) {
+        for (const anyMood of Object.keys(groupLib.lustStickers)) {
+          const anyLust = filterCustom(groupLib.lustStickers[anyMood] || []);
+          if (anyLust.length > 0) {
+            candidates.push(...anyLust);
+          }
+        }
+      }
+      if (candidates.length === 0 && groupLib.stickers) {
+        for (const anyMood of Object.keys(groupLib.stickers)) {
+          const anyList = filterCustom(groupLib.stickers[anyMood] || []);
+          if (anyList.length > 0) {
+            candidates.push(...anyList);
+          }
         }
       }
     }
