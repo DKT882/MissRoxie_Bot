@@ -123,7 +123,7 @@ export class CommandHandler {
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse', '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/automation', '/setrules', '/clearrules', '/chatbot',
     '/protection', '/roxie', '/roxiemode', '/roxiereaction', '/reaction',
-    '/lustmod', '/lustmode',
+    '/lust', '/lustmod', '/lustmode',
     '/clearmemory',
     '/say', '/announce', '/schedule', '/listschedules', '/deleteschedule',
     '/exportconfig', '/importconfig', '/status',
@@ -143,7 +143,7 @@ export class CommandHandler {
     '/setmod', '/delmod',
     '/security', '/antiraid', '/captcha', '/autoaccept', '/chatbot',
     '/protection', '/roxie', '/roxiemode', '/roxiereaction', '/reaction',
-    '/lustmod', '/lustmode',
+    '/lust', '/lustmod', '/lustmode',
     '/clearmemory',
     '/automation', '/settings', '/setrules', '/clearrules',
     '/flood', '/setflood', '/antiflood',
@@ -573,6 +573,7 @@ export class CommandHandler {
       case '/reaction':
         await this.handleRoxieReaction(ctx);
         return true;
+      case '/lust':
       case '/lustmod':
       case '/lustmode':
         await this.handleLustMode(ctx);
@@ -6475,6 +6476,7 @@ export class CommandHandler {
 
     if (sub === 'off' || sub === 'disable' || sub === 'false') {
       db.updateGroupSettings(ctx.chatId, { lustMode: false });
+      db.resetLustLevel(ctx.chatId);
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,

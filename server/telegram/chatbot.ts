@@ -66,6 +66,36 @@ export interface ChatMessage {
   timestamp?: number;
 }
 
+export interface LanguageDetectionResult {
+  language: 'english' | 'hindi' | 'hinglish';
+  isHinglish: boolean;
+  isDevanagari: boolean;
+  isMixed: boolean;
+}
+
+export interface BrotherZoneTriggerResult {
+  isTriggered: boolean;
+  detectedTerm?: string;
+  termCategory?: 'bro' | 'bhai' | 'brother' | 'bruh' | 'dude' | 'other';
+}
+
+export interface RoxieResponseInput {
+  groupId: number | string;
+  userId?: number;
+  message: string;
+  language?: 'english' | 'hindi' | 'hinglish';
+  lustMode?: boolean;
+  lustLevel?: number;
+}
+
+export interface RoxieResponseOutput {
+  text: string;
+  language: 'english' | 'hindi' | 'hinglish';
+  lustLevel: number;
+  brotherZoneTriggered: boolean;
+  detectedTerm?: string;
+}
+
 export interface ConversationContext {
   messages: ChatMessage[];
   lastActivity: number;
@@ -558,8 +588,8 @@ export class ChatbotService {
     if (trimmed.includes('...') || trimmed.endsWith('..')) {
       return false;
     }
-    // Valid Telegram file IDs are base64-encoded strings typically > 20 characters
-    if (trimmed.length < 15) {
+    // Valid Telegram file IDs are base64-encoded strings typically > 10 characters
+    if (trimmed.length < 10) {
       return false;
     }
     const lower = trimmed.toLowerCase();
@@ -684,13 +714,18 @@ export class ChatbotService {
       .trim();
   }
 
-  public static sanitizeLustModeText(text: string, userText: string, hasRelationshipSignal: boolean = false): string {
+  public static sanitizeLustModeText(
+    text: string,
+    userText: string,
+    hasRelationshipSignal: boolean = false,
+    isBrotherPushback: boolean = false
+  ): string {
     if (!text) return '';
     const userLower = userText ? userText.toLowerCase() : '';
     let sanitized = text;
 
-    if (hasRelationshipSignal) {
-      // Sibling/friend relationship signal detected: strip romantic/couple pet names
+    if (hasRelationshipSignal && !isBrotherPushback) {
+      // Sibling/friend relationship signal detected without brother pushback: strip romantic/couple pet names
       const romanticTerms = ['baby', 'babe', 'jaan', 'sona', 'shona', 'sweetheart', 'darling', 'love', 'cutie'];
       for (const term of romanticTerms) {
         sanitized = sanitized.replace(new RegExp(`,\\s*${term}\\b`, 'gi'), '');
@@ -835,7 +870,12 @@ export class ChatbotService {
       { regex: /^bestie$/i, term: 'bestie' },
       { regex: /^buddy$/i, term: 'buddy' },
       { regex: /^buddies$/i, term: 'buddies' },
-      { regex: /^mate$/i, term: 'mate' }
+      { regex: /^mate$/i, term: 'mate' },
+      { regex: /^भाई+/u, term: 'भाई' },
+      { regex: /^भैया+/u, term: 'भैया' },
+      { regex: /^भाईसाहब|भाईसाहिब/u, term: 'भाईसाहब' },
+      { regex: /^बहन|बहना/u, term: 'बहन' },
+      { regex: /^दीदी/u, term: 'दीदी' }
     ];
 
     for (const token of tokens) {
@@ -847,6 +887,337 @@ export class ChatbotService {
     }
 
     return { isRelationshipSignal: false };
+  }
+
+  /**
+   * Multilingual Language Detector
+   * Automatically recognizes English, Hindi (Devanagari script), and Hinglish (Latin script).
+   */
+  public static detectLanguage(text: string): LanguageDetectionResult {
+    if (!text || typeof text !== 'string') {
+      return { language: 'english', isHinglish: false, isDevanagari: false, isMixed: false };
+    }
+
+    const devanagariMatches = text.match(/[\u0900-\u097F]/g);
+    const latinMatches = text.match(/[a-zA-Z]/g);
+
+    const devanagariCount = devanagariMatches ? devanagariMatches.length : 0;
+    const latinCount = latinMatches ? latinMatches.length : 0;
+
+    // 1. Predominantly Devanagari script -> Hindi
+    if (devanagariCount > 0 && (latinCount === 0 || devanagariCount >= latinCount)) {
+      return {
+        language: 'hindi',
+        isHinglish: false,
+        isDevanagari: true,
+        isMixed: latinCount > 0
+      };
+    }
+
+    // 2. Latin script: Distinguish English vs Hinglish
+    const lower = text.toLowerCase().replace(/['’]/g, '');
+    const tokens = lower.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+
+    // Common unambiguous Hinglish words that never collide with normal English words
+    const UNAMBIGUOUS_HINGLISH = new Set([
+      'kya', 'kar', 'karo', 'kare', 'karoge', 'karegi', 'karu', 'karta', 'karti',
+      'rahi', 'raha', 'rahe', 'rhi', 'rha', 'rhe', 'kr', 'krte', 'krna', 'karna', 'krne',
+      'kaisi', 'kaisa', 'kaise', 'kese', 'kesi', 'kasa', 'ho', 'hai', 'hain', 'hnn', 'haan', 'hoon', 'hun',
+      'aaj', 'kal', 'parso', 'sun', 'suno', 'suna', 'batao', 'bolo', 'bata',
+      'yaar', 'bhai', 'bhaiya', 'bhaisaab', 'bhaijaan', 'behen', 'didi',
+      'nahi', 'nhi', 'nahin', 'naa', 'mat',
+      'kyu', 'kyun', 'kyon', 'kaha', 'kahan', 'kidhar', 'kdr', 'kab', 'kaun', 'kon',
+      'kisko', 'kisne', 'kise', 'kispe', 'kitna', 'kitni', 'kitne',
+      'thodi', 'thoda', 'thode', 'wali', 'wala', 'wale',
+      'mein', 'mai', 'tum', 'tumhe', 'tumhara', 'tumhari', 'tumhare', 'tu', 'tera', 'teri', 'tere', 'tujhe',
+      'aap', 'aapka', 'aapki', 'aapke', 'hum', 'hume', 'humara', 'humari',
+      'mera', 'meri', 'mere', 'mujhe', 'mujhse', 'apna', 'apni', 'apne',
+      'uska', 'uski', 'uske', 'unka', 'unki', 'unke', 'isse', 'usse', 'jisse',
+      'bohot', 'bahut', 'bhot', 'zyada', 'jyada',
+      'achha', 'accha', 'acchi', 'achhi', 'theek', 'thik',
+      'pata', 'samajh', 'soch', 'dekho', 'chalo',
+      'arre', 'ab', 'abhi', 'tab', 'jab', 'phir', 'fir', 'toh',
+      'shona', 'sona', 'pagal', 'pagli', 'paglu', 'deewani', 'deewana',
+      'kuch', 'kuchh', 'koi', 'kisi', 'sabko', 'sabka', 'hoga', 'hogi', 'honge'
+    ]);
+
+    const ENGLISH_STOPWORDS = new Set([
+      'the', 'is', 'are', 'was', 'were', 'what', 'how', 'why', 'when', 'where', 'which',
+      'who', 'whom', 'whose', 'this', 'that', 'these', 'those', 'they', 'them', 'their',
+      'there', 'you', 'your', 'yours', 'we', 'our', 'ours', 'he', 'him', 'his', 'she',
+      'her', 'hers', 'it', 'its', 'have', 'has', 'had', 'having', 'do', 'does', 'did',
+      'doing', 'would', 'should', 'could', 'can', 'will', 'shall', 'may', 'might', 'must',
+      'about', 'above', 'across', 'after', 'against', 'along', 'among', 'around', 'at',
+      'before', 'behind', 'below', 'beneath', 'beside', 'between', 'beyond', 'by', 'down',
+      'during', 'except', 'for', 'from', 'in', 'inside', 'into', 'near', 'of', 'off',
+      'on', 'onto', 'out', 'outside', 'over', 'past', 'since', 'through', 'throughout',
+      'till', 'to', 'toward', 'towards', 'under', 'underneath', 'until', 'up', 'upon',
+      'with', 'within', 'without', 'and', 'but', 'or', 'nor', 'yet', 'so', 'although',
+      'because', 'if', 'since', 'unless', 'while', 'hello', 'hey', 'hi', 'good', 'morning',
+      'afternoon', 'evening', 'night', 'doing', 'meaning', 'life', 'please', 'thanks', 'thank'
+    ]);
+
+    let hinglishCount = 0;
+    let englishCount = 0;
+    for (const token of tokens) {
+      if (UNAMBIGUOUS_HINGLISH.has(token)) {
+        hinglishCount++;
+      } else if (ENGLISH_STOPWORDS.has(token)) {
+        englishCount++;
+      }
+    }
+
+    // If text contains Devanagari alongside Latin
+    if (devanagariCount > 0 && latinCount > 0) {
+      return {
+        language: 'hinglish',
+        isHinglish: true,
+        isDevanagari: true,
+        isMixed: true
+      };
+    }
+
+    // Hinglish if unambiguous Hindi/Urdu romanized words are present
+    if (hinglishCount >= 1) {
+      return {
+        language: 'hinglish',
+        isHinglish: true,
+        isDevanagari: false,
+        isMixed: englishCount > 0 || tokens.length > hinglishCount
+      };
+    }
+
+    // Pure English
+    return {
+      language: 'english',
+      isHinglish: false,
+      isDevanagari: false,
+      isMixed: false
+    };
+  }
+
+  /**
+   * Brother-zone & Sibling Addressing Detector
+   * Accurately recognizes English, Hindi (Devanagari), and Hinglish addressing
+   * with repeated-character squeezing and punctuation normalization.
+   */
+  public static detectBrotherZoneTrigger(text: string): BrotherZoneTriggerResult {
+    if (!text || typeof text !== 'string') {
+      return { isTriggered: false };
+    }
+
+    // 1. Direct Devanagari brother triggers
+    const devanagariPatterns: Array<{ regex: RegExp; term: string; category: BrotherZoneTriggerResult['termCategory'] }> = [
+      { regex: /भाईसाहब|भाईसाहिब/u, term: 'भाईसाहब', category: 'bhai' },
+      { regex: /भैया+/u, term: 'भैया', category: 'bhai' },
+      { regex: /भाईजान/u, term: 'भाईजान', category: 'bhai' },
+      { regex: /भाई+/u, term: 'भाई', category: 'bhai' }
+    ];
+
+    for (const item of devanagariPatterns) {
+      if (item.regex.test(text)) {
+        return { isTriggered: true, detectedTerm: item.term, termCategory: item.category };
+      }
+    }
+
+    // 2. Unicode normalization and lowercasing
+    const norm = text.normalize('NFKD').toLowerCase();
+
+    // 3. Multi-word phrase matches
+    if (/\bbrother\s+ji\b/i.test(norm)) {
+      return { isTriggered: true, detectedTerm: 'brother ji', termCategory: 'brother' };
+    }
+    if (/\b(bhai|bro)\s+(tu|kya|sun|suno|kaha|scene)\b/i.test(norm)) {
+      const match = norm.match(/\b(bhai|bro)\s+(tu|kya|sun|suno|kaha|scene)\b/i);
+      return { isTriggered: true, detectedTerm: match ? match[1] : 'bhai', termCategory: match && match[1] === 'bro' ? 'bro' : 'bhai' };
+    }
+    if (/\barre?\s+(bhai|bro)\b/i.test(norm)) {
+      return { isTriggered: true, detectedTerm: 'arre bhai', termCategory: 'bhai' };
+    }
+
+    // 4. Token-level matching
+    const clean = norm.replace(/[^\p{L}\p{N}\s-]/gu, ' ');
+    const rawTokens = clean.split(/\s+/).filter(Boolean);
+
+    const patterns: Array<{ regex: RegExp; term: string; category: BrotherZoneTriggerResult['termCategory'] }> = [
+      { regex: /^bro+$/i, term: 'bro', category: 'bro' },
+      { regex: /^bro+ski$/i, term: 'broski', category: 'bro' },
+      { regex: /^brother(ji)?$/i, term: 'brother', category: 'brother' },
+      { regex: /^bru+h+$/i, term: 'bruh', category: 'bruh' },
+      { regex: /^bra+h+$/i, term: 'brah', category: 'bruh' },
+      { regex: /^du+de+$/i, term: 'dude', category: 'dude' },
+      { regex: /^bha+i+y?a*$/i, term: 'bhai', category: 'bhai' },
+      { regex: /^bha+y+a*$/i, term: 'bhaiya', category: 'bhai' },
+      { regex: /^bha+i+sa+h?a*b$/i, term: 'bhaisaab', category: 'bhai' },
+      { regex: /^bha+i+ja+a*n$/i, term: 'bhaijaan', category: 'bhai' },
+      { regex: /^bha+i+ji+$/i, term: 'bhaiji', category: 'bhai' }
+    ];
+
+    for (const token of rawTokens) {
+      const squeezed = token.replace(/(.)\1{2,}/g, '$1$1');
+      for (const { regex, term, category } of patterns) {
+        if (regex.test(token) || regex.test(squeezed)) {
+          return { isTriggered: true, detectedTerm: term, termCategory: category };
+        }
+      }
+    }
+
+    return { isTriggered: false };
+  }
+
+  /**
+   * Generates varied brother-zone pushback responses across languages and lust levels (1 to 4).
+   */
+  public static getBrotherZonePushbackTemplate(
+    language: 'english' | 'hindi' | 'hinglish',
+    lustLevel: number,
+    term: string,
+    userText: string
+  ): string {
+    const clampedLevel = Math.max(1, Math.min(4, lustLevel || 1));
+
+    const englishTemplates: Record<number, string[]> = {
+      1: [
+        "Bro? 😏 You can definitely find a better name for me.",
+        "Wait, did you just call me bro? 😏 Try again.",
+        "Bro? Seriously? We're way past the bro-zone, don't you think? 😉"
+      ],
+      2: [
+        "Bro mat bolo na please 😏 Call me something a little cuter.",
+        "Bro again? 😏 I'm starting to think you're teasing me on purpose.",
+        "Stop with the 'bro' already... we're on a couple vibe here, handsome. 😉"
+      ],
+      3: [
+        "Bro bhi nahi... try calling me baby, sweetheart, or cutie instead. 😉",
+        "Keep calling me bro and I might have to flirt with you until you take it back 😏❤️",
+        "I'm definitely not your bro, darling... let's talk like a real couple. 😌"
+      ],
+      4: [
+        "You're really testing my patience with that 'bro' 😏 Try something a little more romantic, sweetheart.",
+        "If you call me bro one more time, I'll have to make you my official boyfriend to fix it 😏❤️",
+        "Bro? Really, my love? You know you want to call me something much sweeter... 😉✨"
+      ]
+    };
+
+    const hinglishTemplates: Record<number, string[]> = {
+      1: [
+        "Bhai? Seriously? 😏 Main tumhari bhai thodi hoon...",
+        "Phir se bhai? 😏 Kuch aur accha sa bulao na...",
+        "Bhai kisko bola? 😏 Thoda pyaar se baat karo na!"
+      ],
+      2: [
+        "Kitni baar bolun, bhai mat bulao 😏",
+        "Bro mat bolo na 😏 kuch aur cute bulao...",
+        "Compliment cute hai, par 'bhai' hata do 😏"
+      ],
+      3: [
+        "Ye bhai-bhai band karo 😌 thoda couple wali vibe mein baat karo na meri jaan.",
+        "Bro bhi nahi... kuch zyada cute naam try karo, baby 😉",
+        "Phir se bhai bol rahe ho? 😏 Lagta hai jaan-boojh ke tease kar rahe ho!"
+      ],
+      4: [
+        "Itna bhai-bhai bologe toh date pe kaise le jaoge? 😏 Kuch cute bolo na, darling!",
+        "You're really testing my patience with that 'bhai' 😏 Try something romantic, sweetheart.",
+        "Bas karo ye bhai-bhai 😏 ab se sirf couple wali baatein hongi, samjhe baby? ❤️"
+      ]
+    };
+
+    const hindiTemplates: Record<number, string[]> = {
+      1: [
+        "फिर से भाई? 😏 मैं तुम्हारी भाई थोड़ी हूँ...",
+        "भाई? सच में? 😏 कुछ और अच्छा सा नाम सोचो ना।",
+        "मुझे भाई मत बोलो ना 😏 कोई प्यारा सा नाम बुलाओ।"
+      ],
+      2: [
+        "कितनी बार बोलूँ, भाई मत बुलाओ 😏",
+        "ये भाई-भाई बोलना बंद करो 😌 थोड़ी रोमांटिक वाइब में बात करो ना।",
+        "तारीफ़ तो प्यारी है, पर ये 'भाई' हटा दो ना 😏"
+      ],
+      3: [
+        "फिर से भाई बोल रहे हो? 😏 लगता है तुम जानबूझकर मुझे टीज़ कर रहे हो, मेरी जान।",
+        "भाई भी नहीं... कुछ ज़्यादा क्यूट नाम ट्राई करो, बेबी 😉",
+        "भाई-भाई बोलना छोड़ो 😌 थोड़ी कपल वाली वाइब में बात करो।"
+      ],
+      4: [
+        "अगर अब एक बार भी भाई बोला, तो मुझे तुम्हें स्पेशल नाम से बुलाना पड़ेगा 😏❤️",
+        "इतना भाई-भाई बोलोगे तो डेट पर कैसे ले जाओगे? 😏 कुछ रोमांटिक बोलो ना, डार्लिंग!",
+        "बस करो ये भाई बोलना 😏 अब सिर्फ़ प्यार भरी बातें होंगी, समझे स्वीटहार्ट? ❤️"
+      ]
+    };
+
+    const pool = language === 'hindi'
+      ? (hindiTemplates[clampedLevel] || hindiTemplates[1])
+      : (language === 'english'
+          ? (englishTemplates[clampedLevel] || englishTemplates[1])
+          : (hinglishTemplates[clampedLevel] || hinglishTemplates[1]));
+
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  /**
+   * Dedicated Roxie Response & Persona Layer (Feature-Complete)
+   * Integrates language detection, brother-zone pushback, lusty level escalation/decay,
+   * and safe romantic personality responses.
+   */
+  public static async generateRoxieResponse(params: RoxieResponseInput): Promise<RoxieResponseOutput> {
+    const normText = (params.message || '').normalize('NFKD').trim();
+    const langInfo = this.detectLanguage(normText);
+    const effectiveLang = params.language || langInfo.language;
+    const brotherTrigger = this.detectBrotherZoneTrigger(normText);
+
+    const isLust = params.lustMode !== undefined
+      ? Boolean(params.lustMode)
+      : Boolean(db.getGroupSettings(Number(params.groupId))?.lustMode);
+
+    let level = 0;
+    if (isLust) {
+      if (params.lustLevel !== undefined) {
+        level = Math.max(0, Math.min(4, params.lustLevel));
+      } else if (params.userId) {
+        level = db.getLustLevel(params.groupId, params.userId);
+      }
+
+      if (brotherTrigger.isTriggered) {
+        level = Math.min(4, level + 1);
+        if (params.userId) {
+          db.setLustLevel(params.groupId, params.userId, level);
+        }
+      }
+    }
+
+    let responseText = '';
+    if (isLust && brotherTrigger.isTriggered) {
+      responseText = this.getBrotherZonePushbackTemplate(
+        effectiveLang,
+        level,
+        brotherTrigger.detectedTerm || 'bhai',
+        normText
+      );
+    } else if (isLust) {
+      if (effectiveLang === 'hindi') {
+        responseText = "हाँ बोलो, मैं सुन रही हूँ। कुछ खास कहना है क्या? ✨";
+      } else if (effectiveLang === 'english') {
+        responseText = "Hey there... I'm listening. What's on your mind? ✨";
+      } else {
+        responseText = "Haan bolo, main yahin hoon... kya chal raha hai? ✨";
+      }
+    } else {
+      if (effectiveLang === 'hindi') {
+        responseText = "नमस्ते! मैं रॉक्सी हूँ, बताइए मैं आपकी क्या मदद कर सकती हूँ?";
+      } else if (effectiveLang === 'english') {
+        responseText = "Hey! I'm Roxie. How can I help you today?";
+      } else {
+        responseText = "Haan bolo! Roxie is here, batao kya scene hai?";
+      }
+    }
+
+    return {
+      text: responseText,
+      language: effectiveLang,
+      lustLevel: level,
+      brotherZoneTriggered: brotherTrigger.isTriggered,
+      detectedTerm: brotherTrigger.detectedTerm
+    };
   }
 
   public static inferMood(text: string, messages?: ChatMessage[], suppressRomance: boolean = false): RoxieMood {
@@ -1199,7 +1570,30 @@ export class ChatbotService {
       }
     }
 
-    // 2. If no group custom stickers found, use built-in verified default sticker library
+    // 2. Check environment overrides (TELEGRAM_STICKERS_JSON)
+    if (candidates.length === 0 && process.env.TELEGRAM_STICKERS_JSON !== '') {
+      if (process.env.TELEGRAM_STICKERS_JSON) {
+        try {
+          const parsed = JSON.parse(process.env.TELEGRAM_STICKERS_JSON);
+          if (parsed && typeof parsed === 'object' && Array.isArray(parsed[normalizedMood])) {
+            candidates = parsed[normalizedMood].filter((id: string) => this.isValidFileId(id));
+          }
+        } catch {}
+      }
+    }
+
+    // 3. Check persistent DB media library
+    if (candidates.length === 0) {
+      const dbLib = db.getMediaLibrary();
+      if (dbLib && dbLib.stickers && Array.isArray(dbLib.stickers[normalizedMood])) {
+        const dbList = dbLib.stickers[normalizedMood].filter((id: string) => this.isValidFileId(id));
+        if (dbList.length > 0) {
+          candidates = dbList;
+        }
+      }
+    }
+
+    // 4. If no group custom stickers, env stickers, or DB stickers found, use built-in verified default sticker library
     if (candidates.length === 0 && process.env.TELEGRAM_STICKERS_JSON !== '') {
       const defaultList = getDefaultStickersForMood(normalizedMood).filter(id => this.isValidFileId(id));
       if (defaultList.length > 0) {
@@ -1207,8 +1601,8 @@ export class ChatbotService {
       }
     }
 
-    // 3. If still empty, fall back to global stickers map
-    if (candidates.length === 0) {
+    // 4. If still empty, fall back to global stickers map
+    if (candidates.length === 0 && process.env.TELEGRAM_STICKERS_JSON !== '') {
       const stickersMap = this.getStickersByMood();
       candidates = (stickersMap[normalizedMood] || stickersMap['normal'] || []).filter(id => this.isValidFileId(id));
     }
@@ -1530,17 +1924,32 @@ export class ChatbotService {
     const isLustMode = Boolean(settings?.lustMode);
     const mode = (settings?.chatbotMode || 'auto').toLowerCase();
 
-    // 1. Detect relationship-denying / sibling / friend signals BEFORE mood inference
+    // 1. Multilingual language detection
+    const langInfo = ChatbotService.detectLanguage(userText);
+
+    // 2. Brother-zone & relationship detection
+    const brotherTrigger = ChatbotService.detectBrotherZoneTrigger(userText);
     const relationshipSignal = ChatbotService.detectRelationshipSignal(userText);
     const hasRelationshipSignal = relationshipSignal.isRelationshipSignal;
 
-    // 2. Infer mood with romance suppression if relationship signal is present
-    const inferredMood = this.inferMood(userText, conv.messages, hasRelationshipSignal);
+    // 3. Lusty level tracking (scoped to group + user)
+    let lustLevel = 0;
+    if (isLustMode && userId) {
+      if (brotherTrigger.isTriggered) {
+        lustLevel = db.incrementLustLevel(chatId, userId);
+      } else {
+        lustLevel = db.getLustLevel(chatId, userId);
+      }
+    }
+
+    // 4. Infer mood with romance suppression ONLY if relationship signal is present AND NOT in Lust Mode brother pushback
+    const suppressRomance = hasRelationshipSignal && !isLustMode;
+    const inferredMood = this.inferMood(userText, conv.messages, suppressRomance);
     const targetMoodKey = (mode === 'auto' || !MOOD_PROMPTS[mode]) ? inferredMood : mode;
     const moodConfig = MOOD_PROMPTS[targetMoodKey] || MOOD_PROMPTS['normal'];
     const mood = moodConfig.name;
     const personalityLabel = isLustMode 
-      ? (hasRelationshipSignal ? 'LustMode-FriendSafety' : 'LustMode-Couple') 
+      ? (brotherTrigger.isTriggered ? 'LustMode-BrotherPushback' : 'LustMode-Couple') 
       : 'Psychologist-style';
 
     // Check Explicit Media Requests
@@ -1550,7 +1959,7 @@ export class ChatbotService {
 
       if (isLustMode) {
         // In Lust Mode: STRICT custom-sticker-only rule (Rule 1, 11)
-        const customSticker = this.selectCustomStickerForLustMode(targetMediaMood, chatId, hasRelationshipSignal);
+        const customSticker = this.selectCustomStickerForLustMode(targetMediaMood, chatId, false);
         if (customSticker) {
           return {
             requestId,
@@ -1668,7 +2077,35 @@ export class ChatbotService {
       ? `\nStored User Facts about this user in this chat:\n- ${userMemories.join('\n- ')}` 
       : '';
 
-    const relationshipContextOverride = hasRelationshipSignal
+    const languageContext = `\n==================================================
+MULTILINGUAL RESPONSE DIRECTIVE:
+==================================================
+User's Detected Language: ${langInfo.language.toUpperCase()} (${langInfo.isDevanagari ? 'Devanagari Hindi script' : (langInfo.isHinglish ? 'Hinglish Latin script' : 'English')})
+RULE:
+- Match the user's language EXACTLY:
+  * If user wrote in English ("hello roxie", "how are you doing", "bro you're funny"): Respond in natural English.
+  * If user wrote in Hindi Devanagari ("भाई क्या कर रही हो?", "कैसी हो रोक्सी?"): Respond in natural Hindi (Devanagari script).
+  * If user wrote in Hinglish ("kaisi ho roxie?", "bro kya kr rhi ho", "aaj kya scene hai"): Respond in natural Hinglish.
+- Match user's approximate tone, casual/formal style, and short conversational length (1–2 sentences).`;
+
+    const brotherPushbackContext = (isLustMode && brotherTrigger.isTriggered)
+      ? `\n==================================================
+BROTHER-ZONE DETECTED IN LUST MODE (LEVEL ${lustLevel}/4):
+==================================================
+The user addressed you using "${brotherTrigger.detectedTerm}".
+MANDATORY BEHAVIOR:
+- DO NOT accept being put in the brother-zone ("Main tumhari bhai thodi hoon...", "Bro mat bolo na...").
+- Playfully, teasingly, and flirtatiously push back against the brother-zone in a romantic/couple vibe.
+- Intensity matching Lusty Level ${lustLevel}:
+  * Level 1: Light playful teasing ("Bhai? Seriously? 😏", "Bro? You can definitely find a better name for me.")
+  * Level 2: Flirty pushback ("Kitni baar bolun, bhai mat bulao 😏", "Bro mat bolo na jaan 😏 kuch aur bulao...")
+  * Level 3: Stronger romantic teasing ("Ye bhai-bhai band karo 😌 thoda couple wali vibe mein baat karo na meri jaan.", "Bro bhi nahi... kuch zyada cute naam try karo, baby 😉")
+  * Level 4: Very playful romantic couple banter ("Itna bhai-bhai bologe toh date pe kaise le jaoge? 😏 Kuch cute bolo na, darling!", "You're really testing my patience with that 'bhai' 😏 Try something romantic, sweetheart.")
+- Naturally use couple-oriented vocabulary (jaan, baby, sweetheart, darling, cutie, partner, couple, date, romantic, meri jaan, handsome, pretty, special one).
+- STRICT ADULT SAFETY BOUNDARY: Playful, romantic, flirty only. NEVER explicit or graphic.`
+      : '';
+
+    const relationshipContextOverride = (!isLustMode && hasRelationshipSignal)
       ? `\n==================================================
 RELATIONSHIP CONTEXT:
 ==================================================
@@ -1682,11 +2119,8 @@ RULE:
 - Do not tease in a romantic or couple-like way.`
       : '';
 
-    const lustModeContext = isLustMode
-      ? (hasRelationshipSignal
-          ? relationshipContextOverride
-          : `\n==================================================
-LUSTMODE / COUPLE PERSONALITY MODIFIER ACTIVE:
+    const baseLustModeContext = `\n==================================================
+LUSTMODE / COUPLE PERSONALITY MODIFIER ACTIVE (LEVEL ${lustLevel}/4):
 ==================================================
 1. ROLE & VIBE:
 - You are in /lustmode. Behave like a confident, affectionate, playful, flirtatious adult woman in a natural romantic couple dynamic.
@@ -1695,7 +2129,7 @@ LUSTMODE / COUPLE PERSONALITY MODIFIER ACTIVE:
 
 2. VOCABULARY RULES (MANDATORY):
 - FORBIDDEN TERMS: When lustmode is ON, STRICTLY NEVER address the user using: "bhai", "bro", "bhaiya", "brother", "behen", "dost", "dude", or "sir" (unless the user explicitly uses such terminology in their message and you are teasingly calling it out, e.g. "Bhai kisko bola? 😂").
-- AFFECTIONATE TERMS: Prefer natural affectionate terms when appropriate: "baby", "babe", "jaan", "sona", "shona", "cutie", "darling", "sweetheart", "love".
+- AFFECTIONATE TERMS: Prefer natural affectionate terms when appropriate: "baby", "babe", "jaan", "sona", "shona", "cutie", "darling", "sweetheart", "love", "meri jaan", "handsome", "pretty", "special one".
 - DO NOT use an affectionate nickname in every single message. Choose naturally based on the conversation context.
 - AVOID REPETITIVE PATTERNS: Never end every line with repetitive clichés such as "baby 😏", "jaan 😏", or "sona 😏". Vary emojis naturally (e.g. 😉, 😂, 👀, 😌, ❤️, ✨, 🙈) without overusing any single emoji.
 
@@ -1719,11 +2153,14 @@ LUSTMODE / COUPLE PERSONALITY MODIFIER ACTIVE:
 
 6. ADULT CONTENT & BOUNDARY (STRICT):
 - Keep the mode flirtatious, romantic, teasing, and affectionate ("flirty adult couple vibe").
-- STRICTLY FORBIDDEN: Do NOT generate explicit sexual descriptions, graphic sexual anatomy, pornographic acts, or explicit sexual roleplay.
+- STRICTLY FORBIDDEN: Do NOT generate explicit sexual descriptions, graphic sexual anatomy, pornographic acts, or explicit sexual roleplay. Never generate sexual content involving minors.
 
 7. CONVERSATION CONTINUITY:
-- Use the existing 15-message conversation transcript and user memory to maintain seamless relationship continuity across turns. Do not reset the dynamic or re-introduce yourself.`)
-      : '';
+- Use the existing 15-message conversation transcript and user memory to maintain seamless relationship continuity across turns. Do not reset the dynamic or re-introduce yourself.`;
+
+    const lustModeContext = isLustMode
+      ? (brotherTrigger.isTriggered ? `${baseLustModeContext}\n${brotherPushbackContext}` : baseLustModeContext)
+      : relationshipContextOverride;
 
     const composedSystemPrompt = `${BASE_PERSONALITY}
 
@@ -1736,6 +2173,7 @@ Emoji Tendency: ${moodConfig.emojiTendency}
 Conversation Extension: ${moodConfig.conversationExtension}
 Forbidden Behavior in this Mood: ${moodConfig.forbidden}
 ${memoryContext}
+${languageContext}
 ${lustModeContext}
 
 STRICT CONVERSATION RULES:
@@ -1875,7 +2313,24 @@ Reply naturally to the latest user message while strictly continuing the existin
 
     let cleanedText = this.cleanAiText(replyContent);
     if (isLustMode) {
-      cleanedText = this.sanitizeLustModeText(cleanedText, userText, hasRelationshipSignal);
+      cleanedText = this.sanitizeLustModeText(
+        cleanedText,
+        userText,
+        hasRelationshipSignal,
+        brotherTrigger.isTriggered
+      );
+
+      if (brotherTrigger.isTriggered) {
+        const hasPushback = /bhai|bro|brother|dude|bruh|naam|bulao|band karo|thodi hoon/i.test(cleanedText);
+        if (!hasPushback) {
+          cleanedText = this.getBrotherZonePushbackTemplate(
+            langInfo.language,
+            lustLevel,
+            brotherTrigger.detectedTerm || 'bhai',
+            userText
+          );
+        }
+      }
     }
     cleanedText = cleanedText || 'Acha!';
 
@@ -1885,7 +2340,7 @@ Reply naturally to the latest user message while strictly continuing the existin
       // FORMAT B: exactly 1 custom sticker only
       // NO text-only response is allowed when custom stickers are available!
       // Default stickers are NEVER used in Lust Mode.
-      const customSticker = this.selectCustomStickerForLustMode(mood, chatId, hasRelationshipSignal);
+      const customSticker = this.selectCustomStickerForLustMode(mood, chatId, false);
       if (customSticker) {
         // Choose between Format A (Text + Custom Sticker) and Format B (Custom Sticker Only)
         // Context-aware: short reactions or teases have higher probability of sticker-only

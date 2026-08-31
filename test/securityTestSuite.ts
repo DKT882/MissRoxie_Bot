@@ -48,7 +48,9 @@ async function runSecurityTestSuite() {
   });
 
   telegramApi.sendMessage = async (cId: number, text: string, opts?: any) => {
-    lastSentMessage = { chatId: cId, text, options: opts };
+    if (cId === chatId) {
+      lastSentMessage = { chatId: cId, text, options: opts };
+    }
     return {
       ok: true,
       result: {

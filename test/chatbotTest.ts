@@ -219,6 +219,10 @@ export async function runChatbotTests() {
     responseCount++;
     return { ok: true };
   };
+  (telegramApi as any).sendSticker = async (chatId: any, sticker: any, options: any) => {
+    responseCount++;
+    return { ok: true };
+  };
 
   const testMsg = {
     message_id: 999,
@@ -306,6 +310,7 @@ export async function runChatbotTests() {
       delete process.env[k];
     }
   }
+  process.env.TELEGRAM_STICKERS_JSON = '';
 
   db.getGroupSettings(chatId, chatTitle).chatbotEnabled = true;
   let fallbackTextCalled = false;

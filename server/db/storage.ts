@@ -56,6 +56,13 @@ export interface UserMemoryRecord {
   lastUpdated: number;
 }
 
+export interface UserLustLevelRecord {
+  groupId: number | string;
+  userId: number;
+  level: number; // 0 to 4
+  lastUpdated: number;
+}
+
 export function isSensitiveData(text: string): boolean {
   if (!text) return false;
   const lower = text.toLowerCase();
@@ -89,6 +96,7 @@ interface DatabaseSchema {
   userMemories?: Record<string, UserMemoryRecord>; // `${chatId}_${userId}` -> UserMemoryRecord (personal facts only)
   groupConversationMemories?: Record<string, GroupConversationMemory>; // `${chatId}` -> GroupConversationMemory (ONE shared group memory per chatId)
   groupMemories?: Record<string, any>; // legacy backward-compatible alias
+  userLustLevels?: Record<string, UserLustLevelRecord>; // `${groupId}_${userId}` -> UserLustLevelRecord
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -117,7 +125,8 @@ class StorageManager {
     groupMediaLibraries: {},
     userMemories: {},
     groupConversationMemories: {},
-    groupMemories: {}
+    groupMemories: {},
+    userLustLevels: {}
   };
   private raidStates: Record<number, RaidStateRecord> = {};
   private isLoaded: boolean = false;
@@ -173,7 +182,8 @@ class StorageManager {
             groupMediaLibraries: parsed.groupMediaLibraries || {},
             userMemories: parsed.userMemories || {},
             groupConversationMemories,
-            groupMemories: groupConversationMemories
+            groupMemories: groupConversationMemories,
+            userLustLevels: parsed.userLustLevels || {}
           };
         }
       }
@@ -2026,8 +2036,85 @@ class StorageManager {
         }
       }
     }
+    if (this.data.userLustLevels) {
+      for (const [key, record] of Object.entries(this.data.userLustLevels)) {
+        if (now - (record.lastUpdated || 0) > TTL_MS) {
+          delete this.data.userLustLevels[key];
+          cleaned = true;
+        }
+      }
+    }
     if (cleaned) {
       this.scheduleSave();
+    }
+  }
+
+  // --- User Lusty Level Management (Group-Scoped) ---
+  public getLustLevel(groupId: number | string, userId: number, decayHours: number = 1): number {
+    if (!this.data.userLustLevels) this.data.userLustLevels = {};
+    const key = `${groupId}_${userId}`;
+    const record = this.data.userLustLevels[key];
+    if (!record) return 0;
+
+    // Apply decay if decayHours > 0
+    if (decayHours > 0) {
+      const now = Date.now();
+      const elapsedMs = now - (record.lastUpdated || now);
+      const decayIntervalMs = decayHours * 3600 * 1000;
+      const decaySteps = Math.floor(elapsedMs / decayIntervalMs);
+      if (decaySteps > 0) {
+        const newLevel = Math.max(0, record.level - decaySteps);
+        record.level = newLevel;
+        record.lastUpdated = now;
+        this.scheduleSave();
+        return newLevel;
+      }
+    }
+
+    return Math.max(0, Math.min(4, record.level || 0));
+  }
+
+  public setLustLevel(groupId: number | string, userId: number, level: number): number {
+    if (!this.data.userLustLevels) this.data.userLustLevels = {};
+    const key = `${groupId}_${userId}`;
+    const clampedLevel = Math.max(0, Math.min(4, Math.floor(level)));
+    const now = Date.now();
+    this.data.userLustLevels[key] = {
+      groupId,
+      userId,
+      level: clampedLevel,
+      lastUpdated: now
+    };
+    this.scheduleSave();
+    return clampedLevel;
+  }
+
+  public incrementLustLevel(groupId: number | string, userId: number, decayHours: number = 1): number {
+    const current = this.getLustLevel(groupId, userId, decayHours);
+    const next = Math.min(4, current + 1);
+    return this.setLustLevel(groupId, userId, next);
+  }
+
+  public resetLustLevel(groupId: number | string, userId?: number): void {
+    if (!this.data.userLustLevels) return;
+    if (userId !== undefined) {
+      const key = `${groupId}_${userId}`;
+      if (this.data.userLustLevels[key]) {
+        delete this.data.userLustLevels[key];
+        this.scheduleSave();
+      }
+    } else {
+      let modified = false;
+      const prefix = `${groupId}_`;
+      for (const key of Object.keys(this.data.userLustLevels)) {
+        if (key.startsWith(prefix)) {
+          delete this.data.userLustLevels[key];
+          modified = true;
+        }
+      }
+      if (modified) {
+        this.scheduleSave();
+      }
     }
   }
 
