@@ -673,7 +673,14 @@
       "autoAcceptEnabled": false,
       "automations": [],
       "rules": "",
-      "lastAllTimestamp": 0
+      "lastAllTimestamp": 0,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3
     },
     "-100777888999": {
       "chatId": -100777888999,
@@ -1225,6 +1232,528 @@
       "protectionDuplicateLimit": 3,
       "protectionLinkBurstLimit": 3,
       "updatedAt": "2026-08-30T18:04:10.274Z"
+    },
+    "-100999888111": {
+      "chatId": -100999888111,
+      "chatTitle": "Group A",
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-31T06:53:17.002Z",
+      "lustMode": false
+    },
+    "-100999111222": {
+      "chatId": -100999111222,
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-31T06:48:12.991Z"
+    },
+    "-100888222333": {
+      "chatId": -100888222333,
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-31T06:48:13.005Z"
+    },
+    "-100777333444": {
+      "chatId": -100777333444,
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-31T06:48:13.008Z"
+    },
+    "-100777111000": {
+      "chatId": -100777111000,
+      "chatTitle": "Group Alpha",
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-31T06:48:47.075Z",
+      "lustMode": true
+    },
+    "-100777222000": {
+      "chatId": -100777222000,
+      "chatTitle": "Group Beta",
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-31T06:48:47.075Z",
+      "lustMode": true
+    },
+    "-100777333000": {
+      "chatId": -100777333000,
+      "chatTitle": "Group Empty",
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-31T06:48:47.075Z",
+      "lustMode": true
+    },
+    "-100777444000": {
+      "chatId": -100777444000,
+      "chatTitle": "Normal Group",
+      "warnLimit": 3,
+      "warnAction": "ban",
+      "warnExpireSeconds": 0,
+      "floodEnabled": false,
+      "floodCount": 8,
+      "floodWindow": 5,
+      "floodAction": "mute",
+      "raidEnabled": false,
+      "raidLimit": 8,
+      "raidWindow": 30,
+      "raidAction": "kick",
+      "raidDuration": 300,
+      "captchaEnabled": false,
+      "captchaMode": "button",
+      "captchaTimeout": 120,
+      "captchaAction": "kick",
+      "linksProtection": true,
+      "linksWhitelist": [],
+      "mediaProtection": true,
+      "stickerProtection": true,
+      "gifsProtection": false,
+      "videosProtection": false,
+      "photosProtection": false,
+      "voiceProtection": false,
+      "audioProtection": false,
+      "locks": {},
+      "filters": {},
+      "welcomeEnabled": false,
+      "welcomeMessage": "Welcome {user} to {chat}!",
+      "goodbyeEnabled": false,
+      "goodbyeMessage": "Goodbye {user}!",
+      "autoDeleteJoinLeave": false,
+      "slowModeSeconds": 0,
+      "reportsEnabled": true,
+      "chatbotEnabled": true,
+      "chatbotMode": "auto",
+      "reactionEnabled": true,
+      "reactionProbability": 0.15,
+      "stopSpamEnabled": false,
+      "stopAbusiveEnabled": false,
+      "stopPromotionEnabled": false,
+      "gifProtection": false,
+      "linkProtection": true,
+      "imageProtection": false,
+      "fileProtection": false,
+      "customAbusiveWords": [],
+      "automodEnabled": false,
+      "mediaAction": "delete",
+      "warnEscalation": [],
+      "securityEnabled": false,
+      "joinmode": "normal",
+      "autoAcceptEnabled": false,
+      "automations": [],
+      "rules": "",
+      "lastAllTimestamp": 0,
+      "protectionEnabled": true,
+      "protectionFloodCount": 5,
+      "protectionFloodWindow": 5,
+      "protectionDuplicateLimit": 3,
+      "protectionLinkBurstLimit": 3,
+      "updatedAt": "2026-08-31T06:48:47.075Z",
+      "lustMode": false
     }
   },
   "warnings": [
@@ -1898,278 +2427,49 @@
   ],
   "logs": [
     {
-      "id": "s0bm3ql",
-      "timestamp": "2026-08-30T17:14:01.791Z",
-      "chatId": -1004450308963,
-      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
-      "targetUserId": 8665977501,
-      "action": "delete_media",
-      "reason": "Stickers are locked"
-    },
-    {
-      "id": "af85eti",
-      "timestamp": "2026-08-30T17:14:53.270Z",
-      "chatId": -1004450308963,
-      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
-      "targetUserId": 7200181548,
-      "action": "delete_media",
-      "reason": "Stickers are locked"
-    },
-    {
-      "id": "zth4txj",
-      "timestamp": "2026-08-30T17:17:35.279Z",
-      "chatId": -1004450308963,
-      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
-      "targetUserId": 8380012901,
-      "action": "delete_media",
-      "reason": "Photos are locked"
-    },
-    {
-      "id": "8kh8w7y",
-      "timestamp": "2026-08-30T17:30:37.467Z",
-      "chatId": -1004450308963,
-      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
-      "targetUserId": 8380012901,
-      "action": "delete_media",
-      "reason": "Stickers are locked"
-    },
-    {
-      "id": "sex44lb",
-      "timestamp": "2026-08-30T17:33:59.111Z",
-      "chatId": -1004450308963,
-      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
-      "targetUserId": 8380012901,
-      "action": "delete_media",
-      "reason": "Videos are locked"
-    },
-    {
-      "id": "7vbdiqz",
-      "timestamp": "2026-08-30T17:34:00.088Z",
-      "chatId": -1004450308963,
-      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
-      "targetUserId": 8380012901,
-      "action": "delete_media",
-      "reason": "Videos are locked"
-    },
-    {
-      "id": "kgtmx4j",
-      "timestamp": "2026-08-30T17:34:01.065Z",
-      "chatId": -1004450308963,
-      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
-      "targetUserId": 8380012901,
-      "action": "delete_media",
-      "reason": "Videos are locked"
-    },
-    {
-      "id": "4t8h4jx",
-      "timestamp": "2026-08-30T17:34:02.019Z",
-      "chatId": -1004450308963,
-      "chatTitle": "𝑵𝒐𝒏𝒔𝒕𝒐𝒑 𝑵𝒐𝒕𝒊𝒇𝒊𝒄𝒂𝒕𝒊𝒐𝒏 🙂",
-      "targetUserId": 8380012901,
-      "action": "delete_media",
-      "reason": "Videos are locked"
-    },
-    {
-      "id": "xyzx5ce",
-      "timestamp": "2026-08-30T17:41:06.641Z",
-      "chatId": -100888777,
-      "chatTitle": "Scheduler Test Supergroup",
-      "adminUserId": 111,
-      "adminUsername": "SuperAdmin",
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [M4G94M]: \"Check out our new launch! http...\""
-    },
-    {
-      "id": "85tj4pe",
-      "timestamp": "2026-08-30T17:41:07.155Z",
-      "chatId": -100888777,
-      "chatTitle": "Scheduler Test Supergroup",
-      "adminUserId": 111,
-      "adminUsername": "SuperAdmin",
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [C7PU0C]: \"Check out our new launch! http...\""
-    },
-    {
-      "id": "llus2rr",
-      "timestamp": "2026-08-30T17:41:07.566Z",
-      "chatId": -100888777,
-      "chatTitle": "Scheduler Test Supergroup",
-      "adminUserId": 111,
-      "adminUsername": "SuperAdmin",
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [RYSM5C]: \"Check out our new launch! http...\""
-    },
-    {
-      "id": "nwwq1nu",
-      "timestamp": "2026-08-30T18:07:14.140Z",
-      "chatId": -1004494262619,
-      "chatTitle": "Horney Log",
-      "groupId": -1004494262619,
-      "actorId": 8852515124,
-      "actorUsername": "turtle_020",
+      "id": "j431bdt",
+      "timestamp": "2026-08-31T06:33:28.700Z",
+      "chatId": -100999888111,
+      "chatTitle": "Group A",
+      "groupId": -100999888111,
+      "actorId": 777000,
       "actorRole": "OWNER",
-      "adminUserId": 8852515124,
-      "adminUsername": "@turtle_020",
-      "targetId": 8943438615,
-      "targetUserId": 8943438615,
-      "targetUsername": "Kidfrom2004",
-      "targetTelegramStatus": "administrator",
-      "targetCustomRole": "NONE",
-      "command": "promote",
-      "action": "promote",
-      "result": "denied",
-      "reason": "❌ That user is already an administrator."
-    },
-    {
-      "id": "r2r7s9j",
-      "timestamp": "2026-08-30T18:11:02.244Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [ZYWSXD]: \"Daily check-in...\""
-    },
-    {
-      "id": "o02tzu5",
-      "timestamp": "2026-08-30T18:11:02.654Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [55O99P]: \"Daily check-in...\""
-    },
-    {
-      "id": "r344ylg",
-      "timestamp": "2026-08-30T18:11:03.087Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [Z1CLUO]: \"Daily check-in...\""
-    },
-    {
-      "id": "hkcb34l",
-      "timestamp": "2026-08-30T18:11:03.525Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [83NSXH]: \"Daily check-in...\""
-    },
-    {
-      "id": "k9at2nc",
-      "timestamp": "2026-08-30T18:11:03.933Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [W1HJPK]: \"Daily check-in...\""
-    },
-    {
-      "id": "68tk6ei",
-      "timestamp": "2026-08-30T18:11:04.338Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [M8HLLH]: \"Daily check-in...\""
-    },
-    {
-      "id": "gzu2126",
-      "timestamp": "2026-08-30T18:11:04.751Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [YDSVDX]: \"Daily check-in...\""
-    },
-    {
-      "id": "6f43q1c",
-      "timestamp": "2026-08-30T18:11:05.162Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [2PHBNL]: \"Daily check-in...\""
-    },
-    {
-      "id": "66d9jhd",
-      "timestamp": "2026-08-30T18:11:05.601Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [CM0L6Y]: \"Daily check-in...\""
-    },
-    {
-      "id": "vu2qfha",
-      "timestamp": "2026-08-30T18:11:06.021Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [HR6JN8]: \"Daily check-in...\""
-    },
-    {
-      "id": "bv8hmjf",
-      "timestamp": "2026-08-30T18:11:06.432Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [MD5SE1]: \"Daily check-in...\""
-    },
-    {
-      "id": "9o3q80e",
-      "timestamp": "2026-08-30T18:11:06.838Z",
-      "chatId": -100111222333,
-      "adminUserId": 999,
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [Q306OV]: \"Daily check-in...\""
-    },
-    {
-      "id": "hqivfo9",
-      "timestamp": "2026-08-30T18:11:07.301Z",
-      "chatId": -100777888999,
-      "chatTitle": "Regression Test Group",
-      "adminUserId": 4001,
-      "adminUsername": "@admin",
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [4DBCKR]: \"test job...\""
-    },
-    {
-      "id": "qh7ug8e",
-      "timestamp": "2026-08-30T18:11:17.242Z",
-      "chatId": -100888777,
-      "chatTitle": "Scheduler Test Supergroup",
-      "adminUserId": 111,
-      "adminUsername": "SuperAdmin",
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [M4G94M]: \"Check out our new launch! http...\""
-    },
-    {
-      "id": "uvxhykw",
-      "timestamp": "2026-08-30T18:11:17.655Z",
-      "chatId": -100888777,
-      "chatTitle": "Scheduler Test Supergroup",
-      "adminUserId": 111,
-      "adminUsername": "SuperAdmin",
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [C7PU0C]: \"Check out our new launch! http...\""
-    },
-    {
-      "id": "p0zt6d6",
-      "timestamp": "2026-08-30T18:11:18.067Z",
-      "chatId": -100888777,
-      "chatTitle": "Scheduler Test Supergroup",
-      "adminUserId": 111,
-      "adminUsername": "SuperAdmin",
-      "action": "schedule_sent",
-      "details": "Executed scheduled broadcast [RYSM5C]: \"Check out our new launch! http...\""
-    },
-    {
-      "id": "q0g6edd",
-      "timestamp": "2026-08-30T18:11:28.057Z",
-      "chatId": -1004494262619,
-      "groupId": -1004494262619,
-      "actorId": 8852515124,
-      "actorUsername": "turtle_020",
-      "actorRole": "OWNER",
-      "adminUserId": 8852515124,
-      "adminUsername": "susss",
-      "command": "permissions",
-      "action": "permissions",
+      "adminUserId": 777000,
+      "adminUsername": "User 777000",
+      "command": "lustmod",
+      "action": "setting_change",
       "result": "success",
-      "details": "Successfully updated administrator permissions for @Kidfrom2004"
+      "details": "Lust mode disabled"
+    },
+    {
+      "id": "tft41u8",
+      "timestamp": "2026-08-31T06:37:10.787Z",
+      "chatId": -100999888111,
+      "chatTitle": "Group A",
+      "groupId": -100999888111,
+      "actorId": 777000,
+      "actorRole": "OWNER",
+      "adminUserId": 777000,
+      "adminUsername": "Owner",
+      "command": "lustmod",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Lust mode disabled"
+    },
+    {
+      "id": "kceszf4",
+      "timestamp": "2026-08-31T06:53:17.003Z",
+      "chatId": -100999888111,
+      "chatTitle": "Group A",
+      "groupId": -100999888111,
+      "actorId": 777000,
+      "actorRole": "OWNER",
+      "adminUserId": 777000,
+      "adminUsername": "Owner",
+      "command": "lustmod",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Lust mode disabled"
     }
   ],
   "knownUsers": {
@@ -2199,7 +2499,7 @@
       "username": "owner_user",
       "firstName": "OwnerUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.765Z"
+      "lastSeen": "2026-08-31T06:39:04.153Z"
     },
     "admin1_user": {
       "userId": 2001,
@@ -2220,7 +2520,7 @@
       "username": "mod_user",
       "firstName": "ModUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.756Z",
+      "lastSeen": "2026-08-31T06:39:04.145Z",
       "customRole": "MODERATOR"
     },
     "member1_user": {
@@ -2228,14 +2528,14 @@
       "username": "member1_user",
       "firstName": "Member1",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.771Z"
+      "lastSeen": "2026-08-31T06:39:04.159Z"
     },
     "testbot": {
       "userId": 9999,
       "username": "TestBot",
       "firstName": "TestBot",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.769Z"
+      "lastSeen": "2026-08-31T06:39:04.158Z"
     },
     "test_member_alpha": {
       "userId": 77770001,
@@ -2271,7 +2571,7 @@
       "username": "admin_promote",
       "firstName": "AdminWithPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.763Z"
+      "lastSeen": "2026-08-31T06:39:04.151Z"
     },
     "recycled_handle": {
       "userId": 8002,
@@ -2285,21 +2585,21 @@
       "username": "admin_nopromote",
       "firstName": "AdminNoPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.772Z"
+      "lastSeen": "2026-08-31T06:39:04.160Z"
     },
     "target_editable": {
       "userId": 2003,
       "username": "target_editable",
       "firstName": "TargetEditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.766Z"
+      "lastSeen": "2026-08-31T06:39:04.155Z"
     },
     "target_uneditable": {
       "userId": 2004,
       "username": "target_uneditable",
       "firstName": "TargetUneditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.760Z"
+      "lastSeen": "2026-08-31T06:39:04.149Z"
     },
     "devillove_143": {
       "userId": 5801492206,
@@ -2314,7 +2614,7 @@
       "username": "left_user",
       "firstName": "LeftUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.757Z"
+      "lastSeen": "2026-08-31T06:39:04.146Z"
     },
     "adityahero758": {
       "userId": 2109205454,
@@ -2836,27 +3136,27 @@
       "username": "owner_user",
       "firstName": "OwnerUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.765Z"
+      "lastSeen": "2026-08-31T06:39:04.153Z"
     },
     "2001": {
       "userId": 2001,
       "username": "admin_promote",
       "firstName": "AdminWithPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.763Z"
+      "lastSeen": "2026-08-31T06:39:04.151Z"
     },
     "2002": {
       "userId": 2002,
       "username": "admin_nopromote",
       "firstName": "AdminNoPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.772Z"
+      "lastSeen": "2026-08-31T06:39:04.160Z"
     },
     "2003": {
       "userId": 2003,
       "firstName": "TargetEditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.766Z",
+      "lastSeen": "2026-08-31T06:39:04.155Z",
       "username": "target_editable"
     },
     "2004": {
@@ -2864,14 +3164,14 @@
       "username": "target_uneditable",
       "firstName": "TargetUneditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.760Z"
+      "lastSeen": "2026-08-31T06:39:04.149Z"
     },
     "3001": {
       "userId": 3001,
       "username": "mod_user",
       "firstName": "ModUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.756Z",
+      "lastSeen": "2026-08-31T06:39:04.145Z",
       "customRole": "MODERATOR"
     },
     "4001": {
@@ -2879,20 +3179,20 @@
       "username": "member1_user",
       "firstName": "Member1",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.771Z"
+      "lastSeen": "2026-08-31T06:39:04.159Z"
     },
     "4002": {
       "userId": 4002,
       "firstName": "NoUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.757Z"
+      "lastSeen": "2026-08-31T06:39:04.146Z"
     },
     "5001": {
       "userId": 5001,
       "username": "left_user",
       "firstName": "LeftUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.757Z"
+      "lastSeen": "2026-08-31T06:39:04.146Z"
     },
     "8001": {
       "userId": 8001,
@@ -2911,7 +3211,7 @@
       "userId": 9999,
       "firstName": "TestBot",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.769Z",
+      "lastSeen": "2026-08-31T06:39:04.158Z",
       "username": "TestBot"
     },
     "55551": {
@@ -3887,28 +4187,28 @@
       "username": "owner_user",
       "firstName": "OwnerUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.765Z"
+      "lastSeen": "2026-08-31T06:39:04.153Z"
     },
     "-1001234567890_2001": {
       "userId": 2001,
       "username": "admin_promote",
       "firstName": "AdminWithPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.763Z"
+      "lastSeen": "2026-08-31T06:39:04.151Z"
     },
     "-1001234567890_2002": {
       "userId": 2002,
       "username": "admin_nopromote",
       "firstName": "AdminNoPromote",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.772Z"
+      "lastSeen": "2026-08-31T06:39:04.160Z"
     },
     "-1001234567890_3001": {
       "userId": 3001,
       "username": "mod_user",
       "firstName": "ModUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.756Z",
+      "lastSeen": "2026-08-31T06:39:04.145Z",
       "customRole": "MODERATOR"
     },
     "-1001234567890_4001": {
@@ -3916,20 +4216,20 @@
       "username": "member1_user",
       "firstName": "Member1",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.771Z"
+      "lastSeen": "2026-08-31T06:39:04.159Z"
     },
     "-1001234567890_4002": {
       "userId": 4002,
       "firstName": "NoUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.757Z"
+      "lastSeen": "2026-08-31T06:39:04.146Z"
     },
     "-1001234567890_9999": {
       "userId": 9999,
       "username": "TestBot",
       "firstName": "TestBot",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.769Z"
+      "lastSeen": "2026-08-31T06:39:04.158Z"
     },
     "-1004353139683_8864012889": {
       "userId": 8864012889,
@@ -3998,7 +4298,7 @@
       "username": "target_editable",
       "firstName": "TargetEditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.766Z"
+      "lastSeen": "2026-08-31T06:39:04.155Z"
     },
     "-1001234567890_8001": {
       "userId": 8001,
@@ -4032,7 +4332,7 @@
       "username": "target_uneditable",
       "firstName": "TargetUneditable",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.760Z"
+      "lastSeen": "2026-08-31T06:39:04.149Z"
     },
     "-1004356470022_8204962552": {
       "userId": 8204962552,
@@ -4061,7 +4361,7 @@
       "username": "left_user",
       "firstName": "LeftUser",
       "groupId": -1001234567890,
-      "lastSeen": "2026-08-29T08:52:01.757Z"
+      "lastSeen": "2026-08-31T06:39:04.146Z"
     },
     "-1004356470022_5001662816": {
       "userId": 5001662816,
@@ -5804,6 +6104,94 @@
       "stickers": {},
       "animations": {},
       "stickerMetadata": {}
+    },
+    "-100999111222": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "-100888222333": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "-100777333444": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "-100555444333": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "-100777111000": {
+      "stickers": {
+        "romantic": [
+          "CAACAgIAAxUAAWqCustomStickerGroupA_Romantic_001"
+        ],
+        "flirty": [
+          "CAACAgIAAxUAAWqCustomStickerGroupA_Flirty_002"
+        ],
+        "playful": [
+          "CAACAgIAAxUAAWqCustomStickerGroupA_Playful_003"
+        ]
+      },
+      "animations": {},
+      "stickerMetadata": {
+        "CAACAgIAAxUAAWqCustomStickerGroupA_Romantic_001": {
+          "chatId": -100777111000,
+          "source": "custom",
+          "addedAt": "2026-08-31T06:48:47.075Z",
+          "fileId": "CAACAgIAAxUAAWqCustomStickerGroupA_Romantic_001",
+          "mood": "romantic",
+          "packName": "pack_a"
+        },
+        "CAACAgIAAxUAAWqCustomStickerGroupA_Flirty_002": {
+          "chatId": -100777111000,
+          "source": "custom",
+          "addedAt": "2026-08-31T06:48:47.075Z",
+          "fileId": "CAACAgIAAxUAAWqCustomStickerGroupA_Flirty_002",
+          "mood": "flirty",
+          "packName": "pack_a"
+        },
+        "CAACAgIAAxUAAWqCustomStickerGroupA_Playful_003": {
+          "chatId": -100777111000,
+          "source": "custom",
+          "addedAt": "2026-08-31T06:48:47.075Z",
+          "fileId": "CAACAgIAAxUAAWqCustomStickerGroupA_Playful_003",
+          "mood": "playful",
+          "packName": "pack_a"
+        }
+      }
+    },
+    "-100777222000": {
+      "stickers": {
+        "romantic": [
+          "CAACAgIAAxUAAWqCustomStickerGroupB_Exclusive_999"
+        ]
+      },
+      "animations": {},
+      "stickerMetadata": {
+        "CAACAgIAAxUAAWqCustomStickerGroupB_Exclusive_999": {
+          "chatId": -100777222000,
+          "source": "custom",
+          "addedAt": "2026-08-31T06:48:47.075Z",
+          "fileId": "CAACAgIAAxUAAWqCustomStickerGroupB_Exclusive_999",
+          "mood": "romantic",
+          "packName": "pack_b"
+        }
+      }
+    },
+    "-100777333000": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "-100777444000": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
     }
   },
   "userMemories": {
@@ -5822,6 +6210,3182 @@
         "I live in Tokyo"
       ],
       "lastUpdated": 1787990296007
+    },
+    "-100999111222_102": {
+      "chatId": -100999111222,
+      "userId": 102,
+      "facts": [
+        "I work at a university"
+      ],
+      "lastUpdated": 1788158893011
+    },
+    "-100777111000_1001": {
+      "chatId": -100777111000,
+      "userId": 1001,
+      "facts": [
+        "Roxie hey jaan, I love you so much ❤️"
+      ],
+      "lastUpdated": 1788158927077
+    }
+  },
+  "groupConversationMemories": {
+    "-100999888777": {
+      "chatId": -100999888777,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 111,
+          "name": "User1",
+          "content": "Roxie, are you there?",
+          "timestamp": 1788158560712,
+          "messageId": 4
+        }
+      ],
+      "lastUpdated": 1788158560714,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 111,
+          "name": "User1",
+          "content": "Roxie, are you there?",
+          "timestamp": 1788158560712,
+          "messageId": 4
+        }
+      ]
+    },
+    "-1001": {
+      "chatId": -1001,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 555,
+          "name": "Alice",
+          "content": "Hello Roxie from A",
+          "timestamp": 1788158560720,
+          "messageId": 10
+        }
+      ],
+      "lastUpdated": 1788158560720,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 555,
+          "name": "Alice",
+          "content": "Hello Roxie from A",
+          "timestamp": 1788158560720,
+          "messageId": 10
+        }
+      ]
+    },
+    "-100888222333": {
+      "chatId": -100888222333,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 201,
+          "name": "Charlie",
+          "content": "Roxie what are you doing?",
+          "timestamp": 1788158893005,
+          "messageId": 2001
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "chilling! [Sent sticker]",
+          "timestamp": 1788158893006
+        }
+      ],
+      "lastUpdated": 1788158893006,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 201,
+          "name": "Charlie",
+          "content": "Roxie what are you doing?",
+          "timestamp": 1788158893005,
+          "messageId": 2001
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "chilling! [Sent sticker]",
+          "timestamp": 1788158893006
+        }
+      ]
+    },
+    "-100777333444": {
+      "chatId": -100777333444,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 23",
+          "timestamp": 1788158893030,
+          "messageId": 5023
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 24",
+          "timestamp": 1788158893031,
+          "messageId": 5024
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 25",
+          "timestamp": 1788158893032,
+          "messageId": 5025
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 26",
+          "timestamp": 1788158893033,
+          "messageId": 5026
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 27",
+          "timestamp": 1788158893034,
+          "messageId": 5027
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 28",
+          "timestamp": 1788158893035,
+          "messageId": 5028
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 29",
+          "timestamp": 1788158893036,
+          "messageId": 5029
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 30",
+          "timestamp": 1788158893037,
+          "messageId": 5030
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 31",
+          "timestamp": 1788158893038,
+          "messageId": 5031
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 32",
+          "timestamp": 1788158893039,
+          "messageId": 5032
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 33",
+          "timestamp": 1788158893040,
+          "messageId": 5033
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 34",
+          "timestamp": 1788158893041,
+          "messageId": 5034
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 35",
+          "timestamp": 1788158893042,
+          "messageId": 5035
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 36",
+          "timestamp": 1788158893043,
+          "messageId": 5036
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 37",
+          "timestamp": 1788158893044,
+          "messageId": 5037
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 38",
+          "timestamp": 1788158893045,
+          "messageId": 5038
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 39",
+          "timestamp": 1788158893046,
+          "messageId": 5039
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 40",
+          "timestamp": 1788158893047,
+          "messageId": 5040
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 41",
+          "timestamp": 1788158893048,
+          "messageId": 5041
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 42",
+          "timestamp": 1788158893049,
+          "messageId": 5042
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 43",
+          "timestamp": 1788158893050,
+          "messageId": 5043
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 44",
+          "timestamp": 1788158893051,
+          "messageId": 5044
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 45",
+          "timestamp": 1788158893052,
+          "messageId": 5045
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 46",
+          "timestamp": 1788158893053,
+          "messageId": 5046
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 47",
+          "timestamp": 1788158893054,
+          "messageId": 5047
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 48",
+          "timestamp": 1788158893055,
+          "messageId": 5048
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 49",
+          "timestamp": 1788158893056,
+          "messageId": 5049
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 50",
+          "timestamp": 1788158893057,
+          "messageId": 5050
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 51",
+          "timestamp": 1788158893058,
+          "messageId": 5051
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 52",
+          "timestamp": 1788158893059,
+          "messageId": 5052
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 53",
+          "timestamp": 1788158893060,
+          "messageId": 5053
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 54",
+          "timestamp": 1788158893061,
+          "messageId": 5054
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 55",
+          "timestamp": 1788158893062,
+          "messageId": 5055
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 56",
+          "timestamp": 1788158893063,
+          "messageId": 5056
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 57",
+          "timestamp": 1788158893064,
+          "messageId": 5057
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 58",
+          "timestamp": 1788158893065,
+          "messageId": 5058
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 59",
+          "timestamp": 1788158893066,
+          "messageId": 5059
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 60",
+          "timestamp": 1788158893067,
+          "messageId": 5060
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 61",
+          "timestamp": 1788158893068,
+          "messageId": 5061
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 62",
+          "timestamp": 1788158893069,
+          "messageId": 5062
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 63",
+          "timestamp": 1788158893070,
+          "messageId": 5063
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 64",
+          "timestamp": 1788158893071,
+          "messageId": 5064
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 65",
+          "timestamp": 1788158893072,
+          "messageId": 5065
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 66",
+          "timestamp": 1788158893073,
+          "messageId": 5066
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 67",
+          "timestamp": 1788158893075,
+          "messageId": 5067
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 68",
+          "timestamp": 1788158893076,
+          "messageId": 5068
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 69",
+          "timestamp": 1788158893077,
+          "messageId": 5069
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 70",
+          "timestamp": 1788158893078,
+          "messageId": 5070
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 71",
+          "timestamp": 1788158893079,
+          "messageId": 5071
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 72",
+          "timestamp": 1788158893080,
+          "messageId": 5072
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 73",
+          "timestamp": 1788158893081,
+          "messageId": 5073
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 74",
+          "timestamp": 1788158893082,
+          "messageId": 5074
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 75",
+          "timestamp": 1788158893083,
+          "messageId": 5075
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 76",
+          "timestamp": 1788158893084,
+          "messageId": 5076
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 77",
+          "timestamp": 1788158893085,
+          "messageId": 5077
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 78",
+          "timestamp": 1788158893086,
+          "messageId": 5078
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 79",
+          "timestamp": 1788158893087,
+          "messageId": 5079
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 80",
+          "timestamp": 1788158893088,
+          "messageId": 5080
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 81",
+          "timestamp": 1788158893089,
+          "messageId": 5081
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 82",
+          "timestamp": 1788158893090,
+          "messageId": 5082
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 83",
+          "timestamp": 1788158893091,
+          "messageId": 5083
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 84",
+          "timestamp": 1788158893092,
+          "messageId": 5084
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 85",
+          "timestamp": 1788158893093,
+          "messageId": 5085
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 86",
+          "timestamp": 1788158893094,
+          "messageId": 5086
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 87",
+          "timestamp": 1788158893095,
+          "messageId": 5087
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 88",
+          "timestamp": 1788158893096,
+          "messageId": 5088
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 89",
+          "timestamp": 1788158893097,
+          "messageId": 5089
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 90",
+          "timestamp": 1788158893098,
+          "messageId": 5090
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 91",
+          "timestamp": 1788158893099,
+          "messageId": 5091
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 92",
+          "timestamp": 1788158893100,
+          "messageId": 5092
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 93",
+          "timestamp": 1788158893101,
+          "messageId": 5093
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 94",
+          "timestamp": 1788158893102,
+          "messageId": 5094
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 95",
+          "timestamp": 1788158893103,
+          "messageId": 5095
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 96",
+          "timestamp": 1788158893104,
+          "messageId": 5096
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 97",
+          "timestamp": 1788158893105,
+          "messageId": 5097
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 98",
+          "timestamp": 1788158893106,
+          "messageId": 5098
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 99",
+          "timestamp": 1788158893107,
+          "messageId": 5099
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 100",
+          "timestamp": 1788158893108,
+          "messageId": 5100
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Roxie message 101",
+          "timestamp": 1788158893008,
+          "messageId": 5101
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Still responding happily at message 101!",
+          "timestamp": 1788158893010
+        }
+      ],
+      "lastUpdated": 1788158893010,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 23",
+          "timestamp": 1788158893030,
+          "messageId": 5023
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 24",
+          "timestamp": 1788158893031,
+          "messageId": 5024
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 25",
+          "timestamp": 1788158893032,
+          "messageId": 5025
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 26",
+          "timestamp": 1788158893033,
+          "messageId": 5026
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 27",
+          "timestamp": 1788158893034,
+          "messageId": 5027
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 28",
+          "timestamp": 1788158893035,
+          "messageId": 5028
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 29",
+          "timestamp": 1788158893036,
+          "messageId": 5029
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 30",
+          "timestamp": 1788158893037,
+          "messageId": 5030
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 31",
+          "timestamp": 1788158893038,
+          "messageId": 5031
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 32",
+          "timestamp": 1788158893039,
+          "messageId": 5032
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 33",
+          "timestamp": 1788158893040,
+          "messageId": 5033
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 34",
+          "timestamp": 1788158893041,
+          "messageId": 5034
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 35",
+          "timestamp": 1788158893042,
+          "messageId": 5035
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 36",
+          "timestamp": 1788158893043,
+          "messageId": 5036
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 37",
+          "timestamp": 1788158893044,
+          "messageId": 5037
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 38",
+          "timestamp": 1788158893045,
+          "messageId": 5038
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 39",
+          "timestamp": 1788158893046,
+          "messageId": 5039
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 40",
+          "timestamp": 1788158893047,
+          "messageId": 5040
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 41",
+          "timestamp": 1788158893048,
+          "messageId": 5041
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 42",
+          "timestamp": 1788158893049,
+          "messageId": 5042
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 43",
+          "timestamp": 1788158893050,
+          "messageId": 5043
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 44",
+          "timestamp": 1788158893051,
+          "messageId": 5044
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 45",
+          "timestamp": 1788158893052,
+          "messageId": 5045
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 46",
+          "timestamp": 1788158893053,
+          "messageId": 5046
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 47",
+          "timestamp": 1788158893054,
+          "messageId": 5047
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 48",
+          "timestamp": 1788158893055,
+          "messageId": 5048
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 49",
+          "timestamp": 1788158893056,
+          "messageId": 5049
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 50",
+          "timestamp": 1788158893057,
+          "messageId": 5050
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 51",
+          "timestamp": 1788158893058,
+          "messageId": 5051
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 52",
+          "timestamp": 1788158893059,
+          "messageId": 5052
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 53",
+          "timestamp": 1788158893060,
+          "messageId": 5053
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 54",
+          "timestamp": 1788158893061,
+          "messageId": 5054
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 55",
+          "timestamp": 1788158893062,
+          "messageId": 5055
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 56",
+          "timestamp": 1788158893063,
+          "messageId": 5056
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 57",
+          "timestamp": 1788158893064,
+          "messageId": 5057
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 58",
+          "timestamp": 1788158893065,
+          "messageId": 5058
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 59",
+          "timestamp": 1788158893066,
+          "messageId": 5059
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 60",
+          "timestamp": 1788158893067,
+          "messageId": 5060
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 61",
+          "timestamp": 1788158893068,
+          "messageId": 5061
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 62",
+          "timestamp": 1788158893069,
+          "messageId": 5062
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 63",
+          "timestamp": 1788158893070,
+          "messageId": 5063
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 64",
+          "timestamp": 1788158893071,
+          "messageId": 5064
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 65",
+          "timestamp": 1788158893072,
+          "messageId": 5065
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 66",
+          "timestamp": 1788158893073,
+          "messageId": 5066
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 67",
+          "timestamp": 1788158893075,
+          "messageId": 5067
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 68",
+          "timestamp": 1788158893076,
+          "messageId": 5068
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 69",
+          "timestamp": 1788158893077,
+          "messageId": 5069
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 70",
+          "timestamp": 1788158893078,
+          "messageId": 5070
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 71",
+          "timestamp": 1788158893079,
+          "messageId": 5071
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 72",
+          "timestamp": 1788158893080,
+          "messageId": 5072
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 73",
+          "timestamp": 1788158893081,
+          "messageId": 5073
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 74",
+          "timestamp": 1788158893082,
+          "messageId": 5074
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 75",
+          "timestamp": 1788158893083,
+          "messageId": 5075
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 76",
+          "timestamp": 1788158893084,
+          "messageId": 5076
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 77",
+          "timestamp": 1788158893085,
+          "messageId": 5077
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 78",
+          "timestamp": 1788158893086,
+          "messageId": 5078
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 79",
+          "timestamp": 1788158893087,
+          "messageId": 5079
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 80",
+          "timestamp": 1788158893088,
+          "messageId": 5080
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 81",
+          "timestamp": 1788158893089,
+          "messageId": 5081
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 82",
+          "timestamp": 1788158893090,
+          "messageId": 5082
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 83",
+          "timestamp": 1788158893091,
+          "messageId": 5083
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 84",
+          "timestamp": 1788158893092,
+          "messageId": 5084
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 85",
+          "timestamp": 1788158893093,
+          "messageId": 5085
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 86",
+          "timestamp": 1788158893094,
+          "messageId": 5086
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 87",
+          "timestamp": 1788158893095,
+          "messageId": 5087
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 88",
+          "timestamp": 1788158893096,
+          "messageId": 5088
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 89",
+          "timestamp": 1788158893097,
+          "messageId": 5089
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 90",
+          "timestamp": 1788158893098,
+          "messageId": 5090
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 91",
+          "timestamp": 1788158893099,
+          "messageId": 5091
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 92",
+          "timestamp": 1788158893100,
+          "messageId": 5092
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 93",
+          "timestamp": 1788158893101,
+          "messageId": 5093
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 94",
+          "timestamp": 1788158893102,
+          "messageId": 5094
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 95",
+          "timestamp": 1788158893103,
+          "messageId": 5095
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 96",
+          "timestamp": 1788158893104,
+          "messageId": 5096
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 97",
+          "timestamp": 1788158893105,
+          "messageId": 5097
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 98",
+          "timestamp": 1788158893106,
+          "messageId": 5098
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 99",
+          "timestamp": 1788158893107,
+          "messageId": 5099
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 100",
+          "timestamp": 1788158893108,
+          "messageId": 5100
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Roxie message 101",
+          "timestamp": 1788158893008,
+          "messageId": 5101
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Still responding happily at message 101!",
+          "timestamp": 1788158893010
+        }
+      ]
+    },
+    "-100555444333": {
+      "chatId": -100555444333,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 501,
+          "name": "Aman",
+          "content": "hello",
+          "timestamp": 1787990000000,
+          "messageId": 6001
+        },
+        {
+          "role": "user",
+          "userId": 502,
+          "name": "Rahul",
+          "content": "what's up?",
+          "timestamp": 1787990001000,
+          "messageId": 6002
+        },
+        {
+          "role": "user",
+          "userId": 503,
+          "name": "Priya",
+          "content": "exam tomorrow",
+          "timestamp": 1787990002000,
+          "messageId": 6003
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "haan yaar 😭",
+          "timestamp": 1787990003000
+        },
+        {
+          "role": "user",
+          "userId": 504,
+          "name": "Neha",
+          "content": "Roxie pass karwa do",
+          "timestamp": 1788158893011,
+          "messageId": 6004
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "pata hai mujhe 😂",
+          "timestamp": 1788158893012
+        }
+      ],
+      "lastUpdated": 1788158893012,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 501,
+          "name": "Aman",
+          "content": "hello",
+          "timestamp": 1787990000000,
+          "messageId": 6001
+        },
+        {
+          "role": "user",
+          "userId": 502,
+          "name": "Rahul",
+          "content": "what's up?",
+          "timestamp": 1787990001000,
+          "messageId": 6002
+        },
+        {
+          "role": "user",
+          "userId": 503,
+          "name": "Priya",
+          "content": "exam tomorrow",
+          "timestamp": 1787990002000,
+          "messageId": 6003
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "haan yaar 😭",
+          "timestamp": 1787990003000
+        },
+        {
+          "role": "user",
+          "userId": 504,
+          "name": "Neha",
+          "content": "Roxie pass karwa do",
+          "timestamp": 1788158893011,
+          "messageId": 6004
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "pata hai mujhe 😂",
+          "timestamp": 1788158893012
+        }
+      ]
+    },
+    "-100777111000": {
+      "chatId": -100777111000,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "Aman",
+          "content": "Roxie hey jaan, I love you so much ❤️",
+          "timestamp": 1788158927077,
+          "messageId": 101
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Haan jaan, bolo! [Sent sticker]",
+          "timestamp": 1788158927087
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Text response with illegal default sticker",
+          "timestamp": 1788158927094
+        }
+      ],
+      "lastUpdated": 1788158927094,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "Aman",
+          "content": "Roxie hey jaan, I love you so much ❤️",
+          "timestamp": 1788158927077,
+          "messageId": 101
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Haan jaan, bolo! [Sent sticker]",
+          "timestamp": 1788158927087
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Text response with illegal default sticker",
+          "timestamp": 1788158927094
+        }
+      ]
+    },
+    "-100777333000": {
+      "chatId": -100777333000,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "Rahul",
+          "content": "Roxie you look so hot today 😏",
+          "timestamp": 1788158927090,
+          "messageId": 102
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Haan jaan, bolo!\n\n<i>(💡 Lust Mode requires custom stickers! Add some with /addsticker or /addstickerpack to enable visual couple responses.)</i>",
+          "timestamp": 1788158927092
+        }
+      ],
+      "lastUpdated": 1788158927092,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "Rahul",
+          "content": "Roxie you look so hot today 😏",
+          "timestamp": 1788158927090,
+          "messageId": 102
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Haan jaan, bolo!\n\n<i>(💡 Lust Mode requires custom stickers! Add some with /addsticker or /addstickerpack to enable visual couple responses.)</i>",
+          "timestamp": 1788158927092
+        }
+      ]
+    },
+    "-100777444000": {
+      "chatId": -100777444000,
+      "messages": [
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Normal mode text [Sent sticker]",
+          "timestamp": 1788158927095
+        }
+      ],
+      "lastUpdated": 1788158927095,
+      "entries": [
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Normal mode text [Sent sticker]",
+          "timestamp": 1788158927095
+        }
+      ]
+    }
+  },
+  "groupMemories": {
+    "-100999888777": {
+      "chatId": -100999888777,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 111,
+          "name": "User1",
+          "content": "Roxie, are you there?",
+          "timestamp": 1788158560712,
+          "messageId": 4
+        }
+      ],
+      "lastUpdated": 1788158560714,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 111,
+          "name": "User1",
+          "content": "Roxie, are you there?",
+          "timestamp": 1788158560712,
+          "messageId": 4
+        }
+      ]
+    },
+    "-1001": {
+      "chatId": -1001,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 555,
+          "name": "Alice",
+          "content": "Hello Roxie from A",
+          "timestamp": 1788158560720,
+          "messageId": 10
+        }
+      ],
+      "lastUpdated": 1788158560720,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 555,
+          "name": "Alice",
+          "content": "Hello Roxie from A",
+          "timestamp": 1788158560720,
+          "messageId": 10
+        }
+      ]
+    },
+    "-100888222333": {
+      "chatId": -100888222333,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 201,
+          "name": "Charlie",
+          "content": "Roxie what are you doing?",
+          "timestamp": 1788158893005,
+          "messageId": 2001
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "chilling! [Sent sticker]",
+          "timestamp": 1788158893006
+        }
+      ],
+      "lastUpdated": 1788158893006,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 201,
+          "name": "Charlie",
+          "content": "Roxie what are you doing?",
+          "timestamp": 1788158893005,
+          "messageId": 2001
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "chilling! [Sent sticker]",
+          "timestamp": 1788158893006
+        }
+      ]
+    },
+    "-100777333444": {
+      "chatId": -100777333444,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 23",
+          "timestamp": 1788158893030,
+          "messageId": 5023
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 24",
+          "timestamp": 1788158893031,
+          "messageId": 5024
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 25",
+          "timestamp": 1788158893032,
+          "messageId": 5025
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 26",
+          "timestamp": 1788158893033,
+          "messageId": 5026
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 27",
+          "timestamp": 1788158893034,
+          "messageId": 5027
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 28",
+          "timestamp": 1788158893035,
+          "messageId": 5028
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 29",
+          "timestamp": 1788158893036,
+          "messageId": 5029
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 30",
+          "timestamp": 1788158893037,
+          "messageId": 5030
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 31",
+          "timestamp": 1788158893038,
+          "messageId": 5031
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 32",
+          "timestamp": 1788158893039,
+          "messageId": 5032
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 33",
+          "timestamp": 1788158893040,
+          "messageId": 5033
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 34",
+          "timestamp": 1788158893041,
+          "messageId": 5034
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 35",
+          "timestamp": 1788158893042,
+          "messageId": 5035
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 36",
+          "timestamp": 1788158893043,
+          "messageId": 5036
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 37",
+          "timestamp": 1788158893044,
+          "messageId": 5037
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 38",
+          "timestamp": 1788158893045,
+          "messageId": 5038
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 39",
+          "timestamp": 1788158893046,
+          "messageId": 5039
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 40",
+          "timestamp": 1788158893047,
+          "messageId": 5040
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 41",
+          "timestamp": 1788158893048,
+          "messageId": 5041
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 42",
+          "timestamp": 1788158893049,
+          "messageId": 5042
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 43",
+          "timestamp": 1788158893050,
+          "messageId": 5043
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 44",
+          "timestamp": 1788158893051,
+          "messageId": 5044
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 45",
+          "timestamp": 1788158893052,
+          "messageId": 5045
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 46",
+          "timestamp": 1788158893053,
+          "messageId": 5046
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 47",
+          "timestamp": 1788158893054,
+          "messageId": 5047
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 48",
+          "timestamp": 1788158893055,
+          "messageId": 5048
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 49",
+          "timestamp": 1788158893056,
+          "messageId": 5049
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 50",
+          "timestamp": 1788158893057,
+          "messageId": 5050
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 51",
+          "timestamp": 1788158893058,
+          "messageId": 5051
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 52",
+          "timestamp": 1788158893059,
+          "messageId": 5052
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 53",
+          "timestamp": 1788158893060,
+          "messageId": 5053
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 54",
+          "timestamp": 1788158893061,
+          "messageId": 5054
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 55",
+          "timestamp": 1788158893062,
+          "messageId": 5055
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 56",
+          "timestamp": 1788158893063,
+          "messageId": 5056
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 57",
+          "timestamp": 1788158893064,
+          "messageId": 5057
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 58",
+          "timestamp": 1788158893065,
+          "messageId": 5058
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 59",
+          "timestamp": 1788158893066,
+          "messageId": 5059
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 60",
+          "timestamp": 1788158893067,
+          "messageId": 5060
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 61",
+          "timestamp": 1788158893068,
+          "messageId": 5061
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 62",
+          "timestamp": 1788158893069,
+          "messageId": 5062
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 63",
+          "timestamp": 1788158893070,
+          "messageId": 5063
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 64",
+          "timestamp": 1788158893071,
+          "messageId": 5064
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 65",
+          "timestamp": 1788158893072,
+          "messageId": 5065
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 66",
+          "timestamp": 1788158893073,
+          "messageId": 5066
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 67",
+          "timestamp": 1788158893075,
+          "messageId": 5067
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 68",
+          "timestamp": 1788158893076,
+          "messageId": 5068
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 69",
+          "timestamp": 1788158893077,
+          "messageId": 5069
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 70",
+          "timestamp": 1788158893078,
+          "messageId": 5070
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 71",
+          "timestamp": 1788158893079,
+          "messageId": 5071
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 72",
+          "timestamp": 1788158893080,
+          "messageId": 5072
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 73",
+          "timestamp": 1788158893081,
+          "messageId": 5073
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 74",
+          "timestamp": 1788158893082,
+          "messageId": 5074
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 75",
+          "timestamp": 1788158893083,
+          "messageId": 5075
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 76",
+          "timestamp": 1788158893084,
+          "messageId": 5076
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 77",
+          "timestamp": 1788158893085,
+          "messageId": 5077
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 78",
+          "timestamp": 1788158893086,
+          "messageId": 5078
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 79",
+          "timestamp": 1788158893087,
+          "messageId": 5079
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 80",
+          "timestamp": 1788158893088,
+          "messageId": 5080
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 81",
+          "timestamp": 1788158893089,
+          "messageId": 5081
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 82",
+          "timestamp": 1788158893090,
+          "messageId": 5082
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 83",
+          "timestamp": 1788158893091,
+          "messageId": 5083
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 84",
+          "timestamp": 1788158893092,
+          "messageId": 5084
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 85",
+          "timestamp": 1788158893093,
+          "messageId": 5085
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 86",
+          "timestamp": 1788158893094,
+          "messageId": 5086
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 87",
+          "timestamp": 1788158893095,
+          "messageId": 5087
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 88",
+          "timestamp": 1788158893096,
+          "messageId": 5088
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 89",
+          "timestamp": 1788158893097,
+          "messageId": 5089
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 90",
+          "timestamp": 1788158893098,
+          "messageId": 5090
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 91",
+          "timestamp": 1788158893099,
+          "messageId": 5091
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 92",
+          "timestamp": 1788158893100,
+          "messageId": 5092
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 93",
+          "timestamp": 1788158893101,
+          "messageId": 5093
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 94",
+          "timestamp": 1788158893102,
+          "messageId": 5094
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 95",
+          "timestamp": 1788158893103,
+          "messageId": 5095
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 96",
+          "timestamp": 1788158893104,
+          "messageId": 5096
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 97",
+          "timestamp": 1788158893105,
+          "messageId": 5097
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 98",
+          "timestamp": 1788158893106,
+          "messageId": 5098
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 99",
+          "timestamp": 1788158893107,
+          "messageId": 5099
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 100",
+          "timestamp": 1788158893108,
+          "messageId": 5100
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Roxie message 101",
+          "timestamp": 1788158893008,
+          "messageId": 5101
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Still responding happily at message 101!",
+          "timestamp": 1788158893010
+        }
+      ],
+      "lastUpdated": 1788158893010,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 23",
+          "timestamp": 1788158893030,
+          "messageId": 5023
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 24",
+          "timestamp": 1788158893031,
+          "messageId": 5024
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 25",
+          "timestamp": 1788158893032,
+          "messageId": 5025
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 26",
+          "timestamp": 1788158893033,
+          "messageId": 5026
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 27",
+          "timestamp": 1788158893034,
+          "messageId": 5027
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 28",
+          "timestamp": 1788158893035,
+          "messageId": 5028
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 29",
+          "timestamp": 1788158893036,
+          "messageId": 5029
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 30",
+          "timestamp": 1788158893037,
+          "messageId": 5030
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 31",
+          "timestamp": 1788158893038,
+          "messageId": 5031
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 32",
+          "timestamp": 1788158893039,
+          "messageId": 5032
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 33",
+          "timestamp": 1788158893040,
+          "messageId": 5033
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 34",
+          "timestamp": 1788158893041,
+          "messageId": 5034
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 35",
+          "timestamp": 1788158893042,
+          "messageId": 5035
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 36",
+          "timestamp": 1788158893043,
+          "messageId": 5036
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 37",
+          "timestamp": 1788158893044,
+          "messageId": 5037
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 38",
+          "timestamp": 1788158893045,
+          "messageId": 5038
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 39",
+          "timestamp": 1788158893046,
+          "messageId": 5039
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 40",
+          "timestamp": 1788158893047,
+          "messageId": 5040
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 41",
+          "timestamp": 1788158893048,
+          "messageId": 5041
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 42",
+          "timestamp": 1788158893049,
+          "messageId": 5042
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 43",
+          "timestamp": 1788158893050,
+          "messageId": 5043
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 44",
+          "timestamp": 1788158893051,
+          "messageId": 5044
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 45",
+          "timestamp": 1788158893052,
+          "messageId": 5045
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 46",
+          "timestamp": 1788158893053,
+          "messageId": 5046
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 47",
+          "timestamp": 1788158893054,
+          "messageId": 5047
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 48",
+          "timestamp": 1788158893055,
+          "messageId": 5048
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 49",
+          "timestamp": 1788158893056,
+          "messageId": 5049
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 50",
+          "timestamp": 1788158893057,
+          "messageId": 5050
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 51",
+          "timestamp": 1788158893058,
+          "messageId": 5051
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 52",
+          "timestamp": 1788158893059,
+          "messageId": 5052
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 53",
+          "timestamp": 1788158893060,
+          "messageId": 5053
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 54",
+          "timestamp": 1788158893061,
+          "messageId": 5054
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 55",
+          "timestamp": 1788158893062,
+          "messageId": 5055
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 56",
+          "timestamp": 1788158893063,
+          "messageId": 5056
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 57",
+          "timestamp": 1788158893064,
+          "messageId": 5057
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 58",
+          "timestamp": 1788158893065,
+          "messageId": 5058
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 59",
+          "timestamp": 1788158893066,
+          "messageId": 5059
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 60",
+          "timestamp": 1788158893067,
+          "messageId": 5060
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 61",
+          "timestamp": 1788158893068,
+          "messageId": 5061
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 62",
+          "timestamp": 1788158893069,
+          "messageId": 5062
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 63",
+          "timestamp": 1788158893070,
+          "messageId": 5063
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 64",
+          "timestamp": 1788158893071,
+          "messageId": 5064
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 65",
+          "timestamp": 1788158893072,
+          "messageId": 5065
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 66",
+          "timestamp": 1788158893073,
+          "messageId": 5066
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 67",
+          "timestamp": 1788158893075,
+          "messageId": 5067
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 68",
+          "timestamp": 1788158893076,
+          "messageId": 5068
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 69",
+          "timestamp": 1788158893077,
+          "messageId": 5069
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 70",
+          "timestamp": 1788158893078,
+          "messageId": 5070
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 71",
+          "timestamp": 1788158893079,
+          "messageId": 5071
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 72",
+          "timestamp": 1788158893080,
+          "messageId": 5072
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 73",
+          "timestamp": 1788158893081,
+          "messageId": 5073
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 74",
+          "timestamp": 1788158893082,
+          "messageId": 5074
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 75",
+          "timestamp": 1788158893083,
+          "messageId": 5075
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 76",
+          "timestamp": 1788158893084,
+          "messageId": 5076
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 77",
+          "timestamp": 1788158893085,
+          "messageId": 5077
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 78",
+          "timestamp": 1788158893086,
+          "messageId": 5078
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 79",
+          "timestamp": 1788158893087,
+          "messageId": 5079
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 80",
+          "timestamp": 1788158893088,
+          "messageId": 5080
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 81",
+          "timestamp": 1788158893089,
+          "messageId": 5081
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 82",
+          "timestamp": 1788158893090,
+          "messageId": 5082
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 83",
+          "timestamp": 1788158893091,
+          "messageId": 5083
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 84",
+          "timestamp": 1788158893092,
+          "messageId": 5084
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 85",
+          "timestamp": 1788158893093,
+          "messageId": 5085
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 86",
+          "timestamp": 1788158893094,
+          "messageId": 5086
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 87",
+          "timestamp": 1788158893095,
+          "messageId": 5087
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 88",
+          "timestamp": 1788158893096,
+          "messageId": 5088
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 89",
+          "timestamp": 1788158893097,
+          "messageId": 5089
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 90",
+          "timestamp": 1788158893098,
+          "messageId": 5090
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 91",
+          "timestamp": 1788158893099,
+          "messageId": 5091
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 92",
+          "timestamp": 1788158893100,
+          "messageId": 5092
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 93",
+          "timestamp": 1788158893101,
+          "messageId": 5093
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 94",
+          "timestamp": 1788158893102,
+          "messageId": 5094
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 95",
+          "timestamp": 1788158893103,
+          "messageId": 5095
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Message 96",
+          "timestamp": 1788158893104,
+          "messageId": 5096
+        },
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "User2",
+          "content": "Message 97",
+          "timestamp": 1788158893105,
+          "messageId": 5097
+        },
+        {
+          "role": "user",
+          "userId": 1003,
+          "name": "User3",
+          "content": "Message 98",
+          "timestamp": 1788158893106,
+          "messageId": 5098
+        },
+        {
+          "role": "user",
+          "userId": 1004,
+          "name": "User4",
+          "content": "Message 99",
+          "timestamp": 1788158893107,
+          "messageId": 5099
+        },
+        {
+          "role": "user",
+          "userId": 1000,
+          "name": "User0",
+          "content": "Message 100",
+          "timestamp": 1788158893108,
+          "messageId": 5100
+        },
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "User1",
+          "content": "Roxie message 101",
+          "timestamp": 1788158893008,
+          "messageId": 5101
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Still responding happily at message 101!",
+          "timestamp": 1788158893010
+        }
+      ]
+    },
+    "-100555444333": {
+      "chatId": -100555444333,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 501,
+          "name": "Aman",
+          "content": "hello",
+          "timestamp": 1787990000000,
+          "messageId": 6001
+        },
+        {
+          "role": "user",
+          "userId": 502,
+          "name": "Rahul",
+          "content": "what's up?",
+          "timestamp": 1787990001000,
+          "messageId": 6002
+        },
+        {
+          "role": "user",
+          "userId": 503,
+          "name": "Priya",
+          "content": "exam tomorrow",
+          "timestamp": 1787990002000,
+          "messageId": 6003
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "haan yaar 😭",
+          "timestamp": 1787990003000
+        },
+        {
+          "role": "user",
+          "userId": 504,
+          "name": "Neha",
+          "content": "Roxie pass karwa do",
+          "timestamp": 1788158893011,
+          "messageId": 6004
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "pata hai mujhe 😂",
+          "timestamp": 1788158893012
+        }
+      ],
+      "lastUpdated": 1788158893012,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 501,
+          "name": "Aman",
+          "content": "hello",
+          "timestamp": 1787990000000,
+          "messageId": 6001
+        },
+        {
+          "role": "user",
+          "userId": 502,
+          "name": "Rahul",
+          "content": "what's up?",
+          "timestamp": 1787990001000,
+          "messageId": 6002
+        },
+        {
+          "role": "user",
+          "userId": 503,
+          "name": "Priya",
+          "content": "exam tomorrow",
+          "timestamp": 1787990002000,
+          "messageId": 6003
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "haan yaar 😭",
+          "timestamp": 1787990003000
+        },
+        {
+          "role": "user",
+          "userId": 504,
+          "name": "Neha",
+          "content": "Roxie pass karwa do",
+          "timestamp": 1788158893011,
+          "messageId": 6004
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "pata hai mujhe 😂",
+          "timestamp": 1788158893012
+        }
+      ]
+    },
+    "-100777111000": {
+      "chatId": -100777111000,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "Aman",
+          "content": "Roxie hey jaan, I love you so much ❤️",
+          "timestamp": 1788158927077,
+          "messageId": 101
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Haan jaan, bolo! [Sent sticker]",
+          "timestamp": 1788158927087
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Text response with illegal default sticker",
+          "timestamp": 1788158927094
+        }
+      ],
+      "lastUpdated": 1788158927094,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 1001,
+          "name": "Aman",
+          "content": "Roxie hey jaan, I love you so much ❤️",
+          "timestamp": 1788158927077,
+          "messageId": 101
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Haan jaan, bolo! [Sent sticker]",
+          "timestamp": 1788158927087
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Text response with illegal default sticker",
+          "timestamp": 1788158927094
+        }
+      ]
+    },
+    "-100777333000": {
+      "chatId": -100777333000,
+      "messages": [
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "Rahul",
+          "content": "Roxie you look so hot today 😏",
+          "timestamp": 1788158927090,
+          "messageId": 102
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Haan jaan, bolo!\n\n<i>(💡 Lust Mode requires custom stickers! Add some with /addsticker or /addstickerpack to enable visual couple responses.)</i>",
+          "timestamp": 1788158927092
+        }
+      ],
+      "lastUpdated": 1788158927092,
+      "entries": [
+        {
+          "role": "user",
+          "userId": 1002,
+          "name": "Rahul",
+          "content": "Roxie you look so hot today 😏",
+          "timestamp": 1788158927090,
+          "messageId": 102
+        },
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Haan jaan, bolo!\n\n<i>(💡 Lust Mode requires custom stickers! Add some with /addsticker or /addstickerpack to enable visual couple responses.)</i>",
+          "timestamp": 1788158927092
+        }
+      ]
+    },
+    "-100777444000": {
+      "chatId": -100777444000,
+      "messages": [
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Normal mode text [Sent sticker]",
+          "timestamp": 1788158927095
+        }
+      ],
+      "lastUpdated": 1788158927095,
+      "entries": [
+        {
+          "role": "assistant",
+          "name": "Roxie",
+          "content": "Normal mode text [Sent sticker]",
+          "timestamp": 1788158927095
+        }
+      ]
+    }
+  },
+  "userLustLevels": {
+    "-100999888222_10001": {
+      "groupId": -100999888222,
+      "userId": 10001,
+      "level": 2,
+      "lastUpdated": 1788159197004
+    },
+    "0_0": {
+      "groupId": 0,
+      "userId": 0,
+      "level": 4,
+      "lastUpdated": 1788159197004
+    },
+    "-100999888111_10001": {
+      "groupId": -100999888111,
+      "userId": 10001,
+      "level": 3,
+      "lastUpdated": 1788159197004
     }
   }
 }
