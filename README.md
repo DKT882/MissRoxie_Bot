@@ -1,18 +1,10 @@
 <div align="center">
 
-🤖 ROXIE
+🤖 Roxie
 
-Smart Telegram Moderation & AI Companion
+Intelligent Telegram Moderation & AI Conversation
 
-🛡️ Protect your group • ⚡ Automate moderation • 💬 Talk naturally
-
-<p>
-Roxie is a powerful Telegram bot that combines intelligent moderation,
-<br>
-content protection, group utilities, and multilingual AI conversation
-<br>
-inside one clean, customizable system.
-</p>
+One bot for cleaner groups, smarter protection, and natural conversations.
 
 <br>
 
@@ -21,211 +13,302 @@ inside one clean, customizable system.
 
 
 
-<br><br>
+<br>
 
-Created & Maintained by DKT • Dharmender Kumar
+Created by DKT • Dharmender Kumar
 
-GitHub  • 
-LinkedIn
+GitHub • LinkedIn
 
 </div>
 
-🌐 ROXIE AT A GLANCE
+🌸 What is Roxie?
 
-<table>
-<tr>
-<td align="center" width="25%">
+Roxie is a custom Telegram bot designed to make communities easier to manage while still feeling natural to use.
+
+Instead of using one bot for moderation, another for anti-spam, another for media protection, and another for AI conversation, Roxie brings these capabilities into a single system.
+
+The idea is simple:
+
+Let Roxie handle the repetitive work while the community stays focused on the conversation.
+
+Roxie combines:
+
+🛡️ Moderation · 🔒 Content Protection · 🧠 Smart Filtering · 💬 AI Conversation · 🌐 Multilingual Interaction · ⚙️ Group Automation
+
+✨ Features
+
+<div align="center">
 
 🛡️
 
-MODERATION
-
-Warn • Kick • Ban
-Promote • Demote
-Message cleanup
-
-</td>
-<td align="center" width="25%">
-
 🔒
 
-PROTECTION
-
-Spam • Ads • Abuse
-Links • Stickers
-Files • Images • GIFs
-
-</td>
-<td align="center" width="25%">
+🧠
 
 💬
 
-AI CHAT
+Moderation
 
-English
-Hindi
-Hinglish
-Natural replies
+Protection
 
-</td>
-<td align="center" width="25%">
+Smart Detection
 
-⚙️
+AI Chat
 
-GROUP TOOLS
+Warn, kick, ban, promote, demote & cleanup
 
-Flood control
-Slow mode
-/say • /all
-Trusted members
+Links, stickers, files, images, GIFs & more
 
-</td>
-</tr>
-</table>
+Spam, promotion & abuse detection
 
-💡 WHY ROXIE?
+Natural group & DM conversations
 
-Most communities use several bots to handle different jobs.
+🌐
 
-       ┌────────────┐
-       │ Moderation │
-       └─────┬──────┘
-             │
-       ┌─────▼──────┐
-       │ Anti-Spam  │
-       └─────┬──────┘
-             │
-       ┌─────▼──────┐
-       │ Media Bot  │
-       └─────┬──────┘
-             │
-       ┌─────▼──────┐
-       │   AI Bot   │
-       └─────┬──────┘
-             │
-             ▼
-        🤯 Too many bots
+👥
 
-Roxie brings the stack together.
+🆓
 
-                     🤖 ROXIE
-                        │
-        ┌───────────────┼────────────────┐
-        │               │                │
-        ▼               ▼                ▼
-   🛡️ MODERATION   🔒 PROTECTION     💬 AI CHAT
-        │               │                │
-   Warn / Ban       Spam / Abuse      English
-   Kick / Clear    Media controls      Hindi
-   Promote         Flood control      Hinglish
-   Demote          Exceptions         Personality
+🧹
 
-One bot. Multiple responsibilities. Less noise.
+Multilingual
 
-✨ CORE FEATURES
+Group Isolation
+
+Trusted Members
+
+Clean Chat
+
+English, Hindi & Hinglish
+
+Independent settings & state per group
+
+Give selected users protection exceptions
+
+Remove unwanted content without unnecessary bot noise
+
+</div>
 
 🛡️ Smart Moderation
 
-Roxie provides role-aware moderation for Telegram communities.
+Roxie is built around Telegram communities, so moderation is more than simply deleting messages.
 
-/warn
+It provides a structured moderation layer for administrators and moderators, including:
 
-/kick
+Member warnings
 
-/ban
+Member removal
 
-/promote
+Banning
 
-/demote
+Promotion and demotion
 
-/clear
+Message cleanup
 
-Actions are checked against both Roxie's authorization rules and Telegram's administrative permissions.
+Flood protection
+
+Slow-mode controls
+
+Moderator-only actions
+
+Telegram permission validation
+
+Roxie checks its own authorization rules and the permissions granted to the bot by Telegram.
+
+That means Roxie never assumes that being a moderator in its internal system gives it powers Telegram has not granted.
 
 🔒 Smart Content Protection
 
-Roxie can protect a group from unwanted content using configurable policies.
+Roxie can continuously inspect group activity and enforce the protection rules configured for that particular community.
 
-Protected content:
+Supported protection areas include:
 
 🔗 Links
 🎨 Stickers
-🖼️ Images
 📁 Files
+🖼️ Images
 🎞️ GIFs
-💬 Spam / promotion
-🤬 Custom abuse words
+💬 Spam
+📢 Promotions / advertisements
+🤬 Abusive language
 🌊 Flood activity
 
-Protection is configured per group, so one community's rules do not automatically become another community's rules.
+The protection system is designed to be configurable rather than hard-coded around one type of community.
 
-🧹 CLEAN CHAT DESIGN
+Different groups can have different policies.
 
-Roxie's moderation philosophy is simple:
+🧠 Smart Detection Engine
 
-Act first. Don't flood the chat with explanations.
+Roxie does not rely on a single simple keyword check for every situation.
 
-Instead of:
+Its content-protection layer can combine multiple signals to identify unwanted content, including:
 
-User sends sticker
+Incoming message
+       │
+       ▼
+   Normalize
+       │
+       ▼
+  Analyze content
+       │
+ ┌─────┼─────┬─────┐
+ ▼     ▼     ▼     ▼
+Spam  Promo Abuse Media
+ └─────┴─────┴─────┘
+             │
+             ▼
+       Group policy
+             │
+       ┌─────┴─────┐
+       ▼           ▼
+     ALLOW       REMOVE
 
-Roxie:
-⚠️ Sticker deleted because stickers
-are not allowed in this group.
+Groups can also maintain their own custom abusive-word lists.
 
-The preferred clean flow is:
+This allows Roxie to adapt to the vocabulary and culture of an individual community.
 
-User sends sticker
-       ↓
-    🗑️ DELETE
-       ↓
-      DONE
+🧹 Clean-Chat Philosophy
 
-The same philosophy can be applied to moderator command cleanup.
+One of Roxie's design goals is moderation without unnecessary chat pollution.
 
-💬 MULTILINGUAL AI
+Traditional moderation can look like:
 
-Roxie can communicate in:
+User sends prohibited content
+          ↓
+Bot deletes it
+          ↓
+Bot sends another message explaining
+what it just deleted
 
-Language
+Roxie's approach is:
+
+User sends prohibited content
+          ↓
+       🗑️ REMOVE
+          ↓
+        DONE
+
+When an administrator uses supported management commands, Roxie can also clean up the administrator's command message when the required Telegram permissions are available.
+
+Result
+
+Less:
+
+"⚠️ This message was deleted because..."
+
+More:
+
+The group simply stays clean.
+
+🆓 Trusted Member System
+
+Not every member should necessarily be treated the same.
+
+Roxie supports a trusted-member exception system.
+
+For example:
+
+Group protection
+       │
+       ├── Normal member
+       │      ↓
+       │   Protection applies
+       │
+       └── Trusted member
+              ↓
+          Configured exception
+
+Administrators or authorized moderators can give selected members an exception from configured content restrictions.
+
+This is useful for:
+
+Group staff
+
+Bots
+
+Trusted contributors
+
+Media teams
+
+Special members
+
+💬 AI Conversation
+
+Roxie is not only a moderation bot.
+
+It can also participate in conversations.
+
+The conversational layer is designed to understand:
+
+English
+
+Hindi
+
+Hinglish
+
+Mixed Hindi + English messages
+
+Romanized Hindi expressions
+
+Conversational context and tone
 
 Example
 
-🇬🇧 English
-
-How are you Roxie?
-
-🇮🇳 Hindi
-
-कैसी हो रोक्सी?
-
-🔀 Hinglish
+User
 
 kaisi ho roxie?
 
-🌐 Mixed
+Roxie
 
-Roxie aaj kya kar rahi ho?
-
-Example
-
-USER
-kaisi ho roxie?
-
-ROXIE
 Main badhiya hoon 😄 tum batao?
 
-USER
+User
+
 कैसी हो रोक्सी?
 
-ROXIE
+Roxie
+
 मैं बढ़िया हूँ 😊 तुम बताओ?
 
-Roxie detects language and conversational style before generating its response.
+User
 
-😏 PERSONALITY ENGINE
+Roxie what are you doing?
 
-When configured for the group, Roxie can recognize playful brother-zone terms.
+Roxie
+
+Bas yahin hoon 😄 tumse baat kar rahi hoon.
+
+The goal is not simply to translate messages.
+
+The goal is to respond in the language style the user is actually using.
+
+🌐 Hindi • English • Hinglish
+
+Roxie's language layer recognizes different writing styles.
+
+English
+   ↓
+"How are you?"
+
+Hindi
+   ↓
+"कैसी हो?"
+
+Hinglish
+   ↓
+"Kaisi ho?"
+
+Mixed
+   ↓
+"Roxie aaj kya kar rahi ho?"
+
+This makes Roxie more natural in Indian Telegram communities where users frequently switch between languages during the same conversation.
+
+😏 Personality Layer
+
+Roxie can also have a configurable personality layer.
+
+For example, it can recognize playful sibling/brother-zone expressions such as:
 
 bro
 brooo
@@ -247,597 +330,279 @@ Repeated characters can be normalized:
 brooo   → bro
 bhaiii  → bhai
 
-The detection is designed to avoid unrelated matches such as:
+The detection is designed to avoid false matches against unrelated words such as:
 
 problem
 brown
 broadcast
 broken
 
-📈 LUST LEVEL SYSTEM
+When the relevant personality mode is enabled, Roxie can respond with playful couple-oriented pushback rather than treating the message as a normal moderation event.
 
-Roxie's playful personality can maintain a user-specific level.
+📈 Conversational Level
 
-┌──────────────────────────────────────────────┐
-│  LEVEL 0                                     │
-│  Normal conversation                         │
-├──────────────────────────────────────────────┤
-│  LEVEL 1                                     │
-│  Light teasing                               │
-├──────────────────────────────────────────────┤
-│  LEVEL 2                                     │
-│  Couple-oriented conversation                │
-├──────────────────────────────────────────────┤
-│  LEVEL 3                                     │
-│  Stronger romantic teasing                   │
-├──────────────────────────────────────────────┤
-│  LEVEL 4                                     │
-│  Highest configured playful level            │
-└──────────────────────────────────────────────┘
+The personality layer can maintain a gradual user-specific level:
 
-State is scoped by:
+LEVEL 0  ───────── Normal
+LEVEL 1  ───────── Light teasing
+LEVEL 2  ───────── Couple-oriented
+LEVEL 3  ───────── Stronger romantic teasing
+LEVEL 4  ───────── Highest configured playful level
+
+The state is scoped to:
 
 GROUP ID + USER ID
 
-So conversational state is isolated between different users and groups.
+So a user's state in one group is not automatically transferred to another group.
 
-This personality mode is intended for appropriate adult communities and remains non-explicit.
+The personality layer is designed to remain playful and non-explicit.
 
-📖 COMMAND CENTER
+👥 How Roxie Works in a Group
 
-🟢 GENERAL
+Adding Roxie to a group turns it into a moderation and conversation layer.
 
-<table>
-<tr>
-<th>Command</th>
-<th>Syntax</th>
-<th>Who can use</th>
-<th>Purpose</th>
-</tr>
-<tr>
-<td><code>/start</code></td>
-<td><code>/start</code></td>
-<td>👤 Everyone in DM</td>
-<td>Start Roxie</td>
-</tr>
-<tr>
-<td><code>/help</code></td>
-<td><code>/help</code></td>
-<td>👤 Everyone</td>
-<td>Show available help</td>
-</tr>
-</table>
+Typical flow
 
-🛡️ MODERATION COMMANDS
+                 👥 TELEGRAM GROUP
+                         │
+                         ▼
+                    🤖 ROXIE
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+       🛡️ MOD          🔒 PROTECT      💬 AI
+          │              │              │
+       Members         Content        Messages
+          │              │              │
+          └──────────────┼──────────────┘
+                         ▼
+                  Group-specific
+                     policies
 
-<table>
-<tr>
-<th>Command</th>
-<th>Syntax</th>
-<th>Permission</th>
-<th>Action</th>
-</tr>
-<tr>
-<td><code>/warn</code></td>
-<td>Reply → <code>/warn</code></td>
-<td>🛡️ / 👑</td>
-<td>Warn member</td>
-</tr>
-<tr>
-<td><code>/kick</code></td>
-<td>Reply → <code>/kick</code></td>
-<td>🛡️ / 👑</td>
-<td>Remove member</td>
-</tr>
-<tr>
-<td><code>/ban</code></td>
-<td>Reply → <code>/ban</code></td>
-<td>🛡️ / 👑</td>
-<td>Ban member</td>
-</tr>
-<tr>
-<td><code>/promote</code></td>
-<td>Reply → <code>/promote</code></td>
-<td>👑</td>
-<td>Promote member</td>
-</tr>
-<tr>
-<td><code>/demote</code></td>
-<td>Reply → <code>/demote</code></td>
-<td>👑</td>
-<td>Demote administrator</td>
-</tr>
-<tr>
-<td><code>/clear</code></td>
-<td><code>/clear</code></td>
-<td>🛡️ / 👑</td>
-<td>Clear messages</td>
-</tr>
-</table>
+To use Roxie in a group
+
+Add Roxie to your Telegram group.
+
+Give Roxie the administrative permissions required for the features you want.
+
+Configure the group's protection and moderation settings.
+
+Roxie begins processing eligible group activity.
+
+Members can interact with Roxie's conversational layer according to the group's configuration.
+
+Important
+
+Telegram permissions still control what Roxie can actually do.
+
+For example, if Roxie does not have permission to delete messages, it cannot magically delete them.
+
+👤 How Roxie Works in Private DM
+
+In a private chat, Roxie primarily behaves as a conversational AI.
+
+              👤 USER
+                 │
+                 ▼
+              💬 DM
+                 │
+                 ▼
+             🤖 ROXIE
+                 │
+        ┌────────┼────────┐
+        ▼        ▼        ▼
+      English   Hindi   Hinglish
+        │        │        │
+        └────────┼────────┘
+                 ▼
+           Natural reply
+
+A user can start a conversation with Roxie and interact with its conversational personality.
+
+Group-management behavior is separated from ordinary private conversation.
+
+🔐 Group & User Isolation
+
+Roxie is designed with isolation in mind.
+
+Group configuration and conversational state are scoped to the appropriate group and user.
 
 Example
 
-User:
-Stop spamming!
+GROUP A
+│
+├── User 101 → Level 3
+├── User 102 → Level 1
+└── Group policy → Strict
 
-Admin:
- /warn
+GROUP B
+│
+├── User 101 → Level 0
+├── User 202 → Level 2
+└── Group policy → Relaxed
 
-Roxie uses the replied-to message to identify the target.
+The same Telegram user appearing in two groups does not mean the groups share the same conversational state.
 
-🔒 CONTENT PROTECTION COMMANDS
+This prevents accidental cross-group configuration and state leakage.
 
-<table>
-<tr>
-<th>Command</th>
-<th>Syntax</th>
-<th>Permission</th>
-<th>Controls</th>
-</tr>
-<tr>
-<td><code>/sticker</code></td>
-<td><code>/sticker on/off</code></td>
-<td>🛡️ / 👑</td>
-<td>🎨 Stickers</td>
-</tr>
-<tr>
-<td><code>/link</code></td>
-<td><code>/link on/off</code></td>
-<td>🛡️ / 👑</td>
-<td>🔗 Links</td>
-</tr>
-<tr>
-<td><code>/image</code></td>
-<td><code>/image on/off</code></td>
-<td>🛡️ / 👑</td>
-<td>🖼️ Images</td>
-</tr>
-<tr>
-<td><code>/file</code></td>
-<td><code>/file on/off</code></td>
-<td>🛡️ / 👑</td>
-<td>📁 Files</td>
-</tr>
-<tr>
-<td><code>/gif</code></td>
-<td><code>/gif on/off</code></td>
-<td>🛡️ / 👑</td>
-<td>🎞️ GIFs</td>
-</tr>
-<tr>
-<td><code>/flood</code></td>
-<td><code>/flood on/off</code></td>
-<td>🛡️ / 👑</td>
-<td>🌊 Flood protection</td>
-</tr>
-</table>
+🚀 Why Roxie is Different
 
-Examples
+Roxie's biggest difference is not a single command.
 
-/sticker on
-/link on
-/image on
-/file on
-/gif on
-/flood on
+It is the combination of systems.
 
-Turn protection off:
+Typical Telegram setup
 
-/sticker off
-/link off
+Moderation Bot
+      +
+Anti-Spam Bot
+      +
+Media Protection Bot
+      +
+AI Chat Bot
+      +
+Utility Bot
+      =
+Several bots to configure
 
-🆓 TRUSTED MEMBER EXCEPTIONS
+Roxie
 
-<table>
-<tr>
-<th>Command</th>
-<th>Syntax</th>
-<th>Purpose</th>
-</tr>
-<tr>
-<td><code>/free</code></td>
-<td>Reply → <code>/free</code></td>
-<td>Give a trusted member an exception</td>
-</tr>
-<tr>
-<td><code>/unfree</code></td>
-<td>Reply → <code>/unfree</code></td>
-<td>Remove the exception</td>
-</tr>
-</table>
+                    🤖 ROXIE
+                       │
+       ┌───────────────┼───────────────┐
+       │               │               │
+       ▼               ▼               ▼
+   MODERATION      PROTECTION       AI CHAT
+       │               │               │
+       ├───────────────┼───────────────┤
+       │               │               │
+       ▼               ▼               ▼
+   GROUP TOOLS     SMART FILTERS   MULTILINGUAL
+       │               │               │
+       └───────────────┼───────────────┘
+                       ▼
+                 CLEANER GROUP
 
-Example:
+Roxie's key differentiators
 
-Admin replies to a member:
+Traditional approach
 
-/free
+Roxie
 
-The member receives the configured exception from protected-content rules.
+Multiple bots
 
-📝 CUSTOM ABUSE FILTER
+One integrated system
 
-Every group can maintain its own custom abuse list.
+Basic keyword filtering
 
-<table>
-<tr>
-<th>Command</th>
-<th>Syntax</th>
-<th>Purpose</th>
-</tr>
-<tr>
-<td><code>/addabuse</code></td>
-<td><code>/addabuse &lt;word&gt;</code></td>
-<td>Add a custom rule</td>
-</tr>
-<tr>
-<td><code>/removeabuse</code></td>
-<td><code>/removeabuse &lt;word&gt;</code></td>
-<td>Remove a rule</td>
-</tr>
-<tr>
-<td><code>/listabuse</code></td>
-<td><code>/listabuse</code></td>
-<td>Show custom rules</td>
-</tr>
-<tr>
-<td><code>/clearabuse</code></td>
-<td><code>/clearabuse</code></td>
-<td>Clear custom rules</td>
-</tr>
-</table>
+Multi-signal content analysis
 
-Example:
+Generic responses
 
-/addabuse unwantedword
+Language-aware AI conversation
 
-/removeabuse unwantedword
+Same settings everywhere
 
-📢 COMMUNICATION
+Group-specific configuration
 
-/say
+Bot messages fill the chat
 
-Send a clean moderator announcement.
+Clean-chat moderation approach
 
-/say Group meeting at 7 PM.
+No trusted exceptions
 
-Roxie can remove the administrator's command after processing when it has the required Telegram permission.
+/free exception system
 
-🎯 Reply-aware /say
+User state can be generic
 
-USER 1
-Hello everyone!
+User + group scoped state
 
-Admin replies:
+Moderation and AI are separate
 
-/say Welcome User 1 👋
+Moderation + conversation in one bot
 
-Roxie:
+🧩 Designed as a System, Not Just a Bot
 
-↳ Welcome User 1 👋
+Roxie is built around separate behavioral layers:
 
-The response is attached to the user's original message.
+┌─────────────────────────────────────┐
+│              TELEGRAM               │
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────┐
+│          COMMAND / EVENT LAYER      │
+└──────────────────┬──────────────────┘
+                   │
+          ┌────────┴────────┐
+          ▼                 ▼
+┌─────────────────┐ ┌─────────────────┐
+│   MODERATION    │ │  CONVERSATION   │
+│     ENGINE      │ │     ENGINE      │
+└────────┬────────┘ └────────┬────────┘
+         │                   │
+         ▼                   ▼
+┌─────────────────┐ ┌─────────────────┐
+│    POLICY &     │ │ LANGUAGE &      │
+│    CONTENT      │ │ PERSONALITY    │
+│   PROTECTION    │ │     LAYER      │
+└────────┬────────┘ └────────┬────────┘
+         │                   │
+         └─────────┬─────────┘
+                   ▼
+          ┌─────────────────┐
+          │     STORAGE     │
+          └─────────────────┘
 
-👥 /all
+This separation makes it easier to extend Roxie without turning every new feature into one large block of logic.
 
-Mention known members of the current group.
+🧪 Reliability & Verification
 
-Syntax
+Roxie includes dedicated tests for its major behavioral systems.
 
-/all
+Verification includes areas such as:
 
-or:
+Security
 
-/all <message>
-
-Example
-
-/all Important announcement for everyone!
-
-Roxie creates clickable Telegram mentions and can split large mention sets when necessary to respect Telegram message-size limits.
-
-🐢 SLOW MODE
-
-Syntax
-
-/slowmode <duration>
-
-Examples
-
-/slowmode 10s
-/slowmode 30s
-/slowmode 1m
-
-Permission: 👑 Administrator + required Telegram rights.
-
-😏 LUST COMMANDS
-
-<table>
-<tr>
-<th>Command</th>
-<th>Syntax</th>
-<th>Purpose</th>
-</tr>
-<tr>
-<td><code>/lust</code></td>
-<td><code>/lust on/off</code></td>
-<td>Enable / disable Lust Mode</td>
-</tr>
-<tr>
-<td><code>/lustmode</code></td>
-<td><code>/lustmode on/off</code></td>
-<td>Alternate Lust Mode command</td>
-</tr>
-</table>
-
-👮 PERMISSION OVERVIEW
-
-<div align="center">
-
-Feature
-
-👤 Member
-
-🛡️ Moderator
-
-👑 Admin
-
-/start / /help
-
-✅
-
-✅
-
-✅
-
-AI conversation
-
-✅
-
-✅
-
-✅
+Permission handling
 
 Moderation
 
-❌
+Content protection
 
-✅
+Media controls
 
-✅
+Custom abuse rules
 
-Content toggles
+Message cleanup
 
-❌
+Custom sticker behavior
 
-✅
-
-✅
-
-/free / /unfree
-
-❌
-
-✅
-
-✅
-
-Abuse management
-
-❌
-
-✅
-
-✅
-
-/say
-
-❌
-
-✅
-
-✅
-
-/all
-
-❌
-
-✅
-
-✅
-
-/flood
-
-❌
-
-✅
-
-✅
-
-/slowmode
-
-❌
-
-⚠️
-
-✅
-
-/promote / /demote
-
-❌
-
-⚠️
-
-✅
-
-</div>
-
-Legend
-
-✅ Available
-❌ Not available
-⚠️ Requires additional Telegram administrative rights
-
-Telegram remains the final authority. Roxie cannot bypass Telegram's permission system.
-
-👤 PRIVATE DM
-
-In a private chat, Roxie can primarily act as a conversational AI.
-
-/start
-   │
-   ▼
-User message
-   │
-   ▼
 Language detection
-   │
-   ├── English
-   ├── Hindi
-   └── Hinglish
-   │
-   ▼
-AI response
 
-Group-management commands are not treated as ordinary DM conversation.
+Hindi / Hinglish behavior
 
-👥 GROUP MODE
+Personality detection
 
-Inside a Telegram group, Roxie becomes a moderation + conversation layer.
+Conversational levels
 
-                     👥 TELEGRAM GROUP
-                              │
-                 ┌────────────┴────────────┐
-                 ▼                         ▼
-            🛡️ MODERATION                💬 AI
-                 │                         │
-        ┌────────┼────────┐         ┌──────┼──────┐
-        ▼        ▼        ▼         ▼      ▼      ▼
-       Spam    Media     Abuse      EN     HI   Hinglish
+User isolation
 
-🧠 HOW ROXIE DECIDES
+Group isolation
 
-Message protection
+Edge cases
 
-Incoming message
-       │
-       ▼
-Identify user + group
-       │
-       ▼
-Check permissions
-       │
-       ▼
-Check /free exception
-       │
-       ▼
-Analyze content
-       │
- ┌─────┼──────┬───────┐
- ▼     ▼      ▼       ▼
-Spam  Promo  Abuse   Media
- └─────┴──────┴───────┘
-             │
-             ▼
-       Group policy
-             │
-       ┌─────┴─────┐
-       ▼           ▼
-    ALLOW        DELETE
-
-Conversation
-
-Incoming message
-       │
-       ▼
-Normalize
-       │
-       ▼
-Detect language
-       │
-       ▼
-Detect Hinglish / mixed language
-       │
-       ▼
-Detect personality triggers
-       │
-       ▼
-Read user + group state
-       │
-       ▼
-Generate response
-       │
-       ▼
-Save relevant state
-
-🔐 GROUP & USER ISOLATION
-
-Roxie stores conversational state using a group + user scope.
-
-GROUP A
-├── User 101 → Level 3
-├── User 102 → Level 1
-└── User 103 → Level 0
-
-GROUP B
-├── User 101 → Level 0
-└── User 202 → Level 2
-
-This prevents intentional cross-group state leakage.
-
-🧪 TESTING
-
-Roxie contains dedicated verification for major systems.
-
-✓ Security
-✓ Moderation
-✓ Permissions
-✓ Message cleanup
-✓ Content protection
-✓ Custom abuse rules
-✓ Custom stickers
-✓ Language detection
-✓ Hindi / Hinglish behavior
-✓ Brother-zone detection
-✓ Lust-level escalation
-✓ Lust-level decay
-✓ User isolation
-✓ Group isolation
-✓ Edge cases
-
-Development checks:
+The project also uses:
 
 npm run lint
 npm test
 npm run build
 
-🏗️ ARCHITECTURE
+for development verification.
 
-                         TELEGRAM
-                            │
-                 ┌──────────┴──────────┐
-                 │                     │
-                DM                   GROUP
-                 │                     │
-                 └──────────┬──────────┘
-                            ▼
-                    ┌──────────────┐
-                    │   🤖 ROXIE   │
-                    │ Telegram Bot │
-                    └──────┬───────┘
-                           │
-             ┌─────────────┴─────────────┐
-             ▼                           ▼
-      🛡️ MODERATION                 💬 AI CHAT
-             │                           │
-      ┌──────┼──────┐              ┌────┼────┐
-      ▼      ▼      ▼              ▼    ▼    ▼
-     Spam   Media  Abuse           EN   HI  Hinglish
-             │                           │
-             └─────────────┬─────────────┘
-                           ▼
-                       💾 STORAGE
+🛠️ Technology
 
-🛠️ TECH STACK
+<div align="center">
 
 Layer
 
@@ -867,7 +632,7 @@ Build
 
 Vite + ESBuild
 
-Telegram
+Messaging
 
 Telegram Bot API
 
@@ -883,130 +648,68 @@ Testing
 
 Dedicated project test suites
 
-📁 PROJECT STRUCTURE
+</div>
 
-MissRoxie_Bot/
-│
-├── server/
-│   ├── db/
-│   │   └── storage.ts
-│   │
-│   └── telegram/
-│       ├── commands.ts
-│       ├── moderation.ts
-│       ├── policyEngine.ts
-│       ├── middleware.ts
-│       ├── telegram.ts
-│       ├── types.ts
-│       └── ...
-│
-├── src/
-├── test/
-├── package.json
-├── README.md
-└── LICENSE
+🔒 Public Bot • Private Source
 
-⚙️ AUTHORIZED DEVELOPMENT
+Roxie follows a public-service / private-source model.
 
-🔒 The following section is for authorized developers only.
+             🤖 ROXIE
+                │
+       ┌────────┴────────┐
+       ▼                 ▼
+   TELEGRAM            SOURCE
+     BOT                CODE
+       │                 │
+    PUBLIC              PRIVATE
+       │                 │
+ Users can use       Owner / authorized
+     Roxie              access only
 
-Install:
+People may be allowed to use Roxie through Telegram without receiving ownership or redistribution rights over the source code.
 
-npm install
+Roxie is NOT open source.
 
-Development:
+Without written permission, the source code may not be:
 
-npm run dev
+Copied
 
-Type checking:
+Published
 
-npm run lint
+Redistributed
 
-Tests:
+Modified for redistribution
 
-npm test
+Self-hosted
 
-Production build:
+Sold
 
-npm run build
+Sublicensed
 
-Production start:
+Used to create a competing service
 
-npm start
+Presented as an official Roxie implementation
 
-Never commit secrets:
+Using Roxie does not give anyone ownership of Roxie or its source code.
 
-.env
-BOT_TOKEN
-AI_API_KEY
-DATABASE_URL
-private credentials
+📜 License
 
-🔒 PROPRIETARY SOFTWARE
-
-Roxie is not open source.
-
-The Telegram bot may be publicly available for people to use, while the underlying source code remains private.
-
-                 🤖 ROXIE
-                    │
-          ┌─────────┴─────────┐
-          ▼                   ▼
-    TELEGRAM SERVICE       SOURCE CODE
-          │                   │
-       PUBLIC               PRIVATE
-          │                   │
-     Users can use      Owner / authorized
-      the bot            contributors
-
-✅ You may
-
-Use Roxie through Telegram
-
-Add Roxie to eligible groups
-
-Chat with Roxie
-
-Use supported commands
-
-Configure supported group features
-
-❌ You may NOT, without written permission
-
-Copy the source code
-
-Publish the source code
-
-Redistribute the source
-
-Modify the source
-
-Self-host the proprietary implementation
-
-Sell or sublicense the source
-
-Create a competing bot from the source
-
-Remove copyright notices
-
-Present a copy as official Roxie
-
-Using Roxie does not mean owning Roxie.
-
-📜 LICENSE
+Roxie is distributed under a custom Proprietary Software License.
 
 Copyright © 2026 Dharmender Kumar (DKT)
 All Rights Reserved.
 
-Roxie is licensed under a custom Proprietary Software License.
+The source code is not open source and is not granted under MIT, Apache-2.0, GPL, BSD, or another open-source license.
 
-See LICENSE for the complete terms.
+See LICENSE for the complete legal terms.
 
-👨‍💻 CREATOR
+For permission to use, modify, deploy, redistribute, or access the source code, contact the copyright owner.
+
+👨‍💻 Creator
 
 <div align="center">
 
-DKT • Dharmender Kumar
+DKT — Dharmender Kumar
 
 Creator & Copyright Owner of Roxie
 
@@ -1018,8 +721,7 @@ Creator & Copyright Owner of Roxie
 
 <br>
 
-For licensing, collaboration, deployment permission,<br>
-or authorized source-code access, contact the copyright owner.
+For licensing • collaboration • deployment permission • source access
 
 </div>
 
@@ -1037,6 +739,6 @@ Built with ❤️ by DKT
 
 <br>
 
-🔒 PROPRIETARY • NOT OPEN SOURCE
+PROPRIETARY • NOT OPEN SOURCE
 
 </div>
