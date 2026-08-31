@@ -1,0 +1,344 @@
+{
+  "schemaVersion": 1,
+  "chat": {
+    "chatId": "-100999222001",
+    "title": "Roxie Alpha Lab",
+    "type": "supergroup",
+    "username": null
+  },
+  "status": {
+    "botLeft": false,
+    "leftAt": null,
+    "unavailable": false,
+    "unavailableAt": null,
+    "unavailableReason": null
+  },
+  "settings": {
+    "chatId": -100999222001,
+    "chatTitle": "Roxie Alpha Lab",
+    "warnLimit": 3,
+    "warnAction": "ban",
+    "warnExpireSeconds": 0,
+    "floodEnabled": false,
+    "floodCount": 8,
+    "floodWindow": 5,
+    "floodAction": "mute",
+    "raidEnabled": false,
+    "raidLimit": 8,
+    "raidWindow": 30,
+    "raidAction": "kick",
+    "raidDuration": 300,
+    "captchaEnabled": false,
+    "captchaMode": "button",
+    "captchaTimeout": 120,
+    "captchaAction": "kick",
+    "linksProtection": true,
+    "linksWhitelist": [],
+    "mediaProtection": true,
+    "stickerProtection": true,
+    "gifsProtection": false,
+    "videosProtection": false,
+    "photosProtection": false,
+    "voiceProtection": false,
+    "audioProtection": false,
+    "locks": {},
+    "filters": {},
+    "welcomeEnabled": false,
+    "welcomeMessage": "Welcome {user} to {chat}!",
+    "goodbyeEnabled": false,
+    "goodbyeMessage": "Goodbye {user}!",
+    "autoDeleteJoinLeave": false,
+    "slowModeSeconds": 0,
+    "reportsEnabled": true,
+    "chatbotEnabled": true,
+    "chatbotMode": "auto",
+    "reactionEnabled": true,
+    "reactionProbability": 0.15,
+    "stopSpamEnabled": false,
+    "stopAbusiveEnabled": false,
+    "stopPromotionEnabled": false,
+    "gifProtection": false,
+    "linkProtection": true,
+    "imageProtection": false,
+    "fileProtection": false,
+    "customAbusiveWords": [],
+    "automodEnabled": false,
+    "mediaAction": "delete",
+    "warnEscalation": [],
+    "securityEnabled": false,
+    "joinmode": "normal",
+    "autoAcceptEnabled": false,
+    "automations": [],
+    "rules": "",
+    "lastAllTimestamp": 0,
+    "protectionEnabled": true,
+    "protectionFloodCount": 5,
+    "protectionFloodWindow": 5,
+    "protectionDuplicateLimit": 3,
+    "protectionLinkBurstLimit": 3,
+    "autoResponse": {
+      "enabled": true,
+      "mode": "random",
+      "cooldownSeconds": 30,
+      "randomize": true,
+      "minSeconds": 30,
+      "maxSeconds": 120,
+      "lastResponseTimestamp": 1788183064621,
+      "nextAllowedAt": 0,
+      "nextIntervalSeconds": 50
+    },
+    "autoSticker": {
+      "enabled": true,
+      "mode": "random",
+      "cooldownSeconds": 60,
+      "randomize": true,
+      "minSeconds": 30,
+      "maxSeconds": 60,
+      "lastStickerTimestamp": 0,
+      "nextAllowedAt": 0,
+      "nextIntervalSeconds": 179
+    },
+    "stickerPacks": {
+      "roxieromancepack": {
+        "name": "RoxieRomancePack",
+        "title": "Roxie Romance Official",
+        "enabled": true,
+        "stickerCount": 3,
+        "stickers": [
+          {
+            "fileId": "custom_sticker_romance_01",
+            "emoji": "❤️"
+          },
+          {
+            "fileId": "custom_sticker_romance_02",
+            "emoji": "💋"
+          },
+          {
+            "fileId": "custom_sticker_romance_03",
+            "emoji": "🥰"
+          }
+        ],
+        "addedBy": "dashboard_admin",
+        "addedAt": "2026-08-31T13:31:04.236Z"
+      }
+    },
+    "updatedAt": "2026-08-31T14:07:14.942Z",
+    "lustMode": true,
+    "botLeft": false,
+    "unavailable": false,
+    "abuseWords": []
+  },
+  "permissions": {
+    "contentPermissions": null,
+    "customRoles": {},
+    "stickerFreeUsers": []
+  },
+  "moderation": {
+    "locks": {},
+    "filters": {},
+    "linksWhitelist": [],
+    "approvedUsers": [],
+    "freedUsers": [],
+    "warnings": [],
+    "tempActions": [],
+    "abuseWords": []
+  },
+  "ai": {
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true,
+    "welcomeEnabled": false
+  },
+  "lustMode": {
+    "enabled": true,
+    "level": 1,
+    "lustStickers": {},
+    "userLustLevels": []
+  },
+  "autoResponse": {
+    "enabled": true,
+    "mode": "random",
+    "cooldownSeconds": 30,
+    "randomize": true,
+    "minSeconds": 30,
+    "maxSeconds": 120,
+    "lastResponseTimestamp": 1788183064621,
+    "nextAllowedAt": 0,
+    "nextIntervalSeconds": 50
+  },
+  "autoSticker": {
+    "enabled": true,
+    "mode": "random",
+    "cooldownSeconds": 60,
+    "randomize": true,
+    "minSeconds": 30,
+    "maxSeconds": 60,
+    "lastStickerTimestamp": 0,
+    "nextAllowedAt": 0,
+    "nextIntervalSeconds": 179
+  },
+  "stickers": {
+    "mediaLibrary": {
+      "stickers": {
+        "romantic": [
+          "custom_sticker_romance_01",
+          "custom_sticker_romance_02",
+          "custom_sticker_romance_03"
+        ]
+      },
+      "animations": {},
+      "stickerMetadata": {
+        "custom_sticker_romance_01": {
+          "chatId": -100999222001,
+          "source": "custom",
+          "addedAt": "2026-08-31T13:31:04.284Z",
+          "packName": "RoxieRomancePack",
+          "packTitle": "Roxie Romance Official",
+          "fileId": "custom_sticker_romance_01",
+          "emoji": "❤️",
+          "mood": "romantic",
+          "isLustMode": true
+        },
+        "custom_sticker_romance_02": {
+          "chatId": -100999222001,
+          "source": "custom",
+          "addedAt": "2026-08-31T13:31:04.290Z",
+          "packName": "RoxieRomancePack",
+          "packTitle": "Roxie Romance Official",
+          "fileId": "custom_sticker_romance_02",
+          "emoji": "💋",
+          "mood": "romantic",
+          "isLustMode": true
+        },
+        "custom_sticker_romance_03": {
+          "chatId": -100999222001,
+          "source": "custom",
+          "addedAt": "2026-08-31T13:31:04.295Z",
+          "packName": "RoxieRomancePack",
+          "packTitle": "Roxie Romance Official",
+          "fileId": "custom_sticker_romance_03",
+          "emoji": "🥰",
+          "mood": "romantic",
+          "isLustMode": true
+        }
+      }
+    },
+    "stickerProtection": true
+  },
+  "stickerPacks": [
+    {
+      "name": "RoxieRomancePack",
+      "title": "Roxie Romance Official",
+      "enabled": true,
+      "stickerCount": 3,
+      "stickers": [
+        {
+          "fileId": "custom_sticker_romance_01",
+          "emoji": "❤️"
+        },
+        {
+          "fileId": "custom_sticker_romance_02",
+          "emoji": "💋"
+        },
+        {
+          "fileId": "custom_sticker_romance_03",
+          "emoji": "🥰"
+        }
+      ],
+      "addedBy": "dashboard_admin",
+      "addedAt": "2026-08-31T13:31:04.236Z"
+    }
+  ],
+  "abuseWords": [],
+  "members": [],
+  "moderators": [],
+  "messages": [
+    {
+      "role": "user",
+      "name": "Tester",
+      "displayName": "Tester",
+      "content": "hello roxie my love",
+      "timestamp": 1788176827105,
+      "messageId": 102,
+      "chatId": -100999222001,
+      "mediaType": "text",
+      "direction": "incoming",
+      "source": "telegram",
+      "sender": "Tester"
+    },
+    {
+      "role": "user",
+      "name": "Tester",
+      "displayName": "Tester",
+      "content": "hello roxie after cooldown expired",
+      "timestamp": 1788177722771,
+      "messageId": 202,
+      "chatId": -100999222001,
+      "mediaType": "text",
+      "direction": "incoming",
+      "source": "telegram",
+      "sender": "Tester"
+    }
+  ],
+  "statistics": {
+    "schedules": [],
+    "notes": [],
+    "userMemories": []
+  },
+  "activity": [
+    {
+      "id": "audit-test-1",
+      "timestamp": "2026-08-31T13:16:04.001Z",
+      "chatId": -100999222001,
+      "chatTitle": "Roxie Alpha Lab",
+      "groupId": -100999222001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "add_sticker_pack",
+      "action": "sticker_pack_add",
+      "result": "success",
+      "details": "Added sticker pack RoxieRomancePack"
+    },
+    {
+      "id": "audit-test-2",
+      "timestamp": "2026-08-31T13:16:04.002Z",
+      "chatId": -100999222001,
+      "chatTitle": "Roxie Alpha Lab",
+      "groupId": -100999222001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "dashboard_settings",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Updated settings: autoResponse (mode: cooldown, cd: 45s)"
+    },
+    {
+      "id": "audit-test-1",
+      "timestamp": "2026-08-31T13:31:04.363Z",
+      "chatId": -100999222001,
+      "chatTitle": "Roxie Alpha Lab",
+      "groupId": -100999222001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "add_sticker_pack",
+      "action": "sticker_pack_add",
+      "result": "success",
+      "details": "Added sticker pack RoxieRomancePack"
+    },
+    {
+      "id": "audit-test-2",
+      "timestamp": "2026-08-31T13:31:04.368Z",
+      "chatId": -100999222001,
+      "chatTitle": "Roxie Alpha Lab",
+      "groupId": -100999222001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "dashboard_settings",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Updated settings: autoResponse (mode: cooldown, cd: 45s)"
+    }
+  ],
+  "updatedAt": "2026-08-31T14:14:51.106Z"
+}

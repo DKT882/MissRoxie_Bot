@@ -38,6 +38,19 @@ export interface GroupConversationMessage {
   content: string;
   timestamp: number;
   messageId?: number;
+  chatId?: number | string;
+  username?: string;
+  displayName?: string;
+  mediaType?: string;
+  direction?: 'incoming' | 'outgoing';
+  source?: 'telegram' | 'dashboard' | 'bot';
+  sender?: string;
+  replyToMessageId?: number;
+  replyTo?: {
+    messageId: number;
+    name?: string;
+    text?: string;
+  };
 }
 
 export type GroupConversationEntry = GroupConversationMessage;
@@ -123,12 +136,77 @@ interface DatabaseSchema {
   privateConversations?: Record<string, PrivateConversationRecord>; // `${chatId}` -> PrivateConversationRecord
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.ROXIE_DATA_DIR || process.env.DATA_DIR || path.join(process.cwd(), 'data');
+const GROUPS_DIR = path.join(DATA_DIR, 'groups');
+const PRIVATE_DIR = path.join(DATA_DIR, 'private');
+const BACKUP_DIR = path.join(DATA_DIR, 'backup');
+const GROUPS_BACKUP_DIR = path.join(BACKUP_DIR, 'groups');
+const PRIVATE_BACKUP_DIR = path.join(BACKUP_DIR, 'private');
+const GLOBAL_DB_FILE = path.join(DATA_DIR, 'global.json');
 const DB_FILE = path.join(DATA_DIR, 'bot_storage.json');
 
 class StorageManager {
   public static readonly MAX_PACKS_PER_GROUP = 1000;
   public static readonly GROUP_MEMORY_LIMIT = GROUP_MEMORY_LIMIT;
+
+  public get dataDir(): string {
+    return process.env.ROXIE_DATA_DIR || process.env.DATA_DIR || path.join(process.cwd(), 'data');
+  }
+
+  public get groupsDir(): string {
+    return path.join(this.dataDir, 'groups');
+  }
+
+  public get privateDir(): string {
+    return path.join(this.dataDir, 'private');
+  }
+
+  public get backupDir(): string {
+    return path.join(this.dataDir, 'backup');
+  }
+
+  public get groupsBackupDir(): string {
+    return path.join(this.backupDir, 'groups');
+  }
+
+  public get privateBackupDir(): string {
+    return path.join(this.backupDir, 'private');
+  }
+
+  public get globalFile(): string {
+    return path.join(this.dataDir, 'global.json');
+  }
+
+  public get dbFile(): string {
+    return path.join(this.dataDir, 'bot_storage.json');
+  }
+
+  public ensureDirectories(): void {
+    if (!fs.existsSync(this.dataDir)) {
+      fs.mkdirSync(this.dataDir, { recursive: true });
+    }
+    if (!fs.existsSync(this.groupsDir)) {
+      fs.mkdirSync(this.groupsDir, { recursive: true });
+    }
+    if (!fs.existsSync(this.privateDir)) {
+      fs.mkdirSync(this.privateDir, { recursive: true });
+    }
+    if (!fs.existsSync(this.backupDir)) {
+      fs.mkdirSync(this.backupDir, { recursive: true });
+    }
+    if (!fs.existsSync(this.groupsBackupDir)) {
+      fs.mkdirSync(this.groupsBackupDir, { recursive: true });
+    }
+    if (!fs.existsSync(this.privateBackupDir)) {
+      fs.mkdirSync(this.privateBackupDir, { recursive: true });
+    }
+  }
+
+  private groupWriteQueues: Map<string, Promise<void>> = new Map();
+  private lastSaveTimestamps: Map<string, string> = new Map();
+  private corruptedRecoveries: Map<string, string> = new Map();
+  public lastSaveSuccessful: boolean = true;
+  public corruptedFilesCount: number = 0;
 
   private data: DatabaseSchema = {
     settings: {},
@@ -162,11 +240,17 @@ class StorageManager {
 
   private init() {
     try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+      this.ensureDirectories();
+
+      // Render Persistence Check
+      const isRender = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+      const hasExplicitDataDir = Boolean(process.env.ROXIE_DATA_DIR);
+      if (isRender && !hasExplicitDataDir) {
+        console.warn('[Roxie Storage] WARNING: ROXIE_DATA_DIR is not configured. Runtime filesystem persistence may be lost on Render restart/redeploy. Mount a Persistent Disk (e.g. /var/data/roxie) and configure ROXIE_DATA_DIR=/var/data/roxie.');
       }
-      if (fs.existsSync(DB_FILE)) {
-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
+
+      if (fs.existsSync(this.dbFile)) {
+        const raw = fs.readFileSync(this.dbFile, 'utf-8');
         if (raw) {
           const parsed = JSON.parse(raw);
 
@@ -207,10 +291,59 @@ class StorageManager {
             userMemories: parsed.userMemories || {},
             groupConversationMemories,
             groupMemories: groupConversationMemories,
-            userLustLevels: parsed.userLustLevels || {}
+            userLustLevels: parsed.userLustLevels || {},
+            privateConversations: parsed.privateConversations || {}
           };
         }
       }
+
+      // 2. Load global.json if present
+      this.loadGlobalJson();
+
+      // 3. Load authoritative per-group JSON files
+      const groupLoadResult = this.loadAllGroupJsons();
+      if (groupLoadResult.loadedCount > 0 || groupLoadResult.errorsCount > 0) {
+        console.log(`[Storage] Restored ${groupLoadResult.loadedCount} per-group JSON files (${groupLoadResult.errorsCount} errors handled safely).`);
+      }
+
+      // 4. Load authoritative private chat JSON files
+      const privateLoadResult = this.loadAllPrivateJsons();
+      if (privateLoadResult.loadedCount > 0 || privateLoadResult.errorsCount > 0) {
+        console.log(`[Storage] Restored ${privateLoadResult.loadedCount} private chat JSON files (${privateLoadResult.errorsCount} errors handled safely).`);
+      }
+
+      // 5. Print startup diagnostics (Section 18)
+      console.log(`[Roxie Storage]`);
+      console.log(`Data directory: ${this.dataDir}`);
+      console.log(`Groups loaded: ${groupLoadResult.loadedCount}`);
+      console.log(`Private chats loaded: ${privateLoadResult.loadedCount}`);
+      console.log(`Storage mode: ${hasExplicitDataDir ? 'persistent-path' : 'local-fallback'}`);
+      console.log(`Schema version: 1`);
+
+      // 6. Safe Startup Migration: For any groups/private in memory without a file, generate one
+      if (this.data.settings) {
+        for (const idStr of Object.keys(this.data.settings)) {
+          const numId = Number(idStr);
+          if (!isNaN(numId) && numId < 0) {
+            const groupFile = path.join(this.groupsDir, `${numId}.json`);
+            if (!fs.existsSync(groupFile)) {
+              this.saveGroupJsonSync(numId);
+            }
+          }
+        }
+      }
+      if (this.data.privateConversations) {
+        for (const idStr of Object.keys(this.data.privateConversations)) {
+          const numId = Number(idStr);
+          if (!isNaN(numId) && numId > 0) {
+            const privateFile = path.join(this.privateDir, `${numId}.json`);
+            if (!fs.existsSync(privateFile)) {
+              this.savePrivateJsonSync(numId);
+            }
+          }
+        }
+      }
+      this.saveGlobalJsonSync();
     } catch (err) {
       console.error('Failed to initialize local bot storage:', err);
     }
@@ -219,28 +352,750 @@ class StorageManager {
     this.isLoaded = true;
   }
 
-  public scheduleSave() {
+  // --- Per-Group JSON Persistence & Safety ---
+  public sanitizeGroupData(data: any): any {
+    const jsonStr = JSON.stringify(data, (key, value) => {
+      const lower = key.toLowerCase();
+      if (
+        lower.includes('token') ||
+        lower.includes('secret') ||
+        lower.includes('apikey') ||
+        lower.includes('api_key') ||
+        lower.includes('password') ||
+        lower.includes('credential')
+      ) {
+        return undefined;
+      }
+      return value;
+    });
+    return JSON.parse(jsonStr);
+  }
+
+  public buildGroupDataObject(chatId: number): any {
+    const settings = this.getGroupSettings(chatId);
+    const key = String(chatId);
+
+    const autoResp = settings.autoResponse || { mode: 'disabled' };
+    const autoStk = settings.autoSticker || { mode: 'disabled' };
+
+    const stickerPacksList = settings.stickerPacks
+      ? Object.values(settings.stickerPacks)
+      : [];
+
+    const messages = (this.data.groupConversationMemories?.[key]?.messages || []).map((m: any) => ({
+      role: m.role,
+      name: m.name,
+      displayName: m.displayName || m.name,
+      username: m.username,
+      content: m.content,
+      timestamp: m.timestamp,
+      messageId: m.messageId,
+      chatId: m.chatId || chatId,
+      mediaType: m.mediaType || 'text',
+      direction: m.direction || (m.role === 'assistant' ? 'outgoing' : 'incoming'),
+      source: m.source || (m.role === 'assistant' ? 'dashboard' : 'telegram'),
+      sender: m.sender || (m.role === 'assistant' ? 'Roxie' : m.name),
+      replyToMessageId: m.replyToMessageId,
+      replyTo: m.replyTo
+    }));
+
+    const mediaLib = this.getMediaLibrary(chatId);
+    const groupLogs = (this.data.logs || [])
+      .filter((l: any) => l.groupId === chatId || l.chatId === chatId || l.targetChatId === chatId)
+      .slice(-50);
+
+    const abuseWordsList = settings.abuseWords || settings.customAbusiveWords || [];
+
+    return {
+      schemaVersion: 1,
+      chat: {
+        chatId: String(chatId),
+        title: settings.chatTitle || `Group ${chatId}`,
+        type: chatId < 0 ? 'supergroup' : 'group',
+        username: (settings as any).username || null
+      },
+      status: {
+        botLeft: Boolean(settings.botLeft),
+        leftAt: settings.leftAt || null,
+        unavailable: Boolean(settings.unavailable),
+        unavailableAt: settings.unavailableAt || null,
+        unavailableReason: settings.unavailableReason || null
+      },
+      settings,
+      permissions: {
+        contentPermissions: this.data.contentPermissions?.[key] || null,
+        customRoles: this.data.customRoles?.[key] || {},
+        stickerFreeUsers: (this.data.stickerFreeUsers || []).filter((u: any) => u.chatId === chatId)
+      },
+      moderation: {
+        locks: this.getLocks(chatId),
+        filters: this.getFilters(chatId),
+        linksWhitelist: this.getLinkWhitelist(chatId),
+        approvedUsers: this.getApprovedUsers(chatId),
+        freedUsers: this.getFreedUsers(chatId),
+        warnings: (this.data.warnings || []).filter((w: any) => w.groupId === chatId),
+        tempActions: (this.data.tempActions || []).filter((t: any) => t.groupId === chatId),
+        abuseWords: abuseWordsList
+      },
+      ai: {
+        personality: (settings as any).personality || 'normal',
+        language: (settings as any).language || 'hinglish',
+        brotherZoneEnabled: (settings as any).brotherZoneEnabled ?? true,
+        coupleFilter: (settings as any).coupleFilter ?? true,
+        welcomeEnabled: (settings as any).welcomeEnabled ?? true
+      },
+      lustMode: {
+        enabled: Boolean(settings.lustMode),
+        level: (settings as any).lustLevel ?? 1,
+        lustStickers: mediaLib?.lustStickers || {},
+        userLustLevels: Object.entries(this.data.userLustLevels || {})
+          .filter(([k]) => k.startsWith(`${chatId}_`))
+          .map(([_, v]) => v)
+      },
+      autoResponse: {
+        ...autoResp,
+        nextAllowedAt: (autoResp as any).nextAllowedAt,
+        lastResponseTimestamp: (autoResp as any).lastResponseTimestamp,
+        nextIntervalSeconds: (autoResp as any).nextIntervalSeconds
+      },
+      autoSticker: {
+        ...autoStk,
+        nextAllowedAt: (autoStk as any).nextAllowedAt,
+        lastStickerTimestamp: (autoStk as any).lastStickerTimestamp,
+        nextIntervalSeconds: (autoStk as any).nextIntervalSeconds
+      },
+      stickers: {
+        mediaLibrary: mediaLib,
+        stickerProtection: Boolean(settings.stickerProtection)
+      },
+      stickerPacks: stickerPacksList,
+      abuseWords: abuseWordsList,
+      members: this.data.groupMembers?.[key] || [],
+      moderators: (settings as any).admins || [],
+      messages,
+      statistics: {
+        schedules: this.getGroupSchedules(chatId),
+        notes: this.getAllNotes(chatId),
+        userMemories: Object.entries(this.data.userMemories || {})
+          .filter(([k]) => k.startsWith(`${chatId}_`))
+          .map(([_, v]) => v)
+      },
+      activity: groupLogs,
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  public saveGroupJsonSync(chatId: number | string): void {
+    const numChatId = Number(chatId);
+    if (isNaN(numChatId) || numChatId >= 0) return; // Supergroups and groups have negative IDs
+
+    try {
+      this.ensureDirectories();
+      const rawData = this.buildGroupDataObject(numChatId);
+      const safeData = this.sanitizeGroupData(rawData);
+      const targetFile = path.join(this.groupsDir, `${numChatId}.json`);
+      const tmpFile = path.join(this.groupsDir, `${numChatId}.json.tmp`);
+
+      // Safe backup of previous valid file before replacement
+      if (fs.existsSync(targetFile)) {
+        try {
+          const bakFile = path.join(this.groupsBackupDir, `${numChatId}.json.bak`);
+          fs.copyFileSync(targetFile, bakFile);
+        } catch {}
+      }
+
+      // Safe atomic write (write to .tmp then rename)
+      const jsonContent = JSON.stringify(safeData, null, 2);
+      fs.writeFileSync(tmpFile, jsonContent, 'utf-8');
+      fs.renameSync(tmpFile, targetFile);
+      this.lastSaveSuccessful = true;
+      this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
+    } catch (err: any) {
+      this.lastSaveSuccessful = false;
+      console.error(`[Storage] Failed to save group ${chatId} JSON:`, err.message);
+    }
+  }
+
+  public async saveGroupJson(chatId: number | string): Promise<void> {
+    const key = String(chatId);
+    const prev = this.groupWriteQueues.get(key) || Promise.resolve();
+    const next = prev
+      .then(async () => {
+        this.saveGroupJsonSync(chatId);
+      })
+      .catch((err) => {
+        console.error(`[Storage] Error in write queue for group ${chatId}:`, err);
+      });
+    this.groupWriteQueues.set(key, next);
+    return next;
+  }
+
+  public loadAllGroupJsons(): { loadedCount: number; errorsCount: number } {
+    this.ensureDirectories();
+    let loadedCount = 0;
+    let errorsCount = 0;
+
+    try {
+      const files = fs.readdirSync(this.groupsDir);
+      for (const file of files) {
+        if (!file.endsWith('.json') || file.endsWith('.tmp')) continue;
+
+        const filePath = path.join(this.groupsDir, file);
+        try {
+          const raw = fs.readFileSync(filePath, 'utf-8');
+          if (!raw.trim()) continue;
+
+          let parsed: any;
+          try {
+            parsed = JSON.parse(raw);
+          } catch (parseErr: any) {
+            console.error(`[Storage] Failed to load group ${file}: JSON parse error:`, parseErr.message);
+            // Attempt recovery from backup
+            const chatIdStr = file.replace('.json', '');
+            const bakFile = path.join(this.groupsBackupDir, `${chatIdStr}.json.bak`);
+            if (fs.existsSync(bakFile)) {
+              try {
+                const bakRaw = fs.readFileSync(bakFile, 'utf-8');
+                parsed = JSON.parse(bakRaw);
+                console.log(`[Storage] Successfully recovered corrupted group ${file} from backup ${bakFile}`);
+                this.corruptedRecoveries.set(chatIdStr, 'recovered_from_backup');
+                fs.writeFileSync(filePath, bakRaw, 'utf-8');
+              } catch (bakErr: any) {
+                console.error(`[Storage] Backup recovery failed for group ${file}:`, bakErr.message);
+                this.corruptedRecoveries.set(chatIdStr, 'backup_failed');
+              }
+            }
+            if (!parsed) {
+              errorsCount++;
+              this.corruptedFilesCount++;
+              const numId = Number(chatIdStr);
+              if (!isNaN(numId)) {
+                this.getGroupSettings(numId);
+              }
+              continue;
+            }
+          }
+
+          if (parsed && (parsed.schemaVersion === 1 || parsed.chat?.chatId || parsed.settings)) {
+            const chatId = Number(parsed.chat?.chatId || parsed.settings?.chatId || file.replace('.json', ''));
+            if (!isNaN(chatId) && chatId < 0) {
+              this.restoreGroupData(chatId, parsed);
+              loadedCount++;
+            }
+          }
+        } catch (readErr: any) {
+          console.error(`[Storage] Failed to load group ${file}:`, readErr.message);
+          errorsCount++;
+        }
+      }
+    } catch (err: any) {
+      console.error('[Storage] Error reading groups directory:', err);
+    }
+
+    return { loadedCount, errorsCount };
+  }
+
+  public restoreGroupData(chatId: number, data: any): void {
+    const key = String(chatId);
+
+    // 1. Settings restoration
+    const incomingSettings = data.settings || {};
+    const existingSettings = this.getGroupSettings(chatId);
+
+    const mergedSettings: GroupSettings = {
+      ...existingSettings,
+      ...incomingSettings,
+      chatTitle: data.chat?.title || incomingSettings.chatTitle || existingSettings.chatTitle || `Group ${chatId}`,
+      botLeft: data.status?.botLeft !== undefined ? Boolean(data.status.botLeft) : incomingSettings.botLeft,
+      leftAt: data.status?.leftAt || incomingSettings.leftAt,
+      unavailable: data.status?.unavailable !== undefined ? Boolean(data.status.unavailable) : incomingSettings.unavailable,
+      unavailableAt: data.status?.unavailableAt || incomingSettings.unavailableAt,
+      unavailableReason: data.status?.unavailableReason || incomingSettings.unavailableReason,
+      updatedAt: data.updatedAt || new Date().toISOString()
+    };
+
+    // Restore sticker packs
+    if (Array.isArray(data.stickerPacks)) {
+      if (!mergedSettings.stickerPacks) mergedSettings.stickerPacks = {};
+      for (const pack of data.stickerPacks) {
+        if (pack?.name) {
+          mergedSettings.stickerPacks[pack.name.toLowerCase().trim()] = pack;
+        }
+      }
+    }
+
+    // Restore autoResponse & autoSticker (with runtime timestamps)
+    if (data.autoResponse) {
+      mergedSettings.autoResponse = {
+        ...(mergedSettings.autoResponse || {}),
+        ...data.autoResponse
+      };
+    }
+    if (data.autoSticker) {
+      mergedSettings.autoSticker = {
+        ...(mergedSettings.autoSticker || {}),
+        ...data.autoSticker
+      };
+    }
+
+    // Restore abuse words
+    if (Array.isArray(data.abuseWords)) {
+      mergedSettings.abuseWords = data.abuseWords;
+      mergedSettings.customAbusiveWords = data.abuseWords;
+    }
+
+    this.data.settings[chatId] = mergedSettings;
+
+    // 2. Messages restoration
+    if (Array.isArray(data.messages) && data.messages.length > 0) {
+      if (!this.data.groupConversationMemories) this.data.groupConversationMemories = {};
+      this.data.groupConversationMemories[key] = {
+        chatId,
+        messages: data.messages.slice(-GROUP_MEMORY_LIMIT),
+        lastUpdated: Date.now()
+      };
+      if (this.data.groupMemories) {
+        this.data.groupMemories[key] = this.data.groupConversationMemories[key];
+      }
+    }
+
+    // 3. Media library restoration
+    if (data.stickers?.mediaLibrary) {
+      if (!this.data.groupMediaLibraries) this.data.groupMediaLibraries = {};
+      this.data.groupMediaLibraries[key] = data.stickers.mediaLibrary;
+    }
+
+    // 4. Permissions restoration
+    if (data.permissions?.contentPermissions) {
+      if (!this.data.contentPermissions) this.data.contentPermissions = {};
+      this.data.contentPermissions[key] = data.permissions.contentPermissions;
+    }
+    if (data.permissions?.customRoles) {
+      if (!this.data.customRoles) this.data.customRoles = {};
+      this.data.customRoles[key] = data.permissions.customRoles;
+    }
+
+    // 5. Moderation items
+    if (data.moderation?.approvedUsers) {
+      if (!this.data.approvedUsers) this.data.approvedUsers = {};
+      this.data.approvedUsers[key] = data.moderation.approvedUsers;
+    }
+    if (Array.isArray(data.moderation?.warnings)) {
+      for (const w of data.moderation.warnings) {
+        if (!this.data.warnings.some((x: any) => x.id === w.id)) {
+          this.data.warnings.push(w);
+        }
+      }
+    }
+    if (Array.isArray(data.moderation?.tempActions)) {
+      for (const t of data.moderation.tempActions) {
+        if (!this.data.tempActions.some((x: any) => x.id === t.id)) {
+          this.data.tempActions.push(t);
+        }
+      }
+    }
+
+    // 6. Notes & Schedules
+    if (data.statistics?.notes) {
+      if (!this.data.notes) this.data.notes = {};
+      this.data.notes[key] = data.statistics.notes;
+    }
+    if (Array.isArray(data.statistics?.schedules)) {
+      for (const s of data.statistics.schedules) {
+        if (!this.data.schedules.some((x: any) => x.id === s.id)) {
+          this.data.schedules.push(s);
+        }
+      }
+    }
+
+    // 7. Activity logs
+    if (Array.isArray(data.activity)) {
+      for (const log of data.activity) {
+        if (!this.data.logs.some((l: any) => l.id === log.id)) {
+          this.data.logs.push(log);
+        }
+      }
+    }
+
+    // 8. User lust levels
+    if (Array.isArray(data.lustMode?.userLustLevels)) {
+      if (!this.data.userLustLevels) this.data.userLustLevels = {};
+      for (const ul of data.lustMode.userLustLevels) {
+        this.data.userLustLevels[`${ul.groupId}_${ul.userId}`] = ul;
+      }
+    }
+  }
+
+  public scheduleSave(chatId?: number | string) {
+    this.lastSaveSuccessful = true;
+    if (chatId !== undefined && chatId !== null) {
+      const numId = Number(chatId);
+      if (!isNaN(numId)) {
+        if (numId < 0) {
+          this.saveGroupJsonSync(numId);
+        } else if (numId > 0) {
+          this.savePrivateJsonSync(numId);
+        }
+      }
+    }
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout);
     }
     this.saveTimeout = setTimeout(() => {
       this.persist();
-    }, 300);
+      this.saveGlobalJsonSync();
+    }, 200);
   }
 
   private persist() {
     this.cleanOldLogs();
     this.cleanExpiredMemories();
     try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
-      const tempFile = `${DB_FILE}.tmp`;
+      this.ensureDirectories();
+      const tempFile = `${this.dbFile}.tmp`;
       fs.writeFileSync(tempFile, JSON.stringify(this.data, null, 2), 'utf-8');
-      fs.renameSync(tempFile, DB_FILE);
+      fs.renameSync(tempFile, this.dbFile);
+      this.lastSaveSuccessful = true;
     } catch (err) {
+      this.lastSaveSuccessful = false;
       console.error('Error persisting database:', err);
     }
+  }
+
+  // --- Private Chat JSON Persistence ---
+  public buildPrivateDataObject(chatId: number | string): any {
+    const key = String(chatId);
+    const conv = this.data.privateConversations?.[key] || {
+      chatId,
+      userId: Number(chatId),
+      messages: [],
+      lastUpdated: Date.now()
+    };
+    return {
+      schemaVersion: 1,
+      chatId: String(conv.chatId),
+      userId: conv.userId || Number(chatId),
+      username: conv.username || null,
+      name: conv.name || null,
+      language: conv.language || 'English',
+      lastUpdated: conv.lastUpdated,
+      messages: conv.messages || [],
+      lustLevel: this.getLustLevel(chatId, Number(chatId)),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  public savePrivateJsonSync(chatId: number | string): void {
+    const numChatId = Number(chatId);
+    if (isNaN(numChatId) || numChatId <= 0) return;
+
+    try {
+      this.ensureDirectories();
+      const rawData = this.buildPrivateDataObject(numChatId);
+      const safeData = this.sanitizeGroupData(rawData);
+      const targetFile = path.join(this.privateDir, `${numChatId}.json`);
+      const tmpFile = path.join(this.privateDir, `${numChatId}.json.tmp`);
+
+      if (fs.existsSync(targetFile)) {
+        try {
+          const bakFile = path.join(this.privateBackupDir, `${numChatId}.json.bak`);
+          fs.copyFileSync(targetFile, bakFile);
+        } catch {}
+      }
+
+      const jsonContent = JSON.stringify(safeData, null, 2);
+      fs.writeFileSync(tmpFile, jsonContent, 'utf-8');
+      fs.renameSync(tmpFile, targetFile);
+      this.lastSaveSuccessful = true;
+      this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
+    } catch (err: any) {
+      this.lastSaveSuccessful = false;
+      console.error(`[Storage] Failed to save private chat ${chatId} JSON:`, err.message);
+    }
+  }
+
+  public async savePrivateJson(chatId: number | string): Promise<void> {
+    const key = String(chatId);
+    const prev = this.groupWriteQueues.get(`priv_${key}`) || Promise.resolve();
+    const next = prev
+      .then(async () => {
+        this.savePrivateJsonSync(chatId);
+      })
+      .catch((err) => {
+        console.error(`[Storage] Error in write queue for private chat ${chatId}:`, err);
+      });
+    this.groupWriteQueues.set(`priv_${key}`, next);
+    return next;
+  }
+
+  public restorePrivateData(chatId: string | number, data: any): void {
+    const key = String(chatId);
+    if (!this.data.privateConversations) this.data.privateConversations = {};
+
+    const existing = this.data.privateConversations[key] || {
+      chatId,
+      userId: Number(chatId),
+      messages: [],
+      lastUpdated: Date.now()
+    };
+
+    const mergedMessages = Array.isArray(data.messages) ? data.messages : existing.messages;
+
+    this.data.privateConversations[key] = {
+      ...existing,
+      chatId: data.chatId || existing.chatId,
+      userId: data.userId || existing.userId || Number(chatId),
+      username: data.username || existing.username,
+      name: data.name || existing.name,
+      language: data.language || existing.language || 'English',
+      lastUpdated: data.lastUpdated || existing.lastUpdated || Date.now(),
+      messages: mergedMessages
+    };
+
+    if (data.lustLevel !== undefined) {
+      this.setLustLevel(chatId, Number(chatId), Number(data.lustLevel));
+    }
+  }
+
+  public loadAllPrivateJsons(): { loadedCount: number; errorsCount: number } {
+    this.ensureDirectories();
+    let loadedCount = 0;
+    let errorsCount = 0;
+
+    try {
+      if (!fs.existsSync(this.privateDir)) return { loadedCount, errorsCount };
+      const files = fs.readdirSync(this.privateDir);
+      for (const file of files) {
+        if (!file.endsWith('.json') || file.endsWith('.tmp')) continue;
+
+        const filePath = path.join(this.privateDir, file);
+        try {
+          const raw = fs.readFileSync(filePath, 'utf-8');
+          if (!raw.trim()) continue;
+
+          let parsed: any;
+          try {
+            parsed = JSON.parse(raw);
+          } catch (parseErr: any) {
+            console.error(`[Storage] Failed to load private chat ${file}: JSON parse error:`, parseErr.message);
+            const chatIdStr = file.replace('.json', '');
+            const bakFile = path.join(this.privateBackupDir, `${chatIdStr}.json.bak`);
+            if (fs.existsSync(bakFile)) {
+              try {
+                const bakRaw = fs.readFileSync(bakFile, 'utf-8');
+                parsed = JSON.parse(bakRaw);
+                console.log(`[Storage] Successfully recovered corrupted private chat ${file} from backup ${bakFile}`);
+                fs.writeFileSync(filePath, bakRaw, 'utf-8');
+              } catch {}
+            }
+            if (!parsed) {
+              errorsCount++;
+              continue;
+            }
+          }
+
+          if (parsed && (parsed.chatId || parsed.userId)) {
+            const chatId = String(parsed.chatId || parsed.userId || file.replace('.json', ''));
+            this.restorePrivateData(chatId, parsed);
+            loadedCount++;
+          }
+        } catch (readErr: any) {
+          console.error(`[Storage] Failed to load private chat ${file}:`, readErr.message);
+          errorsCount++;
+        }
+      }
+    } catch (err: any) {
+      console.error('[Storage] Error reading private chats directory:', err);
+    }
+
+    return { loadedCount, errorsCount };
+  }
+
+  // --- Global JSON Persistence ---
+  public saveGlobalJsonSync(): void {
+    try {
+      this.ensureDirectories();
+      const globalData = {
+        schemaVersion: 1,
+        customRoles: this.data.customRoles || {},
+        mediaLibrary: this.data.mediaLibrary || { stickers: {}, animations: {}, stickerMetadata: {} },
+        schedules: this.data.schedules || [],
+        logs: (this.data.logs || []).slice(-200),
+        knownUsers: this.data.knownUsers || {},
+        knownUsersById: this.data.knownUsersById || {},
+        updatedAt: new Date().toISOString()
+      };
+      const safeData = this.sanitizeGroupData(globalData);
+      const targetFile = this.globalFile;
+      const tmpFile = `${targetFile}.tmp`;
+      const jsonContent = JSON.stringify(safeData, null, 2);
+      fs.writeFileSync(tmpFile, jsonContent, 'utf-8');
+      fs.renameSync(tmpFile, targetFile);
+    } catch (err: any) {
+      console.error('[Storage] Failed to save global.json:', err.message);
+    }
+  }
+
+  public loadGlobalJson(): void {
+    try {
+      if (!fs.existsSync(this.globalFile)) return;
+      const raw = fs.readFileSync(this.globalFile, 'utf-8');
+      if (!raw.trim()) return;
+      const parsed = JSON.parse(raw);
+      if (parsed) {
+        if (parsed.customRoles) this.data.customRoles = { ...this.data.customRoles, ...parsed.customRoles };
+        if (parsed.mediaLibrary) this.data.mediaLibrary = { ...this.data.mediaLibrary, ...parsed.mediaLibrary };
+        if (Array.isArray(parsed.schedules) && parsed.schedules.length > 0) {
+          const existingIds = new Set((this.data.schedules || []).map(s => s.id));
+          for (const s of parsed.schedules) {
+            if (!existingIds.has(s.id)) this.data.schedules.push(s);
+          }
+        }
+        if (parsed.knownUsers) this.data.knownUsers = { ...this.data.knownUsers, ...parsed.knownUsers };
+        if (parsed.knownUsersById) this.data.knownUsersById = { ...this.data.knownUsersById, ...parsed.knownUsersById };
+      }
+    } catch (err: any) {
+      console.error('[Storage] Error loading global.json:', err.message);
+    }
+  }
+
+  // --- Group Export, Storage Status & System Health ---
+  public getGroupStorageStatus(chatId: number | string): {
+    chatId: string;
+    storagePath: string;
+    fileExists: boolean;
+    lastModified: string | null;
+    fileSize: number;
+    schemaVersion: number;
+    lastSuccessfulSave: string | null;
+    pendingWrites: number;
+    corruptionRecoveryStatus: string;
+  } {
+    const numId = Number(chatId);
+    const key = String(numId);
+    const targetFile = path.join(this.groupsDir, `${numId}.json`);
+    const exists = fs.existsSync(targetFile);
+    let mtime: string | null = null;
+    let size = 0;
+    if (exists) {
+      try {
+        const stat = fs.statSync(targetFile);
+        mtime = stat.mtime.toISOString();
+        size = stat.size;
+      } catch {}
+    }
+    return {
+      chatId: key,
+      storagePath: targetFile,
+      fileExists: exists,
+      lastModified: mtime,
+      fileSize: size,
+      schemaVersion: 1,
+      lastSuccessfulSave: this.lastSaveTimestamps.get(key) || mtime || null,
+      pendingWrites: this.groupWriteQueues.has(key) ? 1 : 0,
+      corruptionRecoveryStatus: this.corruptedRecoveries.get(key) || 'healthy'
+    };
+  }
+
+  public getGroupExportData(chatId: number | string): any {
+    const numId = Number(chatId);
+    const targetFile = path.join(this.groupsDir, `${numId}.json`);
+    if (fs.existsSync(targetFile)) {
+      try {
+        return JSON.parse(fs.readFileSync(targetFile, 'utf-8'));
+      } catch {}
+    }
+    return this.sanitizeGroupData(this.buildGroupDataObject(numId));
+  }
+
+  public getPersistenceHealth(): {
+    status: 'healthy' | 'warning' | 'error';
+    dataDir: string;
+    storageMode: 'persistent-path' | 'local-fallback';
+    isRender: boolean;
+    renderPersistentConfigured: boolean;
+    directoryWritable: boolean;
+    filesReadable: boolean;
+    lastSaveSuccessful: boolean;
+    pendingWritesCount: number;
+    corruptedFilesCount: number;
+    recoveredFilesCount: number;
+    groupsCount: number;
+    privateChatsCount: number;
+  } {
+    let writable = false;
+    let readable = false;
+    try {
+      this.ensureDirectories();
+      readable = fs.existsSync(this.groupsDir);
+      const testFile = path.join(this.dataDir, `.canary_${Date.now()}`);
+      fs.writeFileSync(testFile, 'ok', 'utf-8');
+      fs.unlinkSync(testFile);
+      writable = true;
+    } catch {
+      writable = false;
+    }
+
+    const isRender = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+    const hasExplicitDataDir = Boolean(process.env.ROXIE_DATA_DIR);
+
+    let status: 'healthy' | 'warning' | 'error' = 'healthy';
+    if (!writable || !readable) {
+      status = 'error';
+    } else if ((isRender && !hasExplicitDataDir) || this.corruptedFilesCount > 0) {
+      status = 'warning';
+    }
+
+    const groupsFiles = fs.existsSync(this.groupsDir)
+      ? fs.readdirSync(this.groupsDir).filter(f => f.endsWith('.json') && !f.endsWith('.tmp')).length
+      : 0;
+    const privateFiles = fs.existsSync(this.privateDir)
+      ? fs.readdirSync(this.privateDir).filter(f => f.endsWith('.json') && !f.endsWith('.tmp')).length
+      : 0;
+
+    return {
+      status,
+      dataDir: this.dataDir,
+      storageMode: hasExplicitDataDir ? 'persistent-path' : 'local-fallback',
+      isRender,
+      renderPersistentConfigured: hasExplicitDataDir,
+      directoryWritable: writable,
+      filesReadable: readable,
+      lastSaveSuccessful: this.lastSaveSuccessful,
+      pendingWritesCount: this.groupWriteQueues.size,
+      corruptedFilesCount: this.corruptedFilesCount,
+      recoveredFilesCount: this.corruptedRecoveries.size,
+      groupsCount: groupsFiles,
+      privateChatsCount: privateFiles
+    };
+  }
+
+  public async flushAll(): Promise<void> {
+    const allPending = Array.from(this.groupWriteQueues.values());
+    await Promise.all(allPending);
+
+    if (this.data.settings) {
+      for (const idStr of Object.keys(this.data.settings)) {
+        const numId = Number(idStr);
+        if (!isNaN(numId) && numId < 0) {
+          this.saveGroupJsonSync(numId);
+        }
+      }
+    }
+
+    if (this.data.privateConversations) {
+      for (const idStr of Object.keys(this.data.privateConversations)) {
+        const numId = Number(idStr);
+        if (!isNaN(numId) && numId > 0) {
+          this.savePrivateJsonSync(numId);
+        }
+      }
+    }
+
+    this.saveGlobalJsonSync();
+    try {
+      this.persist();
+    } catch {}
   }
 
   // --- User Caching (for resolving @username to userId and vice-versa) ---
@@ -394,7 +1249,7 @@ class StorageManager {
     } else {
       this.data.customRoles[key] = role;
     }
-    this.scheduleSave();
+    this.scheduleSave(chatId);
   }
 
   public getCustomRole(chatId: number, userId: number): 'MODERATOR' | 'NONE' {
@@ -602,8 +1457,51 @@ class StorageManager {
       updatedAt: new Date().toISOString()
     };
     this.data.settings[chatId] = updated;
-    this.scheduleSave();
+    this.scheduleSave(chatId);
     return updated;
+  }
+
+  // --- Abuse Words Management ---
+  public getAbuseWords(chatId: number | string): string[] {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    return settings.abuseWords || settings.customAbusiveWords || [];
+  }
+
+  public addAbuseWord(chatId: number | string, word: string): string[] {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    if (!settings.abuseWords) {
+      settings.abuseWords = settings.customAbusiveWords ? [...settings.customAbusiveWords] : [];
+    }
+    const clean = word.toLowerCase().trim();
+    if (clean && !settings.abuseWords.includes(clean)) {
+      settings.abuseWords.push(clean);
+      settings.customAbusiveWords = settings.abuseWords;
+      this.scheduleSave(numId);
+    }
+    return settings.abuseWords;
+  }
+
+  public removeAbuseWord(chatId: number | string, word: string): string[] {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    if (!settings.abuseWords) {
+      settings.abuseWords = settings.customAbusiveWords ? [...settings.customAbusiveWords] : [];
+    }
+    const clean = word.toLowerCase().trim();
+    settings.abuseWords = settings.abuseWords.filter(w => w.toLowerCase() !== clean);
+    settings.customAbusiveWords = settings.abuseWords;
+    this.scheduleSave(numId);
+    return settings.abuseWords;
+  }
+
+  public clearAbuseWords(chatId: number | string): void {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    settings.abuseWords = [];
+    settings.customAbusiveWords = [];
+    this.scheduleSave(numId);
   }
 
   // --- Links Whitelist ---
@@ -734,7 +1632,7 @@ class StorageManager {
       ...record
     };
     this.data.warnings.push(newRecord);
-    this.scheduleSave();
+    this.scheduleSave(record.chatId);
 
     const totalWarnings = this.getUserWarnings(record.chatId, record.userId).length;
     return { warning: newRecord, totalWarnings };
@@ -749,7 +1647,7 @@ class StorageManager {
     // Sort by timestamp or index and remove latest
     const latest = userWarnings[userWarnings.length - 1];
     this.data.warnings = this.data.warnings.filter((w) => w.id !== latest.id);
-    this.scheduleSave();
+    this.scheduleSave(chatId);
 
     const remaining = this.getUserWarnings(chatId, userId).length;
     return { removed: true, remaining };
@@ -773,7 +1671,7 @@ class StorageManager {
     const initialCount = this.data.warnings.length;
     this.data.warnings = this.data.warnings.filter((w) => !(w.chatId === chatId && w.userId === userId));
     const removed = initialCount - this.data.warnings.length;
-    this.scheduleSave();
+    this.scheduleSave(chatId);
     return removed;
   }
 
@@ -803,7 +1701,7 @@ class StorageManager {
       fileType
     };
     this.data.notes[key] = record;
-    this.scheduleSave();
+    this.scheduleSave(chatId);
     return record;
   }
 
@@ -829,7 +1727,7 @@ class StorageManager {
     const key = `${chatId}_${cleanName}`;
     if (this.data.notes[key]) {
       delete this.data.notes[key];
-      this.scheduleSave();
+      this.scheduleSave(chatId);
       return true;
     }
     return false;
@@ -846,7 +1744,7 @@ class StorageManager {
       }
     }
     if (count > 0) {
-      this.scheduleSave();
+      this.scheduleSave(chatId);
     }
     return count;
   }
@@ -872,7 +1770,7 @@ class StorageManager {
       approvedAt: new Date().toISOString()
     };
     this.data.approvedUsers[key] = record;
-    this.scheduleSave();
+    this.scheduleSave(chatId);
     return record;
   }
 
@@ -881,7 +1779,7 @@ class StorageManager {
     const key = `${chatId}_${userId}`;
     if (this.data.approvedUsers[key]) {
       delete this.data.approvedUsers[key];
-      this.scheduleSave();
+      this.scheduleSave(chatId);
       return true;
     }
     return false;
@@ -1249,7 +2147,7 @@ class StorageManager {
     }
 
     this.data.tempActions.push(newRecord);
-    this.scheduleSave();
+    this.scheduleSave(record.chatId);
     return newRecord;
   }
 
@@ -1261,7 +2159,7 @@ class StorageManager {
     );
     const removed = initialCount > this.data.tempActions.length;
     if (removed) {
-      this.scheduleSave();
+      this.scheduleSave(chatId);
     }
     return removed;
   }
@@ -1359,7 +2257,7 @@ class StorageManager {
       }
     }
 
-    this.scheduleSave();
+    this.scheduleSave(chatId);
     return record;
   }
 
@@ -1413,7 +2311,7 @@ class StorageManager {
     }
 
     if (removed) {
-      this.scheduleSave();
+      this.scheduleSave(chatId);
     }
     return removed;
   }
@@ -1553,7 +2451,7 @@ class StorageManager {
       ...schedule
     };
     this.data.schedules.push(newSchedule);
-    this.scheduleSave();
+    this.scheduleSave(schedule.chatId);
     return newSchedule;
   }
 
@@ -1564,7 +2462,7 @@ class StorageManager {
     );
     const changed = initial > this.data.schedules.length;
     if (changed) {
-      this.scheduleSave();
+      this.scheduleSave(chatId);
     }
     return changed;
   }
@@ -1574,7 +2472,7 @@ class StorageManager {
     if (s) {
       s.nextRun = nextRun;
       s.runsCount = (s.runsCount || 0) + 1;
-      this.scheduleSave();
+      this.scheduleSave(s.chatId);
     }
   }
 
@@ -1604,7 +2502,8 @@ class StorageManager {
     if (this.data.logs.length > 200) {
       this.data.logs.shift();
     }
-    this.scheduleSave();
+    const targetChatId = (log as any).groupId || (log as any).chatId || (log as any).targetChatId;
+    this.scheduleSave(targetChatId);
     return entry;
   }
 
@@ -1909,7 +2808,7 @@ class StorageManager {
 
     if (!lib.stickers[normalizedMood].includes(fileId)) {
       lib.stickers[normalizedMood].push(fileId);
-      this.scheduleSave();
+      this.scheduleSave(chatId);
       return true; // newly added
     }
     return false; // already existed
@@ -1923,7 +2822,7 @@ class StorageManager {
     }
     if (!lib.animations[normalizedMood].includes(fileId)) {
       lib.animations[normalizedMood].push(fileId);
-      this.scheduleSave();
+      this.scheduleSave(chatId);
       return true;
     }
     return false;
@@ -1960,7 +2859,7 @@ class StorageManager {
       removed = true;
     }
     if (removed) {
-      this.scheduleSave();
+      this.scheduleSave(chatId);
     }
     return removed;
   }
@@ -1987,7 +2886,7 @@ class StorageManager {
     }
 
     if (removedCount > 0) {
-      this.scheduleSave();
+      this.scheduleSave(chatId);
     }
     return removedCount;
   }
@@ -2021,7 +2920,7 @@ class StorageManager {
       if (!lib.stickers[normalizedMood].includes(fileId)) {
         lib.stickers[normalizedMood].push(fileId);
       }
-      this.scheduleSave();
+      this.scheduleSave(chatId);
       return true;
     }
     return false;
@@ -2209,7 +3108,7 @@ class StorageManager {
       if (record.facts.length > 8) {
         record.facts.shift();
       }
-      this.scheduleSave();
+      this.scheduleSave(chatId);
     }
   }
 
@@ -2219,7 +3118,7 @@ class StorageManager {
     const existed = !!this.data.userMemories[key];
     if (existed) {
       delete this.data.userMemories[key];
-      this.scheduleSave();
+      this.scheduleSave(chatId);
     }
     return existed;
   }
@@ -2293,7 +3192,7 @@ class StorageManager {
       level: clampedLevel,
       lastUpdated: now
     };
-    this.scheduleSave();
+    this.scheduleSave(groupId);
     return clampedLevel;
   }
 
@@ -2309,7 +3208,7 @@ class StorageManager {
       const key = `${groupId}_${userId}`;
       if (this.data.userLustLevels[key]) {
         delete this.data.userLustLevels[key];
-        this.scheduleSave();
+        this.scheduleSave(groupId);
       }
     } else {
       let modified = false;
@@ -2321,7 +3220,7 @@ class StorageManager {
         }
       }
       if (modified) {
-        this.scheduleSave();
+        this.scheduleSave(groupId);
       }
     }
   }
@@ -2374,7 +3273,19 @@ class StorageManager {
     if (this.data.groupMemories) {
       this.data.groupMemories[key] = record;
     }
-    this.scheduleSave();
+    this.scheduleSave(chatId);
+  }
+
+  public isMessageInOtherGroup(messageId: number, targetChatId: number): number | null {
+    if (!this.data.groupConversationMemories) return null;
+    for (const [gId, record] of Object.entries(this.data.groupConversationMemories)) {
+      if (Number(gId) !== targetChatId) {
+        if (record?.messages?.some(m => m.messageId === messageId)) {
+          return Number(gId);
+        }
+      }
+    }
+    return null;
   }
 
   public clearGroupMemory(chatId: number | string): boolean {
@@ -2389,7 +3300,7 @@ class StorageManager {
       existed = true;
     }
     if (existed) {
-      this.scheduleSave();
+      this.scheduleSave(chatId);
     }
     return existed;
   }
@@ -2452,7 +3363,7 @@ class StorageManager {
     if (record.messages.length > 200) {
       record.messages.shift();
     }
-    this.scheduleSave();
+    this.scheduleSave(chatId);
   }
 
   public getPrivateChatsList(): Array<{
@@ -2494,7 +3405,17 @@ class StorageManager {
     const settings = this.getGroupSettings(numId);
     settings.botLeft = true;
     settings.leftAt = new Date().toISOString();
-    this.scheduleSave();
+    settings.unavailable = false;
+    this.scheduleSave(numId);
+  }
+
+  public markGroupUnavailable(chatId: number | string, reason?: string): void {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    settings.unavailable = true;
+    settings.unavailableAt = new Date().toISOString();
+    if (reason) settings.unavailableReason = reason;
+    this.scheduleSave(numId);
   }
 
   public getTotalStoredMessagesCount(): number {
@@ -2556,7 +3477,7 @@ class StorageManager {
       ...pack,
       addedAt: pack.addedAt || new Date().toISOString()
     };
-    this.scheduleSave();
+    this.scheduleSave(numId);
     return settings.stickerPacks[cleanKey];
   }
 
@@ -2575,7 +3496,7 @@ class StorageManager {
       ...settings.stickerPacks[cleanKey],
       ...updates
     };
-    this.scheduleSave();
+    this.scheduleSave(numId);
     return settings.stickerPacks[cleanKey];
   }
 
@@ -2585,7 +3506,7 @@ class StorageManager {
     const cleanKey = packName.toLowerCase().trim();
     if (settings.stickerPacks && settings.stickerPacks[cleanKey]) {
       delete settings.stickerPacks[cleanKey];
-      this.scheduleSave();
+      this.scheduleSave(numId);
     }
     return this.removeStickerPackFromLibrary(packName, numId);
   }
@@ -2598,6 +3519,19 @@ class StorageManager {
     const pack = settings.stickerPacks[packName.toLowerCase().trim()];
     if (!pack) return true;
     return pack.enabled !== false;
+  }
+
+  // --- Sticker Pack Convenience Aliases ---
+  public addStickerPack(chatId: number | string, pack: GroupStickerPackConfig): GroupStickerPackConfig {
+    return this.addGroupStickerPack(chatId, pack);
+  }
+
+  public removeStickerPack(chatId: number | string, packName: string): number {
+    return this.removeGroupStickerPack(chatId, packName);
+  }
+
+  public toggleStickerPack(chatId: number | string, packName: string, enabled: boolean): GroupStickerPackConfig | null {
+    return this.updateGroupStickerPack(chatId, packName, { enabled });
   }
 
   public checkAutoResponseEligibility(chatId: number | string): { allowed: boolean; remainingSeconds?: number; reason?: string } {
@@ -2690,7 +3624,7 @@ class StorageManager {
       settings.autoResponse.nextAllowedAt = 0;
     }
 
-    this.scheduleSave();
+    this.scheduleSave(numId);
   }
 
   public checkAutoStickerEligibility(chatId: number | string): { allowed: boolean; remainingSeconds?: number; reason?: string } {
@@ -2783,7 +3717,7 @@ class StorageManager {
       settings.autoSticker.nextAllowedAt = 0;
     }
 
-    this.scheduleSave();
+    this.scheduleSave(numId);
   }
 }
 

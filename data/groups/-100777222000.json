@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "chat": {
+    "chatId": "-100777222000",
+    "title": "Group Beta",
+    "type": "supergroup",
+    "username": null
+  },
+  "status": {
+    "botLeft": false,
+    "leftAt": null,
+    "unavailable": false,
+    "unavailableAt": null,
+    "unavailableReason": null
+  },
+  "settings": {
+    "chatId": -100777222000,
+    "chatTitle": "Group Beta",
+    "warnLimit": 3,
+    "warnAction": "ban",
+    "warnExpireSeconds": 0,
+    "floodEnabled": false,
+    "floodCount": 8,
+    "floodWindow": 5,
+    "floodAction": "mute",
+    "raidEnabled": false,
+    "raidLimit": 8,
+    "raidWindow": 30,
+    "raidAction": "kick",
+    "raidDuration": 300,
+    "captchaEnabled": false,
+    "captchaMode": "button",
+    "captchaTimeout": 120,
+    "captchaAction": "kick",
+    "linksProtection": true,
+    "linksWhitelist": [],
+    "mediaProtection": true,
+    "stickerProtection": true,
+    "gifsProtection": false,
+    "videosProtection": false,
+    "photosProtection": false,
+    "voiceProtection": false,
+    "audioProtection": false,
+    "locks": {},
+    "filters": {},
+    "welcomeEnabled": false,
+    "welcomeMessage": "Welcome {user} to {chat}!",
+    "goodbyeEnabled": false,
+    "goodbyeMessage": "Goodbye {user}!",
+    "autoDeleteJoinLeave": false,
+    "slowModeSeconds": 0,
+    "reportsEnabled": true,
+    "chatbotEnabled": true,
+    "chatbotMode": "auto",
+    "reactionEnabled": true,
+    "reactionProbability": 0.15,
+    "stopSpamEnabled": false,
+    "stopAbusiveEnabled": false,
+    "stopPromotionEnabled": false,
+    "gifProtection": false,
+    "linkProtection": true,
+    "imageProtection": false,
+    "fileProtection": false,
+    "customAbusiveWords": [],
+    "automodEnabled": false,
+    "mediaAction": "delete",
+    "warnEscalation": [],
+    "securityEnabled": false,
+    "joinmode": "normal",
+    "autoAcceptEnabled": false,
+    "automations": [],
+    "rules": "",
+    "lastAllTimestamp": 0,
+    "protectionEnabled": true,
+    "protectionFloodCount": 5,
+    "protectionFloodWindow": 5,
+    "protectionDuplicateLimit": 3,
+    "protectionLinkBurstLimit": 3,
+    "updatedAt": "2026-08-31T14:07:14.919Z",
+    "lustMode": true,
+    "autoResponse": {
+      "enabled": true,
+      "mode": "every_message",
+      "cooldownSeconds": 30,
+      "randomize": false,
+      "minSeconds": 30,
+      "maxSeconds": 120,
+      "lastResponseTimestamp": 0
+    },
+    "autoSticker": {
+      "enabled": true,
+      "mode": "cooldown",
+      "cooldownSeconds": 60,
+      "randomize": false,
+      "minSeconds": 60,
+      "maxSeconds": 300,
+      "lastStickerTimestamp": 0
+    },
+    "stickerPacks": {},
+    "botLeft": false,
+    "unavailable": false,
+    "abuseWords": []
+  },
+  "permissions": {
+    "contentPermissions": null,
+    "customRoles": {},
+    "stickerFreeUsers": []
+  },
+  "moderation": {
+    "locks": {},
+    "filters": {},
+    "linksWhitelist": [],
+    "approvedUsers": [],
+    "freedUsers": [],
+    "warnings": [],
+    "tempActions": [],
+    "abuseWords": []
+  },
+  "ai": {
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true,
+    "welcomeEnabled": false
+  },
+  "lustMode": {
+    "enabled": true,
+    "level": 1,
+    "lustStickers": {},
+    "userLustLevels": []
+  },
+  "autoResponse": {
+    "enabled": true,
+    "mode": "every_message",
+    "cooldownSeconds": 30,
+    "randomize": false,
+    "minSeconds": 30,
+    "maxSeconds": 120,
+    "lastResponseTimestamp": 0
+  },
+  "autoSticker": {
+    "enabled": true,
+    "mode": "cooldown",
+    "cooldownSeconds": 60,
+    "randomize": false,
+    "minSeconds": 60,
+    "maxSeconds": 300,
+    "lastStickerTimestamp": 0
+  },
+  "stickers": {
+    "mediaLibrary": {
+      "stickers": {
+        "romantic": [
+          "CAACAgIAAxUAAWqCustomStickerGroupB_Exclusive_999"
+        ]
+      },
+      "animations": {},
+      "stickerMetadata": {
+        "CAACAgIAAxUAAWqCustomStickerGroupB_Exclusive_999": {
+          "chatId": -100777222000,
+          "source": "custom",
+          "addedAt": "2026-08-31T06:48:47.075Z",
+          "fileId": "CAACAgIAAxUAAWqCustomStickerGroupB_Exclusive_999",
+          "mood": "romantic",
+          "packName": "pack_b"
+        }
+      }
+    },
+    "stickerProtection": true
+  },
+  "stickerPacks": [],
+  "abuseWords": [],
+  "members": [],
+  "moderators": [],
+  "messages": [],
+  "statistics": {
+    "schedules": [],
+    "notes": [],
+    "userMemories": []
+  },
+  "activity": [],
+  "updatedAt": "2026-08-31T14:14:51.079Z"
+}

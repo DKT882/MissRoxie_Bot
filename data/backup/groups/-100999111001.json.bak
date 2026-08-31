@@ -1,0 +1,271 @@
+{
+  "schemaVersion": 1,
+  "chat": {
+    "chatId": "-100999111001",
+    "title": "Roxie Alpha Community",
+    "type": "supergroup",
+    "username": null
+  },
+  "status": {
+    "botLeft": true,
+    "leftAt": "2026-08-31T13:30:39.496Z",
+    "unavailable": false,
+    "unavailableAt": null,
+    "unavailableReason": null
+  },
+  "settings": {
+    "chatId": -100999111001,
+    "chatTitle": "Roxie Alpha Community",
+    "warnLimit": 3,
+    "warnAction": "ban",
+    "warnExpireSeconds": 0,
+    "floodEnabled": false,
+    "floodCount": 8,
+    "floodWindow": 5,
+    "floodAction": "mute",
+    "raidEnabled": false,
+    "raidLimit": 8,
+    "raidWindow": 30,
+    "raidAction": "kick",
+    "raidDuration": 300,
+    "captchaEnabled": false,
+    "captchaMode": "button",
+    "captchaTimeout": 120,
+    "captchaAction": "kick",
+    "linksProtection": true,
+    "linksWhitelist": [],
+    "mediaProtection": true,
+    "stickerProtection": true,
+    "gifsProtection": false,
+    "videosProtection": false,
+    "photosProtection": false,
+    "voiceProtection": false,
+    "audioProtection": false,
+    "locks": {},
+    "filters": {},
+    "welcomeEnabled": false,
+    "welcomeMessage": "Welcome {user} to {chat}!",
+    "goodbyeEnabled": false,
+    "goodbyeMessage": "Goodbye {user}!",
+    "autoDeleteJoinLeave": false,
+    "slowModeSeconds": 0,
+    "reportsEnabled": true,
+    "chatbotEnabled": true,
+    "chatbotMode": "auto",
+    "reactionEnabled": true,
+    "reactionProbability": 0.15,
+    "stopSpamEnabled": false,
+    "stopAbusiveEnabled": false,
+    "stopPromotionEnabled": false,
+    "gifProtection": false,
+    "linkProtection": true,
+    "imageProtection": false,
+    "fileProtection": false,
+    "customAbusiveWords": [],
+    "automodEnabled": false,
+    "mediaAction": "delete",
+    "warnEscalation": [],
+    "securityEnabled": false,
+    "joinmode": "normal",
+    "autoAcceptEnabled": false,
+    "automations": [],
+    "rules": "",
+    "lastAllTimestamp": 0,
+    "protectionEnabled": true,
+    "protectionFloodCount": 5,
+    "protectionFloodWindow": 5,
+    "protectionDuplicateLimit": 3,
+    "protectionLinkBurstLimit": 3,
+    "updatedAt": "2026-08-31T14:05:27.855Z",
+    "lustMode": true,
+    "botLeft": true,
+    "autoResponse": {
+      "enabled": true,
+      "mode": "every_message",
+      "cooldownSeconds": 30,
+      "randomize": false,
+      "minSeconds": 30,
+      "maxSeconds": 120,
+      "lastResponseTimestamp": 0,
+      "nextAllowedAt": 0
+    },
+    "autoSticker": {
+      "enabled": true,
+      "mode": "cooldown",
+      "cooldownSeconds": 60,
+      "randomize": false,
+      "minSeconds": 60,
+      "maxSeconds": 300,
+      "lastStickerTimestamp": 0,
+      "nextAllowedAt": 0
+    },
+    "stickerPacks": {},
+    "unavailable": false,
+    "abuseWords": [],
+    "leftAt": "2026-08-31T13:30:39.496Z"
+  },
+  "permissions": {
+    "contentPermissions": null,
+    "customRoles": {},
+    "stickerFreeUsers": []
+  },
+  "moderation": {
+    "locks": {},
+    "filters": {},
+    "linksWhitelist": [],
+    "approvedUsers": [],
+    "freedUsers": [],
+    "warnings": [],
+    "tempActions": [],
+    "abuseWords": []
+  },
+  "ai": {
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true,
+    "welcomeEnabled": false
+  },
+  "lustMode": {
+    "enabled": true,
+    "level": 1,
+    "lustStickers": {},
+    "userLustLevels": []
+  },
+  "autoResponse": {
+    "enabled": true,
+    "mode": "every_message",
+    "cooldownSeconds": 30,
+    "randomize": false,
+    "minSeconds": 30,
+    "maxSeconds": 120,
+    "lastResponseTimestamp": 0,
+    "nextAllowedAt": 0
+  },
+  "autoSticker": {
+    "enabled": true,
+    "mode": "cooldown",
+    "cooldownSeconds": 60,
+    "randomize": false,
+    "minSeconds": 60,
+    "maxSeconds": 300,
+    "lastStickerTimestamp": 0,
+    "nextAllowedAt": 0
+  },
+  "stickers": {
+    "mediaLibrary": {
+      "stickers": {
+        "playful": [
+          "CAACAgIAAxkBAAE1111"
+        ]
+      },
+      "animations": {},
+      "stickerMetadata": {
+        "CAACAgIAAxkBAAE1111": {
+          "chatId": -100999111001,
+          "source": "custom",
+          "addedAt": "2026-08-31T13:30:39.515Z",
+          "fileId": "CAACAgIAAxkBAAE1111",
+          "mood": "playful",
+          "packName": "group_1_pack"
+        }
+      },
+      "lustStickers": {}
+    },
+    "stickerProtection": true
+  },
+  "stickerPacks": [],
+  "abuseWords": [],
+  "members": [],
+  "moderators": [],
+  "messages": [
+    {
+      "role": "user",
+      "name": "Alice",
+      "displayName": "Alice",
+      "content": "Hello Roxie from group!",
+      "timestamp": 1788183039483,
+      "chatId": -100999111001,
+      "mediaType": "text",
+      "direction": "incoming",
+      "source": "telegram",
+      "sender": "Alice"
+    },
+    {
+      "role": "assistant",
+      "name": "Roxie",
+      "displayName": "Roxie",
+      "content": "Hey Alice, what are you up to?",
+      "timestamp": 1788183039488,
+      "chatId": -100999111001,
+      "mediaType": "text",
+      "direction": "outgoing",
+      "source": "dashboard",
+      "sender": "Roxie"
+    },
+    {
+      "role": "user",
+      "name": "Alice",
+      "displayName": "Alice",
+      "content": "Secret Group 1 Info",
+      "timestamp": 1788183039528,
+      "chatId": -100999111001,
+      "mediaType": "text",
+      "direction": "incoming",
+      "source": "telegram",
+      "sender": "Alice"
+    }
+  ],
+  "statistics": {
+    "schedules": [],
+    "notes": [],
+    "userMemories": []
+  },
+  "activity": [
+    {
+      "id": "iufhiv4",
+      "timestamp": "2026-08-31T13:14:39.803Z",
+      "chatId": -100999111001,
+      "groupId": -100999111001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "leave_group",
+      "action": "leave_group",
+      "result": "success",
+      "details": "Roxie successfully verified and left group -100999111001 via Telegram leaveChat"
+    },
+    {
+      "id": "4hrs918",
+      "timestamp": "2026-08-31T13:14:39.917Z",
+      "chatId": -100999111001,
+      "chatTitle": "Roxie Alpha Community",
+      "action": "setting_change",
+      "adminUsername": "dashboard_admin",
+      "details": "Enabled anti-raid protection",
+      "result": "success"
+    },
+    {
+      "id": "g1fnckr",
+      "timestamp": "2026-08-31T13:30:39.503Z",
+      "chatId": -100999111001,
+      "groupId": -100999111001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "leave_group",
+      "action": "leave_group",
+      "result": "success",
+      "details": "Roxie successfully verified and left group -100999111001 via Telegram leaveChat"
+    },
+    {
+      "id": "3o1dmi6",
+      "timestamp": "2026-08-31T13:30:39.656Z",
+      "chatId": -100999111001,
+      "chatTitle": "Roxie Alpha Community",
+      "action": "setting_change",
+      "adminUsername": "dashboard_admin",
+      "details": "Enabled anti-raid protection",
+      "result": "success"
+    }
+  ],
+  "updatedAt": "2026-08-31T14:07:14.931Z"
+}

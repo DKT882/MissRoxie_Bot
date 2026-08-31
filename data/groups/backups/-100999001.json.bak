@@ -1,0 +1,214 @@
+{
+  "schemaVersion": 1,
+  "chat": {
+    "chatId": "-100999001",
+    "title": "Alpha Modified Repeatedly",
+    "type": "supergroup",
+    "username": null
+  },
+  "status": {
+    "botLeft": true,
+    "leftAt": "2026-08-31T13:28:10.765Z",
+    "unavailable": false,
+    "unavailableAt": null,
+    "unavailableReason": null
+  },
+  "settings": {
+    "chatId": -100999001,
+    "chatTitle": "Alpha Modified Repeatedly",
+    "warnLimit": 3,
+    "warnAction": "ban",
+    "warnExpireSeconds": 0,
+    "floodEnabled": false,
+    "floodCount": 8,
+    "floodWindow": 5,
+    "floodAction": "mute",
+    "raidEnabled": false,
+    "raidLimit": 8,
+    "raidWindow": 30,
+    "raidAction": "kick",
+    "raidDuration": 300,
+    "captchaEnabled": false,
+    "captchaMode": "button",
+    "captchaTimeout": 120,
+    "captchaAction": "kick",
+    "linksProtection": true,
+    "linksWhitelist": [],
+    "mediaProtection": true,
+    "stickerProtection": true,
+    "gifsProtection": false,
+    "videosProtection": false,
+    "photosProtection": false,
+    "voiceProtection": false,
+    "audioProtection": false,
+    "locks": {},
+    "filters": {},
+    "welcomeEnabled": false,
+    "welcomeMessage": "Welcome {user} to {chat}!",
+    "goodbyeEnabled": false,
+    "goodbyeMessage": "Goodbye {user}!",
+    "autoDeleteJoinLeave": false,
+    "slowModeSeconds": 20,
+    "reportsEnabled": false,
+    "chatbotEnabled": true,
+    "chatbotMode": "auto",
+    "reactionEnabled": true,
+    "reactionProbability": 0.15,
+    "stopSpamEnabled": false,
+    "stopAbusiveEnabled": false,
+    "stopPromotionEnabled": false,
+    "gifProtection": false,
+    "linkProtection": true,
+    "imageProtection": false,
+    "fileProtection": false,
+    "customAbusiveWords": [
+      "isolated_abuse_word"
+    ],
+    "automodEnabled": false,
+    "mediaAction": "delete",
+    "warnEscalation": [],
+    "securityEnabled": false,
+    "joinmode": "normal",
+    "autoAcceptEnabled": false,
+    "automations": [],
+    "rules": "",
+    "lastAllTimestamp": 0,
+    "protectionEnabled": true,
+    "protectionFloodCount": 5,
+    "protectionFloodWindow": 5,
+    "protectionDuplicateLimit": 3,
+    "protectionLinkBurstLimit": 3,
+    "autoResponse": {
+      "enabled": true,
+      "mode": "random",
+      "cooldownSeconds": 45,
+      "randomize": true,
+      "minSeconds": 45,
+      "maxSeconds": 150,
+      "lastResponseTimestamp": 1788182891024,
+      "nextIntervalSeconds": 77,
+      "nextAllowedAt": 1788182968024
+    },
+    "autoSticker": {
+      "enabled": true,
+      "mode": "cooldown",
+      "cooldownSeconds": 75,
+      "randomize": false,
+      "minSeconds": 60,
+      "maxSeconds": 300,
+      "lastStickerTimestamp": 0
+    },
+    "stickerPacks": {
+      "flirtypack": {
+        "name": "FlirtyPack",
+        "title": "Flirty Moods",
+        "enabled": false,
+        "stickerCount": 8,
+        "addedAt": "2026-08-31T13:28:10.709Z"
+      }
+    },
+    "updatedAt": "2026-08-31T13:28:11.015Z",
+    "abuseWords": [
+      "isolated_abuse_word"
+    ],
+    "lustMode": true,
+    "lustLevel": 3,
+    "botLeft": true,
+    "leftAt": "2026-08-31T13:28:10.765Z",
+    "unavailable": false
+  },
+  "permissions": {
+    "contentPermissions": null,
+    "customRoles": {},
+    "stickerFreeUsers": []
+  },
+  "moderation": {
+    "locks": {},
+    "filters": {},
+    "linksWhitelist": [],
+    "approvedUsers": [],
+    "freedUsers": [],
+    "warnings": [],
+    "tempActions": [],
+    "abuseWords": [
+      "isolated_abuse_word"
+    ]
+  },
+  "ai": {
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true,
+    "welcomeEnabled": false
+  },
+  "lustMode": {
+    "enabled": true,
+    "level": 3,
+    "lustStickers": {},
+    "userLustLevels": []
+  },
+  "autoResponse": {
+    "enabled": true,
+    "mode": "random",
+    "cooldownSeconds": 45,
+    "randomize": true,
+    "minSeconds": 45,
+    "maxSeconds": 150,
+    "lastResponseTimestamp": 1788182891024,
+    "nextIntervalSeconds": 77,
+    "nextAllowedAt": 1788182968024
+  },
+  "autoSticker": {
+    "enabled": true,
+    "mode": "cooldown",
+    "cooldownSeconds": 75,
+    "randomize": false,
+    "minSeconds": 60,
+    "maxSeconds": 300,
+    "lastStickerTimestamp": 0
+  },
+  "stickers": {
+    "mediaLibrary": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "stickerProtection": true
+  },
+  "stickerPacks": [
+    {
+      "name": "FlirtyPack",
+      "title": "Flirty Moods",
+      "enabled": false,
+      "stickerCount": 8,
+      "addedAt": "2026-08-31T13:28:10.709Z"
+    }
+  ],
+  "abuseWords": [
+    "isolated_abuse_word"
+  ],
+  "members": [],
+  "moderators": [],
+  "messages": [
+    {
+      "role": "user",
+      "name": "Rohan Sharma",
+      "displayName": "Rohan Sharma",
+      "content": "Persistent message test",
+      "timestamp": 1788182890759,
+      "messageId": 55441,
+      "chatId": -100999001,
+      "mediaType": "text",
+      "direction": "incoming",
+      "source": "telegram",
+      "sender": "Rohan Sharma"
+    }
+  ],
+  "statistics": {
+    "schedules": [],
+    "notes": [],
+    "userMemories": []
+  },
+  "activity": [],
+  "updatedAt": "2026-08-31T13:28:11.025Z"
+}

@@ -312,6 +312,7 @@ export interface GroupSettings {
   chatbotEnabled?: boolean; // default true
   chatbotMode?: string; // e.g. 'auto' | 'normal' | 'friendly' | 'playful' | 'teasing' | 'sarcastic' | 'serious' | 'cute' | 'romantic' | 'flirty' | string
   lustMode?: boolean; // default false (mildly suggestive/spicy teasing personality modifier)
+  lustLevel?: number; // 0 to 4
   reactionEnabled?: boolean; // default true
   reactionProbability?: number; // default 0.15 (15%)
   // Phase 17 Smart User Protection
@@ -329,6 +330,7 @@ export interface GroupSettings {
   imageProtection?: boolean;
   fileProtection?: boolean;
   customAbusiveWords?: string[];
+  abuseWords?: string[];
   // Phase 10 Smart Automation & Advanced Group Management
   automodEnabled?: boolean;
   mediaAction?: 'delete' | 'reason' | 'warn';
@@ -344,6 +346,9 @@ export interface GroupSettings {
   stickerPacks?: Record<string, GroupStickerPackConfig>;
   botLeft?: boolean;
   leftAt?: string;
+  unavailable?: boolean;
+  unavailableAt?: string;
+  unavailableReason?: string;
   updatedAt: string;
 }
 
@@ -375,10 +380,10 @@ export interface GroupStickerPackConfig {
   name: string;
   title: string;
   enabled: boolean;
-  stickerCount: number;
+  stickerCount?: number;
   stickers?: Array<{ fileId: string; emoji?: string }>;
   addedBy?: string | number;
-  addedAt: string;
+  addedAt?: string;
 }
 
 export interface WarningRecord {

@@ -42,7 +42,9 @@ import {
   Eye,
   Clock,
   SlidersHorizontal,
-  ExternalLink
+  ExternalLink,
+  Reply,
+  Loader2
 } from 'lucide-react';
 
 const LIVE_TESTS = [
@@ -119,6 +121,8 @@ interface GroupInfo {
   protectionStatus?: boolean;
   lustMode?: boolean;
   botLeft?: boolean;
+  unavailable?: boolean;
+  unavailableReason?: string;
   stats: {
     bans: number;
     kicks: number;
@@ -212,6 +216,12 @@ export default function App() {
   const [sendMessageContent, setSendMessageContent] = useState<string>('');
   const [sendingMessage, setSendingMessage] = useState<boolean>(false);
   const [sendResult, setSendResult] = useState<any | null>(null);
+
+  // Group Messages Direct Composer & Reply-to-User State
+  const [groupComposerText, setGroupComposerText] = useState<string>('');
+  const [groupReplyTarget, setGroupReplyTarget] = useState<any | null>(null);
+  const [sendingGroupMessage, setSendingGroupMessage] = useState<boolean>(false);
+  const [groupMessageFeedback, setGroupMessageFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Broadcast Action
   const [broadcastSelectedGroups, setBroadcastSelectedGroups] = useState<number[]>([]);
@@ -444,6 +454,9 @@ export default function App() {
         fetchData();
       } else {
         alert(`❌ Failed to leave: ${data.error || 'Telegram rejected leave request'}`);
+        setLeaveModalGroup(null);
+        setLeaveConfirmInput('');
+        fetchData();
       }
     } catch (err: any) {
       alert(`❌ Error: ${err.message}`);
@@ -507,6 +520,70 @@ export default function App() {
       alert(`❌ Error: ${err.message}`);
     } finally {
       setSendingPrivateReply(false);
+    }
+  };
+
+  // Group Messages Direct Composer & Reply-to-User Execution
+  const handleSelectReplyTarget = (msg: any) => {
+    if (!msg.messageId) {
+      alert('Reply unavailable — Telegram message ID was not recorded for this message.');
+      return;
+    }
+    setGroupReplyTarget(msg);
+    setGroupMessageFeedback(null);
+    const composerElem = document.getElementById('group-message-composer');
+    if (composerElem) {
+      composerElem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      const textarea = composerElem.querySelector('textarea');
+      if (textarea) textarea.focus();
+    }
+  };
+
+  const handleSendGroupMessage = async () => {
+    if (!activeGroupDetailId || !groupComposerText.trim() || sendingGroupMessage) return;
+    setSendingGroupMessage(true);
+    setGroupMessageFeedback(null);
+    try {
+      const payload: any = {
+        targetType: 'group',
+        targetId: activeGroupDetailId,
+        chatId: activeGroupDetailId,
+        message: groupComposerText.trim(),
+        text: groupComposerText.trim()
+      };
+      if (groupReplyTarget?.messageId) {
+        payload.replyToMessageId = groupReplyTarget.messageId;
+      }
+
+      const res = await fetch('/api/dashboard/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setGroupMessageFeedback({
+          type: 'success',
+          message: groupReplyTarget ? '✓ Reply sent as Roxie' : '✓ Message sent as Roxie'
+        });
+        setGroupComposerText('');
+        setGroupReplyTarget(null);
+        await fetchData();
+        setTimeout(() => setGroupMessageFeedback(null), 4000);
+      } else {
+        setGroupMessageFeedback({
+          type: 'error',
+          message: data.error || '✕ Failed to send message'
+        });
+      }
+    } catch (err: any) {
+      setGroupMessageFeedback({
+        type: 'error',
+        message: `✕ Error: ${err.message}`
+      });
+    } finally {
+      setSendingGroupMessage(false);
     }
   };
 
@@ -1007,11 +1084,16 @@ export default function App() {
                     <div key={g.chatId} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between`}>
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className={`w-2 h-2 rounded-full ${g.botLeft ? 'bg-stone-500' : 'bg-emerald-500'}`} />
+                          <span className={`w-2 h-2 rounded-full ${
+                            g.status === 'Unavailable' ? 'bg-red-500' :
+                            g.botLeft ? 'bg-stone-500' : 'bg-emerald-500'
+                          }`} />
                           <h4 className="text-xs font-bold">{g.chatTitle}</h4>
                           <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
                             g.status === 'Active' ? 'bg-emerald-500/10 text-emerald-500' :
-                            g.status === 'Bot Left' ? 'bg-stone-500/10 text-stone-400' : 'bg-amber-500/10 text-amber-500'
+                            g.status === 'Bot Left' ? 'bg-stone-500/10 text-stone-400' :
+                            g.status === 'Unavailable' ? 'bg-red-500/10 text-red-500' :
+                            'bg-amber-500/10 text-amber-500'
                           }`}>
                             {g.status}
                           </span>
@@ -1092,6 +1174,7 @@ export default function App() {
                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
                           g.status === 'Active' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' :
                           g.status === 'Bot Left' ? 'bg-stone-500/10 text-stone-400 border border-stone-500/20' :
+                          g.status === 'Unavailable' ? 'bg-red-500/10 text-red-500 border border-red-500/20' :
                           'bg-amber-500/10 text-amber-500 border border-amber-500/20'
                         }`}>
                           {g.status}
@@ -1129,13 +1212,26 @@ export default function App() {
                       >
                         <span>[ OPEN ]</span>
                       </button>
-                      <button
-                        onClick={() => { setLeaveModalGroup(g); setLeaveConfirmInput(''); }}
-                        className="px-3 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/20 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1"
-                        title="Leave Group"
-                      >
-                        <LogOut className="w-3.5 h-3.5" /> Leave
-                      </button>
+                      {g.status === 'Bot Left' ? (
+                        <span className="px-3 py-2 bg-stone-500/10 text-stone-400 border border-stone-500/20 rounded-xl text-xs font-semibold flex items-center gap-1">
+                          <LogOut className="w-3.5 h-3.5" /> Left
+                        </span>
+                      ) : g.status === 'Unavailable' ? (
+                        <span
+                          className="px-3 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl text-xs font-semibold flex items-center gap-1"
+                          title={g.unavailableReason || 'Unavailable on Telegram'}
+                        >
+                          <AlertTriangle className="w-3.5 h-3.5" /> Stale
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => { setLeaveModalGroup(g); setLeaveConfirmInput(''); }}
+                          className="px-3 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/20 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1"
+                          title="Leave Group"
+                        >
+                          <LogOut className="w-3.5 h-3.5" /> Leave
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1162,6 +1258,7 @@ export default function App() {
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
                         groupDetails.status === 'Active' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' :
                         groupDetails.status === 'Bot Left' ? 'bg-stone-500/10 text-stone-400 border border-stone-500/20' :
+                        groupDetails.status === 'Unavailable' ? 'bg-red-500/10 text-red-500 border border-red-500/20' :
                         'bg-amber-500/10 text-amber-500 border border-amber-500/20'
                       }`}>
                         {groupDetails.status}
@@ -1169,6 +1266,9 @@ export default function App() {
                     </div>
                     <p className={`text-xs ${themeMutedText} font-mono mt-0.5`}>
                       Chat ID: {groupDetails.chatId} • Authority: {groupDetails.botRole || '🛡️ Administrator'}
+                      {groupDetails.unavailableReason && (
+                        <span className="text-red-400 ml-2 font-sans font-medium">({groupDetails.unavailableReason})</span>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -1248,35 +1348,174 @@ export default function App() {
               {/* INNER TAB: GROUP STORED MESSAGES */}
               {groupDetailTab === 'messages' && (
                 <div className={`${themeCardBg} border rounded-2xl p-6 space-y-4`}>
-                  <div>
-                    <h3 className="text-sm font-bold flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-blue-500" /> Stored Group Messages ({groupDetails.storedMessages?.length || 0})
-                    </h3>
-                    <p className={`text-xs ${themeMutedText}`}>Real messages received & recorded in group memory by Roxie.</p>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-blue-500" /> Stored Group Messages ({groupDetails.storedMessages?.length || 0})
+                      </h3>
+                      <p className={`text-xs ${themeMutedText}`}>Real messages received & recorded in group memory by Roxie.</p>
+                    </div>
+                    <button
+                      onClick={() => fetchData()}
+                      className={`px-3 py-1.5 ${themeInnerCardBg} border ${themeBorder} hover:opacity-80 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors`}
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> Refresh
+                    </button>
                   </div>
 
-                  <div className="space-y-3">
+                  {/* Messages Feed */}
+                  <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
                     {(groupDetails.storedMessages || []).map((msg: any, idx: number) => (
-                      <div key={idx} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-start gap-3`}>
+                      <div key={idx} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-start gap-3 transition-colors hover:border-blue-500/30`}>
                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
-                          msg.role === 'assistant' ? 'bg-blue-600 text-white' : 'bg-purple-600/20 text-purple-400'
+                          msg.role === 'assistant' || msg.source === 'dashboard' ? 'bg-blue-600 text-white shadow-sm' : 'bg-purple-600/20 text-purple-400'
                         }`}>
-                          {msg.role === 'assistant' ? 'R' : (msg.name?.slice(0, 1) || 'U')}
+                          {msg.role === 'assistant' || msg.source === 'dashboard' ? 'R' : (msg.name?.slice(0, 1) || 'U')}
                         </div>
-                        <div className="flex-1 space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold">{msg.name || (msg.role === 'assistant' ? 'Roxie' : 'User')}</span>
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold">{msg.displayName || msg.name || (msg.role === 'assistant' ? 'Roxie' : 'User')}</span>
+                              {msg.username && (
+                                <span className={`text-[10px] font-mono ${themeMutedText}`}>@{msg.username}</span>
+                              )}
+                              {msg.source === 'dashboard' && (
+                                <span className="text-[9px] px-1.5 py-0.2 rounded font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                  DASHBOARD OPERATOR
+                                </span>
+                              )}
+                              {msg.messageId && (
+                                <span className={`text-[10px] font-mono ${themeMutedText}`}>#{msg.messageId}</span>
+                              )}
+                            </div>
                             <span className={`text-[10px] font-mono ${themeMutedText}`}>
                               {new Date(msg.timestamp).toLocaleTimeString()}
                             </span>
                           </div>
-                          <p className="text-xs">{msg.content}</p>
+
+                          {/* Reply quote preview if replying to another message */}
+                          {msg.replyTo && (
+                            <div className="border-l-2 border-blue-500 bg-blue-500/5 px-2.5 py-1 rounded text-[11px] text-blue-300">
+                              <span className="font-semibold">↩ Replying to {msg.replyTo.name || 'user'}:</span> {msg.replyTo.text ? `"${msg.replyTo.text}"` : ''}
+                            </div>
+                          )}
+
+                          <p className="text-xs leading-relaxed break-words">{msg.content}</p>
+
+                          {/* Reply Action Button */}
+                          <div className="pt-1 flex items-center justify-end gap-2">
+                            {msg.messageId ? (
+                              <button
+                                onClick={() => handleSelectReplyTarget(msg)}
+                                className="px-2.5 py-1 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                                title={`Reply directly to message #${msg.messageId}`}
+                              >
+                                <Reply className="w-3 h-3" /> Reply
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-stone-500 italic" title="Reply unavailable — Telegram message ID not stored">
+                                Reply unavailable
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
                     {(!groupDetails.storedMessages || groupDetails.storedMessages.length === 0) && (
                       <p className={`text-xs ${themeMutedText} text-center py-8`}>No messages stored for this group yet.</p>
                     )}
+                  </div>
+
+                  {/* Professional Sticky Message Composer */}
+                  <div id="group-message-composer" className={`border ${themeBorder} rounded-2xl overflow-hidden shadow-lg transition-all ${themeInnerCardBg}`}>
+                    {/* Reply Target Preview Bar */}
+                    {groupReplyTarget && (
+                      <div className="bg-blue-600/10 border-b border-blue-500/20 px-4 py-2.5 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Reply className="w-4 h-4 text-blue-400 shrink-0" />
+                          <div className="text-xs truncate">
+                            <span className="text-blue-400 font-semibold">Replying to {groupReplyTarget.displayName || groupReplyTarget.name || (groupReplyTarget.username ? `@${groupReplyTarget.username}` : 'User')}</span>
+                            {groupReplyTarget.messageId && (
+                              <span className={`ml-1.5 font-mono text-[10px] ${themeMutedText}`}>#{groupReplyTarget.messageId}</span>
+                            )}
+                            <p className={`text-[11px] ${themeMutedText} truncate italic mt-0.5 max-w-[400px]`}>
+                              "{groupReplyTarget.content}"
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setGroupReplyTarget(null)}
+                          className="p-1 hover:bg-stone-500/20 rounded-lg text-stone-400 hover:text-stone-200 transition-colors shrink-0 cursor-pointer"
+                          title="Cancel Reply"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Feedback Notification Banner */}
+                    {groupMessageFeedback && (
+                      <div className={`px-4 py-2 text-xs flex items-center justify-between ${
+                        groupMessageFeedback.type === 'success'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-b border-emerald-500/20'
+                          : 'bg-red-500/10 text-red-400 border-b border-red-500/20'
+                      }`}>
+                        <span>{groupMessageFeedback.message}</span>
+                        <button onClick={() => setGroupMessageFeedback(null)} className="hover:opacity-70 cursor-pointer">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Composer Input Area */}
+                    <div className="p-3.5 space-y-2.5">
+                      <textarea
+                        rows={2}
+                        value={groupComposerText}
+                        onChange={(e) => setGroupComposerText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendGroupMessage();
+                          }
+                        }}
+                        disabled={sendingGroupMessage || groupDetails.status === 'Bot Left' || groupDetails.status === 'Unavailable'}
+                        placeholder={
+                          groupDetails.status === 'Bot Left' ? 'Cannot send: Roxie has left this group.' :
+                          groupDetails.status === 'Unavailable' ? 'Cannot send: This group is unavailable on Telegram.' :
+                          groupReplyTarget ? `Reply to ${groupReplyTarget.displayName || groupReplyTarget.name || 'user'} as Roxie...` :
+                          'Write a message as Roxie...'
+                        }
+                        className={`w-full bg-transparent resize-none text-xs focus:outline-none placeholder:text-stone-500 leading-relaxed`}
+                      />
+
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-white/5">
+                        <div className="flex items-center gap-1.5 text-[11px] text-stone-400">
+                          <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                          <span>
+                            Press <kbd className="px-1 py-0.5 rounded bg-stone-500/20 font-mono text-[10px]">Enter</kbd> to send, <kbd className="px-1 py-0.5 rounded bg-stone-500/20 font-mono text-[10px]">Shift+Enter</kbd> for new line • Sending as <strong>Roxie</strong>
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={handleSendGroupMessage}
+                          disabled={!groupComposerText.trim() || sendingGroupMessage || groupDetails.status === 'Bot Left' || groupDetails.status === 'Unavailable'}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 shrink-0 cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          {sendingGroupMessage ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Sending...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Send className="w-3.5 h-3.5" />
+                              <span>{groupReplyTarget ? 'Reply as Roxie' : 'Send'}</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -2630,7 +2869,7 @@ export default function App() {
 
             <p className="text-xs leading-relaxed">
               Are you sure you want Roxie to leave <strong>"{leaveModalGroup.chatTitle}"</strong> (Chat ID: {leaveModalGroup.chatId})?
-              All automated moderation, AI conversation, and protections will cease immediately for this group.
+              Roxie will authoritatively verify the group and membership via Telegram before departing. All automated moderation, AI conversation, and protections will cease immediately for this group.
             </p>
 
             <div className="space-y-1.5">

@@ -5,6 +5,7 @@ import { db } from '../server/db/storage.js';
 import { telegramApi } from '../server/telegram/api.js';
 import { telegramBot } from '../server/telegram.js';
 import { authManager } from '../server/auth/authManager.js';
+import { executeLeaveGroupWorkflow } from '../server.js';
 
 let passed = 0;
 function pass(testName: string) {
@@ -180,12 +181,14 @@ async function runDashboardControlCenterTests() {
   pass('Test 11: Broadcast failure isolation and reporting');
 
   // 12. Leave group execution & verification
-  telegramApi.leaveChat = async (chatId) => {
-    return { ok: true, result: true };
-  };
-  const leaveRes = await telegramApi.leaveChat(testGroup1);
-  assert(leaveRes.ok, 'leaveChat must succeed');
-  db.markBotLeftGroup(testGroup1);
+  telegramApi.getChat = async (chatId) => ({ ok: true, result: { id: chatId, title: 'Group 1' } as any });
+  telegramApi.getMe = async () => ({ ok: true, result: { id: 9999, is_bot: true } as any });
+  telegramApi.getChatMember = async (chatId, userId) => ({ ok: true, result: { status: 'administrator' } as any });
+  telegramApi.leaveChat = async (chatId) => ({ ok: true, result: true });
+
+  const workflowRes = await executeLeaveGroupWorkflow(testGroup1, 'LEAVE');
+  assert.strictEqual(workflowRes.status, 200, 'Workflow leave must return status 200');
+  assert.strictEqual(workflowRes.body.success, true, 'Workflow leave must return success: true');
   const updatedG1 = db.getGroupSettings(testGroup1);
   assert.strictEqual(updatedG1.botLeft, true, 'botLeft must be set in database');
   assert(updatedG1.leftAt, 'leftAt timestamp must be recorded');

@@ -372,6 +372,47 @@ export class TelegramBotManager {
       if (linkIntercepted) return;
     }
 
+    // Record incoming group message in persistent memory for Group Messages dashboard & real replies
+    if (chatId && chatId < 0 && message.message_id) {
+      const mediaType = message.sticker ? 'sticker' :
+        message.photo ? 'photo' :
+        message.video ? 'video' :
+        message.animation ? 'animation' :
+        message.document ? 'document' :
+        message.voice ? 'voice' :
+        'text';
+
+      const content = textOrCaption || (
+        message.sticker ? (message.sticker.emoji ? `🎨 Sticker (${message.sticker.emoji})` : '🎨 Sticker') :
+        message.photo ? '📷 Photo' :
+        message.video ? '📹 Video' :
+        message.animation ? '🎬 GIF' :
+        message.document ? '📄 Document' :
+        message.voice ? '🎤 Voice' :
+        'Media'
+      );
+
+      const displayName = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(' ') ||
+        message.from?.username ||
+        'User';
+
+      db.addGroupConversationEntry(chatId, {
+        role: 'user',
+        userId: message.from?.id,
+        name: displayName,
+        displayName,
+        username: message.from?.username,
+        content,
+        timestamp: message.date ? message.date * 1000 : Date.now(),
+        messageId: message.message_id,
+        chatId,
+        mediaType,
+        direction: 'incoming',
+        source: 'telegram',
+        replyToMessageId: message.reply_to_message?.message_id
+      });
+    }
+
     // 7. Check Smart Telegram Reactions (non-blocking & independent)
     ReactionService.handleMessageReaction(message).catch((err) => {
       console.error('[ReactionService] Error handling message reaction:', err);

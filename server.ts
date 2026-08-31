@@ -10,8 +10,476 @@ import { phase8Router } from './server/api/phase8Router.js';
 import { DisasterRecoveryService } from './server/system/disasterRecovery.js';
 import { HealthDiagnosticsService } from './server/observability/healthService.js';
 import { telegramApi } from './server/telegram/api.js';
+import { authManager } from './server/auth/authManager.js';
 
 dotenv.config();
+
+// Exported workflow for Leaving Groups with authoritative verification & stale handling
+export async function executeLeaveGroupWorkflow(
+  chatId: number,
+  confirmation: string
+): Promise<{ status: number; body: { success?: boolean; message?: string; error?: string; code?: string; isStale?: boolean; botLeft?: boolean } }> {
+  if (confirmation !== 'LEAVE') {
+    return {
+      status: 400,
+      body: { error: 'Explicit confirmation "LEAVE" required to leave group.', code: 'CONFIRMATION_REQUIRED' }
+    };
+  }
+
+  const settings = db.getGroupSettings(chatId);
+
+  // 1. Check if group was already recorded as left locally
+  if (settings.botLeft) {
+    return {
+      status: 400,
+      body: {
+        error: 'Roxie has already left this group. Local state already marks this group as "Bot Left".',
+        code: 'ALREADY_LEFT',
+        botLeft: true
+      }
+    };
+  }
+
+  // 2. Authoritative verification: First verify the chat exists on Telegram via getChat
+  let chatRes: any;
+  try {
+    chatRes = await telegramApi.getChat(chatId);
+  } catch (err: any) {
+    return {
+      status: 502,
+      body: {
+        error: `Telegram API network failure while checking chat: ${err.message}`,
+        code: 'TELEGRAM_NETWORK_ERROR'
+      }
+    };
+  }
+
+  if (!chatRes.ok) {
+    const desc = (chatRes.description || '').toLowerCase();
+    // Stale, deleted, migrated, or unresolvable chat ID
+    if (
+      desc.includes('chat not found') ||
+      desc.includes('chat was deleted') ||
+      desc.includes('group chat was migrated') ||
+      chatRes.error_code === 400
+    ) {
+      // Synchronize local storage: mark as Unavailable / Stale
+      db.markGroupUnavailable(chatId, chatRes.description || 'Chat not found on Telegram');
+
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: 'DASHBOARD_ADMIN',
+        adminUsername: 'dashboard_admin',
+        command: 'leave_group',
+        action: 'leave_group',
+        result: 'failure',
+        details: `Cannot leave group ${chatId}: Telegram returned "${chatRes.description}". Group marked as Unavailable / Stale.`
+      });
+
+      return {
+        status: 404,
+        body: {
+          error: `Cannot leave: This group is unavailable or no longer exists on Telegram (${chatRes.description || 'chat not found'}). The group has been marked as Unavailable / Stale.`,
+          code: 'CHAT_NOT_FOUND',
+          isStale: true
+        }
+      };
+    }
+
+    // Other Telegram API error (e.g. 500, rate limit, etc.)
+    return {
+      status: 502,
+      body: {
+        error: `Telegram API error while verifying chat: ${chatRes.description || 'Unknown Telegram error'}`,
+        code: 'TELEGRAM_API_ERROR'
+      }
+    };
+  }
+
+  // 3. Authoritative membership verification: Get bot identity and verify current membership
+  let meRes: any;
+  try {
+    meRes = await telegramApi.getMe();
+  } catch (err: any) {
+    return {
+      status: 502,
+      body: {
+        error: `Telegram API network failure while verifying bot identity: ${err.message}`,
+        code: 'TELEGRAM_NETWORK_ERROR'
+      }
+    };
+  }
+
+  if (!meRes.ok || !meRes.result?.id) {
+    return {
+      status: 502,
+      body: {
+        error: `Telegram API error: Unable to verify bot identity (${meRes.description || 'getMe failed'})`,
+        code: 'BOT_IDENTITY_ERROR'
+      }
+    };
+  }
+
+  const botId = meRes.result.id;
+
+  // Query Telegram getChatMember
+  let memberRes: any;
+  try {
+    memberRes = await telegramApi.getChatMember(chatId, botId);
+  } catch (err: any) {
+    return {
+      status: 502,
+      body: {
+        error: `Telegram API network failure while checking bot membership: ${err.message}`,
+        code: 'TELEGRAM_NETWORK_ERROR'
+      }
+    };
+  }
+
+  // Handle case where getChatMember indicates bot is already not in the chat
+  if (!memberRes.ok) {
+    const memDesc = (memberRes.description || '').toLowerCase();
+    if (
+      memDesc.includes('not a member') ||
+      memDesc.includes('user not found') ||
+      memDesc.includes('kicked') ||
+      memberRes.error_code === 400 ||
+      memberRes.error_code === 403
+    ) {
+      // Authoritative verification confirms Roxie is already no longer present!
+      db.markBotLeftGroup(chatId);
+
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: 'DASHBOARD_ADMIN',
+        adminUsername: 'dashboard_admin',
+        command: 'leave_group',
+        action: 'leave_group',
+        result: 'success',
+        details: `Authoritative check confirmed Roxie is already not a member in ${chatId} (${memberRes.description}). Synchronized local state to Left.`
+      });
+
+      return {
+        status: 400,
+        body: {
+          error: `Roxie is no longer a member of this group on Telegram (${memberRes.description || 'bot is not a member'}). Local group state has been synchronized to "Bot Left".`,
+          code: 'ALREADY_NOT_MEMBER',
+          botLeft: true
+        }
+      };
+    }
+
+    return {
+      status: 502,
+      body: {
+        error: `Telegram API error verifying bot membership: ${memberRes.description || 'getChatMember failed'}`,
+        code: 'MEMBERSHIP_CHECK_FAILED'
+      }
+    };
+  }
+
+  const memberStatus = memberRes.result?.status;
+  if (memberStatus === 'left' || memberStatus === 'kicked') {
+    // Authoritative verification confirms Roxie has already left or was kicked!
+    db.markBotLeftGroup(chatId);
+
+    db.logAction({
+      id: Math.random().toString(36).slice(2, 9),
+      timestamp: new Date().toISOString(),
+      chatId,
+      groupId: chatId,
+      actorRole: 'DASHBOARD_ADMIN',
+      adminUsername: 'dashboard_admin',
+      command: 'leave_group',
+      action: 'leave_group',
+      result: 'success',
+      details: `Authoritative check confirmed Roxie membership status is "${memberStatus}" in ${chatId}. Synchronized local state to Left.`
+    });
+
+    return {
+      status: 400,
+      body: {
+        error: `Roxie has already left or was removed from this group on Telegram (status: "${memberStatus}"). Local group state has been synchronized to "Bot Left".`,
+        code: 'ALREADY_NOT_MEMBER',
+        botLeft: true
+      }
+    };
+  }
+
+  // 4. Roxie is confirmed to be an active member! Now execute leaveChat
+  let leaveRes: any;
+  try {
+    leaveRes = await telegramApi.leaveChat(chatId);
+  } catch (err: any) {
+    return {
+      status: 502,
+      body: {
+        error: `Telegram API network failure while attempting leaveChat: ${err.message}`,
+        code: 'TELEGRAM_NETWORK_ERROR'
+      }
+    };
+  }
+
+  if (!leaveRes.ok) {
+    const leaveDesc = (leaveRes.description || '').toLowerCase();
+    if (leaveDesc.includes('not a member') || leaveDesc.includes('kicked')) {
+      db.markBotLeftGroup(chatId);
+      return {
+        status: 400,
+        body: {
+          error: `Telegram confirmed Roxie is no longer in this chat (${leaveRes.description}). Local state synchronized to "Bot Left".`,
+          code: 'ALREADY_NOT_MEMBER',
+          botLeft: true
+        }
+      };
+    }
+
+    return {
+      status: 502,
+      body: {
+        error: `Telegram API rejected leave request: ${leaveRes.description || 'leaveChat returned failure'}`,
+        code: 'LEAVE_FAILED'
+      }
+    };
+  }
+
+  // 5. Telegram confirmed the bot has left!
+  db.markBotLeftGroup(chatId);
+
+  db.logAction({
+    id: Math.random().toString(36).slice(2, 9),
+    timestamp: new Date().toISOString(),
+    chatId,
+    groupId: chatId,
+    actorRole: 'DASHBOARD_ADMIN',
+    adminUsername: 'dashboard_admin',
+    command: 'leave_group',
+    action: 'leave_group',
+    result: 'success',
+    details: `Roxie successfully verified and left group ${chatId} via Telegram leaveChat`
+  });
+
+  return {
+    status: 200,
+    body: {
+      success: true,
+      message: 'Roxie has successfully verified and left the group on Telegram.'
+    }
+  };
+}
+
+// Exported workflow for Direct Message / Reply-To-User with Authoritative Validation
+export async function executeSendMessageWorkflow(
+  targetId: number | string,
+  message: string,
+  replyToMessageId?: number,
+  operatorUsername: string = 'dashboard_admin',
+  sessionId?: string
+): Promise<{
+  status: number;
+  body: {
+    success?: boolean;
+    messageId?: number;
+    replyToMessageId?: number | null;
+    error?: string;
+    code?: string;
+    message?: string;
+  };
+}> {
+  // 1. Validate Operator Authorization
+  if (sessionId) {
+    const session = authManager.getSession(sessionId);
+    if (!session) {
+      return {
+        status: 401,
+        body: { error: 'Unauthorized: Invalid or expired operator session.', code: 'UNAUTHORIZED' }
+      };
+    }
+    if (session.role === 'VIEWER') {
+      return {
+        status: 403,
+        body: { error: 'Forbidden: Operator lacks permission to send messages (Requires MODERATOR or higher).', code: 'FORBIDDEN' }
+      };
+    }
+    operatorUsername = session.username;
+  }
+
+  // 2. Validate Message Content
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return {
+      status: 400,
+      body: { error: 'Message text cannot be empty.', code: 'EMPTY_MESSAGE' }
+    };
+  }
+  const trimmedText = message.trim();
+
+  // 3. Validate Target Chat ID
+  const numTargetId = Number(targetId);
+  if (!targetId || isNaN(numTargetId) || numTargetId === 0) {
+    return {
+      status: 400,
+      body: { error: 'Invalid target chat ID.', code: 'INVALID_CHAT_ID' }
+    };
+  }
+
+  // 4. Validate Group Status (for group chats)
+  if (numTargetId < 0) {
+    const settings = db.getGroupSettings(numTargetId);
+    if (settings.botLeft) {
+      return {
+        status: 400,
+        body: {
+          error: 'Cannot send message: Roxie has already left this group (Bot Left).',
+          code: 'BOT_LEFT'
+        }
+      };
+    }
+    if (settings.unavailable) {
+      return {
+        status: 404,
+        body: {
+          error: 'Cannot send message: This group is unavailable or deleted on Telegram.',
+          code: 'GROUP_UNAVAILABLE'
+        }
+      };
+    }
+  }
+
+  // 5. Validate Reply Target (if replyToMessageId provided)
+  if (replyToMessageId !== undefined && replyToMessageId !== null) {
+    const numReplyId = Number(replyToMessageId);
+    if (isNaN(numReplyId) || !Number.isInteger(numReplyId) || numReplyId <= 0) {
+      return {
+        status: 400,
+        body: {
+          error: 'Invalid reply message ID: Must be a positive integer.',
+          code: 'INVALID_REPLY_ID'
+        }
+      };
+    }
+
+    // Strict Group Isolation Check:
+    // Verify that the replyToMessageId does NOT belong to a different group!
+    if (numTargetId < 0) {
+      const otherGId = db.isMessageInOtherGroup(numReplyId, numTargetId);
+      if (otherGId !== null) {
+        return {
+          status: 400,
+          body: {
+            error: `Cross-group reply injection rejected: Original message belongs to group ${otherGId}, not ${numTargetId}.`,
+            code: 'CROSS_GROUP_REPLY_REJECTED'
+          }
+        };
+      }
+    }
+  }
+
+  // 6. Send via Telegram Bot API
+  let tgRes: any;
+  try {
+    tgRes = await telegramApi.sendMessage(numTargetId, trimmedText, {
+      reply_to_message_id: replyToMessageId,
+      reply_parameters: replyToMessageId ? { message_id: replyToMessageId } : undefined,
+      parse_mode: 'HTML'
+    });
+  } catch (err: any) {
+    return {
+      status: 502,
+      body: {
+        error: `Telegram API network failure: ${err.message}`,
+        code: 'TELEGRAM_NETWORK_ERROR'
+      }
+    };
+  }
+
+  if (!tgRes.ok) {
+    const desc = tgRes.description || '';
+    const lower = desc.toLowerCase();
+    if (lower.includes('message to be replied not found') || lower.includes('reply') || lower.includes('message not found')) {
+      return {
+        status: 400,
+        body: {
+          error: 'Telegram rejected the reply. The original message may no longer be available.',
+          code: 'REPLY_TARGET_NOT_FOUND'
+        }
+      };
+    }
+    return {
+      status: 502,
+      body: {
+        error: `Telegram failed to send message: ${desc || 'Unknown error'}`,
+        code: 'TELEGRAM_SEND_FAILED'
+      }
+    };
+  }
+
+  const outgoingMsgId = tgRes.result?.message_id;
+
+  // 7. Store the delivered message in conversation memory
+  if (numTargetId < 0) {
+    const orig = replyToMessageId
+      ? db.getGroupMemory(numTargetId).find(m => m.messageId === replyToMessageId)
+      : undefined;
+
+    db.addGroupConversationEntry(numTargetId, {
+      role: 'assistant',
+      name: 'Roxie',
+      displayName: 'Roxie',
+      sender: 'Roxie',
+      content: trimmedText,
+      timestamp: Date.now(),
+      messageId: outgoingMsgId,
+      chatId: numTargetId,
+      direction: 'outgoing',
+      source: 'dashboard',
+      replyToMessageId: replyToMessageId || undefined,
+      replyTo: orig ? {
+        messageId: orig.messageId || replyToMessageId!,
+        name: orig.displayName || orig.name,
+        text: orig.content
+      } : (replyToMessageId ? { messageId: replyToMessageId } : undefined)
+    });
+  } else {
+    db.addPrivateMessage(numTargetId, numTargetId, {
+      role: 'assistant',
+      content: trimmedText,
+      timestamp: Date.now(),
+      direction: 'out'
+    });
+  }
+
+  // 8. Record Audit Log
+  db.logAction({
+    id: Math.random().toString(36).slice(2, 9),
+    timestamp: new Date().toISOString(),
+    chatId: numTargetId,
+    groupId: numTargetId,
+    actorRole: 'DASHBOARD_ADMIN',
+    adminUsername: operatorUsername,
+    command: 'send_message',
+    action: 'send_message',
+    result: 'success',
+    details: replyToMessageId
+      ? `Sent reply as Roxie to message ${replyToMessageId} in group ${numTargetId}`
+      : `Sent direct message as Roxie to ${numTargetId < 0 ? 'group' : 'chat'} ${numTargetId}`
+  });
+
+  return {
+    status: 200,
+    body: {
+      success: true,
+      messageId: outgoingMsgId,
+      replyToMessageId: replyToMessageId || null,
+      message: replyToMessageId ? 'Reply sent as Roxie' : 'Message sent as Roxie'
+    }
+  };
+}
 
 async function startServer() {
   const app = express();
@@ -147,7 +615,19 @@ async function startServer() {
         const schedules = db.getGroupSchedules(chatId).length;
 
         const isLeft = Boolean(s.botLeft);
-        const status = isLeft ? 'Bot Left' : (s.linksProtection && s.stickerProtection ? 'Active' : 'Limited Permissions');
+        const isUnavailable = Boolean(s.unavailable);
+        let status = 'Active';
+        let botRole = 'Administrator';
+
+        if (isUnavailable) {
+          status = 'Unavailable';
+          botRole = 'Unavailable';
+        } else if (isLeft) {
+          status = 'Bot Left';
+          botRole = 'Left';
+        } else if (!(s.linksProtection && s.stickerProtection)) {
+          status = 'Limited Permissions';
+        }
 
         return {
           chatId,
@@ -156,10 +636,12 @@ async function startServer() {
           username: s.username || undefined,
           memberCount: s.memberCount || 1,
           status,
-          botRole: isLeft ? 'Left' : 'Administrator',
+          botRole,
           protectionStatus: Boolean(s.protectionEnabled || s.stickerProtection || s.linksProtection),
           lustMode: Boolean(s.lustMode),
           botLeft: isLeft,
+          unavailable: isUnavailable,
+          unavailableReason: s.unavailableReason,
           stats: {
             bans,
             kicks,
@@ -201,6 +683,19 @@ async function startServer() {
       const autoRespElig = db.checkAutoResponseEligibility(chatId);
       const autoStkElig = db.checkAutoStickerEligibility(chatId);
 
+      const isLeft = Boolean(settings.botLeft);
+      const isUnavailable = Boolean(settings.unavailable);
+      let status = 'Active';
+      let botRole = 'Administrator';
+
+      if (isUnavailable) {
+        status = 'Unavailable';
+        botRole = 'Unavailable';
+      } else if (isLeft) {
+        status = 'Bot Left';
+        botRole = 'Left';
+      }
+
       res.json({
         chatId,
         chatTitle: settings.chatTitle || `Group ${chatId}`,
@@ -220,8 +715,11 @@ async function startServer() {
         freedUsers,
         storedMessages,
         logs,
-        status: settings.botLeft ? 'Bot Left' : 'Active',
-        botRole: settings.botLeft ? 'Left' : 'Administrator'
+        status,
+        botRole,
+        botLeft: isLeft,
+        unavailable: isUnavailable,
+        unavailableReason: settings.unavailableReason
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -703,39 +1201,55 @@ async function startServer() {
     }
   });
 
-  // 10. Leave Group
+  // 10. Leave Group Workflow with Authoritative Verification & Stale Chat Handling
   app.post('/api/dashboard/groups/:chatId/leave', async (req, res) => {
     try {
       const chatId = Number(req.params.chatId);
       const { confirmation } = req.body;
-
-      if (confirmation !== 'LEAVE') {
-        return res.status(400).json({ error: 'Explicit confirmation "LEAVE" required to leave group.' });
-      }
-
-      const tgRes = await telegramApi.leaveChat(chatId);
-      if (!tgRes.ok) {
-        return res.status(400).json({ error: tgRes.description || 'Telegram API rejected leave request' });
-      }
-
-      db.markBotLeftGroup(chatId);
-
-      db.logAction({
-        id: Math.random().toString(36).slice(2, 9),
-        timestamp: new Date().toISOString(),
-        chatId,
-        groupId: chatId,
-        actorRole: 'DASHBOARD_ADMIN',
-        adminUsername: 'dashboard_admin',
-        command: 'leave_group',
-        action: 'leave_group',
-        result: 'success',
-        details: `Roxie voluntarily left group ${chatId}`
-      });
-
-      res.json({ success: true, message: 'Roxie has successfully left the group.' });
+      const result = await executeLeaveGroupWorkflow(chatId, confirmation);
+      res.status(result.status).json(result.body);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 10a. Group Data Export
+  app.get('/api/dashboard/groups/:chatId/export', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) {
+        return res.status(400).json({ error: 'Invalid group chatId' });
+      }
+      const data = db.getGroupExportData(chatId);
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="group_${chatId}.json"`);
+      return res.json(data);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 10b. Group Storage Status
+  app.get('/api/dashboard/groups/:chatId/storage-status', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) {
+        return res.status(400).json({ error: 'Invalid group chatId' });
+      }
+      const status = db.getGroupStorageStatus(chatId);
+      return res.json(status);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 10c. Central Persistence Health Check
+  app.get('/api/dashboard/storage/health', (req, res) => {
+    try {
+      const health = db.getPersistenceHealth();
+      return res.json(health);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
   });
 
@@ -759,50 +1273,27 @@ async function startServer() {
     }
   });
 
-  // 12. Send Message to Group or Private Chat
+  // 12. Send Message to Group or Private Chat (with Reply-to-User support)
   app.post('/api/dashboard/send', async (req, res) => {
     try {
-      const { targetType, targetId, message } = req.body;
-      if (!targetId || !message || !message.trim()) {
-        return res.status(400).json({ error: 'Target ID and non-empty message are required.' });
+      const targetId = req.body.targetId || req.body.chatId;
+      const text = req.body.message || req.body.text;
+      const replyToMessageId = req.body.replyToMessageId !== undefined && req.body.replyToMessageId !== null
+        ? Number(req.body.replyToMessageId)
+        : undefined;
+
+      const authHeader = req.headers.authorization;
+      let sessionId = req.headers['x-session-id'] as string;
+      if (!sessionId && authHeader && authHeader.startsWith('Bearer ')) {
+        sessionId = authHeader.substring(7);
       }
-
-      const tgRes = await telegramApi.sendMessage(targetId, message.trim(), { parse_mode: 'HTML' });
-      if (!tgRes.ok) {
-        return res.status(400).json({ error: tgRes.description || 'Telegram failed to send message.' });
+      if (!sessionId && req.body.sessionId) {
+        sessionId = req.body.sessionId;
       }
+      const operator = (req as any).operator?.username || req.body.operator || 'dashboard_admin';
 
-      const numTargetId = Number(targetId);
-      if (numTargetId > 0) {
-        db.addPrivateMessage(numTargetId, numTargetId, {
-          role: 'assistant',
-          content: message.trim(),
-          timestamp: Date.now(),
-          direction: 'out'
-        });
-      } else {
-        db.addGroupConversationEntry(numTargetId, {
-          role: 'assistant',
-          name: 'Roxie',
-          content: message.trim(),
-          timestamp: Date.now()
-        });
-      }
-
-      db.logAction({
-        id: Math.random().toString(36).slice(2, 9),
-        timestamp: new Date().toISOString(),
-        chatId: numTargetId,
-        groupId: numTargetId,
-        actorRole: 'DASHBOARD_ADMIN',
-        adminUsername: 'dashboard_admin',
-        command: 'send_message',
-        action: 'send_message',
-        result: 'success',
-        details: `Sent direct message to ${targetType || 'target'} ${targetId}`
-      });
-
-      res.json({ success: true, messageId: tgRes.result?.message_id });
+      const result = await executeSendMessageWorkflow(targetId, text, replyToMessageId, operator, sessionId);
+      res.status(result.status).json(result.body);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -934,11 +1425,16 @@ async function startServer() {
     console.log(`Server listening on http://0.0.0.0:${PORT}`);
   });
 
-  const handleShutdown = (signal: string) => {
+  const handleShutdown = async (signal: string) => {
     console.log(`Received ${signal}. Starting graceful shutdown sequence...`);
     try {
       telegramBot.stopPolling();
     } catch {}
+    try {
+      await db.flushAll();
+    } catch (err) {
+      console.error('Error flushing pending storage writes:', err);
+    }
     server.close(() => {
       console.log('HTTP server closed. Exiting cleanly.');
       process.exit(0);
@@ -953,4 +1449,6 @@ async function startServer() {
   process.on('SIGINT', () => handleShutdown('SIGINT'));
 }
 
-startServer();
+if (!process.argv.some(arg => arg.includes('test') || arg.includes('Test'))) {
+  startServer();
+}

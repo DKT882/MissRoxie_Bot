@@ -1,0 +1,296 @@
+{
+  "schemaVersion": 1,
+  "chat": {
+    "chatId": "-100111222333",
+    "title": "SVGI Developers",
+    "type": "supergroup",
+    "username": null
+  },
+  "status": {
+    "botLeft": false,
+    "leftAt": null,
+    "unavailable": false,
+    "unavailableAt": null,
+    "unavailableReason": null
+  },
+  "settings": {
+    "chatId": -100111222333,
+    "chatTitle": "SVGI Developers",
+    "warnLimit": 3,
+    "warnAction": "ban",
+    "warnExpireSeconds": 0,
+    "floodEnabled": false,
+    "floodCount": 8,
+    "floodWindow": 5,
+    "floodAction": "mute",
+    "raidEnabled": false,
+    "raidLimit": 8,
+    "raidWindow": 30,
+    "raidAction": "kick",
+    "raidDuration": 300,
+    "captchaEnabled": false,
+    "captchaMode": "button",
+    "captchaTimeout": 120,
+    "captchaAction": "kick",
+    "linksProtection": true,
+    "linksWhitelist": [],
+    "mediaProtection": true,
+    "stickerProtection": true,
+    "gifsProtection": false,
+    "videosProtection": false,
+    "photosProtection": false,
+    "voiceProtection": false,
+    "audioProtection": false,
+    "locks": {},
+    "filters": {
+      "rules": "Group rules apply."
+    },
+    "welcomeEnabled": false,
+    "welcomeMessage": "Welcome {user} to {chat}!",
+    "goodbyeEnabled": false,
+    "goodbyeMessage": "Goodbye {user}!",
+    "slowModeSeconds": 0,
+    "reportsEnabled": true,
+    "updatedAt": "2026-08-31T14:07:14.827Z",
+    "automodEnabled": false,
+    "mediaAction": "delete",
+    "warnEscalation": [],
+    "securityEnabled": false,
+    "joinmode": "normal",
+    "autoAcceptEnabled": false,
+    "automations": [],
+    "rules": "",
+    "lastAllTimestamp": 0,
+    "chatbotEnabled": true,
+    "chatbotMode": "auto",
+    "protectionEnabled": true,
+    "protectionFloodCount": 5,
+    "protectionFloodWindow": 5,
+    "protectionDuplicateLimit": 3,
+    "protectionLinkBurstLimit": 3,
+    "autoResponse": {
+      "enabled": true,
+      "mode": "every_message",
+      "cooldownSeconds": 30,
+      "randomize": false,
+      "minSeconds": 30,
+      "maxSeconds": 120,
+      "lastResponseTimestamp": 0
+    },
+    "autoSticker": {
+      "enabled": true,
+      "mode": "cooldown",
+      "cooldownSeconds": 60,
+      "randomize": false,
+      "minSeconds": 60,
+      "maxSeconds": 300,
+      "lastStickerTimestamp": 0
+    },
+    "stickerPacks": {},
+    "botLeft": false,
+    "unavailable": false,
+    "abuseWords": [],
+    "customAbusiveWords": []
+  },
+  "permissions": {
+    "contentPermissions": null,
+    "customRoles": {},
+    "stickerFreeUsers": []
+  },
+  "moderation": {
+    "locks": {},
+    "filters": {
+      "rules": "Group rules apply."
+    },
+    "linksWhitelist": [],
+    "approvedUsers": [],
+    "freedUsers": [],
+    "warnings": [],
+    "tempActions": [],
+    "abuseWords": []
+  },
+  "ai": {
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true,
+    "welcomeEnabled": false
+  },
+  "lustMode": {
+    "enabled": false,
+    "level": 1,
+    "lustStickers": {},
+    "userLustLevels": []
+  },
+  "autoResponse": {
+    "enabled": true,
+    "mode": "every_message",
+    "cooldownSeconds": 30,
+    "randomize": false,
+    "minSeconds": 30,
+    "maxSeconds": 120,
+    "lastResponseTimestamp": 0
+  },
+  "autoSticker": {
+    "enabled": true,
+    "mode": "cooldown",
+    "cooldownSeconds": 60,
+    "randomize": false,
+    "minSeconds": 60,
+    "maxSeconds": 300,
+    "lastStickerTimestamp": 0
+  },
+  "stickers": {
+    "mediaLibrary": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "stickerProtection": true
+  },
+  "stickerPacks": [],
+  "abuseWords": [],
+  "members": [],
+  "moderators": [],
+  "messages": [],
+  "statistics": {
+    "schedules": [
+      {
+        "id": "ZYWSXD",
+        "createdAt": "2026-08-25T18:41:32.055Z",
+        "runsCount": 19,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "55O99P",
+        "createdAt": "2026-08-25T18:58:18.112Z",
+        "runsCount": 19,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "Z1CLUO",
+        "createdAt": "2026-08-25T19:17:55.318Z",
+        "runsCount": 18,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "83NSXH",
+        "createdAt": "2026-08-25T19:18:12.310Z",
+        "runsCount": 18,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "W1HJPK",
+        "createdAt": "2026-08-26T08:53:26.672Z",
+        "runsCount": 18,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "M8HLLH",
+        "createdAt": "2026-08-26T08:54:23.506Z",
+        "runsCount": 18,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "YDSVDX",
+        "createdAt": "2026-08-26T09:06:54.357Z",
+        "runsCount": 18,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "2PHBNL",
+        "createdAt": "2026-08-26T09:07:52.077Z",
+        "runsCount": 18,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "CM0L6Y",
+        "createdAt": "2026-08-26T09:08:35.957Z",
+        "runsCount": 18,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "HR6JN8",
+        "createdAt": "2026-08-27T07:31:13.748Z",
+        "runsCount": 14,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "MD5SE1",
+        "createdAt": "2026-08-27T07:32:20.186Z",
+        "runsCount": 14,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      },
+      {
+        "id": "Q306OV",
+        "createdAt": "2026-08-27T08:30:57.959Z",
+        "runsCount": 13,
+        "chatId": -100111222333,
+        "message": "Daily check-in",
+        "intervalMs": 3600000,
+        "intervalFormatted": "1h",
+        "nextRun": "2026-08-30T19:11:01.361Z",
+        "adminId": 999
+      }
+    ],
+    "notes": [],
+    "userMemories": []
+  },
+  "activity": [],
+  "updatedAt": "2026-08-31T14:14:51.004Z"
+}

@@ -51,16 +51,19 @@ export class TelegramApi {
     text: string,
     options?: {
       reply_to_message_id?: number;
+      reply_parameters?: { message_id: number; chat_id?: number | string };
       parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
       disable_web_page_preview?: boolean;
       reply_markup?: any;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
+    const replyId = options?.reply_parameters?.message_id || options?.reply_to_message_id;
     return this.call('sendMessage', {
       chat_id: chatId,
       text,
       parse_mode: options?.parse_mode || 'HTML',
-      reply_to_message_id: options?.reply_to_message_id,
+      reply_to_message_id: replyId,
+      reply_parameters: replyId ? { message_id: replyId } : undefined,
       disable_web_page_preview: options?.disable_web_page_preview ?? true,
       reply_markup: options?.reply_markup
     });

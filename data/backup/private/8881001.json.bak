@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "chatId": "8881001",
+  "userId": 8881001,
+  "username": null,
+  "name": "Tester",
+  "language": "english",
+  "lastUpdated": 1788183064626,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hi roxie private talk",
+      "timestamp": 1788183064359,
+      "messageId": 103,
+      "direction": "in",
+      "language": "english"
+    },
+    {
+      "role": "user",
+      "content": "direct private message to roxie",
+      "timestamp": 1788183064626,
+      "messageId": 205,
+      "direction": "in",
+      "language": "english"
+    }
+  ],
+  "lustLevel": 0,
+  "updatedAt": "2026-08-31T14:14:51.169Z"
+}

@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "chat": {
+    "chatId": "-1004476693823",
+    "title": "testSubject 2",
+    "type": "supergroup",
+    "username": null
+  },
+  "status": {
+    "botLeft": false,
+    "leftAt": null,
+    "unavailable": false,
+    "unavailableAt": null,
+    "unavailableReason": null
+  },
+  "settings": {
+    "chatId": -1004476693823,
+    "chatTitle": "testSubject 2",
+    "warnLimit": 3,
+    "warnAction": "ban",
+    "floodEnabled": true,
+    "floodCount": 8,
+    "floodWindow": 5,
+    "floodAction": "mute",
+    "linksProtection": true,
+    "linksWhitelist": [],
+    "mediaProtection": true,
+    "stickerProtection": true,
+    "gifsProtection": false,
+    "videosProtection": false,
+    "photosProtection": false,
+    "voiceProtection": false,
+    "audioProtection": false,
+    "locks": {},
+    "filters": {},
+    "welcomeEnabled": true,
+    "welcomeMessage": "Welcome {mention} to {chat_title}! 👋 Your ID is {id}.",
+    "goodbyeEnabled": true,
+    "goodbyeMessage": "jaa be {mention}",
+    "slowModeSeconds": 0,
+    "reportsEnabled": true,
+    "updatedAt": "2026-08-31T14:07:14.807Z",
+    "warnExpireSeconds": 0,
+    "raidEnabled": false,
+    "raidLimit": 8,
+    "raidWindow": 30,
+    "raidAction": "kick",
+    "raidDuration": 300,
+    "captchaEnabled": false,
+    "captchaMode": "button",
+    "captchaTimeout": 120,
+    "captchaAction": "kick",
+    "automodEnabled": false,
+    "mediaAction": "delete",
+    "warnEscalation": [],
+    "securityEnabled": false,
+    "joinmode": "normal",
+    "autoAcceptEnabled": false,
+    "automations": [],
+    "rules": "",
+    "lastAllTimestamp": 0,
+    "chatbotEnabled": true,
+    "chatbotMode": "auto",
+    "protectionEnabled": true,
+    "protectionFloodCount": 5,
+    "protectionFloodWindow": 5,
+    "protectionDuplicateLimit": 3,
+    "protectionLinkBurstLimit": 3,
+    "autoResponse": {
+      "enabled": true,
+      "mode": "every_message",
+      "cooldownSeconds": 30,
+      "randomize": false,
+      "minSeconds": 30,
+      "maxSeconds": 120,
+      "lastResponseTimestamp": 0
+    },
+    "autoSticker": {
+      "enabled": true,
+      "mode": "cooldown",
+      "cooldownSeconds": 60,
+      "randomize": false,
+      "minSeconds": 60,
+      "maxSeconds": 300,
+      "lastStickerTimestamp": 0
+    },
+    "stickerPacks": {},
+    "botLeft": false,
+    "unavailable": false,
+    "abuseWords": [],
+    "customAbusiveWords": []
+  },
+  "permissions": {
+    "contentPermissions": null,
+    "customRoles": {},
+    "stickerFreeUsers": [
+      {
+        "chatId": -1004476693823,
+        "userId": 5018082627,
+        "username": "dkt_swift",
+        "grantedBy": 8204962552,
+        "grantedAt": "2026-08-25T10:59:31.748Z"
+      }
+    ]
+  },
+  "moderation": {
+    "locks": {},
+    "filters": {},
+    "linksWhitelist": [],
+    "approvedUsers": [],
+    "freedUsers": [
+      {
+        "chatId": -1004476693823,
+        "userId": 5018082627,
+        "username": "dkt_swift",
+        "grantedBy": 8204962552,
+        "grantedAt": "2026-08-25T10:59:31.748Z"
+      }
+    ],
+    "warnings": [],
+    "tempActions": [],
+    "abuseWords": []
+  },
+  "ai": {
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true,
+    "welcomeEnabled": true
+  },
+  "lustMode": {
+    "enabled": false,
+    "level": 1,
+    "lustStickers": {},
+    "userLustLevels": []
+  },
+  "autoResponse": {
+    "enabled": true,
+    "mode": "every_message",
+    "cooldownSeconds": 30,
+    "randomize": false,
+    "minSeconds": 30,
+    "maxSeconds": 120,
+    "lastResponseTimestamp": 0
+  },
+  "autoSticker": {
+    "enabled": true,
+    "mode": "cooldown",
+    "cooldownSeconds": 60,
+    "randomize": false,
+    "minSeconds": 60,
+    "maxSeconds": 300,
+    "lastStickerTimestamp": 0
+  },
+  "stickers": {
+    "mediaLibrary": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "stickerProtection": true
+  },
+  "stickerPacks": [],
+  "abuseWords": [],
+  "members": [],
+  "moderators": [],
+  "messages": [],
+  "statistics": {
+    "schedules": [],
+    "notes": [],
+    "userMemories": []
+  },
+  "activity": [],
+  "updatedAt": "2026-08-31T14:14:50.989Z"
+}
