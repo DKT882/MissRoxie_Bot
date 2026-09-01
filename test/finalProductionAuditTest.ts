@@ -1,4 +1,4 @@
-﻿import assert from 'assert';
+import assert from 'assert';
 import { db, GROUP_MEMORY_LIMIT, MAX_PRIVATE_CHAT_MESSAGES } from '../server/db/storage.js';
 import { telegramBot } from '../server/telegram/botManager.js';
 import { ChatbotService } from '../server/telegram/chatbot.js';
@@ -259,11 +259,11 @@ async function runAuditTests() {
   const groupScoped = getCommandsForTelegramScope('all_group_chats');
   const privateScoped = getCommandsForTelegramScope('all_private_chats');
   const defaultScoped = getCommandsForTelegramScope('default');
-  assert(adminScoped.length <= 100, `TEST L: Admin scope exceeds 100: ${adminScoped.length}`);
-  assert(groupScoped.length <= 100, `TEST L: Group scope exceeds 100: ${groupScoped.length}`);
-  assert(privateScoped.length <= 100, `TEST L: Private scope exceeds 100: ${privateScoped.length}`);
-  assert(defaultScoped.length <= 100, `TEST L: Default scope exceeds 100: ${defaultScoped.length}`);
-  console.log('✓ TEST L PASSED: All 4 Telegram command scopes capped <= 100 commands.');
+  assert(adminScoped.length <= 75, `TEST L: Admin scope exceeds 75: ${adminScoped.length}`);
+  assert(groupScoped.length <= 45, `TEST L: Group scope exceeds 45: ${groupScoped.length}`);
+  assert(privateScoped.length <= 30, `TEST L: Private scope exceeds 30: ${privateScoped.length}`);
+  assert(defaultScoped.length <= 30, `TEST L: Default scope exceeds 30: ${defaultScoped.length}`);
+  console.log(`✓ TEST L PASSED: All 4 Telegram command scopes capped to safe limits (Admin: ${adminScoped.length}, Group: ${groupScoped.length}, Private: ${privateScoped.length}, Default: ${defaultScoped.length}).`);
 
   // ----------------------------------------------------
   // TEST M: Dashboard Group Data
@@ -335,8 +335,28 @@ async function runAuditTests() {
   assert(!isGroupProtected(0, dummyTitle), 'TEST S: Dummy group should not be protected');
   console.log('✓ TEST S PASSED: Real groups ("horny log", "bade log", "lovers") protected from cleanup.');
 
+  // ----------------------------------------------------
+  // TEST T: Message Routing Safety Invariant
+  // ----------------------------------------------------
+  console.log('\n--- TEST T: Message Routing Safety Invariant ---');
+  const incomingRealGroupId = -1004494262619;
+  const dummyGroupId = -100111222333;
+  const testMsgT: TelegramMessage = {
+    message_id: 94001,
+    date: Math.floor(Date.now() / 1000),
+    chat: { id: incomingRealGroupId, type: 'supergroup', title: 'Horney Log' },
+    from: { id: testUserId, is_bot: false, first_name: 'Tester' },
+    text: 'Roxie, what is your status?'
+  };
+
+  const decisionT = await ChatbotService.generateResponseDecision('req_test_t', testMsgT, mockBotUser);
+  assert(decisionT, 'TEST T: Decision must be generated');
+  assert.strictEqual(decisionT.chatId, incomingRealGroupId, 'TEST T: Decision chatId MUST match incoming message chatId');
+  assert.notStrictEqual(decisionT.chatId, dummyGroupId, 'TEST T: Decision chatId MUST NOT equal dummy group ID');
+  console.log(`✓ TEST T PASSED: Invariant verified — response destination (${decisionT.chatId}) strictly matches incoming chat (${incomingRealGroupId}).`);
+
   console.log('\n================================================================');
-  console.log('ALL TESTS (A THROUGH S) PASSED SUCCESSFULLY! 🎉');
+  console.log('ALL TESTS (A THROUGH T) PASSED SUCCESSFULLY! 🎉');
   console.log('================================================================\n');
 }
 

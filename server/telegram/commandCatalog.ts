@@ -1596,20 +1596,21 @@ export function getCommandsForTelegramScope(scope: 'all_chat_administrators' | '
       break;
   }
 
-  // Deduplicate and cap to Telegram's 100-command limit
+  // Safe conservative limits per scope to strictly avoid BOT_COMMANDS_TOO_MUCH from Telegram API
+  const maxLimit = scope === 'all_chat_administrators' ? 75 : scope === 'all_group_chats' ? 45 : 30;
   const seen = new Set<string>();
   const result: Array<{ command: string; description: string }> = [];
 
   for (const item of filtered) {
-    const rawCmd = item.command.replace(/^\//, '').toLowerCase();
-    if (!seen.has(rawCmd)) {
+    const rawCmd = item.command.replace(/^\//, '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 32);
+    if (rawCmd && !seen.has(rawCmd)) {
       seen.add(rawCmd);
       result.push({
         command: rawCmd,
-        description: item.description.slice(0, 256)
+        description: (item.description || 'Command').slice(0, 256)
       });
     }
-    if (result.length >= 100) break;
+    if (result.length >= maxLimit) break;
   }
 
   return result;

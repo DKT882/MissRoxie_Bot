@@ -1979,6 +1979,25 @@ export class ChatbotService {
         return false;
       }
 
+      // Hard safety guard: enforce that decision.chatId MUST match incoming message.chat.id
+      if (decision.chatId !== chatId) {
+        console.error(JSON.stringify({
+          event: 'TELEGRAM_ROUTE_MISMATCH',
+          incoming_chat_id: chatId,
+          attempted_chat_id: decision.chatId,
+          message_id: msgId
+        }));
+        decision.chatId = chatId;
+      }
+
+      console.log(JSON.stringify({
+        event: 'TELEGRAM_MESSAGE_ROUTE',
+        incoming_chat_id: chatId,
+        response_chat_id: decision.chatId,
+        message_id: msgId,
+        reply_to_message_id: decision.replyToMessageId
+      }));
+
       const sent = await this.dispatchResponse(decision);
       return sent;
     } catch (err: any) {

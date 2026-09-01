@@ -135,7 +135,13 @@ export class MessageScheduler {
         } catch (err: any) {
           this.failures++;
           metricsTracker.increment('scheduler_failures');
-          console.error(`Error executing schedule ${schedule.id}:`, err.message);
+          const isDeadChat = err.message?.includes('chat not found') || err.message?.includes('chat was deleted') || err.message?.includes('PEER_ID_INVALID') || err.message?.includes('bot was kicked') || err.message?.includes('bot is not a member');
+          if (isDeadChat) {
+            console.warn(`[SCHEDULER] Automatically removing obsolete schedule ${schedule.id} for nonexistent chat ${schedule.chatId}: ${err.message}`);
+            db.deleteSchedule(schedule.chatId, schedule.id);
+          } else {
+            console.error(`Error executing schedule ${schedule.id}:`, err.message);
+          }
           errorTracker.recordError({
             source: 'SCHEDULER',
             severity: 'ERROR',
