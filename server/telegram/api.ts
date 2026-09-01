@@ -3,6 +3,7 @@ import { TelegramChatMember, TelegramUser, BotCommand, BotCommandScope } from '.
 export interface TelegramApiCallOptions {
   maxRetries?: number;
   skipRateLimiter?: boolean;
+  timeoutMs?: number;
 }
 
 export class TelegramApi {
@@ -10,6 +11,8 @@ export class TelegramApi {
   private inFlightStickerSets: Map<string, Promise<any>> = new Map();
   // Known permissions cache to avoid redundant setChatPermissions calls
   private knownChatPermissions: Map<string, string> = new Map();
+  // Cached bot user profile
+  private cachedBotInfo: { user: TelegramUser; timestamp: number } | null = null;
   // Outbound rate limit scheduler state
   private lastRequestTimestamp: number = 0;
   private minIntervalMs: number = 35; // ~28 requests/sec max
@@ -45,6 +48,7 @@ export class TelegramApi {
     };
     this.knownChatPermissions.clear();
     this.inFlightStickerSets.clear();
+    this.cachedBotInfo = null;
   }
 
   private async sleep(ms: number): Promise<void> {
@@ -66,7 +70,19 @@ export class TelegramApi {
     options?: TelegramApiCallOptions
   ): Promise<{ ok: boolean; result?: T; description?: string; error_code?: number; parameters?: { retry_after?: number }; skipped?: boolean }> {
     const maxRetries = options?.maxRetries ?? this.maxRetries;
+    const timeoutMs = options?.timeoutMs ?? 5000;
     let attempt = 0;
+
+    let token: string;
+    try {
+      token = this.getToken();
+    } catch (err: any) {
+      return {
+        ok: false,
+        error_code: 401,
+        description: err.message || 'TELEGRAM_BOT_TOKEN not configured'
+      };
+    }
 
     while (attempt <= maxRetries) {
       try {
@@ -74,13 +90,14 @@ export class TelegramApi {
           await this.paceRequest();
         }
 
-        const token = this.getToken();
         const url = `https://api.telegram.org/bot${token}/${method}`;
+        const signal = AbortSignal.timeout(timeoutMs);
         
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: body ? JSON.stringify(body) : undefined
+          body: body ? JSON.stringify(body) : undefined,
+          signal
         });
 
         let data: any;
@@ -120,6 +137,15 @@ export class TelegramApi {
 
         return data;
       } catch (err: any) {
+        if (err.name === 'TimeoutError' || err.name === 'AbortError' || err.message?.includes('aborted') || err.message?.includes('timeout')) {
+          console.warn(`[TelegramApi] Request timed out on ${method} (${timeoutMs}ms). Chat: ${body?.chat_id || 'N/A'}`);
+          return {
+            ok: false,
+            error_code: 408,
+            description: `Telegram API request timed out after ${timeoutMs}ms`
+          };
+        }
+
         if (attempt < maxRetries && (err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.message?.includes('fetch failed'))) {
           attempt++;
           const backoffMs = 1000 * Math.pow(2, attempt - 1);
@@ -141,7 +167,14 @@ export class TelegramApi {
   }
 
   public async getMe(): Promise<{ ok: boolean; result?: TelegramUser; description?: string; error_code?: number }> {
-    return this.call<TelegramUser>('getMe');
+    if (this.cachedBotInfo && (Date.now() - this.cachedBotInfo.timestamp < 10 * 60 * 1000)) {
+      return { ok: true, result: this.cachedBotInfo.user };
+    }
+    const res = await this.call<TelegramUser>('getMe', undefined, { timeoutMs: 3000, maxRetries: 1 });
+    if (res.ok && res.result) {
+      this.cachedBotInfo = { user: res.result, timestamp: Date.now() };
+    }
+    return res;
   }
 
   public async deleteWebhook(): Promise<{ ok: boolean; description?: string; error_code?: number }> {

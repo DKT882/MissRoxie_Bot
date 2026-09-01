@@ -1230,22 +1230,17 @@ export async function startServer() {
       const botId = meRes.ok && meRes.result ? meRes.result.id : 0;
       let botMember: any = null;
 
-      if (botId) {
-        try {
-          const memberRes = await telegramApi.getChatMember(chatId, botId);
-          if (memberRes.ok) botMember = memberRes.result;
-        } catch {}
-      }
+      const [memberRes, cRes] = await Promise.all([
+        botId ? telegramApi.getChatMember(chatId, botId).catch(() => ({ ok: false })) : Promise.resolve({ ok: false }),
+        telegramApi.getChat(chatId).catch(() => ({ ok: false }))
+      ]);
 
-      let chatInfo: any = null;
-      try {
-        const cRes = await telegramApi.getChat(chatId);
-        if (cRes.ok) chatInfo = cRes.result;
-      } catch {}
+      if (memberRes && (memberRes as any).ok) botMember = (memberRes as any).result;
+      const chatInfo = cRes && (cRes as any).ok ? (cRes as any).result : null;
 
       res.json({
         chatId,
-        botUser: meRes.result,
+        botUser: meRes.result || null,
         roxieRole: botMember?.status === 'creator' ? '👑 Owner' : botMember?.status === 'administrator' ? '🛡️ Administrator' : '👤 Member',
         roxiePermissions: {
           can_delete_messages: botMember?.can_delete_messages ?? true,

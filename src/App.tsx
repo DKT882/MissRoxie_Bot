@@ -424,7 +424,8 @@ export default function App() {
       // Fetch group details if a group is open or selected
       const targetDetailId = activeGroupDetailId || (selectedChatId !== 'all' ? selectedChatId : null);
       if (targetDetailId) {
-        const [detailRes, modsRes, permsRes, groupStickersRes, abuseRes, membersRes, lustUsersRes, historyRes] = await Promise.all([
+        // Fetch all group sub-resources with Promise.allSettled so no single slow or failing sub-resource blocks the others
+        const [detailResult, modsResult, permsResult, groupStickersResult, abuseResult, membersResult, lustUsersResult, historyResult] = await Promise.allSettled([
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}`),
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/moderators`),
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/permissions`),
@@ -434,23 +435,76 @@ export default function App() {
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/lust/users`),
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/backup/history`)
         ]);
-        if (detailRes.ok) {
-          const dData = await detailRes.json();
-          setGroupDetails(dData);
-          if (dData.settings?.slowModeSeconds !== undefined) {
-            setSlowmodeInput(dData.settings.slowModeSeconds);
-          }
+
+        if (detailResult.status === 'fulfilled' && detailResult.value.ok) {
+          try {
+            const dData = await detailResult.value.json();
+            setGroupDetails(dData);
+            if (dData.settings?.slowModeSeconds !== undefined) {
+              setSlowmodeInput(dData.settings.slowModeSeconds);
+            }
+          } catch {}
+        } else {
+          // If the group detail endpoint returned an error or is missing, synthesize a safe default object from existing groups
+          const matchedGroup = groups.find(g => g.chatId === targetDetailId);
+          setGroupDetails(prev => prev && prev.chatId === targetDetailId ? prev : {
+            chatId: targetDetailId,
+            chatTitle: matchedGroup?.chatTitle || `Group ${targetDetailId}`,
+            settings: matchedGroup?.settings || {},
+            locks: {},
+            filters: {},
+            linksWhitelist: [],
+            bans: [],
+            kicks: [],
+            mutes: [],
+            reports: [],
+            schedules: [],
+            notes: [],
+            approvedUsers: [],
+            freedUsers: [],
+            storedMessages: [],
+            logs: [],
+            status: matchedGroup?.status || 'Active',
+            botRole: matchedGroup?.botRole || 'Administrator'
+          });
         }
-        if (modsRes.ok) setGroupModerators(await modsRes.json());
-        if (permsRes.ok) setGroupPermissionsData(await permsRes.json());
-        if (groupStickersRes.ok) setGroupStickersData(await groupStickersRes.json());
-        if (abuseRes.ok) {
-          const aData = await abuseRes.json();
-          setGroupAbuseWords(aData.words || []);
+
+        if (modsResult.status === 'fulfilled' && modsResult.value.ok) {
+          try {
+            setGroupModerators(await modsResult.value.json());
+          } catch {}
         }
-        if (membersRes.ok) setGroupMembersList(await membersRes.json());
-        if (lustUsersRes.ok) setGroupLustUsers(await lustUsersRes.json());
-        if (historyRes && historyRes.ok) setBackupHistoryList(await historyRes.json());
+        if (permsResult.status === 'fulfilled' && permsResult.value.ok) {
+          try {
+            setGroupPermissionsData(await permsResult.value.json());
+          } catch {}
+        }
+        if (groupStickersResult.status === 'fulfilled' && groupStickersResult.value.ok) {
+          try {
+            setGroupStickersData(await groupStickersResult.value.json());
+          } catch {}
+        }
+        if (abuseResult.status === 'fulfilled' && abuseResult.value.ok) {
+          try {
+            const aData = await abuseResult.value.json();
+            setGroupAbuseWords(aData.words || []);
+          } catch {}
+        }
+        if (membersResult.status === 'fulfilled' && membersResult.value.ok) {
+          try {
+            setGroupMembersList(await membersResult.value.json());
+          } catch {}
+        }
+        if (lustUsersResult.status === 'fulfilled' && lustUsersResult.value.ok) {
+          try {
+            setGroupLustUsers(await lustUsersResult.value.json());
+          } catch {}
+        }
+        if (historyResult.status === 'fulfilled' && historyResult.value.ok) {
+          try {
+            setBackupHistoryList(await historyResult.value.json());
+          } catch {}
+        }
       } else {
         setGroupDetails(null);
         setGroupModerators(null);
