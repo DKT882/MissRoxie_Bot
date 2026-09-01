@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 import { telegramBot } from './server/telegram.js';
 import { db } from './server/db/storage.js';
 import { COMMAND_CATALOG } from './server/telegram/commandCatalog.js';
@@ -557,13 +557,18 @@ export async function executeSendMessageWorkflow(
     return responsePayload;
   }
 
-async function startServer() {
+export async function startServer() {
+  console.log('[Roxie Startup] Initializing Express application...');
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
+  console.log(`[Roxie Startup] Target port resolved: ${PORT}`);
 
-  // Startup recovery
-  const startupResult = DisasterRecoveryService.startupRecovery();
-  console.log('ROXIE STARTUP DIAGNOSTICS:', startupResult);
+  try {
+    const startupResult = DisasterRecoveryService.startupRecovery();
+    console.log('[Roxie Startup] Storage & recovery check complete:', startupResult.status);
+  } catch (recErr: any) {
+    console.warn('[Roxie Startup] Recovery notice:', recErr.message);
+  }
 
   app.use(express.json({ limit: '10mb' }));
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -2221,31 +2226,46 @@ async function startServer() {
     }
   });
 
-  // Automatically initiate bot polling if TELEGRAM_BOT_TOKEN is present
-  if (process.env.TELEGRAM_BOT_TOKEN?.trim()) {
-    telegramBot.startPolling().catch((err) => {
-      console.error('Failed to start Telegram bot polling:', err.message);
-    });
-  }
-
   // Vite middleware for development vs static build in production
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
+  const isProduction = process.env.NODE_ENV === 'production' || fs.existsSync(path.join(process.cwd(), 'dist', 'index.html'));
+  if (isProduction) {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
+  } else {
+    try {
+      const viteModule = await import('vite');
+      const vite = await viteModule.createServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (viteErr: any) {
+      console.warn('[Roxie Server] Vite dev server failed to start, falling back to static files:', viteErr.message);
+      const distPath = path.join(process.cwd(), 'dist');
+      if (fs.existsSync(distPath)) {
+        app.use(express.static(distPath));
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(distPath, 'index.html'));
+        });
+      }
+    }
   }
 
+  console.log(`[Roxie Server] Starting HTTP server on port ${PORT}...`);
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Roxie Server] Listening on port ${PORT}`);
   });
+
+  // Automatically initiate bot polling in background AFTER HTTP server is listening
+  if (process.env.TELEGRAM_BOT_TOKEN?.trim()) {
+    console.log('[Roxie Telegram] Initializing Telegram bot subsystem...');
+    telegramBot.startPolling().catch((err) => {
+      console.error('[Roxie Telegram] Failed to start Telegram bot polling:', err.message);
+    });
+  }
 
   const handleShutdown = async (signal: string) => {
     console.log(`Received ${signal}. Starting graceful shutdown sequence...`);
@@ -2271,12 +2291,25 @@ async function startServer() {
   process.on('SIGINT', () => handleShutdown('SIGINT'));
 }
 
-const isDirectExecution = process.argv[1] && (
-  process.argv[1].endsWith('server.ts') ||
-  process.argv[1].endsWith('server.js') ||
-  process.argv[1].endsWith('server.cjs')
+process.on('uncaughtException', (err) => {
+  console.error('[Roxie Server] Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Roxie Server] Unhandled Promise Rejection:', reason);
+});
+
+const isDirectExecution = Boolean(
+  (typeof require !== 'undefined' && require.main === module) ||
+  (process.argv[1] && (
+    process.argv[1].endsWith('server.ts') ||
+    process.argv[1].endsWith('server.js') ||
+    process.argv[1].endsWith('server.cjs')
+  ))
 );
 
-if (isDirectExecution && !process.argv.some(arg => arg.toLowerCase().includes('test')) && process.env.NODE_ENV !== 'test') {
-  startServer();
+if (isDirectExecution && process.env.NODE_ENV !== 'test') {
+  startServer().catch((err) => {
+    console.error('[Roxie Server] Fatal startup error:', err);
+  });
 }
