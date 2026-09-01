@@ -4874,6 +4874,83 @@ export class StorageManager {
 
     this.scheduleSave(numId);
   }
+
+  public getDataDir(): string {
+    return this.dataDir;
+  }
+
+  public deleteGroupData(chatId: number | string): boolean {
+    const idNum = Number(chatId);
+    const idStr = String(chatId);
+    if (this.data.settings) {
+      delete this.data.settings[idNum];
+    }
+    if (this.data.groupMediaLibraries) {
+      delete this.data.groupMediaLibraries[idStr];
+    }
+    if (this.data.groupConversationMemories) {
+      delete this.data.groupConversationMemories[idStr];
+    }
+    if (this.data.groupMemories) {
+      delete this.data.groupMemories[idStr];
+    }
+    
+    // Clean keys prefixed with `${chatId}_`
+    const prefix = `${idStr}_`;
+    for (const key of Object.keys(this.data.notes || {})) {
+      if (key.startsWith(prefix)) delete this.data.notes[key];
+    }
+    for (const key of Object.keys(this.data.approvedUsers || {})) {
+      if (key.startsWith(prefix)) delete this.data.approvedUsers[key];
+    }
+    for (const key of Object.keys(this.data.groupMembers || {})) {
+      if (key.startsWith(prefix)) delete this.data.groupMembers[key];
+    }
+    for (const key of Object.keys(this.data.customRoles || {})) {
+      if (key.startsWith(prefix)) delete this.data.customRoles[key];
+    }
+    for (const key of Object.keys(this.data.userMemories || {})) {
+      if (key.startsWith(prefix)) delete this.data.userMemories[key];
+    }
+    for (const key of Object.keys(this.data.userLustLevels || {})) {
+      if (key.startsWith(prefix)) delete this.data.userLustLevels[key];
+    }
+
+    try {
+      const filePath = path.join(this.groupsDir, `${chatId}.json`);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      const bakPath = path.join(this.groupsBackupDir, `${chatId}.json.bak`);
+      if (fs.existsSync(bakPath)) {
+        fs.unlinkSync(bakPath);
+      }
+    } catch (err: any) {
+      console.warn(`[Storage] Failed to delete group file ${chatId}:`, err.message);
+    }
+    return true;
+  }
+
+  public deletePrivateChatData(chatId: number | string): boolean {
+    const idStr = String(chatId);
+    if (this.data.privateConversations) {
+      delete this.data.privateConversations[idStr];
+    }
+    
+    try {
+      const filePath = path.join(this.privateDir, `${chatId}.json`);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      const bakPath = path.join(this.privateBackupDir, `${chatId}.json.bak`);
+      if (fs.existsSync(bakPath)) {
+        fs.unlinkSync(bakPath);
+      }
+    } catch (err: any) {
+      console.warn(`[Storage] Failed to delete private chat file ${chatId}:`, err.message);
+    }
+    return true;
+  }
 }
 
 export const db = new StorageManager();

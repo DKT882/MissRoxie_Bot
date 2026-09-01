@@ -5,13 +5,17 @@ import { ModerationService, parseDuration } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { mapTelegramError } from './errorMapper.js';
 import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand } from './types.js';
-import { COMMAND_CATALOG } from './commandCatalog.js';
+import {
+  COMMAND_CATALOG,
+  getCatalogItem,
+  getCatalogByCategory,
+  getCommandsForTelegramScope,
+  CommandCatalogItem,
+  CommandCategory
+} from './commandCatalog.js';
 import { ChatbotService, ROXIE_SUPPORTED_MOODS } from './chatbot.js';
 
-export const ADMIN_COMMANDS: BotCommand[] = COMMAND_CATALOG.map(item => ({
-  command: item.command.replace(/^\//, ''),
-  description: item.description.slice(0, 256)
-}));
+export const ADMIN_COMMANDS: BotCommand[] = getCommandsForTelegramScope('all_chat_administrators');
 
 export async function registerBotCommands(): Promise<{
   adminCommandsSet: boolean;
@@ -20,27 +24,13 @@ export async function registerBotCommands(): Promise<{
 }> {
   const errors: string[] = [];
 
-  const allCommands: BotCommand[] = COMMAND_CATALOG.map(item => ({
-    command: item.command.replace(/^\//, ''),
-    description: item.description.slice(0, 256)
-  }));
-
-  const publicCommands: BotCommand[] = COMMAND_CATALOG
-    .filter(item => item.permission === 'Everyone')
-    .map(item => ({
-      command: item.command.replace(/^\//, ''),
-      description: item.description.slice(0, 256)
-    }));
-
-  const privateCommands: BotCommand[] = [
-    ...publicCommands,
-    { command: 'start', description: 'Initialize bot conversation and welcome' },
-    { command: 'help', description: "Show Roxie's command help" }
-  ];
-  const uniquePrivateCommands = Array.from(new Map(privateCommands.map(c => [c.command, c])).values());
+  const adminCommands = getCommandsForTelegramScope('all_chat_administrators');
+  const groupCommands = getCommandsForTelegramScope('all_group_chats');
+  const privateCommands = getCommandsForTelegramScope('all_private_chats');
+  const defaultCommands = getCommandsForTelegramScope('default');
 
   // 1. Register all commands for administrators scope (capped at 100 for Telegram API limit)
-  const adminRes = await telegramApi.setMyCommands(allCommands.slice(0, 100), {
+  const adminRes = await telegramApi.setMyCommands(adminCommands, {
     type: 'all_chat_administrators'
   });
   if (!adminRes.ok) {
@@ -48,7 +38,7 @@ export async function registerBotCommands(): Promise<{
   }
 
   // 2. Register public group commands for group chats scope
-  const groupRes = await telegramApi.setMyCommands(publicCommands.slice(0, 100), {
+  const groupRes = await telegramApi.setMyCommands(groupCommands, {
     type: 'all_group_chats'
   });
   if (!groupRes.ok) {
@@ -56,7 +46,7 @@ export async function registerBotCommands(): Promise<{
   }
 
   // 3. Register private chat commands for private chats scope
-  const privateRes = await telegramApi.setMyCommands(uniquePrivateCommands.slice(0, 100), {
+  const privateRes = await telegramApi.setMyCommands(privateCommands, {
     type: 'all_private_chats'
   });
   if (!privateRes.ok) {
@@ -64,7 +54,7 @@ export async function registerBotCommands(): Promise<{
   }
 
   // 4. Register public commands for default scope
-  const defaultRes = await telegramApi.setMyCommands(publicCommands.slice(0, 100), {
+  const defaultRes = await telegramApi.setMyCommands(defaultCommands, {
     type: 'default'
   });
   if (!defaultRes.ok) {
@@ -95,8 +85,16 @@ export class CommandHandler {
   private static sayCooldowns: Map<number, number> = new Map();
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
-  private static catalogMap = new Map<string, any>(
-    COMMAND_CATALOG.map(item => [item.command.toLowerCase(), item])
+  private static catalogMap = new Map<string, CommandCatalogItem>(
+    COMMAND_CATALOG.flatMap(item => {
+      const entries: Array<[string, CommandCatalogItem]> = [[item.command.toLowerCase(), item]];
+      if (item.aliases) {
+        for (const a of item.aliases) {
+          entries.push([a.toLowerCase(), item]);
+        }
+      }
+      return entries;
+    })
   );
 
   public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
@@ -5511,7 +5509,7 @@ export class CommandHandler {
     const query = ctx.args[0]?.toLowerCase()?.trim()?.replace(/^\//, '');
 
     if (query) {
-      const foundCmd = COMMAND_CATALOG.find(c => c.command.toLowerCase().replace(/^\//, '') === query);
+      const foundCmd = getCatalogItem(query);
       if (foundCmd) {
         if (foundCmd.permission !== 'Everyone' && !isAdmin) {
           await telegramApi.sendMessage(ctx.chatId, `❌ Command <code>${escapeHtml(foundCmd.command)}</code> requires administrator privileges.`);
@@ -5523,6 +5521,13 @@ export class CommandHandler {
           `• <b>Syntax:</b> <code>${escapeHtml(foundCmd.syntax)}</code>\n` +
           `• <b>Example:</b> <code>${escapeHtml(foundCmd.example)}</code>\n` +
           `• <b>Permission:</b> ${escapeHtml(foundCmd.permission)}`;
+
+        if (foundCmd.aliases && foundCmd.aliases.length > 0) {
+          text += `\n• <b>Aliases:</b> <code>${foundCmd.aliases.map(a => escapeHtml(a)).join(', ')}</code>`;
+        }
+        if (foundCmd.scopes && foundCmd.scopes.length > 0) {
+          text += `\n• <b>Available In:</b> ${foundCmd.scopes.map(s => s === 'group' ? 'Groups' : s === 'private' ? 'Direct Messages' : 'Admin Only').join(', ')}`;
+        }
 
         if (foundCmd.command === '/schedule') {
           text += `\n\n📅 <b>SCHEDULE</b>\n\n` +
@@ -5560,7 +5565,8 @@ export class CommandHandler {
         const catName = allowedItems[0].category;
         let text = `📌 <b>Category: ${escapeHtml(catName)}</b>\n\n`;
         for (const item of allowedItems) {
-          text += `• <code>${escapeHtml(item.command)}</code> — ${escapeHtml(item.description)}\n  <i>Syntax:</i> <code>${escapeHtml(item.syntax)}</code>\n\n`;
+          const aliasStr = item.aliases && item.aliases.length > 0 ? ` (alias: <code>${item.aliases.join(', ')}</code>)` : '';
+          text += `• <code>${escapeHtml(item.command)}</code>${aliasStr} — ${escapeHtml(item.description)}\n  <i>Syntax:</i> <code>${escapeHtml(item.syntax)}</code>\n\n`;
         }
         await telegramApi.sendMessage(ctx.chatId, text);
         return;
@@ -5575,6 +5581,29 @@ export class CommandHandler {
       return item.permission === 'Everyone';
     });
 
+    const categoryOrder: CommandCategory[] = [
+      'General',
+      'Moderation',
+      'Warnings',
+      'Message Cleaning',
+      'Media & Stickers',
+      'Locks & Whitelist',
+      'Smart Protection',
+      'Custom Abuse',
+      'Flood Control',
+      'Filters',
+      'Reports',
+      'Welcome & Rules',
+      'Pin Management',
+      'Slow Mode',
+      'Admin & Permissions',
+      'Audit & Logs',
+      'Announcements',
+      'Scheduler',
+      'Notes',
+      'Configuration'
+    ];
+
     const categories: Record<string, typeof COMMAND_CATALOG> = {};
     for (const item of filteredCatalog) {
       if (!categories[item.category]) {
@@ -5588,11 +5617,15 @@ export class CommandHandler {
       ? `🛡️ <b>Roxie Admin Command Center & Toolkit</b>\n<i>🔒 Showing all available administrator & member commands.</i>\n`
       : `🛡️ <b>Roxie Command Center</b>\n<i>📖 Showing available member commands.</i>\n`;
 
-    for (const [cat, items] of Object.entries(categories)) {
+    for (const cat of categoryOrder) {
+      const items = categories[cat];
+      if (!items || items.length === 0) continue;
+
       let section = `\n📌 <b>${cat.toUpperCase()}</b>\n`;
       for (const item of items) {
         const permBadge = item.permission === 'Owner' ? '👑 Owner' : item.permission === 'Admin' ? '🛡️ Admin' : '👥 Everyone';
-        section += `• <code>${escapeHtml(item.command)}</code> [${permBadge}] — ${escapeHtml(item.description)}\n  <i>Syntax:</i> <code>${escapeHtml(item.syntax)}</code>\n`;
+        const aliasStr = item.aliases && item.aliases.length > 0 ? ` (alias: <code>${item.aliases.join(', ')}</code>)` : '';
+        section += `• <code>${escapeHtml(item.command)}</code>${aliasStr} [${permBadge}] — ${escapeHtml(item.description)}\n  <i>Syntax:</i> <code>${escapeHtml(item.syntax)}</code>\n`;
       }
       if (currentMsg.length + section.length > 3900) {
         messages.push(currentMsg);

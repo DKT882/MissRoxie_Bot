@@ -4531,18 +4531,23 @@ export default function App() {
             <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
               <div>
                 <h3 className="text-sm font-bold flex items-center gap-2">
-                  <ListChecks className="w-4 h-4 text-blue-500" /> Command Registry ({commands.length} Commands)
+                  <ListChecks className="w-4 h-4 text-blue-500" /> Authoritative Command Registry ({commands.length} Commands)
                 </h3>
-                <p className={`text-xs ${themeMutedText}`}>Live registered Telegram commands and syntax.</p>
+                <p className={`text-xs ${themeMutedText}`}>Synchronized single source of truth for Telegram bot commands, permissions, syntax, and aliases.</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {commands.map((cmd, idx) => (
                   <div key={idx} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-2`}>
                     <div className="flex items-center justify-between">
-                      <span className="px-2.5 py-1 bg-blue-500/10 text-blue-500 font-mono text-xs font-bold rounded-lg border border-blue-500/20">
-                        {cmd.command}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-1 bg-blue-500/10 text-blue-500 font-mono text-xs font-bold rounded-lg border border-blue-500/20">
+                          {cmd.command}
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-stone-500/10 text-stone-400">
+                          {cmd.category}
+                        </span>
+                      </div>
                       <span className={`text-[10px] px-2 py-0.5 rounded font-semibold uppercase ${
                         cmd.permission === 'Owner' ? 'bg-red-500/20 text-red-500' :
                         cmd.permission === 'Admin' ? 'bg-amber-500/20 text-amber-500' : 'bg-emerald-500/20 text-emerald-500'
@@ -4551,9 +4556,17 @@ export default function App() {
                       </span>
                     </div>
                     <p className="text-xs">{cmd.description}</p>
+                    {cmd.aliases && cmd.aliases.length > 0 && (
+                      <div className="text-[11px] text-blue-400">
+                        <strong>Aliases:</strong> {cmd.aliases.join(', ')}
+                      </div>
+                    )}
                     <div className={`${themeCardBg} rounded-lg p-2.5 text-[11px] font-mono space-y-0.5 ${themeMutedText}`}>
                       <div><strong>Syntax:</strong> {cmd.syntax}</div>
                       <div><strong>Example:</strong> {cmd.example}</div>
+                      {cmd.scopes && (
+                        <div><strong>Scopes:</strong> {cmd.scopes.join(', ')}</div>
+                      )}
                     </div>
                   </div>
                 ))}

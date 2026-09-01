@@ -362,7 +362,7 @@ async function runStickerPackReplyTests() {
   console.log('\n--- TEST 10: Command Catalog Integrity ---');
   const addPackEntries = COMMAND_CATALOG.filter(c => c.command === '/addstickerpack');
   assert(addPackEntries.length === 1, `TEST 10.1: /addstickerpack registered exactly once in COMMAND_CATALOG (found ${addPackEntries.length})`);
-  assert(addPackEntries[0].category === 'Media', 'TEST 10.2: /addstickerpack belongs to "Media" category');
+  assert(addPackEntries[0].category === 'Media & Stickers', 'TEST 10.2: /addstickerpack belongs to "Media & Stickers" category');
   assert(addPackEntries[0].permission === 'Admin', 'TEST 10.3: /addstickerpack permission is Admin');
   const addStickerEntries = COMMAND_CATALOG.filter(c => c.command === '/addsticker');
   assert(addStickerEntries.length === 1, `TEST 10.4: /addsticker registered exactly once in COMMAND_CATALOG (found ${addStickerEntries.length})`);

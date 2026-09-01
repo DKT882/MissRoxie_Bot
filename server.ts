@@ -11,6 +11,7 @@ import { DisasterRecoveryService } from './server/system/disasterRecovery.js';
 import { HealthDiagnosticsService } from './server/observability/healthService.js';
 import { telegramApi } from './server/telegram/api.js';
 import { authManager } from './server/auth/authManager.js';
+import { runDummyDataCleanup } from './server/operations/cleanupDummyData.js';
 
 dotenv.config();
 
@@ -663,6 +664,17 @@ export async function startServer() {
   app.get('/api/commands', (req, res) => {
     try {
       res.json(COMMAND_CATALOG);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Operations: Safe Dummy Data Cleanup & Real Group Protection
+  app.post('/api/dashboard/operations/cleanup-dummy-data', async (req, res) => {
+    try {
+      const dryRun = req.body?.dryRun !== false;
+      const report = await runDummyDataCleanup({ dryRun });
+      res.json(report);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
