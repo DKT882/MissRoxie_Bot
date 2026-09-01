@@ -33,7 +33,10 @@ export async function registerBotCommands(): Promise<{
   const adminRes = await telegramApi.setMyCommands(adminCommands, {
     type: 'all_chat_administrators'
   });
-  if (!adminRes.ok) {
+  if (adminRes.ok) {
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_chat_administrators', count: adminCommands.length }));
+  } else {
+    console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'all_chat_administrators', error_code: adminRes.error_code, description: adminRes.description }));
     errors.push(`Failed to set admin commands: ${adminRes.description}`);
   }
 
@@ -41,7 +44,10 @@ export async function registerBotCommands(): Promise<{
   const groupRes = await telegramApi.setMyCommands(groupCommands, {
     type: 'all_group_chats'
   });
-  if (!groupRes.ok) {
+  if (groupRes.ok) {
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_group_chats', count: groupCommands.length }));
+  } else {
+    console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'all_group_chats', error_code: groupRes.error_code, description: groupRes.description }));
     errors.push(`Failed to set group commands: ${groupRes.description}`);
   }
 
@@ -49,7 +55,10 @@ export async function registerBotCommands(): Promise<{
   const privateRes = await telegramApi.setMyCommands(privateCommands, {
     type: 'all_private_chats'
   });
-  if (!privateRes.ok) {
+  if (privateRes.ok) {
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_private_chats', count: privateCommands.length }));
+  } else {
+    console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'all_private_chats', error_code: privateRes.error_code, description: privateRes.description }));
     errors.push(`Failed to set private commands: ${privateRes.description}`);
   }
 
@@ -57,7 +66,10 @@ export async function registerBotCommands(): Promise<{
   const defaultRes = await telegramApi.setMyCommands(defaultCommands, {
     type: 'default'
   });
-  if (!defaultRes.ok) {
+  if (defaultRes.ok) {
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'default', count: defaultCommands.length }));
+  } else {
+    console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'default', error_code: defaultRes.error_code, description: defaultRes.description }));
     errors.push(`Failed to set default commands: ${defaultRes.description}`);
   }
 

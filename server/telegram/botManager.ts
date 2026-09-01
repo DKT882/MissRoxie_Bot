@@ -385,10 +385,23 @@ export class TelegramBotManager {
           rawArgs
         };
 
+        console.log(JSON.stringify({
+          event: 'TELEGRAM_COMMAND_RECEIVED',
+          chat_id: message.chat.id,
+          user_id: message.from?.id,
+          command
+        }));
+
         const handled = await CommandHandler.handleCommand(ctx);
         if (handled) {
           this.recordResponseSent();
         }
+        console.log(JSON.stringify({
+          event: 'TELEGRAM_MESSAGE_PROCESSED',
+          chat_id: message.chat.id,
+          message_id: message.message_id,
+          is_command: true
+        }));
         return;
       }
     }
@@ -455,6 +468,12 @@ export class TelegramBotManager {
         replyToMessageId: message.reply_to_message?.message_id
       });
       this.lastStoredMessageTimestamp = new Date().toISOString();
+      console.log(JSON.stringify({
+        event: 'STORAGE_MESSAGE_SAVED',
+        chat_id: chatId,
+        message_id: message.message_id,
+        chat_type: 'group'
+      }));
     } else if (chatId && chatId > 0 && userId && message.message_id) {
       // Record incoming private chat message in persistent memory for Control Center dashboard
       db.addPrivateMessage(chatId, userId, {
@@ -468,6 +487,12 @@ export class TelegramBotManager {
         language: ChatbotService.detectLanguage(content).language
       });
       this.lastStoredMessageTimestamp = new Date().toISOString();
+      console.log(JSON.stringify({
+        event: 'STORAGE_MESSAGE_SAVED',
+        chat_id: chatId,
+        message_id: message.message_id,
+        chat_type: 'private'
+      }));
     }
 
     // 7. Check Smart Telegram Reactions (non-blocking & independent)
@@ -479,8 +504,14 @@ export class TelegramBotManager {
     const chatbotHandled = await ChatbotService.handleMessage(message, this.botUser);
     if (chatbotHandled) {
       this.recordResponseSent();
-      return;
     }
+
+    console.log(JSON.stringify({
+      event: 'TELEGRAM_MESSAGE_PROCESSED',
+      chat_id: chatId,
+      message_id: message.message_id,
+      is_command: false
+    }));
   }
 
   private async handleChatMemberUpdate(chatMemberUpdate: {
