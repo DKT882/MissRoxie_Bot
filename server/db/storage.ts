@@ -437,8 +437,10 @@ export class StorageManager {
       this.lastStorageError = validation.error;
       this.storageIndicator = validation.isWritable ? (validation.mode === 'persistent' ? 'persistent' : 'local_ephemeral') : 'error';
 
-      if (validation.error) {
-        console.warn(`[Roxie Storage] WARNING: ${validation.error}. Falling back safely to active directory '${this.activeDataDir}' (Mode: ${this.storageMode}).`);
+      if (validation.mode === 'local_fallback' && validation.error) {
+        console.log(`[Roxie Storage] Using local storage directory: ${this.activeDataDir}`);
+      } else if (validation.error) {
+        console.warn(`[Roxie Storage] Notice: ${validation.error}. Using directory: '${this.activeDataDir}'.`);
       }
 
       this.ensureDirectories();
@@ -447,7 +449,7 @@ export class StorageManager {
       const isRender = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
       const hasExplicitDataDir = Boolean(process.env.ROXIE_DATA_DIR);
       if (isRender && !hasExplicitDataDir) {
-        console.warn('[Roxie Storage] NOTICE: ROXIE_DATA_DIR is not configured. Runtime filesystem persistence may be lost on Render restart/redeploy. Mount a Persistent Disk (e.g. /var/data/roxie) and configure ROXIE_DATA_DIR=/var/data/roxie.');
+        console.log(`[Roxie Storage] Using local storage directory: ${this.activeDataDir}`);
       }
 
       if (fs.existsSync(this.dbFile)) {

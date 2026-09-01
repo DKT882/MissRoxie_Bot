@@ -559,7 +559,7 @@ export async function executeSendMessageWorkflow(
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Startup recovery
   const startupResult = DisasterRecoveryService.startupRecovery();
@@ -2244,7 +2244,7 @@ async function startServer() {
   }
 
   const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`[Roxie Server] Listening on port ${PORT}`);
   });
 
   const handleShutdown = async (signal: string) => {
