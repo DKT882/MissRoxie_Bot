@@ -1,3 +1,13 @@
+export interface TelegramRequestContext {
+  readonly updateId?: number;
+  readonly chatId: number;
+  readonly messageId: number;
+  readonly userId?: number;
+  readonly chatType: string;
+  readonly isCommand: boolean;
+  readonly receivedAt: number;
+}
+
 export interface TelegramUser {
   id: number;
   is_bot: boolean;

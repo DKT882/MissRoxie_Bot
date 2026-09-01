@@ -1,4 +1,4 @@
-import { TelegramMessage, TelegramUser } from './types.js';
+import { TelegramMessage, TelegramUser, TelegramRequestContext } from './types.js';
 import { telegramApi } from './api.js';
 import { db, isSensitiveData, GROUP_MEMORY_LIMIT, GroupConversationEntry } from '../db/storage.js';
 import { metricsTracker } from '../observability/metricsService.js';
@@ -1955,9 +1955,10 @@ export class ChatbotService {
     return selected;
   }
 
-  public static async handleMessage(message: TelegramMessage, botUser: TelegramUser | null): Promise<boolean> {
-    const chatId = message.chat?.id;
-    const msgId = message.message_id || 0;
+  public static async handleMessage(message: TelegramMessage, botUser: TelegramUser | null, reqCtx?: TelegramRequestContext): Promise<boolean> {
+    const processingStartedAt = Date.now();
+    const chatId = reqCtx?.chatId ?? message.chat?.id;
+    const msgId = reqCtx?.messageId ?? message.message_id ?? 0;
     if (!chatId || !msgId) return false;
 
     // 1. Strict Command Precedence: Commands MUST NEVER enter the chatbot pipeline
@@ -1974,7 +1975,7 @@ export class ChatbotService {
     const requestId = `req_${chatId}_${msgId}_${Date.now()}`;
 
     try {
-      const decision = await this.generateResponseDecision(requestId, message, botUser);
+      const decision = await this.generateResponseDecision(requestId, message, botUser, reqCtx);
       if (!decision || decision.responseType === 'none') {
         return false;
       }
@@ -1983,6 +1984,7 @@ export class ChatbotService {
       if (decision.chatId !== chatId) {
         console.error(JSON.stringify({
           event: 'TELEGRAM_ROUTE_MISMATCH',
+          update_id: reqCtx?.updateId,
           incoming_chat_id: chatId,
           attempted_chat_id: decision.chatId,
           message_id: msgId
@@ -1992,13 +1994,31 @@ export class ChatbotService {
 
       console.log(JSON.stringify({
         event: 'TELEGRAM_MESSAGE_ROUTE',
+        update_id: reqCtx?.updateId,
         incoming_chat_id: chatId,
         response_chat_id: decision.chatId,
         message_id: msgId,
         reply_to_message_id: decision.replyToMessageId
       }));
 
-      const sent = await this.dispatchResponse(decision);
+      const sendStartedAt = Date.now();
+      const sent = await this.dispatchResponse(decision, reqCtx);
+      const sendFinishedAt = Date.now();
+
+      if (sent) {
+        console.log(JSON.stringify({
+          event: 'TELEGRAM_MESSAGE_TIMING',
+          update_id: reqCtx?.updateId,
+          chat_id: chatId,
+          message_id: msgId,
+          received_at: reqCtx?.receivedAt || processingStartedAt,
+          processing_started_at: processingStartedAt,
+          send_started_at: sendStartedAt,
+          send_finished_at: sendFinishedAt,
+          total_ms: sendFinishedAt - (reqCtx?.receivedAt || processingStartedAt)
+        }));
+      }
+
       return sent;
     } catch (err: any) {
       console.error(`[CHATBOT] Error processing message ${msgId}:`, err);
@@ -2011,10 +2031,11 @@ export class ChatbotService {
   public static async generateResponseDecision(
     requestId: string,
     message: TelegramMessage,
-    botUser: TelegramUser | null
+    botUser: TelegramUser | null,
+    reqCtx?: TelegramRequestContext
   ): Promise<ChatbotDecision | null> {
-    const chatId = message.chat.id;
-    const msgId = message.message_id;
+    const chatId = reqCtx?.chatId ?? message.chat.id;
+    const msgId = reqCtx?.messageId ?? message.message_id;
     const userId = message.from?.id || 0;
     const isPrivate = message.chat.type === 'private';
     const convKey = String(chatId);
@@ -2822,11 +2843,12 @@ Core Rules:
     }
   }
 
-  private static async dispatchResponse(decision: ChatbotDecision): Promise<boolean> {
+  private static async dispatchResponse(decision: ChatbotDecision, reqCtx?: TelegramRequestContext): Promise<boolean> {
     console.log(`CHATBOT_DECISION ${JSON.stringify(decision)}`);
 
-    const isGroup = decision.chatId < 0;
-    const convKey = String(decision.chatId);
+    const targetChatId = reqCtx?.chatId ?? decision.chatId;
+    const isGroup = targetChatId < 0;
+    const convKey = String(targetChatId);
     let conv = this.conversations.get(convKey);
     if (!conv) {
       conv = { messages: [], lastActivity: Date.now() };

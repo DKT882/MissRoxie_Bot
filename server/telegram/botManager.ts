@@ -1,5 +1,5 @@
 import { telegramApi } from './api.js';
-import { TelegramMessage, TelegramUpdate, TelegramUser, TelegramChat, TelegramChatMember, TelegramBotStatus } from './types.js';
+import { TelegramMessage, TelegramUpdate, TelegramUser, TelegramChat, TelegramChatMember, TelegramBotStatus, TelegramRequestContext } from './types.js';
 import { db } from '../db/storage.js';
 import { CommandHandler, registerBotCommands } from './commands.js';
 import { ModerationService } from './moderation.js';
@@ -256,6 +256,8 @@ export class TelegramBotManager {
 
         if (Array.isArray(data.result)) {
           this.pollingError = null;
+          const updatesToProcess: TelegramUpdate[] = [];
+
           for (const update of data.result as TelegramUpdate[]) {
             if (update.update_id) {
               if (TelegramBotManager.processedUpdateIds.has(update.update_id)) {
@@ -269,50 +271,11 @@ export class TelegramBotManager {
               this.lastUpdateId = Math.max(this.lastUpdateId, update.update_id);
               this.lastUpdateTimestamp = new Date().toISOString();
             }
+            updatesToProcess.push(update);
+          }
 
-            metricsTracker.increment('telegram_updates_received');
-
-            const msg = update.message || update.edited_message;
-            if (msg) {
-              const textOrCap = msg.text || msg.caption || '';
-              const isCmd = textOrCap.trim().startsWith('/') || textOrCap.trim().startsWith('!');
-              const hasMedia = Boolean(msg.photo || msg.video || msg.sticker || msg.animation || msg.document || msg.voice || msg.audio);
-              console.log(JSON.stringify({
-                event: 'TELEGRAM_UPDATE_RECEIVED',
-                update_id: update.update_id,
-                chat_id: msg.chat?.id,
-                chat_type: msg.chat?.type,
-                message_id: msg.message_id,
-                is_command: isCmd,
-                has_text: Boolean(textOrCap),
-                has_media: hasMedia
-              }));
-            }
-
-            try {
-              console.log(JSON.stringify({ event: 'TELEGRAM_UPDATE_PROCESSING', update_id: update.update_id }));
-              if (update.message) {
-                await this.handleMessage(update.message, false);
-              } else if (update.edited_message) {
-                await this.handleMessage(update.edited_message, true);
-              } else if (update.callback_query) {
-                const handledCaptcha = await ModerationService.handleCaptchaCallback(update.callback_query);
-                if (!handledCaptcha) {
-                  await CommandHandler.handleCallbackQuery(update.callback_query);
-                }
-              } else if ((update as any).chat_member) {
-                await this.handleChatMemberUpdate((update as any).chat_member);
-              }
-              metricsTracker.increment('telegram_updates_processed');
-              console.log(JSON.stringify({ event: 'TELEGRAM_UPDATE_PROCESSED', update_id: update.update_id }));
-            } catch (updateErr: any) {
-              metricsTracker.increment('telegram_updates_failed');
-              errorTracker.recordError({
-                source: 'TELEGRAM',
-                severity: 'ERROR',
-                message: `Failed to process update ${update.update_id}: ${updateErr.message}`
-              });
-            }
+          if (updatesToProcess.length > 0) {
+            await Promise.allSettled(updatesToProcess.map(u => this.processUpdate(u)));
           }
         }
       } catch (err: any) {
@@ -345,12 +308,81 @@ export class TelegramBotManager {
     }
   }
 
-  private async handleMessage(message: TelegramMessage, isEdit: boolean = false) {
+  private async processUpdate(update: TelegramUpdate) {
+    metricsTracker.increment('telegram_updates_received');
+    const receivedAt = Date.now();
+    const msg = update.message || update.edited_message;
+    const textOrCap = msg ? (msg.text || msg.caption || '') : '';
+    const isCmd = Boolean(textOrCap.trim().startsWith('/') || textOrCap.trim().startsWith('!'));
+    const hasMedia = Boolean(msg && (msg.photo || msg.video || msg.sticker || msg.animation || msg.document || msg.voice || msg.audio));
+
+    if (msg) {
+      console.log(JSON.stringify({
+        event: 'TELEGRAM_UPDATE_RECEIVED',
+        update_id: update.update_id,
+        chat_id: msg.chat?.id,
+        chat_type: msg.chat?.type,
+        message_id: msg.message_id,
+        is_command: isCmd,
+        has_text: Boolean(textOrCap),
+        has_media: hasMedia
+      }));
+    }
+
+    const reqCtx: TelegramRequestContext = {
+      updateId: update.update_id,
+      chatId: msg?.chat?.id || 0,
+      messageId: msg?.message_id || 0,
+      userId: msg?.from?.id,
+      chatType: msg?.chat?.type || 'unknown',
+      isCommand: isCmd,
+      receivedAt
+    };
+
+    try {
+      console.log(JSON.stringify({
+        event: 'TELEGRAM_UPDATE_PROCESSING',
+        update_id: update.update_id,
+        chat_id: reqCtx.chatId,
+        message_id: reqCtx.messageId
+      }));
+
+      if (update.message) {
+        await this.handleMessage(update.message, false, reqCtx);
+      } else if (update.edited_message) {
+        await this.handleMessage(update.edited_message, true, reqCtx);
+      } else if (update.callback_query) {
+        const handledCaptcha = await ModerationService.handleCaptchaCallback(update.callback_query);
+        if (!handledCaptcha) {
+          await CommandHandler.handleCallbackQuery(update.callback_query);
+        }
+      } else if ((update as any).chat_member) {
+        await this.handleChatMemberUpdate((update as any).chat_member);
+      }
+
+      metricsTracker.increment('telegram_updates_processed');
+      console.log(JSON.stringify({
+        event: 'TELEGRAM_UPDATE_PROCESSED',
+        update_id: update.update_id,
+        chat_id: reqCtx.chatId,
+        message_id: reqCtx.messageId
+      }));
+    } catch (updateErr: any) {
+      metricsTracker.increment('telegram_updates_failed');
+      errorTracker.recordError({
+        source: 'TELEGRAM',
+        severity: 'ERROR',
+        message: `Failed to process update ${update.update_id}: ${updateErr.message}`
+      });
+    }
+  }
+
+  private async handleMessage(message: TelegramMessage, isEdit: boolean = false, reqCtx?: TelegramRequestContext) {
     this.totalMessagesReceived++;
     this.lastProcessedMessageTimestamp = new Date().toISOString();
 
-    const chatId = message.chat?.id;
-    const userId = message.from?.id;
+    const chatId = reqCtx?.chatId ?? message.chat?.id;
+    const userId = reqCtx?.userId ?? message.from?.id;
 
     // Track message for group /clear purge capabilities
     if (chatId && message.message_id) {
@@ -583,7 +615,7 @@ export class TelegramBotManager {
     });
 
     // 8. Check Roxie AI Chatbot triggers
-    const chatbotHandled = await ChatbotService.handleMessage(message, this.botUser);
+    const chatbotHandled = await ChatbotService.handleMessage(message, this.botUser, reqCtx);
     if (chatbotHandled) {
       this.recordResponseSent();
     }
