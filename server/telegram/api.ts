@@ -70,7 +70,7 @@ export class TelegramApi {
     options?: TelegramApiCallOptions
   ): Promise<{ ok: boolean; result?: T; description?: string; error_code?: number; parameters?: { retry_after?: number }; skipped?: boolean }> {
     const maxRetries = options?.maxRetries ?? this.maxRetries;
-    const timeoutMs = options?.timeoutMs ?? 5000;
+    const timeoutMs = options?.timeoutMs ?? 20000;
     let attempt = 0;
 
     let token: string;
@@ -170,7 +170,7 @@ export class TelegramApi {
     if (this.cachedBotInfo && (Date.now() - this.cachedBotInfo.timestamp < 10 * 60 * 1000)) {
       return { ok: true, result: this.cachedBotInfo.user };
     }
-    const res = await this.call<TelegramUser>('getMe', undefined, { timeoutMs: 3000, maxRetries: 1 });
+    const res = await this.call<TelegramUser>('getMe', undefined, { timeoutMs: 25000, maxRetries: 3, skipRateLimiter: true });
     if (res.ok && res.result) {
       this.cachedBotInfo = { user: res.result, timestamp: Date.now() };
     }

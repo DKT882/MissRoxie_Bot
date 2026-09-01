@@ -78,9 +78,15 @@ export class TelegramBotManager {
     };
   }
 
-  public async testConnection(): Promise<{ success: boolean; bot?: TelegramUser; error?: string }> {
+  public async testConnection(maxAttempts: number = 3): Promise<{ success: boolean; bot?: TelegramUser; error?: string }> {
     const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
-    if (!token) {
+    const tokenPresent = Boolean(token && token.length > 0);
+    console.log(JSON.stringify({
+      event: 'TELEGRAM_TOKEN_PRESENT',
+      present: tokenPresent
+    }));
+
+    if (!tokenPresent) {
       console.error(JSON.stringify({
         event: 'TELEGRAM_GETME_FAILED',
         error_code: 401,
@@ -89,32 +95,59 @@ export class TelegramBotManager {
       return { success: false, error: 'TELEGRAM_BOT_TOKEN is not configured on the server.' };
     }
 
-    try {
-      const res = await telegramApi.getMe();
-      if (res.ok && res.result) {
-        this.botUser = res.result;
-        console.log(JSON.stringify({
-          event: 'TELEGRAM_GETME_SUCCESS',
-          username: res.result.username || res.result.first_name,
-          bot_id: res.result.id
-        }));
-        return { success: true, bot: res.result };
-      } else {
+    let lastError = 'Unknown error';
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const startTime = Date.now();
+      console.log(JSON.stringify({
+        event: 'TELEGRAM_GETME_START',
+        attempt,
+        maxAttempts
+      }));
+
+      try {
+        const res = await telegramApi.getMe();
+        const elapsedMs = Date.now() - startTime;
+
+        if (res.ok && res.result) {
+          this.botUser = res.result;
+          console.log(JSON.stringify({
+            event: 'TELEGRAM_GETME_SUCCESS',
+            username: res.result.username || res.result.first_name,
+            bot_id: res.result.id,
+            elapsed_ms: elapsedMs,
+            attempt
+          }));
+          return { success: true, bot: res.result };
+        } else {
+          lastError = res.description || 'Telegram API returned an error';
+          console.error(JSON.stringify({
+            event: 'TELEGRAM_GETME_FAILED',
+            error_code: res.error_code || 500,
+            description: res.description || 'Telegram API returned an error',
+            elapsed_ms: elapsedMs,
+            attempt
+          }));
+        }
+      } catch (err: any) {
+        const elapsedMs = Date.now() - startTime;
+        lastError = err.message || 'Failed to contact Telegram API';
         console.error(JSON.stringify({
           event: 'TELEGRAM_GETME_FAILED',
-          error_code: res.error_code || 500,
-          description: res.description || 'Telegram API returned an error'
+          error_code: 502,
+          description: err.message || 'Failed to contact Telegram API',
+          elapsed_ms: elapsedMs,
+          attempt
         }));
-        return { success: false, error: res.description || 'Telegram API returned an error' };
       }
-    } catch (err: any) {
-      console.error(JSON.stringify({
-        event: 'TELEGRAM_GETME_FAILED',
-        error_code: 502,
-        description: err.message || 'Failed to contact Telegram API'
-      }));
-      return { success: false, error: `Failed to contact Telegram API: ${err.message}` };
+
+      if (attempt < maxAttempts) {
+        const backoffMs = attempt * 2000;
+        console.log(`[TELEGRAM] Retrying getMe in ${backoffMs / 1000}s (attempt ${attempt + 1}/${maxAttempts})...`);
+        await new Promise(r => setTimeout(r, backoffMs));
+      }
     }
+
+    return { success: false, error: lastError };
   }
 
   public async startPolling() {
@@ -134,7 +167,7 @@ export class TelegramBotManager {
     this.pollingError = null;
 
     try {
-      const conn = await this.testConnection();
+      const conn = await this.testConnection(5);
       if (!conn.success || !this.botUser) {
         this.pollingError = conn.error || 'Failed to authenticate bot token with Telegram.';
         this.isRunning = false;
