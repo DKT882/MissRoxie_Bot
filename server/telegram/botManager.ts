@@ -144,6 +144,11 @@ export class TelegramBotManager {
     const instanceId = Math.random().toString(36).substring(2, 9);
     TelegramBotManager.activeInstanceId = instanceId;
     console.log(`[TELEGRAM] polling instance started instanceId=${instanceId}`);
+    console.log(JSON.stringify({
+      event: 'TELEGRAM_POLLING_START',
+      bot: this.botUser?.username || this.botUser?.first_name || 'Roxie',
+      instanceId
+    }));
 
     // Run polling loop
     this.runPollingLoop(instanceId);
@@ -157,11 +162,20 @@ export class TelegramBotManager {
         this.abortController = new AbortController();
 
         metricsTracker.increment('telegram_api_requests');
+        const offset = this.lastUpdateId ? this.lastUpdateId + 1 : undefined;
+        console.log(JSON.stringify({ event: 'TELEGRAM_POLLING_REQUEST', offset }));
+
         const data = await telegramApi.getUpdates(
-          this.lastUpdateId ? this.lastUpdateId + 1 : undefined,
+          offset,
           20,
           ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member']
         );
+
+        console.log(JSON.stringify({
+          event: 'TELEGRAM_POLLING_RESPONSE',
+          ok: data.ok,
+          update_count: Array.isArray(data.result) ? data.result.length : 0
+        }));
 
         if (!data.ok) {
           metricsTracker.increment('telegram_api_errors');
@@ -223,6 +237,7 @@ export class TelegramBotManager {
             }
 
             try {
+              console.log(JSON.stringify({ event: 'TELEGRAM_UPDATE_PROCESSING', update_id: update.update_id }));
               if (update.message) {
                 await this.handleMessage(update.message, false);
               } else if (update.edited_message) {
@@ -236,6 +251,7 @@ export class TelegramBotManager {
                 await this.handleChatMemberUpdate((update as any).chat_member);
               }
               metricsTracker.increment('telegram_updates_processed');
+              console.log(JSON.stringify({ event: 'TELEGRAM_UPDATE_PROCESSED', update_id: update.update_id }));
             } catch (updateErr: any) {
               metricsTracker.increment('telegram_updates_failed');
               errorTracker.recordError({
@@ -255,6 +271,11 @@ export class TelegramBotManager {
         this.reconnectCount++;
         this.lastReconnectAt = new Date().toISOString();
         this.pollingError = err.message || 'Error during update polling';
+
+        console.error(JSON.stringify({
+          event: 'TELEGRAM_POLLING_ERROR',
+          error: err.message || 'Error during update polling'
+        }));
 
         errorTracker.recordError({
           source: 'TELEGRAM',
@@ -359,6 +380,14 @@ export class TelegramBotManager {
         const parts = trimmed.split(/\s+/);
         const command = rawCmd.startsWith('!') ? `/${rawCmd.slice(1)}` : rawCmd;
         const args = parts.slice(1);
+
+        // If command is explicitly addressed to a specific bot (e.g. /help@OtherBot), ignore if not for this bot
+        if (rawCmd.includes('@')) {
+          const targetBot = rawCmd.split('@')[1];
+          if (this.botUser?.username && targetBot.toLowerCase() !== this.botUser.username.toLowerCase()) {
+            return;
+          }
+        }
 
         const isAnonymousAdmin = TelegramMiddleware.isAnonymousAdminMessage(message, message.chat.id);
         const authorSignature = message.author_signature;

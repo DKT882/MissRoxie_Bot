@@ -2458,6 +2458,13 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     await telegramApi.sendChatAction(chatId, 'typing');
     metricsTracker.increment('ai_requests');
 
+    console.log(JSON.stringify({
+      event: 'AI_REQUEST_START',
+      requestId,
+      chatId,
+      primaryModel: configuredModels[0] || 'deepseek/deepseek-chat'
+    }));
+
     let replyContent: string | null = null;
     let modelUsed: string = configuredModels[0] || 'deepseek/deepseek-chat';
 
@@ -2490,6 +2497,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
           if (content) {
             replyContent = content;
             modelUsed = modelToTry;
+            console.log(JSON.stringify({ event: 'AI_REQUEST_SUCCESS', requestId, model: modelUsed }));
             break;
           }
         } else {
@@ -2504,17 +2512,12 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
 
     if (!replyContent) {
       metricsTracker.increment('ai_failures');
-      return {
-        requestId,
-        chatId,
-        messageId: msgId,
-        userId,
-        personality: 'Psychologist-style',
-        mood,
-        responseType: 'none',
-        replyToMessageId: msgId,
-        reason: 'All OpenRouter models failed'
-      };
+      console.error(JSON.stringify({ event: 'AI_REQUEST_FAILED', requestId, chatId, reason: 'All OpenRouter models failed' }));
+      // Provide conversational fallback so bot never goes completely mute
+      replyContent = isLustMode 
+        ? 'Acha jaan, thoda connection slow hai, par main yahin hoon! 💕'
+        : 'Acha! Network thoda slow hai, ek baar firse bolo? 🙂';
+      modelUsed = 'fallback/internal';
     }
 
     // Add user message to conversation history
@@ -2542,6 +2545,13 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
       }
     }
     cleanedText = cleanedText || 'Acha!';
+
+    console.log(JSON.stringify({
+      event: 'AI_RESPONSE_SANITIZED',
+      requestId,
+      length: cleanedText.length,
+      modelUsed
+    }));
 
     if (isLustMode) {
       // Lust Mode ONLY uses CUSTOM stickers and STRICTLY allows ONLY TWO response formats:

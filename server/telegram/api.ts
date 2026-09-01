@@ -181,12 +181,13 @@ export class TelegramApi {
     return this.call('deleteWebhook', { drop_pending_updates: false });
   }
 
-  public async getUpdates(offset?: number, timeout: number = 20, allowed_updates: string[] = ['message']): Promise<any> {
+  public async getUpdates(offset?: number, timeout: number = 20, allowed_updates: string[] = ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member']): Promise<any> {
+    const timeoutMs = (timeout * 1000) + 10000;
     return this.call('getUpdates', {
       offset: offset || undefined,
       timeout,
       allowed_updates
-    });
+    }, { timeoutMs, skipRateLimiter: true });
   }
 
   public async sendMessage(
@@ -201,7 +202,7 @@ export class TelegramApi {
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     const replyId = options?.reply_parameters?.message_id || options?.reply_to_message_id;
-    const res = await this.call('sendMessage', {
+    let res = await this.call('sendMessage', {
       chat_id: chatId,
       text,
       parse_mode: options?.parse_mode || 'HTML',
@@ -210,6 +211,43 @@ export class TelegramApi {
       disable_web_page_preview: options?.disable_web_page_preview ?? true,
       reply_markup: options?.reply_markup
     });
+
+    // Fallback 1: If Telegram rejected due to deleted/missing replied message, retry without reply parameters
+    if (!res.ok && replyId && (
+      res.description?.toLowerCase().includes('message to be replied not found') ||
+      res.description?.toLowerCase().includes('reply message not found') ||
+      res.description?.toLowerCase().includes('message to reply not found') ||
+      res.error_code === 400
+    )) {
+      const retryWithoutReply = await this.call('sendMessage', {
+        chat_id: chatId,
+        text,
+        parse_mode: options?.parse_mode || 'HTML',
+        disable_web_page_preview: options?.disable_web_page_preview ?? true,
+        reply_markup: options?.reply_markup
+      });
+      if (retryWithoutReply.ok) {
+        res = retryWithoutReply;
+      }
+    }
+
+    // Fallback 2: If Telegram rejected due to invalid HTML entities, retry as plain text (no parse_mode)
+    if (!res.ok && (
+      res.description?.toLowerCase().includes('can\'t parse entities') ||
+      res.description?.toLowerCase().includes('parse entities') ||
+      res.description?.toLowerCase().includes('unclosed') ||
+      res.description?.toLowerCase().includes('tag')
+    )) {
+      const retryPlainText = await this.call('sendMessage', {
+        chat_id: chatId,
+        text: text.replace(/<[^>]+>/g, ''),
+        disable_web_page_preview: options?.disable_web_page_preview ?? true,
+        reply_markup: options?.reply_markup
+      });
+      if (retryPlainText.ok) {
+        res = retryPlainText;
+      }
+    }
 
     if (res.ok) {
       console.log(JSON.stringify({
