@@ -39,8 +39,8 @@ export async function registerBotCommands(): Promise<{
   ];
   const uniquePrivateCommands = Array.from(new Map(privateCommands.map(c => [c.command, c])).values());
 
-  // 1. Register all commands for administrators scope
-  const adminRes = await telegramApi.setMyCommands(allCommands, {
+  // 1. Register all commands for administrators scope (capped at 100 for Telegram API limit)
+  const adminRes = await telegramApi.setMyCommands(allCommands.slice(0, 100), {
     type: 'all_chat_administrators'
   });
   if (!adminRes.ok) {
@@ -48,7 +48,7 @@ export async function registerBotCommands(): Promise<{
   }
 
   // 2. Register public group commands for group chats scope
-  const groupRes = await telegramApi.setMyCommands(publicCommands, {
+  const groupRes = await telegramApi.setMyCommands(publicCommands.slice(0, 100), {
     type: 'all_group_chats'
   });
   if (!groupRes.ok) {
@@ -56,7 +56,7 @@ export async function registerBotCommands(): Promise<{
   }
 
   // 3. Register private chat commands for private chats scope
-  const privateRes = await telegramApi.setMyCommands(uniquePrivateCommands, {
+  const privateRes = await telegramApi.setMyCommands(uniquePrivateCommands.slice(0, 100), {
     type: 'all_private_chats'
   });
   if (!privateRes.ok) {
@@ -64,7 +64,7 @@ export async function registerBotCommands(): Promise<{
   }
 
   // 4. Register public commands for default scope
-  const defaultRes = await telegramApi.setMyCommands(publicCommands, {
+  const defaultRes = await telegramApi.setMyCommands(publicCommands.slice(0, 100), {
     type: 'default'
   });
   if (!defaultRes.ok) {
@@ -127,7 +127,7 @@ export class CommandHandler {
     '/clearmemory',
     '/say', '/announce', '/schedule', '/listschedules', '/deleteschedule',
     '/exportconfig', '/importconfig', '/status',
-    '/addstickerpack', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
+    '/addstickerpack', '/addbulkstickers', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
     '/teststicker', '/stickerpackremove', '/removestickerpack', '/delstickerpack'
   ]);
 
@@ -162,7 +162,7 @@ export class CommandHandler {
     '/listabuse', '/clearabuse', '/stoppromotion', '/file',
     '/note', '/delnote',
     '/exportconfig', '/importconfig',
-    '/addstickerpack', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
+    '/addstickerpack', '/addbulkstickers', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
     '/teststicker', '/stickerpackremove', '/removestickerpack', '/delstickerpack'
   ]);
 
@@ -333,6 +333,7 @@ export class CommandHandler {
       case '/addstickerpack':
         await this.handleAddStickerPack(ctx);
         return true;
+      case '/addbulkstickers':
       case '/addbulksticker':
         await this.handleAddBulkSticker(ctx);
         return true;

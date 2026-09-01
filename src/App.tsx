@@ -1535,7 +1535,16 @@ export default function App() {
                   return (
                     <button
                       key={item.id}
-                      onClick={() => setActiveNav(item.id)}
+                      onClick={() => {
+                        setActiveNav(item.id);
+                        if (item.id === 'settings' && activeGroupDetailId) {
+                          setGroupDetailTab('general');
+                        } else if (item.id === 'moderators' && activeGroupDetailId) {
+                          setGroupDetailTab('moderators');
+                        } else if (item.id === 'permissions' && activeGroupDetailId) {
+                          setGroupDetailTab('permissions');
+                        }
+                      }}
                       className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium transition-colors ${
                         isActive 
                           ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 font-semibold' 
@@ -4719,6 +4728,133 @@ export default function App() {
                     {telegramStatus?.pollingError || 'None'}
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* LOADING FALLBACK FOR GROUP DETAILS */}
+          {activeGroupDetailId && !groupDetails && (
+            <div className={`${themeCardBg} border rounded-2xl p-12 text-center space-y-4`}>
+              <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto" />
+              <div>
+                <h3 className="text-sm font-bold">Loading Group Data...</h3>
+                <p className={`text-xs ${themeMutedText} mt-1`}>Fetching settings, permissions, and members for Chat ID: {activeGroupDetailId}</p>
+              </div>
+              <div className="flex justify-center gap-2">
+                <button
+                  onClick={() => fetchData()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Retry
+                </button>
+                <button
+                  onClick={() => setActiveGroupDetailId(null)}
+                  className={`px-4 py-2 ${themeInnerCardBg} border ${themeBorder} rounded-xl text-xs font-semibold`}
+                >
+                  Back to Overview
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: SETTINGS HUB */}
+          {activeNav === 'settings' && !activeGroupDetailId && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold flex items-center gap-2">
+                    <Settings className="w-5 h-5 text-blue-500" /> Group & Global Settings Hub
+                  </h2>
+                  <p className={`text-xs ${themeMutedText}`}>Select any Telegram group to configure its individual moderation, AI, welcome, or security settings.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {groups.map((g) => (
+                  <div key={g.chatId} className={`${themeCardBg} border rounded-2xl p-5 space-y-3 flex flex-col justify-between`}>
+                    <div className="space-y-1">
+                      <h3 className="text-xs font-bold truncate">{g.chatTitle}</h3>
+                      <p className={`text-[10px] font-mono ${themeMutedText}`}>ID: {g.chatId}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedChatId(g.chatId);
+                        setActiveGroupDetailId(g.chatId);
+                        setGroupDetailTab('general');
+                      }}
+                      className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5"
+                    >
+                      <Settings2 className="w-3.5 h-3.5" /> Open Group Settings
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: MODERATORS HUB */}
+          {activeNav === 'moderators' && !activeGroupDetailId && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-blue-500" /> Group Moderators Hub
+                  </h2>
+                  <p className={`text-xs ${themeMutedText}`}>Inspect group administrators, promote/demote members, and manage custom moderator privileges.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {groups.map((g) => (
+                  <div key={g.chatId} className={`${themeCardBg} border rounded-2xl p-5 space-y-3 flex flex-col justify-between`}>
+                    <div className="space-y-1">
+                      <h3 className="text-xs font-bold truncate">{g.chatTitle}</h3>
+                      <p className={`text-[10px] font-mono ${themeMutedText}`}>ID: {g.chatId} • {g.botRole || 'Admin'}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedChatId(g.chatId);
+                        setActiveGroupDetailId(g.chatId);
+                        setGroupDetailTab('moderators');
+                      }}
+                      className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5"
+                    >
+                      <Shield className="w-3.5 h-3.5" /> Manage Moderators
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: PERMISSIONS HUB */}
+          {activeNav === 'permissions' && !activeGroupDetailId && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold flex items-center gap-2">
+                    <Lock className="w-5 h-5 text-blue-500" /> Group Content Permissions Hub
+                  </h2>
+                  <p className={`text-xs ${themeMutedText}`}>Configure content locks, custom user roles, and sticker/media exemptions per group.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {groups.map((g) => (
+                  <div key={g.chatId} className={`${themeCardBg} border rounded-2xl p-5 space-y-3 flex flex-col justify-between`}>
+                    <div className="space-y-1">
+                      <h3 className="text-xs font-bold truncate">{g.chatTitle}</h3>
+                      <p className={`text-[10px] font-mono ${themeMutedText}`}>ID: {g.chatId}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedChatId(g.chatId);
+                        setActiveGroupDetailId(g.chatId);
+                        setGroupDetailTab('permissions');
+                      }}
+                      className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5"
+                    >
+                      <Lock className="w-3.5 h-3.5" /> Manage Permissions
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )}

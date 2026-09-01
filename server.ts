@@ -703,8 +703,10 @@ export async function startServer() {
   const handleGetGroups = (req: express.Request, res: express.Response) => {
     try {
       const settings = (db as any).data?.settings || {};
-      const groups = Object.entries(settings).map(([chatIdStr, s]: [string, any]) => {
-        const chatId = Number(chatIdStr);
+      const groups = Object.entries(settings)
+        .filter(([chatIdStr]) => Number(chatIdStr) < 0)
+        .map(([chatIdStr, s]: [string, any]) => {
+          const chatId = Number(chatIdStr);
         const groupLogs = db.getGroupLogs(chatId, 100);
         const bans = groupLogs.filter(l => l.action === 'ban' || l.action === 'auto_ban').length;
         const kicks = groupLogs.filter(l => l.action === 'kick').length;
@@ -907,7 +909,7 @@ export async function startServer() {
         }
       }
 
-      res.json({ chatId, source, administrators: admins });
+      res.json({ chatId, source, administrators: admins, admins });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
