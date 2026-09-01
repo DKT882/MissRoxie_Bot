@@ -29,7 +29,12 @@ export interface MediaLibraryRecord {
   lustStickers?: Record<string, string[]>;
 }
 
-export const GROUP_MEMORY_LIMIT = 80;
+export const MAX_GROUP_STORED_MESSAGES = 500;
+export const GROUP_MEMORY_LIMIT = MAX_GROUP_STORED_MESSAGES;
+export const MAX_PRIVATE_CHAT_MESSAGES = 200;
+export const PRIVATE_CHAT_INACTIVITY_DAYS = 5;
+export const PRIVATE_CHAT_INACTIVITY_MS = PRIVATE_CHAT_INACTIVITY_DAYS * 24 * 60 * 60 * 1000;
+export const MAX_BACKUPS_PER_GROUP = 5;
 
 export interface GroupConversationMessage {
   role: 'user' | 'assistant';
@@ -172,7 +177,12 @@ const DB_FILE = path.join(DATA_DIR, 'bot_storage.json');
 
 export class StorageManager {
   public static readonly MAX_PACKS_PER_GROUP = 1000;
-  public static readonly GROUP_MEMORY_LIMIT = GROUP_MEMORY_LIMIT;
+  public static readonly MAX_GROUP_STORED_MESSAGES = MAX_GROUP_STORED_MESSAGES;
+  public static readonly GROUP_MEMORY_LIMIT = MAX_GROUP_STORED_MESSAGES;
+  public static readonly MAX_PRIVATE_CHAT_MESSAGES = MAX_PRIVATE_CHAT_MESSAGES;
+  public static readonly PRIVATE_CHAT_INACTIVITY_DAYS = PRIVATE_CHAT_INACTIVITY_DAYS;
+  public static readonly PRIVATE_CHAT_INACTIVITY_MS = PRIVATE_CHAT_INACTIVITY_MS;
+  public static readonly MAX_BACKUPS_PER_GROUP = MAX_BACKUPS_PER_GROUP;
 
   public get dataDir(): string {
     return process.env.ROXIE_DATA_DIR || process.env.DATA_DIR || path.join(process.cwd(), 'data');
@@ -230,6 +240,7 @@ export class StorageManager {
   private groupWriteQueues: Map<string, Promise<void>> = new Map();
   private lastSaveTimestamps: Map<string, string> = new Map();
   private corruptedRecoveries: Map<string, string> = new Map();
+  private pendingSaves: Set<number> = new Set();
   public lastSaveSuccessful: boolean = true;
   public corruptedFilesCount: number = 0;
 
@@ -687,13 +698,17 @@ export class StorageManager {
     // 2. Messages restoration
     if (Array.isArray(data.messages) && data.messages.length > 0) {
       if (!this.data.groupConversationMemories) this.data.groupConversationMemories = {};
+      const trimmed = data.messages.slice(-MAX_GROUP_STORED_MESSAGES);
       this.data.groupConversationMemories[key] = {
         chatId,
-        messages: data.messages.slice(-GROUP_MEMORY_LIMIT),
+        messages: trimmed,
         lastUpdated: Date.now()
       };
       if (this.data.groupMemories) {
         this.data.groupMemories[key] = this.data.groupConversationMemories[key];
+      }
+      if (data.messages.length > MAX_GROUP_STORED_MESSAGES) {
+        this.scheduleSave(chatId);
       }
     }
 
@@ -769,20 +784,26 @@ export class StorageManager {
     if (chatId !== undefined && chatId !== null) {
       const numId = Number(chatId);
       if (!isNaN(numId)) {
-        if (numId < 0) {
-          this.saveGroupJsonSync(numId);
-        } else if (numId > 0) {
-          this.savePrivateJsonSync(numId);
-        }
+        this.pendingSaves.add(numId);
       }
     }
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout);
     }
     this.saveTimeout = setTimeout(() => {
+      if (this.pendingSaves && this.pendingSaves.size > 0) {
+        for (const id of this.pendingSaves) {
+          if (id < 0) {
+            this.saveGroupJsonSync(id);
+          } else if (id > 0) {
+            this.savePrivateJsonSync(id);
+          }
+        }
+        this.pendingSaves.clear();
+      }
       this.persist();
       this.saveGlobalJsonSync();
-    }, 200);
+    }, 100);
   }
 
   private persist() {
@@ -877,7 +898,10 @@ export class StorageManager {
       lastUpdated: Date.now()
     };
 
-    const mergedMessages = Array.isArray(data.messages) ? data.messages : existing.messages;
+    let mergedMessages = Array.isArray(data.messages) ? data.messages : existing.messages;
+    if (mergedMessages.length > MAX_PRIVATE_CHAT_MESSAGES) {
+      mergedMessages = mergedMessages.slice(-MAX_PRIVATE_CHAT_MESSAGES);
+    }
 
     this.data.privateConversations[key] = {
       ...existing,
@@ -893,6 +917,40 @@ export class StorageManager {
     if (data.lustLevel !== undefined) {
       this.setLustLevel(chatId, Number(chatId), Number(data.lustLevel));
     }
+  }
+
+  public cleanupInactivePrivateConversations(thresholdDays: number = PRIVATE_CHAT_INACTIVITY_DAYS): number {
+    const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    let cleanedCount = 0;
+
+    if (this.data.privateConversations) {
+      for (const [key, conv] of Object.entries(this.data.privateConversations)) {
+        const lastMsgTimestamp = conv.messages && conv.messages.length > 0
+          ? conv.messages[conv.messages.length - 1].timestamp
+          : conv.lastUpdated;
+        const lastActivity = lastMsgTimestamp || conv.lastUpdated || 0;
+
+        if (lastActivity > 0 && (now - lastActivity >= thresholdMs)) {
+          delete this.data.privateConversations[key];
+          cleanedCount++;
+
+          try {
+            const targetFile = path.join(this.privateDir, `${key}.json`);
+            if (fs.existsSync(targetFile)) {
+              fs.unlinkSync(targetFile);
+            }
+            const bakFile = path.join(this.privateBackupDir, `${key}.json.bak`);
+            if (fs.existsSync(bakFile)) {
+              fs.unlinkSync(bakFile);
+            }
+          } catch (err: any) {
+            console.error(`[Storage] Error deleting inactive private chat file for ${key}:`, err.message);
+          }
+        }
+      }
+    }
+    return cleanedCount;
   }
 
   public loadAllPrivateJsons(): { loadedCount: number; errorsCount: number } {
@@ -934,6 +992,19 @@ export class StorageManager {
 
           if (parsed && (parsed.chatId || parsed.userId)) {
             const chatId = String(parsed.chatId || parsed.userId || file.replace('.json', ''));
+            const now = Date.now();
+            const lastUpdated = parsed.lastUpdated || (Array.isArray(parsed.messages) && parsed.messages.length > 0 ? parsed.messages[parsed.messages.length - 1].timestamp : 0);
+            if (lastUpdated && (now - lastUpdated >= PRIVATE_CHAT_INACTIVITY_MS)) {
+              // Inactivity >= 5 days: purge private chat JSON file & backup
+              try {
+                if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+                const chatIdStr = file.replace('.json', '');
+                const bakFile = path.join(this.privateBackupDir, `${chatIdStr}.json.bak`);
+                if (fs.existsSync(bakFile)) fs.unlinkSync(bakFile);
+              } catch {}
+              continue;
+            }
+
             this.restorePrivateData(chatId, parsed);
             loadedCount++;
           }
@@ -4062,7 +4133,8 @@ export class StorageManager {
         }
       }
     }
-    if (cleaned) {
+    const inactivePrivCount = this.cleanupInactivePrivateConversations();
+    if (cleaned || inactivePrivCount > 0) {
       this.scheduleSave();
     }
   }
@@ -4084,33 +4156,38 @@ export class StorageManager {
         const newLevel = Math.max(0, record.level - decaySteps);
         record.level = newLevel;
         record.lastUpdated = now;
-        this.scheduleSave();
-        return newLevel;
+        this.scheduleSave(groupId);
       }
     }
 
-    return Math.max(0, Math.min(4, record.level || 0));
+    return record.level;
   }
 
-  public setLustLevel(groupId: number | string, userId: number, level: number): number {
+  public setLustLevel(groupId: number | string, userId: number, level: number): void {
     if (!this.data.userLustLevels) this.data.userLustLevels = {};
     const key = `${groupId}_${userId}`;
-    const clampedLevel = Math.max(0, Math.min(4, Math.floor(level)));
-    const now = Date.now();
+    const boundedLevel = Math.max(0, Math.min(100, Math.round(level)));
     this.data.userLustLevels[key] = {
       groupId,
       userId,
-      level: clampedLevel,
-      lastUpdated: now
+      level: boundedLevel,
+      lastUpdated: Date.now()
     };
     this.scheduleSave(groupId);
-    return clampedLevel;
   }
 
-  public incrementLustLevel(groupId: number | string, userId: number, decayHours: number = 1): number {
-    const current = this.getLustLevel(groupId, userId, decayHours);
-    const next = Math.min(4, current + 1);
-    return this.setLustLevel(groupId, userId, next);
+  public incrementLustLevel(groupId: number | string, userId: number, delta: number = 1): number {
+    const current = this.getLustLevel(groupId, userId, 0);
+    const updated = Math.min(100, current + delta);
+    this.setLustLevel(groupId, userId, updated);
+    return updated;
+  }
+
+  public decrementLustLevel(groupId: number | string, userId: number, delta: number = 1): number {
+    const current = this.getLustLevel(groupId, userId, 0);
+    const updated = Math.max(0, current - delta);
+    this.setLustLevel(groupId, userId, updated);
+    return updated;
   }
 
   public resetLustLevel(groupId: number | string, userId?: number): void {
@@ -4136,23 +4213,16 @@ export class StorageManager {
     }
   }
 
-  // --- Group Conversation Memory Management (Shared per ChatId) ---
+  // --- Group-Shared Conversation Memory Management ---
   public getGroupMemory(chatId: number | string): GroupConversationMessage[] {
-    if (!this.data.groupConversationMemories) this.data.groupConversationMemories = {};
     const key = String(chatId);
-    let record = this.data.groupConversationMemories[key];
-    if (!record && this.data.groupMemories && this.data.groupMemories[key]) {
-      const legacy = this.data.groupMemories[key];
-      const msgs = Array.isArray(legacy.messages) ? legacy.messages : (Array.isArray(legacy.entries) ? legacy.entries : []);
-      record = {
-        chatId,
-        messages: msgs,
-        lastUpdated: legacy.lastUpdated || Date.now()
-      };
-      this.data.groupConversationMemories[key] = record;
+    if (this.data.groupConversationMemories && this.data.groupConversationMemories[key]) {
+      return this.data.groupConversationMemories[key].messages || [];
     }
-    if (!record || !Array.isArray(record.messages)) return [];
-    return record.messages;
+    if (this.data.groupMemories && this.data.groupMemories[key]) {
+      return this.data.groupMemories[key].messages || [];
+    }
+    return [];
   }
 
   public addGroupConversationEntry(chatId: number | string, entry: GroupConversationMessage): void {
@@ -4176,7 +4246,7 @@ export class StorageManager {
     }
 
     record.messages.push(entry);
-    while (record.messages.length > GROUP_MEMORY_LIMIT) {
+    while (record.messages.length > MAX_GROUP_STORED_MESSAGES) {
       record.messages.shift();
     }
     // Backward compatibility alias for entries
@@ -4271,9 +4341,10 @@ export class StorageManager {
       language: msg.language
     });
 
-    if (record.messages.length > 200) {
+    while (record.messages.length > MAX_PRIVATE_CHAT_MESSAGES) {
       record.messages.shift();
     }
+    this.cleanupInactivePrivateConversations();
     this.scheduleSave(chatId);
   }
 
@@ -4287,6 +4358,7 @@ export class StorageManager {
     messageCount: number;
     lastMessage?: string;
   }> {
+    this.cleanupInactivePrivateConversations();
     if (!this.data.privateConversations) return [];
     return Object.values(this.data.privateConversations)
       .map(c => {
@@ -4306,6 +4378,7 @@ export class StorageManager {
   }
 
   public getPrivateChatMessages(chatId: number | string): PrivateConversationMessage[] {
+    this.cleanupInactivePrivateConversations();
     if (!this.data.privateConversations) return [];
     const key = String(chatId);
     return this.data.privateConversations[key]?.messages || [];

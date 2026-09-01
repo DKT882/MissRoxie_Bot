@@ -157,14 +157,14 @@ async function runGroupSharedMemoryTestSuite() {
     assert(!memGroupA.some(e => e.content.includes('Group Beta room discussion')), 'TEST 8.2: Group B conversation does NOT leak into Group A');
 
     // ----------------------------------------------------
-    // TEST 9-11: Rolling 80-entry limit & Indefinite response
+    // TEST 9-11: Rolling 500-entry limit & Indefinite response
     // ----------------------------------------------------
-    console.log('\n--- TEST 9-11: Rolling Window (80 entries limit) & Indefinite Continuation ---');
+    console.log('\n--- TEST 9-11: Rolling Window (500 entries limit) & Indefinite Continuation ---');
     const testRollChatId = -100999888777;
     db.clearGroupMemory(testRollChatId);
 
-    // Add exactly 80 entries
-    for (let i = 1; i <= 80; i++) {
+    // Add exactly 500 entries
+    for (let i = 1; i <= 500; i++) {
       db.addGroupConversationEntry(testRollChatId, {
         role: i % 2 === 1 ? 'user' : 'assistant',
         userId: 5000,
@@ -174,28 +174,28 @@ async function runGroupSharedMemoryTestSuite() {
       });
     }
 
-    const countAt80 = db.getGroupMemory(testRollChatId).length;
-    assert(countAt80 === 80, `TEST 9.1: Group memory holds exactly 80 entries (count=${countAt80})`);
+    const countAt500 = db.getGroupMemory(testRollChatId).length;
+    assert(countAt500 === 500, `TEST 9.1: Group memory holds exactly 500 entries (count=${countAt500})`);
     assert(db.getGroupMemory(testRollChatId)[0].content === 'Message 1', 'TEST 9.2: First entry is Message 1');
-    assert(db.getGroupMemory(testRollChatId)[79].content === 'Message 80', 'TEST 9.3: 80th entry is Message 80');
+    assert(db.getGroupMemory(testRollChatId)[499].content === 'Message 500', 'TEST 9.3: 500th entry is Message 500');
 
-    // 10. Entry 81 removes the oldest entry (Message 1 removed, Message 81 added)
+    // 10. Entry 501 removes the oldest entry (Message 1 removed, Message 501 added)
     db.addGroupConversationEntry(testRollChatId, {
       role: 'user',
       userId: 5000,
       name: 'TestUser',
-      content: 'Message 81',
+      content: 'Message 501',
       timestamp: Date.now()
     });
 
-    const entriesAfter81 = db.getGroupMemory(testRollChatId);
-    assert(entriesAfter81.length === 80, 'TEST 10.1: Memory length stays clamped at 80');
-    assert(entriesAfter81[0].content === 'Message 2', 'TEST 10.2: Oldest entry (Message 1) was evicted, Message 2 is now first');
-    assert(entriesAfter81[79].content === 'Message 81', 'TEST 10.3: Newest entry is Message 81');
+    const entriesAfter501 = db.getGroupMemory(testRollChatId);
+    assert(entriesAfter501.length === 500, 'TEST 10.1: Memory length stays clamped at 500');
+    assert(entriesAfter501[0].content === 'Message 2', 'TEST 10.2: Oldest entry (Message 1) was evicted, Message 2 is now first');
+    assert(entriesAfter501[499].content === 'Message 501', 'TEST 10.3: Newest entry is Message 501');
 
-    // 11. Bot continues responding indefinitely after 80 messages (test up to 100)
+    // 11. Bot continues responding indefinitely after 500 messages (test up to 520)
     let continuousSuccess = true;
-    for (let i = 82; i <= 100; i++) {
+    for (let i = 502; i <= 520; i++) {
       const msg: TelegramMessage = {
         message_id: 1000 + i,
         date: Math.floor(Date.now() / 1000),
@@ -210,10 +210,10 @@ async function runGroupSharedMemoryTestSuite() {
         break;
       }
     }
-    assert(continuousSuccess === true, 'TEST 11.1: Roxie continues responding smoothly after 80, 90, 100 messages');
+    assert(continuousSuccess === true, 'TEST 11.1: Roxie continues responding smoothly after 500 messages');
     const finalEntries = db.getGroupMemory(testRollChatId);
-    assert(finalEntries.length === 80, 'TEST 11.2: Memory remains bounded at exactly 80 entries');
-    assert(finalEntries[79].content.includes('Reply to 100') || finalEntries[79].content.includes('[Sent sticker]'), 'TEST 11.3: Newest entry reflects message 100 response');
+    assert(finalEntries.length === 500, 'TEST 11.2: Memory remains bounded at exactly 500 entries');
+    assert(finalEntries[499].content.includes('Reply to 520') || finalEntries[499].content.includes('[Sent sticker]'), 'TEST 11.3: Newest entry reflects message 520 response');
 
     // ----------------------------------------------------
     // TEST 12: Persistence Verification
@@ -222,7 +222,7 @@ async function runGroupSharedMemoryTestSuite() {
     // Verify that data is stored in db storage data
     const persistedMemories = (db as any).data.groupMemories;
     assert(!!persistedMemories[String(testRollChatId)], 'TEST 12.1: Group memory is tracked in db.data.groupMemories for persistent JSON storage');
-    assert(persistedMemories[String(testRollChatId)].entries.length === 80, 'TEST 12.2: Persisted entries match 80 count');
+    assert(persistedMemories[String(testRollChatId)].entries.length === 500, 'TEST 12.2: Persisted entries match 500 count');
 
     // ----------------------------------------------------
     // TEST 13: /clearmemory clears only the current group's memory
@@ -378,7 +378,9 @@ async function runGroupSharedMemoryTestSuite() {
   }
 }
 
-runGroupSharedMemoryTestSuite().catch(err => {
-  console.error('Fatal test error:', err);
-  process.exit(1);
-});
+runGroupSharedMemoryTestSuite()
+  .then(() => process.exit(0))
+  .catch(err => {
+    console.error('Fatal test error:', err);
+    process.exit(1);
+  });

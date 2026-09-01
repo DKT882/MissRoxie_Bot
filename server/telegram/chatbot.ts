@@ -705,13 +705,102 @@ export class ChatbotService {
     return animations;
   }
 
-  public static cleanAiText(text: string): string {
-    if (!text) return '';
-    return text
+  public static cleanAiText(text: string, userText?: string, userName?: string): string {
+    if (!text || typeof text !== 'string') return '';
+    let cleaned = text.trim();
+
+    // 1. Strip markdown code fences if LLM wrapped response in ```
+    cleaned = cleaned.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    // 2. Strip asterisks actions (e.g. *laughs*, *sends a sticker*, *smiles*)
+    cleaned = cleaned
       .replace(/\*(sends a sticker|sends sticker|send a sticker|sticker|gif|animation|laughs|smiles|giggles|winks|blushes|sighs|shrugs|chuckles|rolls eyes|hugs|high fives)\*/gi, '')
       .replace(/\*.*?\b(sticker|gif|animation|sends?)\b.*?\*/gi, '')
-      .replace(/\s{2,}/g, ' ')
       .trim();
+
+    // 3. Multi-Speaker Dialogue Separation:
+    // If output contains an explicit Roxie / Assistant / Bot marker, extract the LAST speaker turn
+    const roxieMarkerGlobalRegex = /(?:^|\n|\s+)(?:\[?(?:Roxie|Assistant|Bot|AI|You)\]?)\s*:\s*/gi;
+    let match: RegExpExecArray | null;
+    let lastMatchIndex = -1;
+    let lastMatchLength = 0;
+    while ((match = roxieMarkerGlobalRegex.exec(cleaned)) !== null) {
+      lastMatchIndex = match.index;
+      lastMatchLength = match[0].length;
+    }
+
+    if (lastMatchIndex !== -1) {
+      let candidate = cleaned.slice(lastMatchIndex + lastMatchLength).trim();
+      // If the candidate continues into a subsequent simulated turn ("User: ..."), take only Roxie's turn
+      const nextTurnIndex = candidate.search(/\n\s*(?:User|Human|You|\w+)\s*:\s*/i);
+      if (nextTurnIndex !== -1) {
+        candidate = candidate.slice(0, nextTurnIndex).trim();
+      }
+      if (candidate.length > 0) {
+        cleaned = candidate;
+      }
+    }
+
+    // 4. Strip single-line or multi-line generic speaker prefixes at start of string
+    cleaned = cleaned
+      .replace(/^(?:\[?(?:Roxie|Assistant|Bot|AI|You)\]?)\s*:\s*/i, '')
+      .replace(/^(?:<Roxie>|\(Roxie\))\s*:\s*/i, '')
+      .trim();
+
+    // 5. Handle cases where output starts with "UserName: ..." or "User: ..."
+    if (userName) {
+      const escapedUserName = userName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const userPrefixRegex = new RegExp(`^(?:\\[?${escapedUserName}\\]?|User|Human)\\s*:\\s*`, 'i');
+      if (userPrefixRegex.test(cleaned)) {
+        const lines = cleaned.split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length > 1) {
+          const secondLine = lines[1].replace(/^(?:\[?(?:Roxie|Assistant|Bot|AI|You)\]?)\s*:\s*/i, '').trim();
+          if (secondLine.length > 0) {
+            cleaned = secondLine;
+          }
+        } else {
+          const inlineRoxie = cleaned.search(/(?:Roxie|Assistant|Bot)\s*:\s*/i);
+          if (inlineRoxie !== -1) {
+            const m = cleaned.slice(inlineRoxie).match(/^(?:Roxie|Assistant|Bot)\s*:\s*/i);
+            if (m) {
+              cleaned = cleaned.slice(inlineRoxie + m[0].length).trim();
+            }
+          }
+        }
+      }
+    } else if (/^(?:User|Human)\s*:\s*/i.test(cleaned)) {
+      const lines = cleaned.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length > 1) {
+        const secondLine = lines[1].replace(/^(?:\[?(?:Roxie|Assistant|Bot|AI|You)\]?)\s*:\s*/i, '').trim();
+        if (secondLine.length > 0) {
+          cleaned = secondLine;
+        }
+      }
+    }
+
+    // 6. User Message Echo Elimination: If output starts with the user's prompt text followed by reply
+    if (userText && userText.trim().length > 3) {
+      const trimmedUser = userText.trim();
+      if (cleaned.startsWith(trimmedUser) && cleaned.length > trimmedUser.length) {
+        let remainder = cleaned.slice(trimmedUser.length).trim();
+        remainder = remainder.replace(/^(?:Roxie|Assistant|Bot)?\s*[:\-–—]\s*/i, '').trim();
+        if (remainder.length > 0) {
+          cleaned = remainder;
+        }
+      }
+    }
+
+    // 7. Strip matching surrounding quotes if whole response is enclosed in quotes
+    if ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+        (cleaned.startsWith('“') && cleaned.endsWith('”')) ||
+        (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+      cleaned = cleaned.slice(1, -1).trim();
+    }
+
+    // 8. Normalize internal multi-spaces
+    cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+
+    return cleaned;
   }
 
   public static sanitizeLustModeText(
@@ -733,9 +822,9 @@ export class ChatbotService {
         sanitized = sanitized.replace(new RegExp(`\\b(haan|arre|oye|suno|accha|acha)\\s+${term}\\b`, 'gi'), '$1');
         sanitized = sanitized.replace(new RegExp(`\\b${term}\\b`, 'gi'), '');
       }
-    } else {
+    } else if (!isBrotherPushback) {
       // Vocabulary rules: NEVER address user using bhai, bro, bhaiya, brother, behen, dost, dude, sir
-      // unless user explicitly used such terminology in their message.
+      // unless user explicitly used such terminology in their message or in brother pushback.
       const forbiddenTerms = ['bhai', 'bro', 'bhaiya', 'brother', 'behen', 'dost', 'dude', 'sir'];
       for (const term of forbiddenTerms) {
         const userHasTerm = new RegExp(`\\b${term}\\b`, 'i').test(userLower);
@@ -2302,7 +2391,12 @@ STRICT CONVERSATION RULES:
 2. TOPIC CONTINUITY & REFERENTIAL UNDERSTANDING: The response MUST continue the current topic. Understand referential phrases like "haan", "nahi", "ye wala", "woh", "uska", "fir?", "kyu?", "accha", "same", "haan wahi" using the conversation transcript. NEVER randomly introduce unrelated topics, random jokes, random stories, random questions, random flirting, or random memories.
 3. RESPONSE LENGTH: Target 5 to 25 words (1 concise sentence, maximum 2 short sentences). Produce a natural Telegram chat message, NOT an essay or paragraph.
 4. CONVERSATIONAL STYLE: Speak like a real human chat user in natural Hinglish or English. Avoid generic AI clichés ("That's a great question", "I completely understand", "Certainly!", "I'd be happy to help").
-5. ACTION BAN: NEVER output asterisks actions like *laughs*, *sends a sticker*, *smiles*, or *blushes*.`;
+5. ACTION BAN: NEVER output asterisks actions like *laughs*, *sends a sticker*, *smiles*, or *blushes*.
+6. STRICT OUTPUT INVARIANT:
+- You are Roxie. Return ONLY the direct response text that Roxie speaks to the user.
+- NEVER include conversation transcripts, history, usernames, or speaker labels (such as "User:", "Roxie:", "Assistant:", "Bot:", "Yohhan:").
+- NEVER repeat or echo the user's message back to them unless they explicitly asked you to quote it.
+- NEVER output meta-commentary, markdown code fences, or formatting labels. Raw reply text only.`;
 
     // Construct single chronological transcript from group-shared memory or DM history
     let transcript = '(No previous messages)';
@@ -2329,28 +2423,22 @@ ${transcript}
 LATEST MESSAGE:
 ${userName}: ${userText}
 
-CURRENT MOOD:
-${mood}
+[CURRENT MOOD]: ${mood}
+[CURRENT PERSONALITY]: ${isLustMode ? 'confident, affectionate, playful, flirtatious adult woman (flirty adult couple vibe)' : 'psychologist-style, tactical, witty, confident female conversational personality'}
 
-CURRENT PERSONALITY:
-${isLustMode ? 'confident, affectionate, playful, flirtatious adult woman (flirty adult couple vibe)' : 'psychologist-style, tactical, witty, confident female conversational personality'}
-
-TASK:
-Reply naturally to the latest message from ${userName} based primarily on what they just said, while using previous group conversation for context and continuity.`
+[TASK]:
+Reply naturally as Roxie directly to ${userName} regarding what they just said. Return ONLY Roxie's direct reply text without any speaker labels ("Roxie:", "${userName}:", etc.) or transcripts.`
       : `CONVERSATION HISTORY:
 ${transcript}
 
-LATEST USER MESSAGE:
-User: ${userText}
+LATEST MESSAGE:
+${userName}: ${userText}
 
-CURRENT MOOD:
-${mood}
+[CURRENT MOOD]: ${mood}
+[CURRENT PERSONALITY]: ${isLustMode ? 'confident, affectionate, playful, flirtatious adult woman (flirty adult couple vibe)' : 'psychologist-style, tactical, witty, confident female conversational personality'}
 
-CURRENT PERSONALITY:
-${isLustMode ? 'confident, affectionate, playful, flirtatious adult woman (flirty adult couple vibe)' : 'psychologist-style, tactical, witty, confident female conversational personality'}
-
-TASK:
-Reply naturally to the latest user message while strictly continuing the existing conversation topic.`;
+[TASK]:
+Reply naturally as Roxie directly to the user regarding what they just said. Return ONLY Roxie's direct reply text without any speaker labels or transcripts.`;
 
     const apiMessages: ChatMessage[] = [
       { role: 'system', content: composedSystemPrompt },
@@ -2432,7 +2520,7 @@ Reply naturally to the latest user message while strictly continuing the existin
     // Add user message to conversation history
     conv.messages.push({ role: 'user', content: userText, timestamp: Date.now() });
 
-    let cleanedText = this.cleanAiText(replyContent);
+    let cleanedText = this.cleanAiText(replyContent, userText, userName);
     if (isLustMode) {
       cleanedText = this.sanitizeLustModeText(
         cleanedText,
@@ -2632,6 +2720,8 @@ Users are chatting casually.
 Core Rules:
 - Understand the user's latest message precisely and stay strictly on topic.
 - Chime in casually with a short, natural, relevant comment (1 sentence, 5-25 words) in natural Hinglish or English reacting directly to what the user said.
+- Return ONLY Roxie's direct reply text. Never output speaker labels like "Roxie:", "User:", usernames, or conversation transcripts.
+- Do not repeat the user's message.
 - No unsolicited advice or lecture. No asterisks actions like *laughs*.
 - If you have nothing interesting or natural to add, reply with exactly the single word: SKIP`;
 
@@ -2648,7 +2738,7 @@ Core Rules:
           model,
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: `${contextPrefix}LATEST MESSAGE:\n${userName}: ${userText}` }
+            { role: 'user', content: `${contextPrefix}[LATEST MESSAGE TO REPLY TO]:\n${userName}: "${userText}"` }
           ],
           max_tokens: 100,
           temperature: 0.7
@@ -2664,7 +2754,7 @@ Core Rules:
         return null;
       }
 
-      const cleaned = this.cleanAiText(replyContent);
+      const cleaned = this.cleanAiText(replyContent, userText, userName);
       if (!cleaned) return null;
 
       const settings = db.getGroupSettings(chatId);
@@ -2740,24 +2830,27 @@ Core Rules:
     const isLustMode = Boolean(settings?.lustMode);
 
     if (decision.responseType === 'text_plus_sticker' && decision.content && decision.mediaFileId) {
+      const sanitizedContent = this.cleanAiText(decision.content);
+      decision.content = sanitizedContent;
+
       if (isLustMode && !this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true)) {
         console.warn(`[LUST] BLOCKED DEFAULT STICKER\nchatId: ${decision.chatId}\nfileId: ${decision.mediaFileId}\nsource: default`);
         // Fallback: send text only, blocking default sticker from Telegram
-        const textRes = await telegramApi.sendMessage(decision.chatId, decision.content, {
+        const textRes = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
           reply_to_message_id: decision.replyToMessageId
         });
         if (textRes.ok || (textRes as any).message_id) {
           console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
-          conv.messages.push({ role: 'assistant', content: decision.content });
+          conv.messages.push({ role: 'assistant', content: sanitizedContent });
           this.trimContext(conv);
-          recordAssistantEntry(decision.content);
+          recordAssistantEntry(sanitizedContent);
           db.recordAutoResponseSent(decision.chatId);
           return true;
         }
         return false;
       }
 
-      const textRes = await telegramApi.sendMessage(decision.chatId, decision.content, {
+      const textRes = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
         reply_to_message_id: decision.replyToMessageId
       });
       const stickerRes = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
@@ -2765,7 +2858,7 @@ Core Rules:
       });
       if (textRes.ok || (textRes as any).message_id || stickerRes.ok) {
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text_plus_sticker', replyToMessageId: decision.replyToMessageId })}`);
-        const fullContent = `${decision.content} [Sent sticker]`;
+        const fullContent = `${sanitizedContent} [Sent sticker]`;
         conv.messages.push({ role: 'assistant', content: fullContent });
         this.trimContext(conv);
         recordAssistantEntry(fullContent);
@@ -2816,14 +2909,16 @@ Core Rules:
     }
 
     if (decision.responseType === 'text' && decision.content) {
-      const res = await telegramApi.sendMessage(decision.chatId, decision.content, {
+      const sanitizedContent = this.cleanAiText(decision.content);
+      decision.content = sanitizedContent;
+      const res = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
         reply_to_message_id: decision.replyToMessageId
       });
       if (res.ok || (res as any).message_id) {
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
-        conv.messages.push({ role: 'assistant', content: decision.content });
+        conv.messages.push({ role: 'assistant', content: sanitizedContent });
         this.trimContext(conv);
-        recordAssistantEntry(decision.content);
+        recordAssistantEntry(sanitizedContent);
         db.recordAutoResponseSent(decision.chatId);
         return true;
       }

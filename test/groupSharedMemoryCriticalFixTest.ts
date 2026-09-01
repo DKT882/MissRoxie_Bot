@@ -147,8 +147,8 @@ async function runGroupSharedMemoryCriticalFixTests() {
     const rollGroup = -100777333444;
     db.clearGroupMemory(rollGroup);
 
-    // Insert 100 messages directly into group memory
-    for (let i = 1; i <= 100; i++) {
+    // Insert 600 messages directly into group memory
+    for (let i = 1; i <= 600; i++) {
       db.addGroupConversationEntry(rollGroup, {
         role: 'user',
         userId: 1000 + (i % 5),
@@ -160,22 +160,22 @@ async function runGroupSharedMemoryCriticalFixTests() {
     }
 
     const rollMemory = db.getGroupMemory(rollGroup);
-    assert.strictEqual(rollMemory.length, 80, `Must be capped at exactly 80 messages (got ${rollMemory.length})`);
-    assert.strictEqual(rollMemory[0].content, 'Message 21', 'Oldest entries (1-20) were removed; first is Message 21');
-    assert.strictEqual(rollMemory[79].content, 'Message 100', 'Latest entry is Message 100');
+    assert.strictEqual(rollMemory.length, 500, `Must be capped at exactly 500 messages (got ${rollMemory.length})`);
+    assert.strictEqual(rollMemory[0].content, 'Message 101', 'Oldest entries (1-100) were removed; first is Message 101');
+    assert.strictEqual(rollMemory[499].content, 'Message 600', 'Latest entry is Message 600');
 
-    // 101st message triggers chatbot without any blockage
+    // 601st message triggers chatbot without any blockage
     const msg101: TelegramMessage = {
-      message_id: 5101,
+      message_id: 5601,
       date: Math.floor(Date.now() / 1000),
       chat: { id: rollGroup, type: 'supergroup', title: 'Roll Group' },
       from: { id: 1001, is_bot: false, first_name: 'User1' },
-      text: 'Roxie message 101'
+      text: 'Roxie message 601'
     };
-    mockAiResponse = 'Still responding happily at message 101!';
+    mockAiResponse = 'Still responding happily at message 601!';
     const handled101 = await ChatbotService.handleMessage(msg101, botUser);
-    assert.strictEqual(handled101, true, 'Chatbot handles 101st message successfully');
-    pass('Requirements 5, 6, 7: 80-entry rolling window maintained, oldest removed, processing continues past 80.');
+    assert.strictEqual(handled101, true, 'Chatbot handles message successfully');
+    pass('Requirements 5, 6, 7: 500-entry rolling window maintained, oldest removed, processing continues past 500.');
 
     // ==============================================================
     // REQUIREMENT 8: Deduplication Prevents Duplicate Entries
