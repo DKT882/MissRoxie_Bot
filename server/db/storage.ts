@@ -99,6 +99,30 @@ export interface PrivateConversationRecord {
   messages: PrivateConversationMessage[];
 }
 
+export interface GlobalSettings {
+  botEnabled: boolean;
+  aiConversationEnabled: boolean;
+  globalModerationEnabled: boolean;
+  globalStickersEnabled: boolean;
+  globalAutoResponseEnabled: boolean;
+  globalAutoStickerEnabled: boolean;
+  globalLustModeAvailable: boolean;
+  globalLoggingEnabled: boolean;
+  maintenanceMode: boolean;
+}
+
+export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
+  botEnabled: true,
+  aiConversationEnabled: true,
+  globalModerationEnabled: true,
+  globalStickersEnabled: true,
+  globalAutoResponseEnabled: true,
+  globalAutoStickerEnabled: true,
+  globalLustModeAvailable: true,
+  globalLoggingEnabled: true,
+  maintenanceMode: false
+};
+
 export function isSensitiveData(text: string): boolean {
   if (!text) return false;
   const lower = text.toLowerCase();
@@ -114,6 +138,7 @@ export function isSensitiveData(text: string): boolean {
 
 interface DatabaseSchema {
   settings: Record<number, GroupSettings>;
+  globalSettings?: GlobalSettings;
   warnings: WarningRecord[];
   tempActions: TempActionRecord[];
   stickerFreeUsers: StickerFreeUser[];
@@ -917,6 +942,7 @@ class StorageManager {
       this.ensureDirectories();
       const globalData = {
         schemaVersion: 1,
+        globalSettings: this.getGlobalSettings(),
         customRoles: this.data.customRoles || {},
         mediaLibrary: this.data.mediaLibrary || { stickers: {}, animations: {}, stickerMetadata: {} },
         schedules: this.data.schedules || [],
@@ -943,6 +969,9 @@ class StorageManager {
       if (!raw.trim()) return;
       const parsed = JSON.parse(raw);
       if (parsed) {
+        if (parsed.globalSettings) {
+          this.data.globalSettings = { ...DEFAULT_GLOBAL_SETTINGS, ...parsed.globalSettings };
+        }
         if (parsed.customRoles) this.data.customRoles = { ...this.data.customRoles, ...parsed.customRoles };
         if (parsed.mediaLibrary) this.data.mediaLibrary = { ...this.data.mediaLibrary, ...parsed.mediaLibrary };
         if (Array.isArray(parsed.schedules) && parsed.schedules.length > 0) {
@@ -957,6 +986,142 @@ class StorageManager {
     } catch (err: any) {
       console.error('[Storage] Error loading global.json:', err.message);
     }
+  }
+
+  public getGlobalSettings(): GlobalSettings {
+    if (!this.data.globalSettings) {
+      this.data.globalSettings = { ...DEFAULT_GLOBAL_SETTINGS };
+    }
+    return { ...this.data.globalSettings };
+  }
+
+  public updateGlobalSettings(updates: Partial<GlobalSettings>): GlobalSettings {
+    if (!this.data.globalSettings) {
+      this.data.globalSettings = { ...DEFAULT_GLOBAL_SETTINGS };
+    }
+    for (const [k, v] of Object.entries(updates)) {
+      if (typeof v === 'boolean') {
+        (this.data.globalSettings as any)[k] = v;
+      }
+    }
+    this.saveGlobalJsonSync();
+    return { ...this.data.globalSettings };
+  }
+
+  public resetGroupSettings(chatId: number): GroupSettings {
+    const numId = Number(chatId);
+    const existingTitle = this.data.settings?.[numId]?.chatTitle;
+    if (this.data.settings && this.data.settings[numId]) {
+      delete this.data.settings[numId];
+    }
+    const fresh = this.getGroupSettings(numId, existingTitle);
+    this.saveGroupJsonSync(numId);
+    return fresh;
+  }
+
+  public resetGroupLustState(chatId: number | string): void {
+    const numId = Number(chatId);
+    this.updateGroupSettings(numId, { lustLevel: 0 });
+    this.resetLustLevel(numId);
+    this.saveGroupJsonSync(numId);
+  }
+
+  public getGroupUserLustLevels(groupId: number | string): UserLustLevelRecord[] {
+    if (!this.data.userLustLevels) return [];
+    const prefix = `${groupId}_`;
+    return Object.entries(this.data.userLustLevels)
+      .filter(([k]) => k.startsWith(prefix))
+      .map(([_, v]) => v);
+  }
+
+  public getGroupMembers(chatId: number | string): Array<{
+    userId: number;
+    username?: string;
+    firstName?: string;
+    lastName?: string;
+    role?: string;
+    customRole?: string;
+    lastActive?: string;
+  }> {
+    const numId = Number(chatId);
+    const prefix = `${numId}_`;
+    const membersMap = new Map<number, {
+      userId: number;
+      username?: string;
+      firstName?: string;
+      lastName?: string;
+      role?: string;
+      customRole?: string;
+      lastActive?: string;
+    }>();
+
+    // 1. From groupMembers
+    if (this.data.groupMembers) {
+      for (const [k, member] of Object.entries(this.data.groupMembers)) {
+        if (k.startsWith(prefix) && member.userId) {
+          membersMap.set(member.userId, {
+            userId: member.userId,
+            username: member.username,
+            firstName: member.firstName,
+            lastName: member.lastName,
+            role: (member as any).role || member.customRole || 'member',
+            customRole: member.customRole,
+            lastActive: member.lastSeen
+          });
+        }
+      }
+    }
+
+    // 2. From group conversation memory
+    const memory = this.getGroupMemory(numId);
+    for (const msg of memory) {
+      if (msg.role === 'user' && msg.sender) {
+        const uId = (msg as any).userId;
+        if (uId && !membersMap.has(uId)) {
+          membersMap.set(uId, {
+            userId: uId,
+            username: msg.username,
+            firstName: msg.name || msg.displayName,
+            role: 'member',
+            lastActive: new Date(msg.timestamp).toISOString()
+          });
+        }
+      }
+    }
+
+    // 3. Fallback: knownUsersById
+    if (membersMap.size === 0 && this.data.knownUsersById) {
+      for (const [uId, u] of Object.entries(this.data.knownUsersById)) {
+        membersMap.set(Number(uId), {
+          userId: Number(uId),
+          username: u.username,
+          firstName: u.firstName,
+          lastName: u.lastName,
+          role: (u as any).role || u.customRole || 'member',
+          lastActive: u.lastSeen
+        });
+        if (membersMap.size >= 25) break;
+      }
+    }
+
+    return Array.from(membersMap.values());
+  }
+
+  public updateCustomSticker(
+    fileId: string,
+    updates: { mood?: string; category?: string; enabled?: boolean },
+    chatId?: number | string
+  ): boolean {
+    const lib = this.getMediaLibrary(chatId);
+    if (!lib.stickerMetadata || !lib.stickerMetadata[fileId]) {
+      return false;
+    }
+    const meta = lib.stickerMetadata[fileId];
+    if (updates.mood) meta.mood = updates.mood;
+    if (updates.category) (meta as any).category = updates.category;
+    if (updates.enabled !== undefined) (meta as any).enabled = updates.enabled;
+    this.scheduleSave(chatId);
+    return true;
   }
 
   // --- Group Export, Storage Status & System Health ---

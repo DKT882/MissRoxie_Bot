@@ -1,5 +1,16 @@
 {
   "schemaVersion": 1,
+  "globalSettings": {
+    "botEnabled": true,
+    "aiConversationEnabled": true,
+    "globalModerationEnabled": true,
+    "globalStickersEnabled": true,
+    "globalAutoResponseEnabled": true,
+    "globalAutoStickerEnabled": true,
+    "globalLustModeAvailable": true,
+    "globalLoggingEnabled": true,
+    "maintenanceMode": false
+  },
   "customRoles": {
     "-1001234567890_3001": "MODERATOR",
     "-1004353139683_77770003": "MODERATOR",
@@ -54,7 +65,8 @@
     "-100999011": {},
     "-100999012": {},
     "-100999088": {},
-    "-100999099": {}
+    "-100999099": {},
+    "-100888999111": {}
   },
   "mediaLibrary": {
     "stickers": {},
@@ -406,490 +418,7 @@
       "nextRun": "2026-08-30T19:11:01.361Z"
     }
   ],
-  "logs": [
-    {
-      "id": "audit-test-1",
-      "timestamp": "2026-08-31T13:16:04.001Z",
-      "chatId": -100999222001,
-      "chatTitle": "Roxie Alpha Lab",
-      "groupId": -100999222001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "add_sticker_pack",
-      "action": "sticker_pack_add",
-      "result": "success",
-      "details": "Added sticker pack RoxieRomancePack"
-    },
-    {
-      "id": "audit-test-2",
-      "timestamp": "2026-08-31T13:16:04.002Z",
-      "chatId": -100999222001,
-      "chatTitle": "Roxie Alpha Lab",
-      "groupId": -100999222001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "dashboard_settings",
-      "action": "setting_change",
-      "result": "success",
-      "details": "Updated settings: autoResponse (mode: cooldown, cd: 45s)"
-    },
-    {
-      "id": "9pbnsn1",
-      "timestamp": "2026-08-31T13:29:15.372Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "gwxi72p",
-      "timestamp": "2026-08-31T13:29:15.391Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "tak50gr",
-      "timestamp": "2026-08-31T13:29:15.801Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "2vfekve",
-      "timestamp": "2026-08-31T13:29:15.805Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "zwp2405",
-      "timestamp": "2026-08-31T13:29:15.811Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "p9ak7ii",
-      "timestamp": "2026-08-31T13:29:15.815Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "0jod2ep",
-      "timestamp": "2026-08-31T13:29:15.831Z",
-      "chatId": -100888777002,
-      "groupId": -100888777002,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Roxie successfully verified and left group -100888777002 via Telegram leaveChat"
-    },
-    {
-      "id": "zxwqgc7",
-      "timestamp": "2026-08-31T13:29:44.258Z",
-      "chatId": -100999888101,
-      "groupId": -100999888101,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Roxie successfully verified and left group -100999888101 via Telegram leaveChat"
-    },
-    {
-      "id": "h0ort2q",
-      "timestamp": "2026-08-31T13:29:44.281Z",
-      "chatId": -100999888103,
-      "groupId": -100999888103,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Authoritative check confirmed Roxie membership status is \"left\" in -100999888103. Synchronized local state to Left."
-    },
-    {
-      "id": "nzeepv8",
-      "timestamp": "2026-08-31T13:29:44.307Z",
-      "chatId": -100999888104,
-      "groupId": -100999888104,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Authoritative check confirmed Roxie is already not a member in -100999888104 (Forbidden: bot was kicked from the supergroup chat). Synchronized local state to Left."
-    },
-    {
-      "id": "vhv7sqf",
-      "timestamp": "2026-08-31T13:29:44.322Z",
-      "chatId": -100999888105,
-      "groupId": -100999888105,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "failure",
-      "details": "Cannot leave group -100999888105: Telegram returned \"Bad Request: chat not found\". Group marked as Unavailable / Stale."
-    },
-    {
-      "id": "fa2gjhc",
-      "timestamp": "2026-08-31T13:29:44.337Z",
-      "chatId": -100999888106,
-      "groupId": -100999888106,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "failure",
-      "details": "Cannot leave group -100999888106: Telegram returned \"Bad Request: chat was deleted\". Group marked as Unavailable / Stale."
-    },
-    {
-      "id": "g1fnckr",
-      "timestamp": "2026-08-31T13:30:39.503Z",
-      "chatId": -100999111001,
-      "groupId": -100999111001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Roxie successfully verified and left group -100999111001 via Telegram leaveChat"
-    },
-    {
-      "id": "3o1dmi6",
-      "timestamp": "2026-08-31T13:30:39.656Z",
-      "chatId": -100999111001,
-      "chatTitle": "Roxie Alpha Community",
-      "action": "setting_change",
-      "adminUsername": "dashboard_admin",
-      "details": "Enabled anti-raid protection",
-      "result": "success"
-    },
-    {
-      "id": "audit-test-1",
-      "timestamp": "2026-08-31T13:31:04.363Z",
-      "chatId": -100999222001,
-      "chatTitle": "Roxie Alpha Lab",
-      "groupId": -100999222001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "add_sticker_pack",
-      "action": "sticker_pack_add",
-      "result": "success",
-      "details": "Added sticker pack RoxieRomancePack"
-    },
-    {
-      "id": "audit-test-2",
-      "timestamp": "2026-08-31T13:31:04.368Z",
-      "chatId": -100999222001,
-      "chatTitle": "Roxie Alpha Lab",
-      "groupId": -100999222001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "dashboard_settings",
-      "action": "setting_change",
-      "result": "success",
-      "details": "Updated settings: autoResponse (mode: cooldown, cd: 45s)"
-    },
-    {
-      "id": "5jnsne4",
-      "timestamp": "2026-08-31T13:56:17.506Z",
-      "action": "TEST_PERSIST_AUDIT",
-      "adminId": 998811,
-      "adminName": "SuperAdmin",
-      "details": "Audit log persistent test",
-      "targetChatId": -100999011
-    },
-    {
-      "id": "64gg4kn",
-      "timestamp": "2026-08-31T14:05:27.708Z",
-      "action": "setting_change",
-      "chatId": -100999011,
-      "adminUserId": 998811,
-      "adminUsername": "SuperAdmin",
-      "details": "Audit log persistent test"
-    },
-    {
-      "id": "ngq6xng",
-      "timestamp": "2026-08-31T14:07:14.775Z",
-      "action": "setting_change",
-      "chatId": -100999011,
-      "adminUserId": 998811,
-      "adminUsername": "SuperAdmin",
-      "details": "Audit log persistent test"
-    },
-    {
-      "id": "z7xokfk",
-      "timestamp": "2026-08-31T14:08:53.763Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "l67d9u0",
-      "timestamp": "2026-08-31T14:08:53.779Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "uscelxh",
-      "timestamp": "2026-08-31T14:08:54.036Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "1hjb13k",
-      "timestamp": "2026-08-31T14:08:54.042Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "jbehtdd",
-      "timestamp": "2026-08-31T14:08:54.047Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "j4jvrfe",
-      "timestamp": "2026-08-31T14:08:54.053Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "su7r04c",
-      "timestamp": "2026-08-31T14:14:30.415Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "s5vqhis",
-      "timestamp": "2026-08-31T14:14:30.438Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "ssyxrfr",
-      "timestamp": "2026-08-31T14:14:30.707Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "kvfpyyz",
-      "timestamp": "2026-08-31T14:14:30.712Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "r19ujvi",
-      "timestamp": "2026-08-31T14:14:30.718Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "gofwsgi",
-      "timestamp": "2026-08-31T14:14:30.723Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "xr39p61",
-      "timestamp": "2026-08-31T14:08:54.068Z",
-      "chatId": -100888777002,
-      "groupId": -100888777002,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Roxie successfully verified and left group -100888777002 via Telegram leaveChat"
-    },
-    {
-      "id": "o2yy92c",
-      "timestamp": "2026-08-31T14:14:30.739Z",
-      "chatId": -100888777002,
-      "groupId": -100888777002,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Roxie successfully verified and left group -100888777002 via Telegram leaveChat"
-    },
-    {
-      "id": "2y50ks0",
-      "timestamp": "2026-08-31T14:09:18.934Z",
-      "chatId": -100999888101,
-      "groupId": -100999888101,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Roxie successfully verified and left group -100999888101 via Telegram leaveChat"
-    },
-    {
-      "id": "nz75hyy",
-      "timestamp": "2026-08-31T14:09:18.958Z",
-      "chatId": -100999888103,
-      "groupId": -100999888103,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Authoritative check confirmed Roxie membership status is \"left\" in -100999888103. Synchronized local state to Left."
-    },
-    {
-      "id": "t16e1mn",
-      "timestamp": "2026-08-31T14:09:18.972Z",
-      "chatId": -100999888104,
-      "groupId": -100999888104,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Authoritative check confirmed Roxie is already not a member in -100999888104 (Forbidden: bot was kicked from the supergroup chat). Synchronized local state to Left."
-    },
-    {
-      "id": "pqzdu5a",
-      "timestamp": "2026-08-31T14:09:18.986Z",
-      "chatId": -100999888105,
-      "groupId": -100999888105,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "failure",
-      "details": "Cannot leave group -100999888105: Telegram returned \"Bad Request: chat not found\". Group marked as Unavailable / Stale."
-    },
-    {
-      "id": "l8jp8wm",
-      "timestamp": "2026-08-31T14:09:19.003Z",
-      "chatId": -100999888106,
-      "groupId": -100999888106,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "failure",
-      "details": "Cannot leave group -100999888106: Telegram returned \"Bad Request: chat was deleted\". Group marked as Unavailable / Stale."
-    },
-    {
-      "id": "461vh6w",
-      "timestamp": "2026-08-31T14:14:50.956Z",
-      "action": "setting_change",
-      "chatId": -100999011,
-      "adminUserId": 998811,
-      "adminUsername": "SuperAdmin",
-      "details": "Audit log persistent test"
-    }
-  ],
+  "logs": [],
   "knownUsers": {
     "rojloo": {
       "userId": 8864012889,
@@ -1526,6 +1055,20 @@
       "firstName": "susss",
       "groupId": -1004494262619,
       "lastSeen": "2026-08-30T18:11:01.547Z"
+    },
+    "alice_crypto": {
+      "userId": 444001,
+      "username": "alice_crypto",
+      "firstName": "Alice",
+      "groupId": -100888999111,
+      "lastSeen": "2026-09-01T07:03:49.532Z"
+    },
+    "bob_moderator": {
+      "userId": 444002,
+      "username": "bob_moderator",
+      "firstName": "Bob",
+      "groupId": -100888999111,
+      "lastSeen": "2026-09-01T07:03:49.532Z"
     }
   },
   "knownUsersById": {
@@ -1644,6 +1187,20 @@
       "groupId": -1004353139683,
       "lastSeen": "2026-08-24T20:20:34.329Z",
       "username": "old_handle"
+    },
+    "444001": {
+      "userId": 444001,
+      "username": "alice_crypto",
+      "firstName": "Alice",
+      "groupId": -100888999111,
+      "lastSeen": "2026-09-01T07:03:49.532Z"
+    },
+    "444002": {
+      "userId": 444002,
+      "username": "bob_moderator",
+      "firstName": "Bob",
+      "groupId": -100888999111,
+      "lastSeen": "2026-09-01T07:03:49.532Z"
     },
     "77770001": {
       "userId": 77770001,
@@ -2599,5 +2156,5 @@
       "lastSeen": "2026-08-30T18:10:15.368Z"
     }
   },
-  "updatedAt": "2026-08-31T14:14:51.176Z"
+  "updatedAt": "2026-09-01T07:03:49.780Z"
 }

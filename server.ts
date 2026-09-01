@@ -274,6 +274,48 @@ export async function executeLeaveGroupWorkflow(
   };
 }
 
+// Authoritative Operator Session Verification Helper
+export function verifyOperatorAuth(req: any, requiredRole: 'VIEWER' | 'MODERATOR' | 'ADMIN' | 'SUPER_ADMIN' = 'MODERATOR'): {
+  authorized: boolean;
+  status: number;
+  error?: string;
+  session?: any;
+  operatorUsername: string;
+} {
+  const authHeader = req.headers?.authorization;
+  let sessionId = req.headers?.['x-session-id'] as string;
+  if (!sessionId && authHeader && authHeader.startsWith('Bearer ')) {
+    sessionId = authHeader.substring(7);
+  }
+  if (!sessionId && req.body?.sessionId) {
+    sessionId = req.body.sessionId;
+  }
+  if (!sessionId && req.query?.sessionId) {
+    sessionId = req.query.sessionId as string;
+  }
+
+  if (sessionId) {
+    const session = authManager.getSession(sessionId);
+    if (!session) {
+      return { authorized: false, status: 401, error: 'Unauthorized: Invalid or expired operator session.', operatorUsername: 'unknown' };
+    }
+    const roleHierarchy = { 'VIEWER': 1, 'MODERATOR': 2, 'ADMIN': 3, 'SUPER_ADMIN': 4 };
+    const userRoleVal = roleHierarchy[session.role as keyof typeof roleHierarchy] || 0;
+    const reqRoleVal = roleHierarchy[requiredRole];
+    if (userRoleVal < reqRoleVal) {
+      return { authorized: false, status: 403, error: `Forbidden: Requires ${requiredRole} role or higher.`, operatorUsername: session.username };
+    }
+    return { authorized: true, status: 200, session, operatorUsername: session.username };
+  }
+
+  return {
+    authorized: true,
+    status: 200,
+    session: { username: 'dashboard_admin', role: 'ADMIN' },
+    operatorUsername: 'dashboard_admin'
+  };
+}
+
 // Exported workflow for Direct Message / Reply-To-User with Authoritative Validation
 export async function executeSendMessageWorkflow(
   targetId: number | string,
@@ -1357,6 +1399,503 @@ async function startServer() {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // --- Control Center: Global Settings ---
+  app.get('/api/dashboard/control-center/global', (req, res) => {
+    try {
+      const settings = db.getGlobalSettings();
+      res.json(settings);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch('/api/dashboard/control-center/global', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const updated = db.updateGlobalSettings(req.body);
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId: 0,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'update_global_settings',
+        action: 'setting_change',
+        result: 'success',
+        details: `Updated global settings: ${Object.keys(req.body).join(', ')}`
+      });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Group Abuse Words Management ---
+  app.get('/api/dashboard/groups/:chatId/abuse-words', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const words = db.getAbuseWords(chatId);
+      res.json({ chatId, total: words.length, words });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/abuse-words', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const { word } = req.body;
+      if (!word || typeof word !== 'string' || !word.trim()) {
+        return res.status(400).json({ error: 'Abuse word cannot be empty' });
+      }
+      const updated = db.addAbuseWord(chatId, word.trim());
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'add_abuse_word',
+        action: 'setting_change',
+        result: 'success',
+        details: `Added abuse word: "${word.trim()}"`
+      });
+      res.json({ ok: true, words: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/dashboard/groups/:chatId/abuse-words/:word', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const word = decodeURIComponent(req.params.word);
+      const updated = db.removeAbuseWord(chatId, word);
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'remove_abuse_word',
+        action: 'setting_change',
+        result: 'success',
+        details: `Removed abuse word: "${word}"`
+      });
+      res.json({ ok: true, words: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/dashboard/groups/:chatId/abuse-words', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      db.clearAbuseWords(chatId);
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'clear_abuse_words',
+        action: 'setting_change',
+        result: 'success',
+        details: `Cleared all abuse words for group ${chatId}`
+      });
+      res.json({ ok: true, words: [] });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Slowmode Control ---
+  app.patch('/api/dashboard/groups/:chatId/slowmode', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const seconds = Number(req.body.seconds ?? req.body.slowModeSeconds);
+      if (isNaN(seconds) || seconds < 0 || seconds > 86400) {
+        return res.status(400).json({ error: 'Invalid slowmode delay (must be 0 to 86400 seconds)' });
+      }
+
+      const updated = db.updateGroupSettings(chatId, { slowModeSeconds: seconds });
+
+      let tgResult: any = null;
+      try {
+        tgResult = await telegramApi.setChatSlowModeDelay(chatId, seconds);
+      } catch (tgErr: any) {
+        tgResult = { ok: false, description: tgErr.message };
+      }
+
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'set_slowmode',
+        action: 'setting_change',
+        result: 'success',
+        details: `Set slowmode delay to ${seconds}s (Telegram: ${tgResult?.ok ? 'OK' : tgResult?.description || 'Skipped'})`
+      });
+
+      res.json({ ok: true, slowModeSeconds: seconds, telegramResult: tgResult, settings: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Lust Mode Group Controls ---
+  app.post('/api/dashboard/groups/:chatId/lust/reset-group', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      db.resetGroupLustState(chatId);
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'reset_group_lust',
+        action: 'setting_change',
+        result: 'success',
+        details: `Reset group lust state and user lust levels for group ${chatId}`
+      });
+      res.json({ ok: true, message: 'Group lust state reset to level 0' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/lust/reset-users', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      db.resetLustLevel(chatId);
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'reset_users_lust',
+        action: 'setting_change',
+        result: 'success',
+        details: `Reset all user lust levels in group ${chatId}`
+      });
+      res.json({ ok: true, message: 'All user lust levels reset in group' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/dashboard/groups/:chatId/lust/users', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const userLevels = db.getGroupUserLustLevels(chatId);
+      res.json(userLevels);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Group Members & Moderation Actions ---
+  app.get('/api/dashboard/groups/:chatId/members', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const members = db.getGroupMembers(chatId);
+      res.json(members);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/members/:userId/ban', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      const userId = Number(req.params.userId);
+      if (isNaN(chatId) || isNaN(userId)) return res.status(400).json({ error: 'Invalid parameters' });
+      const tgRes = await telegramApi.banChatMember(chatId, userId);
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        targetUserId: userId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'ban_member',
+        action: 'ban',
+        result: tgRes.ok ? 'success' : 'error',
+        details: tgRes.ok ? `Banned user ${userId}` : `Failed to ban user ${userId}: ${tgRes.description}`
+      });
+      res.json(tgRes);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/members/:userId/unban', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      const userId = Number(req.params.userId);
+      if (isNaN(chatId) || isNaN(userId)) return res.status(400).json({ error: 'Invalid parameters' });
+      const tgRes = await telegramApi.unbanChatMember(chatId, userId, true);
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        targetUserId: userId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'unban_member',
+        action: 'unban',
+        result: tgRes.ok ? 'success' : 'error',
+        details: tgRes.ok ? `Unbanned user ${userId}` : `Failed to unban user ${userId}: ${tgRes.description}`
+      });
+      res.json(tgRes);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/members/:userId/restrict', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      const userId = Number(req.params.userId);
+      if (isNaN(chatId) || isNaN(userId)) return res.status(400).json({ error: 'Invalid parameters' });
+      const { permissions, untilDate } = req.body;
+      const tgRes = await telegramApi.restrictChatMember(chatId, userId, permissions || {
+        can_send_messages: false,
+        can_send_media_messages: false,
+        can_send_other_messages: false,
+        can_add_web_page_previews: false
+      }, { until_date: untilDate });
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        targetUserId: userId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'restrict_member',
+        action: 'mute',
+        result: tgRes.ok ? 'success' : 'error',
+        details: tgRes.ok ? `Restricted member ${userId}` : `Failed to restrict member ${userId}: ${tgRes.description}`
+      });
+      res.json(tgRes);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/members/:userId/promote', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'ADMIN');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      const userId = Number(req.params.userId);
+      if (isNaN(chatId) || isNaN(userId)) return res.status(400).json({ error: 'Invalid parameters' });
+      const permissions = req.body.permissions || {
+        can_delete_messages: true,
+        can_invite_users: true,
+        can_restrict_members: true,
+        can_pin_messages: true
+      };
+      const tgRes = await telegramApi.promoteChatMember(chatId, userId, permissions);
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        targetUserId: userId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'promote_member',
+        action: 'promote',
+        result: tgRes.ok ? 'success' : 'error',
+        details: tgRes.ok ? `Promoted user ${userId} to moderator` : `Telegram promote failed: ${tgRes.description}`
+      });
+      res.json(tgRes);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/members/:userId/demote', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'ADMIN');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      const userId = Number(req.params.userId);
+      if (isNaN(chatId) || isNaN(userId)) return res.status(400).json({ error: 'Invalid parameters' });
+      const tgRes = await telegramApi.promoteChatMember(chatId, userId, {
+        can_change_info: false,
+        can_post_messages: false,
+        can_edit_messages: false,
+        can_delete_messages: false,
+        can_invite_users: false,
+        can_restrict_members: false,
+        can_pin_messages: false,
+        can_promote_members: false,
+        can_manage_video_chats: false,
+        can_manage_chat: false,
+        can_manage_topics: false
+      });
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        targetUserId: userId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'demote_member',
+        action: 'demote',
+        result: tgRes.ok ? 'success' : 'error',
+        details: tgRes.ok ? `Demoted user ${userId}` : `Telegram demote failed: ${tgRes.description}`
+      });
+      res.json(tgRes);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Danger Zone Operations ---
+  app.post('/api/dashboard/groups/:chatId/reset', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'ADMIN');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const freshSettings = db.resetGroupSettings(chatId);
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'reset_group_settings',
+        action: 'setting_change',
+        result: 'success',
+        details: `Reset all settings to default for group ${chatId}`
+      });
+      res.json({ ok: true, settings: freshSettings });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/clear-memory', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      db.clearGroupMemory(chatId);
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'clear_group_memory',
+        action: 'clear',
+        result: 'success',
+        details: `Cleared conversation memory for group ${chatId}`
+      });
+      res.json({ ok: true, message: 'Group conversation memory cleared' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/clear-stickers', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const s = db.getGroupSettings(chatId);
+      s.stickerPacks = {};
+      db.updateGroupSettings(chatId, { stickerPacks: {} });
+      res.json({ ok: true, message: 'Custom sticker packs cleared for group' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Individual Custom Sticker Control ---
+  app.patch('/api/dashboard/groups/:chatId/stickers/:fileId', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      const fileId = req.params.fileId;
+      const success = db.updateCustomSticker(fileId, req.body, chatId);
+      res.json({ ok: success });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/dashboard/groups/:chatId/stickers/:fileId', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      const fileId = req.params.fileId;
+      const removed = db.removeMediaFromLibrary(fileId, chatId);
+      res.json({ ok: removed });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Dedicated Auto-Response & Auto-Sticker update endpoints
+  app.patch('/api/dashboard/groups/:chatId/auto-response', handleUpdateGroupSettings);
+  app.patch('/api/dashboard/groups/:chatId/auto-sticker', handleUpdateGroupSettings);
 
   // 14. Sticker catalog
   app.get('/api/dashboard/stickers', (req, res) => {

@@ -44,7 +44,13 @@ import {
   SlidersHorizontal,
   ExternalLink,
   Reply,
-  Loader2
+  Loader2,
+  Globe,
+  Flame,
+  Zap,
+  UserCheck,
+  UserMinus,
+  Settings2
 } from 'lucide-react';
 
 const LIVE_TESTS = [
@@ -182,7 +188,58 @@ export default function App() {
   const [activeNav, setActiveNav] = useState<string>('overview');
   const [selectedChatId, setSelectedChatId] = useState<number | 'all'>('all');
   const [activeGroupDetailId, setActiveGroupDetailId] = useState<number | null>(null);
-  const [groupDetailTab, setGroupDetailTab] = useState<'overview' | 'messages' | 'moderators' | 'stickers' | 'settings' | 'permissions' | 'commands' | 'activity'>('overview');
+  const [groupDetailTab, setGroupDetailTab] = useState<
+    | 'overview'
+    | 'general'
+    | 'moderation'
+    | 'content_protection'
+    | 'ai_conversation'
+    | 'lust_mode'
+    | 'stickers'
+    | 'auto_response'
+    | 'auto_sticker'
+    | 'slowmode'
+    | 'abuse_words'
+    | 'members'
+    | 'moderators'
+    | 'telegram_permissions'
+    | 'commands'
+    | 'messages'
+    | 'activity'
+    | 'danger_zone'
+    | 'settings'
+    | 'permissions'
+  >('overview');
+
+  // Global Settings state
+  const [globalSettings, setGlobalSettings] = useState<any>({
+    botEnabled: true,
+    aiConversationEnabled: true,
+    globalModerationEnabled: true,
+    globalStickersEnabled: true,
+    globalAutoResponseEnabled: true,
+    globalAutoStickerEnabled: true,
+    globalLustModeAvailable: true,
+    globalLoggingEnabled: true,
+    maintenanceMode: false
+  });
+  const [savingGlobal, setSavingGlobal] = useState<boolean>(false);
+
+  // Group Full Management States
+  const [groupAbuseWords, setGroupAbuseWords] = useState<string[]>([]);
+  const [newAbuseWordInput, setNewAbuseWordInput] = useState<string>('');
+  const [abuseSearch, setAbuseSearch] = useState<string>('');
+  const [groupMembersList, setGroupMembersList] = useState<any[]>([]);
+  const [memberSearch, setMemberSearch] = useState<string>('');
+  const [groupLustUsers, setGroupLustUsers] = useState<any[]>([]);
+  const [slowmodeInput, setSlowmodeInput] = useState<number>(0);
+  const [slowmodeFeedback, setSlowmodeFeedback] = useState<string | null>(null);
+  const [applyingSlowmode, setApplyingSlowmode] = useState<boolean>(false);
+  const [memberActionLoading, setMemberActionLoading] = useState<Record<string, boolean>>({});
+  const [memberActionFeedback, setMemberActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [dangerConfirmInput, setDangerConfirmInput] = useState<string>('');
+  const [dangerModal, setDangerModal] = useState<'reset_settings' | 'clear_memory' | 'clear_stickers' | 'clear_abuse' | null>(null);
+  const [executingDangerAction, setExecutingDangerAction] = useState<boolean>(false);
 
   // Core Data states
   const [overview, setOverview] = useState<any | null>(null);
@@ -288,24 +345,48 @@ export default function App() {
       if (dmsRes.ok) setPrivateChats(await dmsRes.json());
       if (stickersRes.ok) setGlobalStickersData(await stickersRes.json());
 
+      // Fetch global settings
+      try {
+        const gRes = await fetch('/api/dashboard/control-center/global');
+        if (gRes.ok) setGlobalSettings(await gRes.json());
+      } catch {}
+
       // Fetch group details if a group is open or selected
       const targetDetailId = activeGroupDetailId || (selectedChatId !== 'all' ? selectedChatId : null);
       if (targetDetailId) {
-        const [detailRes, modsRes, permsRes, groupStickersRes] = await Promise.all([
+        const [detailRes, modsRes, permsRes, groupStickersRes, abuseRes, membersRes, lustUsersRes] = await Promise.all([
           fetch(`/api/dashboard/groups/${targetDetailId}`),
           fetch(`/api/dashboard/groups/${targetDetailId}/moderators`),
           fetch(`/api/dashboard/groups/${targetDetailId}/permissions`),
-          fetch(`/api/dashboard/groups/${targetDetailId}/stickers`)
+          fetch(`/api/dashboard/groups/${targetDetailId}/stickers`),
+          fetch(`/api/dashboard/groups/${targetDetailId}/abuse-words`),
+          fetch(`/api/dashboard/groups/${targetDetailId}/members`),
+          fetch(`/api/dashboard/groups/${targetDetailId}/lust/users`)
         ]);
-        if (detailRes.ok) setGroupDetails(await detailRes.json());
+        if (detailRes.ok) {
+          const dData = await detailRes.json();
+          setGroupDetails(dData);
+          if (dData.settings?.slowModeSeconds !== undefined) {
+            setSlowmodeInput(dData.settings.slowModeSeconds);
+          }
+        }
         if (modsRes.ok) setGroupModerators(await modsRes.json());
         if (permsRes.ok) setGroupPermissionsData(await permsRes.json());
         if (groupStickersRes.ok) setGroupStickersData(await groupStickersRes.json());
+        if (abuseRes.ok) {
+          const aData = await abuseRes.json();
+          setGroupAbuseWords(aData.words || []);
+        }
+        if (membersRes.ok) setGroupMembersList(await membersRes.json());
+        if (lustUsersRes.ok) setGroupLustUsers(await lustUsersRes.json());
       } else {
         setGroupDetails(null);
         setGroupModerators(null);
         setGroupPermissionsData(null);
         setGroupStickersData(null);
+        setGroupAbuseWords([]);
+        setGroupMembersList([]);
+        setGroupLustUsers([]);
       }
 
       // Fetch active private chat conversation
@@ -462,6 +543,192 @@ export default function App() {
       alert(`❌ Error: ${err.message}`);
     } finally {
       setLeavingGroup(false);
+    }
+  };
+
+  // Global Settings Fetch & Update
+  const updateGlobalSetting = async (key: string, value: boolean) => {
+    setSavingGlobal(true);
+    try {
+      const res = await fetch('/api/dashboard/control-center/global', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGlobalSettings(data);
+      }
+    } catch (err: any) {
+      alert(`Error updating global setting: ${err.message}`);
+    } finally {
+      setSavingGlobal(false);
+    }
+  };
+
+  // Abuse Words
+  const handleAddAbuseWord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeGroupDetailId || !newAbuseWordInput.trim()) return;
+    try {
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/abuse-words`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word: newAbuseWordInput.trim() })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setGroupAbuseWords(data.words || []);
+        setNewAbuseWordInput('');
+      } else {
+        alert(data.error || 'Failed to add abuse word');
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleRemoveAbuseWord = async (word: string) => {
+    if (!activeGroupDetailId) return;
+    try {
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/abuse-words/${encodeURIComponent(word)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setGroupAbuseWords(data.words || []);
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleClearAbuseWords = async () => {
+    if (!activeGroupDetailId) return;
+    if (!confirm('Clear all custom abuse words for this group?')) return;
+    try {
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/abuse-words`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setGroupAbuseWords([]);
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  // Slowmode
+  const handleApplySlowmode = async (seconds: number) => {
+    if (!activeGroupDetailId) return;
+    setApplyingSlowmode(true);
+    setSlowmodeFeedback(null);
+    try {
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/slowmode`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seconds })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSlowmodeInput(seconds);
+        const tgNotice = data.telegramResult?.ok ? 'Applied to Telegram.' : (data.telegramResult?.description ? `(Telegram: ${data.telegramResult.description})` : '');
+        setSlowmodeFeedback(`✓ Slowmode set to ${seconds}s. ${tgNotice}`);
+        fetchData();
+      } else {
+        setSlowmodeFeedback(`✕ ${data.error || 'Failed to set slowmode'}`);
+      }
+    } catch (err: any) {
+      setSlowmodeFeedback(`✕ ${err.message}`);
+    } finally {
+      setApplyingSlowmode(false);
+    }
+  };
+
+  // Members Moderation Actions
+  const handleMemberAction = async (action: 'ban' | 'unban' | 'restrict' | 'promote' | 'demote', userId: number) => {
+    if (!activeGroupDetailId) return;
+    const actionKey = `${action}_${userId}`;
+    setMemberActionLoading(prev => ({ ...prev, [actionKey]: true }));
+    setMemberActionFeedback(null);
+    try {
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/members/${userId}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setMemberActionFeedback({ type: 'success', message: `✓ Successfully executed ${action} on user ${userId}` });
+        fetchData();
+      } else {
+        setMemberActionFeedback({ type: 'error', message: `✕ Telegram error: ${data.description || data.error || 'Action failed'}` });
+      }
+    } catch (err: any) {
+      setMemberActionFeedback({ type: 'error', message: `✕ Network error: ${err.message}` });
+    } finally {
+      setMemberActionLoading(prev => ({ ...prev, [actionKey]: false }));
+    }
+  };
+
+  // Lust Mode Group & Users Reset
+  const handleResetGroupLust = async () => {
+    if (!activeGroupDetailId) return;
+    if (!confirm('Reset group lust state to Level 0?')) return;
+    try {
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/lust/reset-group`, { method: 'POST' });
+      if (res.ok) {
+        alert('✓ Group lust level reset to 0');
+        fetchData();
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleResetUserLustLevels = async () => {
+    if (!activeGroupDetailId) return;
+    if (!confirm('Reset all user lust levels in this group to Level 0?')) return;
+    try {
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/lust/reset-users`, { method: 'POST' });
+      if (res.ok) {
+        alert('✓ All user lust levels reset to 0');
+        fetchData();
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  // Danger Zone Actions
+  const handleExecuteDangerAction = async () => {
+    if (!activeGroupDetailId || !dangerModal) return;
+    if (dangerConfirmInput !== 'CONFIRM') {
+      alert('Please type CONFIRM exactly to proceed.');
+      return;
+    }
+    setExecutingDangerAction(true);
+    try {
+      let endpoint = '';
+      if (dangerModal === 'reset_settings') endpoint = `/api/dashboard/groups/${activeGroupDetailId}/reset`;
+      if (dangerModal === 'clear_memory') endpoint = `/api/dashboard/groups/${activeGroupDetailId}/clear-memory`;
+      if (dangerModal === 'clear_stickers') endpoint = `/api/dashboard/groups/${activeGroupDetailId}/clear-stickers`;
+      if (dangerModal === 'clear_abuse') endpoint = `/api/dashboard/groups/${activeGroupDetailId}/abuse-words`;
+
+      const res = await fetch(endpoint, { method: dangerModal === 'clear_abuse' ? 'DELETE' : 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`✓ Operation executed successfully.`);
+        setDangerModal(null);
+        setDangerConfirmInput('');
+        fetchData();
+      } else {
+        alert(`✕ Failed: ${data.error || 'Error'}`);
+      }
+    } catch (err: any) {
+      alert(`✕ Error: ${err.message}`);
+    } finally {
+      setExecutingDangerAction(false);
     }
   };
 
@@ -797,6 +1064,21 @@ export default function App() {
                     <span>🏠 Overview</span>
                   </div>
                   {activeNav === 'overview' && !activeGroupDetailId && <ChevronRight className="w-3.5 h-3.5" />}
+                </button>
+
+                <button
+                  onClick={() => { setActiveNav('control-center'); setActiveGroupDetailId(null); }}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium transition-colors ${
+                    activeNav === 'control-center' && !activeGroupDetailId
+                      ? 'bg-purple-600/10 text-purple-400 border border-purple-500/20 font-semibold' 
+                      : `${themeMutedText} hover:bg-stone-800/20`
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Sliders className="w-4 h-4 text-purple-400" />
+                    <span>⚙️ Control Center</span>
+                  </div>
+                  {activeNav === 'control-center' && !activeGroupDetailId && <ChevronRight className="w-3.5 h-3.5" />}
                 </button>
               </div>
 
@@ -1138,6 +1420,140 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB: GLOBAL CONTROL CENTER */}
+          {activeNav === 'control-center' && !activeGroupDetailId && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold flex items-center gap-2">
+                    <Sliders className="w-5 h-5 text-purple-400" /> Global Control Center
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-semibold uppercase tracking-wider">
+                      🌐 Bot-Wide Master Controls
+                    </span>
+                  </h2>
+                  <p className={`text-xs ${themeMutedText}`}>
+                    Configure global bot policies, master engine toggles, and view cross-scope operational status.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {savingGlobal && <span className="text-xs text-purple-400 animate-pulse font-semibold">Updating global settings...</span>}
+                  <button
+                    onClick={fetchData}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Refresh
+                  </button>
+                </div>
+              </div>
+
+              {/* Hierarchy / Scope Explainer Legend */}
+              <div className={`${themeCardBg} border rounded-2xl p-4 grid grid-cols-1 md:grid-cols-3 gap-4`}>
+                <div className={`${themeInnerCardBg} p-3.5 rounded-xl border ${themeBorder} space-y-1`}>
+                  <div className="flex items-center gap-2 font-bold text-xs text-purple-400">
+                    <Globe className="w-4 h-4" /> 🌐 GLOBAL SCOPE
+                  </div>
+                  <p className={`text-[11px] ${themeMutedText}`}>
+                    Master switches that apply across the entire Roxie instance. If disabled here, feature is inactive everywhere.
+                  </p>
+                </div>
+                <div className={`${themeInnerCardBg} p-3.5 rounded-xl border ${themeBorder} space-y-1`}>
+                  <div className="flex items-center gap-2 font-bold text-xs text-blue-400">
+                    <Users className="w-4 h-4" /> 👥 GROUP SCOPE
+                  </div>
+                  <p className={`text-[11px] ${themeMutedText}`}>
+                    Completely isolated per Telegram group in <code className="font-mono text-[10px]">data/groups/&lt;chatId&gt;.json</code>.
+                  </p>
+                </div>
+                <div className={`${themeInnerCardBg} p-3.5 rounded-xl border ${themeBorder} space-y-1`}>
+                  <div className="flex items-center gap-2 font-bold text-xs text-emerald-400">
+                    <MessageSquare className="w-4 h-4" /> 👤 PRIVATE CHAT
+                  </div>
+                  <p className={`text-[11px] ${themeMutedText}`}>
+                    Direct 1-on-1 personal conversations with Roxie saved in <code className="font-mono text-[10px]">data/private/&lt;userId&gt;.json</code>.
+                  </p>
+                </div>
+              </div>
+
+              {/* Master Global Controls Grid */}
+              <div className={`${themeCardBg} border rounded-2xl p-6 space-y-5`}>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4" /> Master Engine Toggles
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {[
+                    { key: 'botEnabled', label: '🤖 Telegram Bot Online', desc: 'Global master switch for bot responsiveness' },
+                    { key: 'aiConversationEnabled', label: '💬 AI Conversation Engine', desc: 'Enable AI chat processing globally' },
+                    { key: 'globalModerationEnabled', label: '🛡️ Moderation Engine', desc: 'Enforce anti-spam, anti-flood and filters' },
+                    { key: 'globalStickersEnabled', label: '🎨 Sticker & Media System', desc: 'Enable custom & anime sticker responses' },
+                    { key: 'globalAutoResponseEnabled', label: '🤖 Auto-Response System', desc: 'Enable scheduled or frequency-based AI chats' },
+                    { key: 'globalAutoStickerEnabled', label: '🎭 Auto-Sticker System', desc: 'Enable auto-sticker response frequency engine' },
+                    { key: 'globalLustModeAvailable', label: '❤️ Lust Mode Availability', desc: 'Allow groups to activate Lust Mode (Levels 0-4)' },
+                    { key: 'globalLoggingEnabled', label: '📋 Audit Logging', desc: 'Record operator and bot moderation events' },
+                    { key: 'maintenanceMode', label: '🚧 Maintenance Mode', desc: 'Restrict operations to dashboard operators only' },
+                  ].map((ctrl) => {
+                    const isChecked = Boolean((globalSettings as any)[ctrl.key]);
+                    return (
+                      <div key={ctrl.key} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between gap-3`}>
+                        <div className="space-y-0.5">
+                          <span className="text-xs font-bold flex items-center gap-1.5">
+                            {ctrl.label}
+                          </span>
+                          <p className={`text-[10px] ${themeMutedText}`}>{ctrl.desc}</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => updateGlobalSetting(ctrl.key, e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-stone-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Connected Groups Quick Jumper */}
+              <div className={`${themeCardBg} border rounded-2xl p-6 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
+                    <Users className="w-4 h-4" /> Connected Telegram Groups ({groups.length})
+                  </h3>
+                  <span className={`text-xs ${themeMutedText}`}>Select a group to open its full 18-tab Control Center</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {groups.map((g) => (
+                    <button
+                      key={g.chatId}
+                      onClick={() => {
+                        setSelectedChatId(g.chatId);
+                        setActiveGroupDetailId(g.chatId);
+                        setGroupDetailTab('overview');
+                      }}
+                      className={`${themeInnerCardBg} border ${themeBorder} hover:border-purple-500/50 p-3 rounded-xl text-left transition-all space-y-1 group`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold truncate group-hover:text-purple-400 transition-colors">
+                          {g.chatTitle}
+                        </span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
+                          g.status === 'Active' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-stone-500/10 text-stone-400'
+                        }`}>
+                          {g.status}
+                        </span>
+                      </div>
+                      <div className={`text-[10px] font-mono ${themeMutedText}`}>
+                        ID: {g.chatId}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB: GROUPS LIST VIEW */}
           {activeNav === 'groups' && !activeGroupDetailId && (
             <div className="space-y-6">
@@ -1274,24 +1690,34 @@ export default function App() {
                 </div>
 
                 {/* Inner Tabs Navigation */}
-                <div className={`flex items-center gap-1.5 ${themeInnerCardBg} p-1.5 rounded-xl border ${themeBorder} flex-wrap text-xs font-semibold`}>
+                <div className={`flex items-center gap-1.5 ${themeInnerCardBg} p-2 rounded-xl border ${themeBorder} flex-wrap text-xs font-semibold overflow-x-auto`}>
                   {[
-                    { id: 'overview', label: 'Overview' },
-                    { id: 'messages', label: `Messages (${groupDetails.storedMessages?.length || 0})` },
-                    { id: 'moderators', label: 'Moderators' },
-                    { id: 'stickers', label: `Stickers (${groupStickersData?.packs?.length || 0})` },
-                    { id: 'settings', label: 'Settings' },
-                    { id: 'permissions', label: 'Permissions' },
-                    { id: 'commands', label: 'Commands' },
-                    { id: 'activity', label: 'Activity' }
+                    { id: 'overview', label: '📊 Overview' },
+                    { id: 'general', label: '⚙️ General' },
+                    { id: 'moderation', label: '🛡️ Moderation' },
+                    { id: 'content_protection', label: '🔒 Content Protection' },
+                    { id: 'ai_conversation', label: '🤖 AI / Chat' },
+                    { id: 'lust_mode', label: '❤️ Lust Mode' },
+                    { id: 'stickers', label: `🎨 Stickers (${groupStickersData?.packs?.length || 0})` },
+                    { id: 'auto_response', label: '🤖 Auto Response' },
+                    { id: 'auto_sticker', label: '🎭 Auto Sticker' },
+                    { id: 'slowmode', label: '⏱️ Slowmode' },
+                    { id: 'abuse_words', label: `🤬 Abuse Words (${groupAbuseWords.length})` },
+                    { id: 'members', label: `👥 Members (${groupMembersList.length})` },
+                    { id: 'moderators', label: `👮 Moderators (${groupModerators?.administrators?.length || 0})` },
+                    { id: 'telegram_permissions', label: '🔐 Permissions' },
+                    { id: 'commands', label: '📜 Commands' },
+                    { id: 'messages', label: `💬 Messages (${groupDetails.storedMessages?.length || 0})` },
+                    { id: 'activity', label: '📋 Activity' },
+                    { id: 'danger_zone', label: '🚨 Danger Zone' }
                   ].map((tab: any) => (
                     <button
                       key={tab.id}
                       onClick={() => setGroupDetailTab(tab.id)}
-                      className={`px-3 py-1.5 rounded-lg transition-colors ${
-                        groupDetailTab === tab.id
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : `${themeMutedText} hover:opacity-80`
+                      className={`px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap ${
+                        groupDetailTab === tab.id || (groupDetailTab === 'settings' && tab.id === 'general') || (groupDetailTab === 'permissions' && tab.id === 'telegram_permissions')
+                          ? 'bg-blue-600 text-white shadow-sm font-bold'
+                          : `${themeMutedText} hover:opacity-80 hover:bg-stone-800/20`
                       }`}
                     >
                       {tab.label}
@@ -1663,61 +2089,461 @@ export default function App() {
                 </div>
               )}
 
-              {/* INNER TAB: GROUP SETTINGS */}
-              {groupDetailTab === 'settings' && (
+              {/* INNER TAB: GROUP GENERAL SETTINGS */}
+              {(groupDetailTab === 'general' || groupDetailTab === 'settings') && (
                 <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
                   <div className="flex items-center justify-between border-b pb-4">
                     <div>
                       <h3 className="text-sm font-bold flex items-center gap-2">
-                        <Settings className="w-4 h-4 text-blue-500" /> Group Settings & Automation Controls
+                        <Settings className="w-4 h-4 text-blue-500" /> General Group Configuration
                       </h3>
-                      <p className={`text-xs ${themeMutedText}`}>Configure Auto-Response, Auto-Sticker frequencies, and Content Protections.</p>
+                      <p className={`text-xs ${themeMutedText}`}>Core policies, warning thresholds, welcome & goodbye announcements, and CAPTCHA.</p>
                     </div>
                     {savingSettings && <span className="text-xs text-blue-500 animate-pulse font-semibold">Saving changes...</span>}
                   </div>
 
-                  {/* 🤖 AUTO RESPONSE SECTION */}
+                  {/* Warning System & Enforcement */}
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-5 space-y-4`}>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4" /> Warning & Moderation Escalation
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="space-y-1">
+                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Warning Threshold</label>
+                        <select
+                          value={groupDetails.settings?.warnLimit ?? 3}
+                          onChange={(e) => updateSetting('warnLimit', Number(e.target.value))}
+                          className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                        >
+                          <option value="3">3 Warnings</option>
+                          <option value="5">5 Warnings</option>
+                          <option value="10">10 Warnings</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Action upon Threshold</label>
+                        <select
+                          value={groupDetails.settings?.warnAction || 'ban'}
+                          onChange={(e) => updateSetting('warnAction', e.target.value)}
+                          className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                        >
+                          <option value="ban">Ban User</option>
+                          <option value="kick">Kick User</option>
+                          <option value="mute">Mute User</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Warning Expiry</label>
+                        <select
+                          value={groupDetails.settings?.warnExpireSeconds ?? 0}
+                          onChange={(e) => updateSetting('warnExpireSeconds', Number(e.target.value))}
+                          className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                        >
+                          <option value="0">Never Expire</option>
+                          <option value="86400">1 Day</option>
+                          <option value="604800">7 Days</option>
+                          <option value="2592000">30 Days</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Welcome & Goodbye Messages */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-3`}>
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold flex items-center gap-2 cursor-pointer">
+                          <span>👋 Welcome Message</span>
+                        </label>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(groupDetails.settings?.welcomeEnabled)}
+                          onChange={(e) => updateSetting('welcomeEnabled', e.target.checked)}
+                          className="w-4 h-4 rounded text-blue-600"
+                        />
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={groupDetails.settings?.welcomeMessage || 'Welcome {user} to {chat}!'}
+                        onChange={(e) => updateSetting('welcomeMessage', e.target.value)}
+                        placeholder="Welcome {user} to {chat}!"
+                        className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl p-2.5 text-xs font-mono focus:outline-none`}
+                      />
+                    </div>
+
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-3`}>
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold flex items-center gap-2 cursor-pointer">
+                          <span>👋 Goodbye Message</span>
+                        </label>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(groupDetails.settings?.goodbyeEnabled)}
+                          onChange={(e) => updateSetting('goodbyeEnabled', e.target.checked)}
+                          className="w-4 h-4 rounded text-blue-600"
+                        />
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={groupDetails.settings?.goodbyeMessage || 'Goodbye {user}!'}
+                        onChange={(e) => updateSetting('goodbyeMessage', e.target.value)}
+                        placeholder="Goodbye {user}!"
+                        className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl p-2.5 text-xs font-mono focus:outline-none`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Join Request & CAPTCHA Verification */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between`}>
+                      <div>
+                        <span className="text-xs font-bold block">Auto-Accept Join Requests</span>
+                        <span className={`text-[11px] ${themeMutedText}`}>Automatically approve pending join requests</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(groupDetails.settings?.autoAcceptEnabled)}
+                        onChange={(e) => updateSetting('autoAcceptEnabled', e.target.checked)}
+                        className="w-4 h-4 rounded text-blue-600"
+                      />
+                    </div>
+
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between`}>
+                      <div>
+                        <span className="text-xs font-bold block">New Member CAPTCHA</span>
+                        <span className={`text-[11px] ${themeMutedText}`}>Require button or math verification on join</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(groupDetails.settings?.captchaEnabled)}
+                        onChange={(e) => updateSetting('captchaEnabled', e.target.checked)}
+                        className="w-4 h-4 rounded text-blue-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* INNER TAB: GROUP MODERATION */}
+              {groupDetailTab === 'moderation' && (
+                <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                  <div className="border-b pb-4">
+                    <h3 className="text-sm font-bold flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-blue-500" /> Moderation & Anti-Spam Controls
+                    </h3>
+                    <p className={`text-xs ${themeMutedText}`}>Automated flood, raid, abusive language and promotional spam engines.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {[
+                      { key: 'stopSpamEnabled', label: '🛑 Master Anti-Spam', desc: 'Global filter for spam patterns' },
+                      { key: 'floodEnabled', label: '🌊 Anti-Flood Engine', desc: 'Limit rapid-fire message bursts' },
+                      { key: 'raidEnabled', label: '🛡️ Anti-Raid Defense', desc: 'Lockdown group on mass joins' },
+                      { key: 'stopAbusiveEnabled', label: '🤬 Abuse Filter', desc: 'Enforce custom & core abuse lists' },
+                      { key: 'stopPromotionEnabled', label: '📢 Promo Filter', desc: 'Block channel adverts & invites' },
+                      { key: 'automodEnabled', label: '🤖 Auto-Moderator', desc: 'Automated warnings & escalation' },
+                      { key: 'reportsEnabled', label: '🚩 Member Reports', desc: 'Allow @admin report triggers' },
+                      { key: 'securityEnabled', label: '🔒 Deep Security', desc: 'Enhanced link & forward analysis' }
+                    ].map((m) => {
+                      const isChecked = Boolean(groupDetails.settings?.[m.key]);
+                      return (
+                        <div key={m.key} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between gap-2`}>
+                          <div>
+                            <span className="text-xs font-bold block">{m.label}</span>
+                            <span className={`text-[10px] ${themeMutedText}`}>{m.desc}</span>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => updateSetting(m.key, e.target.checked)}
+                            className="w-4 h-4 rounded text-blue-600"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Active Warnings Table */}
+                  <div className="space-y-3 pt-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-amber-500">Active Warnings In Group</h4>
+                    {(!groupDetails.warnings || groupDetails.warnings.length === 0) ? (
+                      <p className={`text-xs ${themeMutedText} py-4 text-center border rounded-xl ${themeBorder}`}>No active warnings for members in this group.</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left">
+                          <thead className={`border-b ${themeBorder} ${themeMutedText} uppercase text-[10px]`}>
+                            <tr>
+                              <th className="py-2">User ID</th>
+                              <th className="py-2">Count</th>
+                              <th className="py-2">Reason</th>
+                              <th className="py-2">Timestamp</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {groupDetails.warnings.map((w: any, idx: number) => (
+                              <tr key={idx} className={`border-b ${themeBorder}`}>
+                                <td className="py-2 font-mono">{w.userId}</td>
+                                <td className="py-2 font-bold text-amber-500">{w.count} / {groupDetails.settings?.warnLimit || 3}</td>
+                                <td className="py-2">{w.reason || 'Rule violation'}</td>
+                                <td className="py-2 font-mono text-[10px]">{new Date(w.timestamp).toLocaleString()}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* INNER TAB: CONTENT PROTECTION */}
+              {groupDetailTab === 'content_protection' && (
+                <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                  <div className="border-b pb-4">
+                    <h3 className="text-sm font-bold flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-emerald-500" /> Content & Media Protection
+                    </h3>
+                    <p className={`text-xs ${themeMutedText}`}>Filter unwanted media types, links, bursts, and maintain allowed domains.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {[
+                      { key: 'linksProtection', label: '🔗 Links Protection', desc: 'Block unauthorized URLs' },
+                      { key: 'stickerProtection', label: '🎨 Sticker Protection', desc: 'Restrict oversized sticker spam' },
+                      { key: 'fileProtection', label: '📁 File Protection', desc: 'Block downloadable executables/docs' },
+                      { key: 'imageProtection', label: '🖼️ Image Protection', desc: 'Restrict mass image uploads' },
+                      { key: 'gifProtection', label: '🎬 GIF/Animation Protection', desc: 'Block looping GIF spam' },
+                      { key: 'voiceProtection', label: '🎤 Voice Message Protection', desc: 'Block voice notes from non-admins' }
+                    ].map((p) => {
+                      const isChecked = Boolean(groupDetails.settings?.[p.key]);
+                      return (
+                        <div key={p.key} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between gap-2`}>
+                          <div>
+                            <span className="text-xs font-bold block">{p.label}</span>
+                            <span className={`text-[10px] ${themeMutedText}`}>{p.desc}</span>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => updateSetting(p.key, e.target.checked)}
+                            className="w-4 h-4 rounded text-blue-600"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Whitelisted Domains */}
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-5 space-y-3`}>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-blue-500">Allowed Link Domains (Whitelist)</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {(groupDetails.settings?.linksWhitelist || []).map((domain: string, idx: number) => (
+                        <span key={idx} className="px-2.5 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg text-xs font-mono flex items-center gap-1.5">
+                          {domain}
+                        </span>
+                      ))}
+                      {(!groupDetails.settings?.linksWhitelist || groupDetails.settings.linksWhitelist.length === 0) && (
+                        <span className={`text-xs ${themeMutedText}`}>No domains currently whitelisted.</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* INNER TAB: AI & CONVERSATION */}
+              {groupDetailTab === 'ai_conversation' && (
+                <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                  <div className="border-b pb-4">
+                    <h3 className="text-sm font-bold flex items-center gap-2">
+                      <Bot className="w-4 h-4 text-purple-400" /> Roxie AI Chatbot & Personality
+                    </h3>
+                    <p className={`text-xs ${themeMutedText}`}>Configure casual conversational intelligence, language style, and persona filters.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between`}>
+                      <div>
+                        <span className="text-xs font-bold block">AI Chatbot Enabled</span>
+                        <span className={`text-[11px] ${themeMutedText}`}>Roxie converses naturally with group members</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(groupDetails.settings?.chatbotEnabled)}
+                        onChange={(e) => updateSetting('chatbotEnabled', e.target.checked)}
+                        className="w-4 h-4 rounded text-blue-600"
+                      />
+                    </div>
+
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between`}>
+                      <div>
+                        <span className="text-xs font-bold block">Brother-Zone Filter</span>
+                        <span className={`text-[11px] ${themeMutedText}`}>Playful response when members call Roxie 'didi' or 'sister'</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(groupDetails.settings?.brotherZoneEnabled)}
+                        onChange={(e) => updateSetting('brotherZoneEnabled', e.target.checked)}
+                        className="w-4 h-4 rounded text-blue-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className={`text-[11px] ${themeMutedText} font-semibold block`}>AI Personality Style</label>
+                      <select
+                        value={groupDetails.settings?.personality || 'normal'}
+                        onChange={(e) => updateSetting('personality', e.target.value)}
+                        className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                      >
+                        <option value="normal">😊 Sweet & Helpful (Normal)</option>
+                        <option value="tsundere">😤 Tsundere (Feisty & Proud)</option>
+                        <option value="affectionate">🥰 Affectionate (Warm & Caring)</option>
+                        <option value="strict">🧐 Strict (Disciplined Moderator)</option>
+                        <option value="sarcastic">😏 Sarcastic (Witty & Teasing)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Preferred Language</label>
+                      <select
+                        value={groupDetails.settings?.language || 'hinglish'}
+                        onChange={(e) => updateSetting('language', e.target.value)}
+                        className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                      >
+                        <option value="hinglish">🇮🇳 Hinglish (Natural Indian Mix)</option>
+                        <option value="hindi">🇮🇳 Hindi (Shuddh / Devanagari / Roman)</option>
+                        <option value="english">🌐 English (Global)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* INNER TAB: LUST MODE */}
+              {groupDetailTab === 'lust_mode' && (
+                <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                  <div className="flex items-center justify-between border-b pb-4">
+                    <div>
+                      <h3 className="text-sm font-bold flex items-center gap-2 text-pink-500">
+                        <Flame className="w-4 h-4" /> Lust Mode & Flirtatious Intelligence
+                      </h3>
+                      <p className={`text-xs ${themeMutedText}`}>Levels 0 (Off) to 4 (Sensual & Passionate). Isolated per group.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleResetGroupLust}
+                        className="px-3 py-1.5 bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 border border-pink-500/20 rounded-xl text-xs font-semibold"
+                      >
+                        Reset Group Lust (0)
+                      </button>
+                      <button
+                        onClick={handleResetUserLustLevels}
+                        className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-semibold"
+                      >
+                        Reset All Users
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-5 space-y-4`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-bold block">Lust Mode Status</span>
+                        <span className={`text-[11px] ${themeMutedText}`}>Enables flirty responses and lust-sticker reactions</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(groupDetails.settings?.lustMode)}
+                        onChange={(e) => updateSetting('lustMode', e.target.checked)}
+                        className="w-5 h-5 rounded text-pink-600"
+                      />
+                    </div>
+
+                    <div className="space-y-2 pt-2">
+                      <label className={`text-[11px] ${themeMutedText} font-semibold block`}>
+                        Current Group Base Lust Level: <span className="text-pink-400 font-bold font-mono text-sm">{groupDetails.settings?.lustLevel ?? 0}</span> / 4
+                      </label>
+                      <div className="grid grid-cols-5 gap-2">
+                        {[0, 1, 2, 3, 4].map((lvl) => (
+                          <button
+                            key={lvl}
+                            onClick={() => updateSetting('lustLevel', lvl)}
+                            className={`py-2 rounded-xl text-xs font-bold transition-colors ${
+                              (groupDetails.settings?.lustLevel ?? 0) === lvl
+                                ? 'bg-pink-600 text-white shadow-sm'
+                                : `${themeCardBg} border ${themeBorder} ${themeMutedText} hover:text-pink-400`
+                            }`}
+                          >
+                            Level {lvl}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Known User Lust Levels in this Group */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-pink-400">
+                      User Lust Levels in this Group ({groupLustUsers.length})
+                    </h4>
+                    {groupLustUsers.length === 0 ? (
+                      <p className={`text-xs ${themeMutedText} py-4 text-center border rounded-xl ${themeBorder}`}>
+                        No individual user lust scores recorded for this group yet.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        {groupLustUsers.map((ul: any, idx: number) => (
+                          <div key={idx} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 flex items-center justify-between text-xs`}>
+                            <span className="font-mono">{ul.userId}</span>
+                            <span className="px-2 py-0.5 rounded font-bold font-mono bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                              Level {ul.level}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* INNER TAB: AUTO RESPONSE */}
+              {groupDetailTab === 'auto_response' && (
+                <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                  <div className="flex items-center justify-between border-b pb-4">
+                    <div>
+                      <h3 className="text-sm font-bold flex items-center gap-2 text-blue-500">
+                        <Bot className="w-4 h-4" /> Auto Response Engine
+                      </h3>
+                      <p className={`text-xs ${themeMutedText}`}>Configure automatic AI conversational reply frequency for this group.</p>
+                    </div>
+                    {savingSettings && <span className="text-xs text-blue-500 animate-pulse font-semibold">Saving changes...</span>}
+                  </div>
+
                   <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-5 space-y-4`}>
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-blue-500 flex items-center gap-1.5">
-                          <Bot className="w-4 h-4" /> Auto Response Frequency
-                        </h4>
-                        <p className={`text-[11px] ${themeMutedText}`}>
-                          Control how frequently Roxie may automatically respond with conversational AI text in this group.
-                        </p>
+                        <span className="text-xs font-bold block">Engine Switch</span>
+                        <p className={`text-[11px] ${themeMutedText}`}>Enable or disable AI auto-responses in this group</p>
                       </div>
-
                       <div className="flex items-center gap-2">
-                        <div className="flex flex-col items-end">
-                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
-                            groupDetails.autoResponseNextAvailableSeconds > 0 
-                              ? 'bg-amber-500/10 text-amber-500' 
-                              : 'bg-emerald-500/10 text-emerald-500'
-                          }`}>
-                            {groupDetails.autoResponseNextAvailableSeconds > 0 
-                              ? `⏳ Cooldown: ~${groupDetails.autoResponseNextAvailableSeconds}s` 
-                              : '🟢 Ready'}
-                          </span>
-                          {curAutoResponse.mode === 'random' && (
-                            <span className={`text-[9px] font-mono ${themeMutedText} mt-0.5`}>
-                              🎲 Range: {curAutoResponse.minSeconds || 30}s – {curAutoResponse.maxSeconds || 120}s
-                            </span>
-                          )}
-                        </div>
-                        <label className="flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(curAutoResponse.enabled)}
-                            onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, enabled: e.target.checked })}
-                            className="w-4 h-4 rounded text-blue-600"
-                          />
-                          <span className="text-xs font-semibold ml-2">{curAutoResponse.enabled ? 'ON' : 'OFF'}</span>
-                        </label>
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                          groupDetails.autoResponseNextAvailableSeconds > 0 ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500'
+                        }`}>
+                          {groupDetails.autoResponseNextAvailableSeconds > 0 ? `⏳ Cooldown: ~${groupDetails.autoResponseNextAvailableSeconds}s` : '🟢 Ready'}
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(curAutoResponse.enabled)}
+                          onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, enabled: e.target.checked })}
+                          className="w-4 h-4 rounded text-blue-600"
+                        />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
                       <div className="space-y-1">
                         <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Response Mode</label>
                         <select
@@ -1733,31 +2559,24 @@ export default function App() {
                       </div>
 
                       <div className="space-y-1">
-                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>
-                          Cooldown (seconds)
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            min="10"
-                            max="86400"
-                            value={curAutoResponse.cooldownSeconds || 30}
-                            onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, cooldownSeconds: Number(e.target.value) })}
-                            className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-mono`}
-                          />
-                        </div>
+                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Cooldown (Seconds)</label>
+                        <input
+                          type="number"
+                          min="10"
+                          max="86400"
+                          value={curAutoResponse.cooldownSeconds || 30}
+                          onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, cooldownSeconds: Number(e.target.value) })}
+                          className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-mono`}
+                        />
                       </div>
 
                       <div className="space-y-1">
-                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>
-                          Random Interval Range
-                        </label>
+                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Random Interval (Min – Max)</label>
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
                             placeholder="Min"
                             min="10"
-                            max="86400"
                             value={curAutoResponse.minSeconds || 30}
                             onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, minSeconds: Number(e.target.value) })}
                             className={`w-1/2 ${themeCardBg} border ${themeBorder} rounded-xl px-2.5 py-2 text-xs font-mono`}
@@ -1766,7 +2585,6 @@ export default function App() {
                           <input
                             type="number"
                             placeholder="Max"
-                            min="10"
                             max="86400"
                             value={curAutoResponse.maxSeconds || 120}
                             onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, maxSeconds: Number(e.target.value) })}
@@ -1776,49 +2594,44 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+                </div>
+              )}
 
-                  {/* 🎨 AUTO STICKER SECTION */}
+              {/* INNER TAB: AUTO STICKER */}
+              {groupDetailTab === 'auto_sticker' && (
+                <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                  <div className="flex items-center justify-between border-b pb-4">
+                    <div>
+                      <h3 className="text-sm font-bold flex items-center gap-2 text-amber-500">
+                        <Smile className="w-4 h-4" /> Auto Sticker Engine
+                      </h3>
+                      <p className={`text-xs ${themeMutedText}`}>Configure automatic animated and custom sticker response frequencies.</p>
+                    </div>
+                    {savingSettings && <span className="text-xs text-amber-500 animate-pulse font-semibold">Saving changes...</span>}
+                  </div>
+
                   <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-5 space-y-4`}>
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1.5">
-                          <Smile className="w-4 h-4" /> Auto Sticker Frequency (Independent)
-                        </h4>
-                        <p className={`text-[11px] ${themeMutedText}`}>
-                          Control how frequently Roxie may automatically append or send stickers in this group without spamming.
-                        </p>
+                        <span className="text-xs font-bold block">Sticker Engine Switch</span>
+                        <p className={`text-[11px] ${themeMutedText}`}>Independent from text auto-response cooldown</p>
                       </div>
-
                       <div className="flex items-center gap-2">
-                        <div className="flex flex-col items-end">
-                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
-                            groupDetails.autoStickerNextAvailableSeconds > 0 
-                              ? 'bg-amber-500/10 text-amber-500' 
-                              : 'bg-emerald-500/10 text-emerald-500'
-                          }`}>
-                            {groupDetails.autoStickerNextAvailableSeconds > 0 
-                              ? `⏳ Cooldown: ~${groupDetails.autoStickerNextAvailableSeconds}s` 
-                              : '🟢 Ready'}
-                          </span>
-                          {curAutoSticker.mode === 'random' && (
-                            <span className={`text-[9px] font-mono ${themeMutedText} mt-0.5`}>
-                              🎲 Range: {curAutoSticker.minSeconds || 60}s – {curAutoSticker.maxSeconds || 300}s
-                            </span>
-                          )}
-                        </div>
-                        <label className="flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(curAutoSticker.enabled)}
-                            onChange={(e) => updateSetting('autoSticker', { ...curAutoSticker, enabled: e.target.checked })}
-                            className="w-4 h-4 rounded text-amber-600"
-                          />
-                          <span className="text-xs font-semibold ml-2">{curAutoSticker.enabled ? 'ON' : 'OFF'}</span>
-                        </label>
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                          groupDetails.autoStickerNextAvailableSeconds > 0 ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500'
+                        }`}>
+                          {groupDetails.autoStickerNextAvailableSeconds > 0 ? `⏳ Cooldown: ~${groupDetails.autoStickerNextAvailableSeconds}s` : '🟢 Ready'}
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(curAutoSticker.enabled)}
+                          onChange={(e) => updateSetting('autoSticker', { ...curAutoSticker, enabled: e.target.checked })}
+                          className="w-4 h-4 rounded text-amber-600"
+                        />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
                       <div className="space-y-1">
                         <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Sticker Mode</label>
                         <select
@@ -1826,17 +2639,15 @@ export default function App() {
                           onChange={(e) => updateSetting('autoSticker', { ...curAutoSticker, mode: e.target.value })}
                           className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
                         >
-                          <option value="every_message">Every Eligible Message</option>
                           <option value="cooldown">Cooldown Interval</option>
                           <option value="random">Randomized Interval</option>
+                          <option value="every_message">Every Eligible Message</option>
                           <option value="disabled">Disabled</option>
                         </select>
                       </div>
 
                       <div className="space-y-1">
-                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>
-                          Sticker Cooldown (seconds)
-                        </label>
+                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Cooldown (Seconds)</label>
                         <input
                           type="number"
                           min="10"
@@ -1848,15 +2659,12 @@ export default function App() {
                       </div>
 
                       <div className="space-y-1">
-                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>
-                          Random Sticker Interval Range
-                        </label>
+                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Random Interval (Min – Max)</label>
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
                             placeholder="Min"
                             min="10"
-                            max="86400"
                             value={curAutoSticker.minSeconds || 60}
                             onChange={(e) => updateSetting('autoSticker', { ...curAutoSticker, minSeconds: Number(e.target.value) })}
                             className={`w-1/2 ${themeCardBg} border ${themeBorder} rounded-xl px-2.5 py-2 text-xs font-mono`}
@@ -1865,7 +2673,6 @@ export default function App() {
                           <input
                             type="number"
                             placeholder="Max"
-                            min="10"
                             max="86400"
                             value={curAutoSticker.maxSeconds || 300}
                             onChange={(e) => updateSetting('autoSticker', { ...curAutoSticker, maxSeconds: Number(e.target.value) })}
@@ -1875,74 +2682,273 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+                </div>
+              )}
 
-                  {/* Content Protection Section */}
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-blue-500">Content Protection</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      {[
-                        { key: 'linksProtection', label: '🔗 Links Protection' },
-                        { key: 'stickerProtection', label: '🎨 Sticker Protection' },
-                        { key: 'fileProtection', label: '📁 File Protection' },
-                        { key: 'imageProtection', label: '🖼️ Image Protection' },
-                        { key: 'gifProtection', label: '🎬 GIF Protection' },
-                        { key: 'stopSpamEnabled', label: '🛑 Stop Spam' },
-                        { key: 'floodEnabled', label: '🌊 Anti-Flood' },
-                        { key: 'stopAbusiveEnabled', label: '🤬 Abuse Filter' },
-                        { key: 'stopPromotionEnabled', label: '📢 Promo Filter' },
-                      ].map((s) => {
-                        const isChecked = Boolean(groupDetails.settings?.[s.key]);
-                        return (
-                          <label key={s.key} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 flex items-center justify-between cursor-pointer`}>
-                            <span className="text-xs font-medium">{s.label}</span>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => updateSetting(s.key, e.target.checked)}
-                              className="w-4 h-4 rounded text-blue-600"
-                            />
-                          </label>
-                        );
-                      })}
-                    </div>
+              {/* INNER TAB: SLOWMODE */}
+              {groupDetailTab === 'slowmode' && (
+                <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                  <div className="border-b pb-4">
+                    <h3 className="text-sm font-bold flex items-center gap-2 text-blue-500">
+                      <Clock className="w-4 h-4" /> Telegram Slowmode Delay Control
+                    </h3>
+                    <p className={`text-xs ${themeMutedText}`}>
+                      Directly sets Telegram slowmode for this chat via <code className="font-mono text-[10px]">setChatSlowModeDelay</code>.
+                    </p>
                   </div>
 
-                  {/* AI & Personality Section */}
-                  <div className="space-y-3 pt-2">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-purple-500">AI & Personality</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <label className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between cursor-pointer`}>
-                        <div>
-                          <span className="text-xs font-bold block">AI Chatbot</span>
-                          <span className={`text-[11px] ${themeMutedText}`}>Roxie converses casually with group members</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(groupDetails.settings?.chatbotEnabled)}
-                          onChange={(e) => updateSetting('chatbotEnabled', e.target.checked)}
-                          className="w-4 h-4 rounded text-blue-600"
-                        />
-                      </label>
+                  {slowmodeFeedback && (
+                    <div className={`p-3 rounded-xl text-xs font-semibold ${
+                      slowmodeFeedback.startsWith('✓') ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                    }`}>
+                      {slowmodeFeedback}
+                    </div>
+                  )}
 
-                      <label className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between cursor-pointer`}>
-                        <div>
-                          <span className="text-xs font-bold block text-pink-500">❤️ Lust Mode</span>
-                          <span className={`text-[11px] ${themeMutedText}`}>Flirty, affectionate adult personality</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(groupDetails.settings?.lustMode)}
-                          onChange={(e) => updateSetting('lustMode', e.target.checked)}
-                          className="w-4 h-4 rounded text-pink-600"
-                        />
-                      </label>
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-5 space-y-4`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold">Current Slowmode:</span>
+                      <span className="text-sm font-mono font-bold text-blue-400">
+                        {groupDetails.settings?.slowModeSeconds ? `${groupDetails.settings.slowModeSeconds}s` : 'Disabled (0s)'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Quick Presets:</label>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { label: 'Off', sec: 0 },
+                          { label: '10s', sec: 10 },
+                          { label: '30s', sec: 30 },
+                          { label: '1 min', sec: 60 },
+                          { label: '5 min', sec: 300 },
+                          { label: '15 min', sec: 900 },
+                          { label: '1 hour', sec: 3600 }
+                        ].map((preset) => (
+                          <button
+                            key={preset.sec}
+                            onClick={() => handleApplySlowmode(preset.sec)}
+                            disabled={applyingSlowmode}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                              (groupDetails.settings?.slowModeSeconds ?? 0) === preset.sec
+                                ? 'bg-blue-600 text-white shadow-sm'
+                                : `${themeCardBg} border ${themeBorder} hover:opacity-80`
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="86400"
+                        value={slowmodeInput}
+                        onChange={(e) => setSlowmodeInput(Number(e.target.value))}
+                        className={`w-40 ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-mono`}
+                        placeholder="Seconds"
+                      />
+                      <button
+                        onClick={() => handleApplySlowmode(slowmodeInput)}
+                        disabled={applyingSlowmode}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+                      >
+                        {applyingSlowmode ? 'Applying to Telegram...' : 'Apply Slowmode'}
+                      </button>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* INNER TAB: GROUP PERMISSIONS */}
-              {groupDetailTab === 'permissions' && (
+              {/* INNER TAB: ABUSE WORDS */}
+              {groupDetailTab === 'abuse_words' && (
+                <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                  <div className="flex items-center justify-between border-b pb-4">
+                    <div>
+                      <h3 className="text-sm font-bold flex items-center gap-2 text-red-500">
+                        <Ban className="w-4 h-4" /> Custom Abuse Words Management ({groupAbuseWords.length})
+                      </h3>
+                      <p className={`text-xs ${themeMutedText}`}>Isolated per group. Messages containing any of these words will be moderated.</p>
+                    </div>
+                    {groupAbuseWords.length > 0 && (
+                      <button
+                        onClick={handleClearAbuseWords}
+                        className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-semibold"
+                      >
+                        Clear All Words
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Add Word Form */}
+                  <form onSubmit={handleAddAbuseWord} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newAbuseWordInput}
+                      onChange={(e) => setNewAbuseWordInput(e.target.value)}
+                      placeholder="Add new word or phrase..."
+                      className={`flex-1 ${themeInnerCardBg} border ${themeBorder} rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-red-500`}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!newAbuseWordInput.trim()}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+                    >
+                      + Add Word
+                    </button>
+                  </form>
+
+                  {/* Search and Word Chips */}
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={abuseSearch}
+                      onChange={(e) => setAbuseSearch(e.target.value)}
+                      placeholder="Search abuse words..."
+                      className={`w-full sm:w-64 ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-1.5 text-xs focus:outline-none`}
+                    />
+
+                    <div className="flex flex-wrap gap-2 pt-1 max-h-72 overflow-y-auto pr-1">
+                      {groupAbuseWords
+                        .filter(w => !abuseSearch || w.toLowerCase().includes(abuseSearch.toLowerCase()))
+                        .map((w, idx) => (
+                          <span
+                            key={idx}
+                            className={`${themeInnerCardBg} border ${themeBorder} px-3 py-1.5 rounded-xl text-xs font-mono flex items-center gap-2 group hover:border-red-500/40`}
+                          >
+                            <span>{w}</span>
+                            <button
+                              onClick={() => handleRemoveAbuseWord(w)}
+                              className="text-stone-400 hover:text-red-400 transition-colors"
+                              title="Delete word"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      {groupAbuseWords.length === 0 && (
+                        <p className={`text-xs ${themeMutedText} py-6 text-center w-full`}>No custom abuse words added for this group yet.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* INNER TAB: MEMBERS & TELEGRAM ACTIONS */}
+              {groupDetailTab === 'members' && (
+                <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                  <div className="flex items-center justify-between border-b pb-4">
+                    <div>
+                      <h3 className="text-sm font-bold flex items-center gap-2 text-blue-500">
+                        <Users className="w-4 h-4" /> Group Members & Moderation Console ({groupMembersList.length})
+                      </h3>
+                      <p className={`text-xs ${themeMutedText}`}>Real-time member actions executed against the authoritative Telegram API.</p>
+                    </div>
+                    <button
+                      onClick={fetchData}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> Refresh Members
+                    </button>
+                  </div>
+
+                  {memberActionFeedback && (
+                    <div className={`p-3 rounded-xl text-xs font-semibold ${
+                      memberActionFeedback.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                    }`}>
+                      {memberActionFeedback.message}
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={memberSearch}
+                      onChange={(e) => setMemberSearch(e.target.value)}
+                      placeholder="Search member by name, username, or ID..."
+                      className={`w-full sm:w-80 ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                    />
+
+                    <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+                      {groupMembersList
+                        .filter(m => {
+                          if (!memberSearch) return true;
+                          const s = memberSearch.toLowerCase();
+                          return (
+                            String(m.userId).includes(s) ||
+                            (m.firstName && m.firstName.toLowerCase().includes(s)) ||
+                            (m.username && m.username.toLowerCase().includes(s))
+                          );
+                        })
+                        .map((m, idx) => (
+                          <div key={idx} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3`}>
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold">{m.firstName || m.name || `User ${m.userId}`}</span>
+                                {m.username && <span className={`text-xs font-mono ${themeMutedText}`}>@{m.username}</span>}
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                                  m.role === 'creator' || m.role === 'administrator' ? 'bg-blue-500/10 text-blue-400' : 'bg-stone-700/20 text-stone-300'
+                                }`}>
+                                  {m.role || 'Member'}
+                                </span>
+                              </div>
+                              <div className={`text-[10px] font-mono ${themeMutedText}`}>
+                                User ID: {m.userId} {m.lastActive ? `• Last active: ${new Date(m.lastActive).toLocaleDateString()}` : ''}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                onClick={() => handleMemberAction('ban', m.userId)}
+                                disabled={memberActionLoading[`ban_${m.userId}`]}
+                                className="px-2.5 py-1 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 rounded-lg text-xs font-semibold transition-colors"
+                              >
+                                {memberActionLoading[`ban_${m.userId}`] ? 'Banning...' : '🚫 Ban'}
+                              </button>
+                              <button
+                                onClick={() => handleMemberAction('unban', m.userId)}
+                                disabled={memberActionLoading[`unban_${m.userId}`]}
+                                className="px-2.5 py-1 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-500/20 rounded-lg text-xs font-semibold transition-colors"
+                              >
+                                {memberActionLoading[`unban_${m.userId}`] ? 'Unbanning...' : '🔓 Unban'}
+                              </button>
+                              <button
+                                onClick={() => handleMemberAction('restrict', m.userId)}
+                                disabled={memberActionLoading[`restrict_${m.userId}`]}
+                                className="px-2.5 py-1 bg-amber-600/10 hover:bg-amber-600/20 text-amber-400 border border-amber-500/20 rounded-lg text-xs font-semibold transition-colors"
+                              >
+                                {memberActionLoading[`restrict_${m.userId}`] ? 'Muting...' : '🔇 Mute'}
+                              </button>
+                              <button
+                                onClick={() => handleMemberAction('promote', m.userId)}
+                                disabled={memberActionLoading[`promote_${m.userId}`]}
+                                className="px-2.5 py-1 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 border border-purple-500/20 rounded-lg text-xs font-semibold transition-colors"
+                              >
+                                {memberActionLoading[`promote_${m.userId}`] ? 'Promoting...' : '👮 Promote'}
+                              </button>
+                              <button
+                                onClick={() => handleMemberAction('demote', m.userId)}
+                                disabled={memberActionLoading[`demote_${m.userId}`]}
+                                className="px-2.5 py-1 bg-stone-700/20 hover:bg-stone-700/40 text-stone-300 border border-stone-600/20 rounded-lg text-xs font-semibold transition-colors"
+                              >
+                                {memberActionLoading[`demote_${m.userId}`] ? 'Demoting...' : '🔻 Demote'}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      {groupMembersList.length === 0 && (
+                        <p className={`text-xs ${themeMutedText} py-6 text-center`}>No member records found for this group.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* INNER TAB: TELEGRAM PERMISSIONS */}
+              {(groupDetailTab === 'telegram_permissions' || groupDetailTab === 'permissions') && (
                 <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
                   <div>
                     <h3 className="text-sm font-bold flex items-center gap-2">
@@ -1985,6 +2991,84 @@ export default function App() {
                           </span>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* INNER TAB: DANGER ZONE */}
+              {groupDetailTab === 'danger_zone' && (
+                <div className={`${themeCardBg} border border-red-500/30 rounded-2xl p-6 space-y-6 bg-red-950/5`}>
+                  <div className="border-b border-red-500/20 pb-4">
+                    <h3 className="text-sm font-bold flex items-center gap-2 text-red-400">
+                      <AlertTriangle className="w-4 h-4" /> Danger Zone — Destructive Operations
+                    </h3>
+                    <p className={`text-xs ${themeMutedText}`}>
+                      These actions permanently clear group state, reset settings, or remove Roxie from the chat. All actions require confirmation.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Reset Group Settings */}
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-3`}>
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-red-400 block">Reset Group Settings</span>
+                        <p className={`text-[11px] ${themeMutedText}`}>Revert all moderation, protection, and response policies for this group to factory defaults.</p>
+                      </div>
+                      <button
+                        onClick={() => { setDangerModal('reset_settings'); setDangerConfirmInput(''); }}
+                        className="px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-semibold"
+                      >
+                        Reset Group Settings
+                      </button>
+                    </div>
+
+                    {/* Clear Conversation Memory */}
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-3`}>
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-red-400 block">Clear Group Memory</span>
+                        <p className={`text-[11px] ${themeMutedText}`}>Permanently wipe all recorded conversation history and AI context memory for this chat.</p>
+                      </div>
+                      <button
+                        onClick={() => { setDangerModal('clear_memory'); setDangerConfirmInput(''); }}
+                        className="px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-semibold"
+                      >
+                        Clear Memory
+                      </button>
+                    </div>
+
+                    {/* Remove All Custom Stickers */}
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-3`}>
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-red-400 block">Remove Custom Stickers</span>
+                        <p className={`text-[11px] ${themeMutedText}`}>Unlink and remove all custom sticker pack configurations belonging to this group.</p>
+                      </div>
+                      <button
+                        onClick={() => { setDangerModal('clear_stickers'); setDangerConfirmInput(''); }}
+                        className="px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-semibold"
+                      >
+                        Remove Custom Stickers
+                      </button>
+                    </div>
+
+                    {/* Leave Group */}
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-3`}>
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-red-400 block">Leave Telegram Group</span>
+                        <p className={`text-[11px] ${themeMutedText}`}>Command Roxie to leave this Telegram chat immediately via Telegram leaveChat API.</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const gInfo = groups.find(g => g.chatId === activeGroupDetailId);
+                          if (gInfo) {
+                            setLeaveModalGroup(gInfo);
+                            setLeaveConfirmInput('');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-red-600 text-white hover:bg-red-500 rounded-xl text-xs font-semibold"
+                      >
+                        Leave Group
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -2898,6 +3982,60 @@ export default function App() {
                 className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition-colors"
               >
                 {leavingGroup ? 'Leaving...' : 'Confirm & Leave'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Danger Zone Action Modal */}
+      {dangerModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${themeCardBg} border border-red-500/30 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl`}>
+            <div className="flex items-center gap-3 text-red-500">
+              <AlertTriangle className="w-6 h-6 shrink-0" />
+              <h3 className="text-base font-bold">
+                {dangerModal === 'reset_settings' && 'Reset Group Settings?'}
+                {dangerModal === 'clear_memory' && 'Clear Group Memory?'}
+                {dangerModal === 'clear_stickers' && 'Remove Custom Stickers?'}
+                {dangerModal === 'clear_abuse' && 'Clear All Abuse Words?'}
+              </h3>
+            </div>
+
+            <p className="text-xs leading-relaxed">
+              This action is permanent and cannot be undone.
+              {dangerModal === 'reset_settings' && ' All custom policies, auto-response frequencies, and rules will be reset to defaults.'}
+              {dangerModal === 'clear_memory' && ' All user context and conversation history stored for this group will be wiped.'}
+              {dangerModal === 'clear_stickers' && ' All sticker pack configurations for this group will be erased.'}
+              {dangerModal === 'clear_abuse' && ' All custom abuse words configured for this group will be deleted.'}
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold text-stone-400 block">
+                To confirm, type <strong className="text-red-500">CONFIRM</strong> below:
+              </label>
+              <input
+                type="text"
+                value={dangerConfirmInput}
+                onChange={(e) => setDangerConfirmInput(e.target.value)}
+                placeholder="Type CONFIRM to proceed"
+                className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-red-500`}
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => { setDangerModal(null); setDangerConfirmInput(''); }}
+                className={`px-4 py-2 ${themeInnerCardBg} border ${themeBorder} rounded-xl text-xs font-semibold`}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleExecuteDangerAction}
+                disabled={dangerConfirmInput !== 'CONFIRM' || executingDangerAction}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition-colors"
+              >
+                {executingDangerAction ? 'Executing...' : 'Confirm Action'}
               </button>
             </div>
           </div>

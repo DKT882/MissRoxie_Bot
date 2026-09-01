@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "chatId": "8881234",
+  "userId": 8881234,
+  "username": null,
+  "name": "Samir",
+  "language": "English",
+  "lastUpdated": 1788184577245,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Private message test content",
+      "timestamp": 1788184577245,
+      "messageId": 9991,
+      "direction": "in"
+    }
+  ],
+  "lustLevel": 0,
+  "updatedAt": "2026-09-01T07:03:48.613Z"
+}
