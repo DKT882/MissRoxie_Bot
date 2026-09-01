@@ -81,6 +81,11 @@ export class TelegramBotManager {
   public async testConnection(): Promise<{ success: boolean; bot?: TelegramUser; error?: string }> {
     const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
     if (!token) {
+      console.error(JSON.stringify({
+        event: 'TELEGRAM_GETME_FAILED',
+        error_code: 401,
+        description: 'TELEGRAM_BOT_TOKEN is not configured on the server.'
+      }));
       return { success: false, error: 'TELEGRAM_BOT_TOKEN is not configured on the server.' };
     }
 
@@ -88,11 +93,26 @@ export class TelegramBotManager {
       const res = await telegramApi.getMe();
       if (res.ok && res.result) {
         this.botUser = res.result;
+        console.log(JSON.stringify({
+          event: 'TELEGRAM_GETME_SUCCESS',
+          username: res.result.username || res.result.first_name,
+          bot_id: res.result.id
+        }));
         return { success: true, bot: res.result };
       } else {
+        console.error(JSON.stringify({
+          event: 'TELEGRAM_GETME_FAILED',
+          error_code: res.error_code || 500,
+          description: res.description || 'Telegram API returned an error'
+        }));
         return { success: false, error: res.description || 'Telegram API returned an error' };
       }
     } catch (err: any) {
+      console.error(JSON.stringify({
+        event: 'TELEGRAM_GETME_FAILED',
+        error_code: 502,
+        description: err.message || 'Failed to contact Telegram API'
+      }));
       return { success: false, error: `Failed to contact Telegram API: ${err.message}` };
     }
   }

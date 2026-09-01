@@ -849,21 +849,26 @@ export class ChatbotService {
 
   public static isTriggered(message: TelegramMessage, botUser: TelegramUser | null): boolean {
     const text = (message.text || message.caption || '').trim();
-    if (!text) return false;
 
-    // 1. Reply to bot message
-    if (message.reply_to_message?.from && botUser) {
-      if (message.reply_to_message.from.id === botUser.id) {
-        return true;
-      }
+    // 1. In private chat, every message is an explicit trigger
+    if (message.chat.type === 'private') {
+      return true;
     }
 
-    // 2. Mention "Roxie", bot username, or media requests case-insensitively
+    // 2. Reply to bot message
+    if (message.reply_to_message?.from) {
+      const replyFrom = message.reply_to_message.from;
+      if (botUser && replyFrom.id === botUser.id) return true;
+      if (replyFrom.is_bot && (replyFrom.username?.toLowerCase() === 'missroxie_bot' || replyFrom.username?.toLowerCase() === botUser?.username?.toLowerCase())) return true;
+    }
+
+    // 3. Mention "Roxie", bot username, or media requests case-insensitively
     const lowerText = text.toLowerCase();
-    const botUsername = botUser?.username ? `@${botUser.username.toLowerCase()}` : '';
+    const botUsername = botUser?.username ? `@${botUser.username.toLowerCase()}` : '@missroxie_bot';
     if (
       lowerText.includes('roxie') ||
-      (botUsername && lowerText.includes(botUsername)) ||
+      lowerText.includes(botUsername) ||
+      lowerText.includes('@missroxie_bot') ||
       lowerText.includes('sticker') ||
       lowerText.includes('stkr') ||
       lowerText.includes('gif') ||
@@ -2013,22 +2018,6 @@ export class ChatbotService {
           reason: 'Chatbot disabled for group'
         };
       }
-
-      // Check Auto Response frequency & cooldown (anti-spam protection)
-      const autoResponseEligibility = db.checkAutoResponseEligibility(chatId);
-      if (!autoResponseEligibility.allowed) {
-        return {
-          requestId,
-          chatId,
-          messageId: msgId,
-          userId,
-          personality: 'Psychologist-style',
-          mood: 'normal',
-          responseType: 'none',
-          replyToMessageId: msgId,
-          reason: `Auto response cooldown or disabled: ${autoResponseEligibility.reason || 'cooldown'}`
-        };
-      }
     }
 
     const userText = message.text || message.caption || (message.sticker ? `[sticker: ${message.sticker.emoji || 'sticker'}]` : message.photo ? '[photo]' : message.video ? '[video]' : 'Hello');
@@ -2087,15 +2076,22 @@ export class ChatbotService {
 
     const isExplicitTrigger = isPrivate || this.isTriggered(message, botUser);
 
-    // Spontaneous natural group chat chime-in check
+    // Spontaneous natural group chat chime-in check (only when not explicitly triggered)
     if (!isExplicitTrigger) {
-      const now = Date.now();
-      const lastRandom = this.chatRandomCooldowns.get(chatId) || 0;
-      if (now - lastRandom > this.RANDOM_CHAT_COOLDOWN_MS) {
-        if (Math.random() < this.RANDOM_CHAT_PROBABILITY) {
-          this.chatRandomCooldowns.set(chatId, now);
-          const randomDecision = await this.generateRandomNaturalDecision(requestId, message);
-          return randomDecision;
+      // Check Auto Response frequency & cooldown (anti-spam protection for spontaneous chat)
+      const autoResponseEligibility = db.checkAutoResponseEligibility(chatId);
+      if (autoResponseEligibility.allowed) {
+        const now = Date.now();
+        const lastRandom = this.chatRandomCooldowns.get(chatId) || 0;
+        if (now - lastRandom > this.RANDOM_CHAT_COOLDOWN_MS) {
+          if (Math.random() < this.RANDOM_CHAT_PROBABILITY) {
+            this.chatRandomCooldowns.set(chatId, now);
+            const randomDecision = await this.generateRandomNaturalDecision(requestId, message);
+            if (randomDecision && randomDecision.responseType !== 'none') {
+              db.recordAutoResponseSent(chatId);
+              return randomDecision;
+            }
+          }
         }
       }
       return {

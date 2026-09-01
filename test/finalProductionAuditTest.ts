@@ -5,12 +5,11 @@ import { ChatbotService } from '../server/telegram/chatbot.js';
 import { CommandHandler } from '../server/telegram/commands.js';
 import { COMMAND_CATALOG, getCommandsForTelegramScope } from '../server/telegram/commandCatalog.js';
 import { isGroupProtected } from '../server/operations/cleanupDummyData.js';
-import { HealthDiagnosticsService } from '../server/observability/healthService.js';
 import { TelegramMessage, TelegramUser } from '../server/telegram/types.js';
 
 async function runAuditTests() {
   console.log('================================================================');
-  console.log('ROXIE FINAL END-TO-END PRODUCTION AUDIT (TESTS A THROUGH S)');
+  console.log('ROXIE COMPREHENSIVE PRODUCTION RECOVERY & AUDIT SUITE');
   console.log('================================================================\n');
 
   const testGroupId = -1004494262619; // Protected "Horney Log"
@@ -45,9 +44,9 @@ async function runAuditTests() {
   console.log('✓ TEST A PASSED: Ingestion, timestamps, and structured logging confirmed.');
 
   // ----------------------------------------------------
-  // TEST B: Private Message Storage
+  // TEST B: Private Message Storage & Direct Triggers
   // ----------------------------------------------------
-  console.log('\n--- TEST B: Private Message Storage ---');
+  console.log('\n--- TEST B: Private Message Storage & Direct Triggers ---');
   const dmMsgId = 92002;
   const testDmMsg: TelegramMessage = {
     message_id: dmMsgId,
@@ -65,7 +64,11 @@ async function runAuditTests() {
   const foundDmMsg = dmMessages.find(m => m.content.includes('Test DM storage message B'));
   assert(foundDmMsg, 'TEST B: Private message not found in storage');
   assert.strictEqual(foundDmMsg.direction, 'in', 'TEST B: Message direction must be in');
-  console.log('✓ TEST B PASSED: Private message immediately persisted and indexed.');
+  
+  // Verify private message is always an explicit trigger
+  const dmTriggered = ChatbotService.isTriggered(testDmMsg, mockBotUser);
+  assert.strictEqual(dmTriggered, true, 'TEST B: Private message must always trigger response');
+  console.log('✓ TEST B PASSED: Private message immediately persisted and triggers chatbot unconditionally.');
 
   // ----------------------------------------------------
   // TEST C: Group Message Storage
@@ -105,21 +108,39 @@ async function runAuditTests() {
   console.log(`✓ TEST D PASSED: Private normal chat generated response type: ${normalDmDecision.responseType}`);
 
   // ----------------------------------------------------
-  // TEST E: Group Normal Chat Response
+  // TEST E: Group Normal Chat Response & Direct Mentions / Replies
   // ----------------------------------------------------
-  console.log('\n--- TEST E: Group Normal Chat Response ---');
-  const groupTriggered = ChatbotService.isTriggered(
-    {
-      message_id: 92005,
+  console.log('\n--- TEST E: Group Normal Chat Response & Direct Mentions / Replies ---');
+  const mentionMsg: TelegramMessage = {
+    message_id: 92005,
+    date: Math.floor(Date.now() / 1000),
+    chat: { id: testGroupId, type: 'supergroup' },
+    from: { id: testUserId, is_bot: false, first_name: 'Tester' },
+    text: 'Roxie, what is your plan for today?'
+  };
+  const groupTriggered = ChatbotService.isTriggered(mentionMsg, mockBotUser);
+  assert(groupTriggered, 'TEST E: Group message mentioning Roxie must trigger response');
+
+  const replyMsg: TelegramMessage = {
+    message_id: 92006,
+    date: Math.floor(Date.now() / 1000),
+    chat: { id: testGroupId, type: 'supergroup' },
+    from: { id: testUserId, is_bot: false, first_name: 'Tester' },
+    reply_to_message: {
+      message_id: 92000,
       date: Math.floor(Date.now() / 1000),
       chat: { id: testGroupId, type: 'supergroup' },
-      from: { id: testUserId, is_bot: false, first_name: 'Tester' },
-      text: 'Roxie, what is your plan for today?'
+      from: mockBotUser,
+      text: 'Hey everyone!'
     },
-    mockBotUser
-  );
-  assert(groupTriggered, 'TEST E: Group message mentioning Roxie must trigger response');
-  console.log('✓ TEST E PASSED: Group chat trigger correctly identifies bot mentions.');
+    text: 'I agree with you!'
+  };
+  const replyTriggered = ChatbotService.isTriggered(replyMsg, mockBotUser);
+  assert(replyTriggered, 'TEST E: Replying directly to Roxie must trigger response');
+
+  const groupDecision = await ChatbotService.generateResponseDecision('req_test_e', mentionMsg, mockBotUser);
+  assert(groupDecision && groupDecision.responseType !== 'none', 'TEST E: Direct group mention must not be blocked by autoResponse disabled');
+  console.log('✓ TEST E PASSED: Group chat trigger correctly identifies bot mentions and direct replies.');
 
   // ----------------------------------------------------
   // TEST F: /start in DM
@@ -195,7 +216,7 @@ async function runAuditTests() {
   };
   const pingHandled = await CommandHandler.handleCommand(pingCtx as any);
   assert(pingHandled, 'TEST I: /ping must execute successfully');
-  console.log('✓ TEST I PASSED: /ping executed successfully.');
+  console.log('✓ TEST I PASSED: /ping executed successfully without AI dependency.');
 
   // ----------------------------------------------------
   // TEST J: /addbulkstickers
