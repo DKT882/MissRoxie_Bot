@@ -51,11 +51,28 @@ export class HealthDiagnosticsService {
       overallStatus = 'DEGRADED';
     }
 
+    const tgTimestamps = (telegramBot as any).getDiagnosticsTimestamps ? (telegramBot as any).getDiagnosticsTimestamps() : {
+      lastUpdateTimestamp: null,
+      lastProcessedMessageTimestamp: null,
+      lastStoredMessageTimestamp: null,
+      lastResponseTimestamp: null
+    };
+
     return {
       status: overallStatus,
       timestamp: new Date().toISOString(),
       uptimeSeconds: uptime,
       nodeVersion: process.version,
+      diagnostics: {
+        telegramPolling: botPolling ? 'RUNNING' : 'STOPPED',
+        lastTelegramUpdate: tgTimestamps.lastUpdateTimestamp || tgStatus.lastPolledAt,
+        lastProcessedMessage: tgTimestamps.lastProcessedMessageTimestamp,
+        lastStoredMessage: tgTimestamps.lastStoredMessageTimestamp,
+        lastTelegramResponse: tgTimestamps.lastResponseTimestamp,
+        storage: (db as any).lastSaveSuccessful !== false ? 'HEALTHY' : 'ERROR',
+        dashboardApi: 'HEALTHY',
+        ai: aiStatus === 'ERROR' ? 'ERROR' : 'HEALTHY'
+      },
       components: {
         bot: {
           configured: botConfigured,
@@ -65,6 +82,10 @@ export class HealthDiagnosticsService {
         telegramPolling: {
           status: telegramPollingStatus,
           lastPolledAt: tgStatus.lastPolledAt,
+          lastUpdateTimestamp: tgTimestamps.lastUpdateTimestamp,
+          lastProcessedMessageTimestamp: tgTimestamps.lastProcessedMessageTimestamp,
+          lastStoredMessageTimestamp: tgTimestamps.lastStoredMessageTimestamp,
+          lastResponseTimestamp: tgTimestamps.lastResponseTimestamp,
           error: pollingError,
           reconnectCount: telegramBot.getReconnectCount(),
           lastReconnectAt: telegramBot.getLastReconnectAt()

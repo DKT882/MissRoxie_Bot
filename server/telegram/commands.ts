@@ -191,16 +191,12 @@ export class CommandHandler {
       }
       console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED`);
     } else if (isPublic) {
-      // Public commands (like /report) are restricted to groups and open to normal members
-      if (cmd === '/help' || cmd === '/ping' || cmd === '/rules') {
-        console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED_UNIVERSAL`);
-      } else {
-        if (!(await TelegramMiddleware.requireGroup(ctx))) {
-          console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DENIED_NOT_GROUP`);
-          return true;
-        }
-        console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED`);
+      const allowedInPrivate = catalogItem?.scopes?.includes('private') || ['/help', '/start', '/ping', '/live', '/settings', '/mymemory', '/forgetme'].includes(cmd);
+      if (!allowedInPrivate && !(await TelegramMiddleware.requireGroup(ctx))) {
+        console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DENIED_NOT_GROUP`);
+        return true;
       }
+      console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=ALLOWED`);
     } else if (isSensitive) {
       if (!(await TelegramMiddleware.requireGroup(ctx))) {
         console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DENIED_NOT_GROUP`);

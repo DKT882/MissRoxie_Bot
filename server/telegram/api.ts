@@ -201,7 +201,7 @@ export class TelegramApi {
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     const replyId = options?.reply_parameters?.message_id || options?.reply_to_message_id;
-    return this.call('sendMessage', {
+    const res = await this.call('sendMessage', {
       chat_id: chatId,
       text,
       parse_mode: options?.parse_mode || 'HTML',
@@ -210,6 +210,24 @@ export class TelegramApi {
       disable_web_page_preview: options?.disable_web_page_preview ?? true,
       reply_markup: options?.reply_markup
     });
+
+    if (res.ok) {
+      console.log(JSON.stringify({
+        event: 'TELEGRAM_SEND_SUCCESS',
+        chat_id: chatId,
+        message_id: res.result?.message_id,
+        method: 'sendMessage'
+      }));
+    } else {
+      console.error(JSON.stringify({
+        event: 'TELEGRAM_SEND_FAILED',
+        chat_id: chatId,
+        method: 'sendMessage',
+        error_code: res.error_code,
+        description: res.description || 'Unknown error'
+      }));
+    }
+    return res;
   }
 
   public async editMessageText(
@@ -474,12 +492,18 @@ export class TelegramApi {
       reply_markup?: any;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    return this.call('sendSticker', {
+    const res = await this.call('sendSticker', {
       chat_id: chatId,
       sticker,
       reply_to_message_id: options?.reply_to_message_id,
       reply_markup: options?.reply_markup
     });
+    if (res.ok) {
+      console.log(JSON.stringify({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendSticker' }));
+    } else {
+      console.error(JSON.stringify({ event: 'TELEGRAM_SEND_FAILED', chat_id: chatId, method: 'sendSticker', error_code: res.error_code, description: res.description }));
+    }
+    return res;
   }
 
   public async sendPhoto(
@@ -492,7 +516,7 @@ export class TelegramApi {
       reply_markup?: any;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    return this.call('sendPhoto', {
+    const res = await this.call('sendPhoto', {
       chat_id: chatId,
       photo,
       caption: options?.caption,
@@ -500,6 +524,12 @@ export class TelegramApi {
       reply_to_message_id: options?.reply_to_message_id,
       reply_markup: options?.reply_markup
     });
+    if (res.ok) {
+      console.log(JSON.stringify({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendPhoto' }));
+    } else {
+      console.error(JSON.stringify({ event: 'TELEGRAM_SEND_FAILED', chat_id: chatId, method: 'sendPhoto', error_code: res.error_code, description: res.description }));
+    }
+    return res;
   }
 
   public async sendVideo(
@@ -512,7 +542,7 @@ export class TelegramApi {
       reply_markup?: any;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    return this.call('sendVideo', {
+    const res = await this.call('sendVideo', {
       chat_id: chatId,
       video,
       caption: options?.caption,
@@ -520,6 +550,12 @@ export class TelegramApi {
       reply_to_message_id: options?.reply_to_message_id,
       reply_markup: options?.reply_markup
     });
+    if (res.ok) {
+      console.log(JSON.stringify({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendVideo' }));
+    } else {
+      console.error(JSON.stringify({ event: 'TELEGRAM_SEND_FAILED', chat_id: chatId, method: 'sendVideo', error_code: res.error_code, description: res.description }));
+    }
+    return res;
   }
 
   public async sendDocument(
@@ -532,7 +568,7 @@ export class TelegramApi {
       reply_markup?: any;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    return this.call('sendDocument', {
+    const res = await this.call('sendDocument', {
       chat_id: chatId,
       document,
       caption: options?.caption,
@@ -540,6 +576,12 @@ export class TelegramApi {
       reply_to_message_id: options?.reply_to_message_id,
       reply_markup: options?.reply_markup
     });
+    if (res.ok) {
+      console.log(JSON.stringify({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendDocument' }));
+    } else {
+      console.error(JSON.stringify({ event: 'TELEGRAM_SEND_FAILED', chat_id: chatId, method: 'sendDocument', error_code: res.error_code, description: res.description }));
+    }
+    return res;
   }
 
   public async sendAnimation(
@@ -552,7 +594,7 @@ export class TelegramApi {
       reply_markup?: any;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    return this.call('sendAnimation', {
+    const res = await this.call('sendAnimation', {
       chat_id: chatId,
       animation,
       caption: options?.caption,
@@ -560,6 +602,12 @@ export class TelegramApi {
       reply_to_message_id: options?.reply_to_message_id,
       reply_markup: options?.reply_markup
     });
+    if (res.ok) {
+      console.log(JSON.stringify({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendAnimation' }));
+    } else {
+      console.error(JSON.stringify({ event: 'TELEGRAM_SEND_FAILED', chat_id: chatId, method: 'sendAnimation', error_code: res.error_code, description: res.description }));
+    }
+    return res;
   }
 
   public async getStickerSet(name: string): Promise<{ ok: boolean; result?: { name?: string; title?: string; stickers: Array<{ file_id: string; emoji?: string; [key: string]: any }> }; description?: string; error_code?: number }> {

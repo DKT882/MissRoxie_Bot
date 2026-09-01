@@ -33,6 +33,10 @@ export class TelegramBotManager {
   private abortController: AbortController | null = null;
   private reconnectCount: number = 0;
   private lastReconnectAt: string | null = null;
+  private lastUpdateTimestamp: string | null = null;
+  private lastProcessedMessageTimestamp: string | null = null;
+  private lastStoredMessageTimestamp: string | null = null;
+  private lastResponseTimestamp: string | null = null;
 
   public getReconnectCount(): number {
     return this.reconnectCount;
@@ -40,6 +44,19 @@ export class TelegramBotManager {
 
   public getLastReconnectAt(): string | null {
     return this.lastReconnectAt;
+  }
+
+  public getDiagnosticsTimestamps() {
+    return {
+      lastUpdateTimestamp: this.lastUpdateTimestamp,
+      lastProcessedMessageTimestamp: this.lastProcessedMessageTimestamp,
+      lastStoredMessageTimestamp: this.lastStoredMessageTimestamp,
+      lastResponseTimestamp: this.lastResponseTimestamp
+    };
+  }
+
+  public recordResponseSent(): void {
+    this.lastResponseTimestamp = new Date().toISOString();
   }
 
   public getStatus(): TelegramBotStatus {
@@ -183,9 +200,28 @@ export class TelegramBotManager {
                 if (first) TelegramBotManager.processedUpdateIds.delete(first);
               }
               this.lastUpdateId = Math.max(this.lastUpdateId, update.update_id);
+              this.lastUpdateTimestamp = new Date().toISOString();
             }
 
             metricsTracker.increment('telegram_updates_received');
+
+            const msg = update.message || update.edited_message;
+            if (msg) {
+              const textOrCap = msg.text || msg.caption || '';
+              const isCmd = textOrCap.trim().startsWith('/') || textOrCap.trim().startsWith('!');
+              const hasMedia = Boolean(msg.photo || msg.video || msg.sticker || msg.animation || msg.document || msg.voice || msg.audio);
+              console.log(JSON.stringify({
+                event: 'TELEGRAM_UPDATE_RECEIVED',
+                update_id: update.update_id,
+                chat_id: msg.chat?.id,
+                chat_type: msg.chat?.type,
+                message_id: msg.message_id,
+                is_command: isCmd,
+                has_text: Boolean(textOrCap),
+                has_media: hasMedia
+              }));
+            }
+
             try {
               if (update.message) {
                 await this.handleMessage(update.message, false);
@@ -237,6 +273,7 @@ export class TelegramBotManager {
 
   private async handleMessage(message: TelegramMessage, isEdit: boolean = false) {
     this.totalMessagesReceived++;
+    this.lastProcessedMessageTimestamp = new Date().toISOString();
 
     const chatId = message.chat?.id;
     const userId = message.from?.id;
@@ -299,7 +336,10 @@ export class TelegramBotManager {
 
     // 0. Check Hashtag Notes Shortcuts (#notename)
     const shortcutHandled = await ModerationService.handleNotesShortcut(message);
-    if (shortcutHandled) return;
+    if (shortcutHandled) {
+      this.recordResponseSent();
+      return;
+    }
 
     // 1. Process Welcome and Goodbye messages
     await ModerationService.handleWelcomeAndGoodbye(message);
@@ -345,7 +385,10 @@ export class TelegramBotManager {
           rawArgs
         };
 
-        await CommandHandler.handleCommand(ctx);
+        const handled = await CommandHandler.handleCommand(ctx);
+        if (handled) {
+          this.recordResponseSent();
+        }
         return;
       }
     }
@@ -372,30 +415,30 @@ export class TelegramBotManager {
       if (linkIntercepted) return;
     }
 
+    const mediaType = message.sticker ? 'sticker' :
+      message.photo ? 'photo' :
+      message.video ? 'video' :
+      message.animation ? 'animation' :
+      message.document ? 'document' :
+      message.voice ? 'voice' :
+      'text';
+
+    const content = textOrCaption || (
+      message.sticker ? (message.sticker.emoji ? `🎨 Sticker (${message.sticker.emoji})` : '🎨 Sticker') :
+      message.photo ? '📷 Photo' :
+      message.video ? '📹 Video' :
+      message.animation ? '🎬 GIF' :
+      message.document ? '📄 Document' :
+      message.voice ? '🎤 Voice' :
+      'Media'
+    );
+
+    const displayName = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(' ') ||
+      message.from?.username ||
+      (userId ? `User ${userId}` : 'User');
+
     // Record incoming group message in persistent memory for Group Messages dashboard & real replies
     if (chatId && chatId < 0 && message.message_id) {
-      const mediaType = message.sticker ? 'sticker' :
-        message.photo ? 'photo' :
-        message.video ? 'video' :
-        message.animation ? 'animation' :
-        message.document ? 'document' :
-        message.voice ? 'voice' :
-        'text';
-
-      const content = textOrCaption || (
-        message.sticker ? (message.sticker.emoji ? `🎨 Sticker (${message.sticker.emoji})` : '🎨 Sticker') :
-        message.photo ? '📷 Photo' :
-        message.video ? '📹 Video' :
-        message.animation ? '🎬 GIF' :
-        message.document ? '📄 Document' :
-        message.voice ? '🎤 Voice' :
-        'Media'
-      );
-
-      const displayName = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(' ') ||
-        message.from?.username ||
-        'User';
-
       db.addGroupConversationEntry(chatId, {
         role: 'user',
         userId: message.from?.id,
@@ -411,6 +454,20 @@ export class TelegramBotManager {
         source: 'telegram',
         replyToMessageId: message.reply_to_message?.message_id
       });
+      this.lastStoredMessageTimestamp = new Date().toISOString();
+    } else if (chatId && chatId > 0 && userId && message.message_id) {
+      // Record incoming private chat message in persistent memory for Control Center dashboard
+      db.addPrivateMessage(chatId, userId, {
+        role: 'user',
+        content,
+        timestamp: message.date ? message.date * 1000 : Date.now(),
+        messageId: message.message_id,
+        direction: 'in',
+        username: message.from?.username,
+        name: displayName,
+        language: ChatbotService.detectLanguage(content).language
+      });
+      this.lastStoredMessageTimestamp = new Date().toISOString();
     }
 
     // 7. Check Smart Telegram Reactions (non-blocking & independent)
@@ -420,7 +477,10 @@ export class TelegramBotManager {
 
     // 8. Check Roxie AI Chatbot triggers
     const chatbotHandled = await ChatbotService.handleMessage(message, this.botUser);
-    if (chatbotHandled) return;
+    if (chatbotHandled) {
+      this.recordResponseSent();
+      return;
+    }
   }
 
   private async handleChatMemberUpdate(chatMemberUpdate: {
