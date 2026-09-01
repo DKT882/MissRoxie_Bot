@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ShieldCheck, 
   AlertCircle, 
@@ -253,8 +253,19 @@ export default function App() {
   const [groupAbuseWords, setGroupAbuseWords] = useState<string[]>([]);
   const [newAbuseWordInput, setNewAbuseWordInput] = useState<string>('');
   const [abuseSearch, setAbuseSearch] = useState<string>('');
+  const [debouncedAbuseSearch, setDebouncedAbuseSearch] = useState<string>('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedAbuseSearch(abuseSearch), 400);
+    return () => clearTimeout(t);
+  }, [abuseSearch]);
+
   const [groupMembersList, setGroupMembersList] = useState<any[]>([]);
   const [memberSearch, setMemberSearch] = useState<string>('');
+  const [debouncedMemberSearch, setDebouncedMemberSearch] = useState<string>('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedMemberSearch(memberSearch), 400);
+    return () => clearTimeout(t);
+  }, [memberSearch]);
   const [groupLustUsers, setGroupLustUsers] = useState<any[]>([]);
   const [slowmodeInput, setSlowmodeInput] = useState<number>(0);
   const [slowmodeFeedback, setSlowmodeFeedback] = useState<string | null>(null);
@@ -316,8 +327,14 @@ export default function App() {
   const [leaveConfirmInput, setLeaveConfirmInput] = useState<string>('');
   const [leavingGroup, setLeavingGroup] = useState<boolean>(false);
 
-  // Search & Filters
+  // Search & Filters (Debounced 400ms)
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery), 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   const [dateFilter, setDateFilter] = useState<string>('24h');
   const [logFilterType, setLogFilterType] = useState<string>('ALL');
   const [selectedEvent, setSelectedEvent] = useState<ModerationLog | null>(null);
@@ -329,6 +346,35 @@ export default function App() {
   // Stickers View Filter
   const [stickerTab, setStickerTab] = useState<'all' | 'custom' | 'lust' | 'default'>('all');
   const [globalStickersData, setGlobalStickersData] = useState<any | null>(null);
+
+  // Autosave Debounce & Batching Engine (1500ms)
+  const [settingsSaveStatus, setSettingsSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
+  const pendingSettingsBatchRef = useRef<Record<string, any>>({});
+  const settingsDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const settingsSaveStatusTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSettingsSentTimestampRef = useRef<number>(0);
+
+  // In-flight GET request deduplication cache
+  const inFlightGetMap = useRef<Map<string, Promise<any>>>(new Map());
+
+  const deduplicatedFetch = async (url: string, options?: RequestInit): Promise<Response> => {
+    if (options && options.method && options.method !== 'GET') {
+      return fetch(url, options);
+    }
+    if (inFlightGetMap.current.has(url)) {
+      return inFlightGetMap.current.get(url)!;
+    }
+    const promise = (async () => {
+      try {
+        return await fetch(url, options);
+      } finally {
+        inFlightGetMap.current.delete(url);
+      }
+    })();
+    inFlightGetMap.current.set(url, promise);
+    return promise;
+  };
 
   // Live checklist
   const [liveTestStatus, setLiveTestStatus] = useState<Record<string, 'NOT TESTED' | 'PASS' | 'FAIL'>>(() => {
@@ -348,17 +394,17 @@ export default function App() {
     } catch {}
   };
 
-  // Primary Data Fetcher
+  // Primary Data Fetcher (Optimized with in-flight deduplication)
   const fetchData = async () => {
     try {
       const [overviewRes, groupsRes, cmdsRes, statusRes, healthRes, dmsRes, stickersRes] = await Promise.all([
-        fetch('/api/dashboard/overview'),
-        fetch('/api/dashboard/groups'),
-        fetch('/api/commands'),
-        fetch('/api/telegram/status'),
-        fetch('/api/health'),
-        fetch('/api/dashboard/private-chats'),
-        fetch('/api/dashboard/stickers')
+        deduplicatedFetch('/api/dashboard/overview'),
+        deduplicatedFetch('/api/dashboard/groups'),
+        deduplicatedFetch('/api/commands'),
+        deduplicatedFetch('/api/telegram/status'),
+        deduplicatedFetch('/api/health'),
+        deduplicatedFetch('/api/dashboard/private-chats'),
+        deduplicatedFetch('/api/dashboard/stickers')
       ]);
 
       if (overviewRes.ok) setOverview(await overviewRes.json());
@@ -371,7 +417,7 @@ export default function App() {
 
       // Fetch global settings
       try {
-        const gRes = await fetch('/api/dashboard/control-center/global');
+        const gRes = await deduplicatedFetch('/api/dashboard/control-center/global');
         if (gRes.ok) setGlobalSettings(await gRes.json());
       } catch {}
 
@@ -379,14 +425,14 @@ export default function App() {
       const targetDetailId = activeGroupDetailId || (selectedChatId !== 'all' ? selectedChatId : null);
       if (targetDetailId) {
         const [detailRes, modsRes, permsRes, groupStickersRes, abuseRes, membersRes, lustUsersRes, historyRes] = await Promise.all([
-          fetch(`/api/dashboard/groups/${targetDetailId}`),
-          fetch(`/api/dashboard/groups/${targetDetailId}/moderators`),
-          fetch(`/api/dashboard/groups/${targetDetailId}/permissions`),
-          fetch(`/api/dashboard/groups/${targetDetailId}/stickers`),
-          fetch(`/api/dashboard/groups/${targetDetailId}/abuse-words`),
-          fetch(`/api/dashboard/groups/${targetDetailId}/members`),
-          fetch(`/api/dashboard/groups/${targetDetailId}/lust/users`),
-          fetch(`/api/dashboard/groups/${targetDetailId}/backup/history`)
+          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}`),
+          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/moderators`),
+          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/permissions`),
+          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/stickers`),
+          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/abuse-words`),
+          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/members`),
+          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/lust/users`),
+          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/backup/history`)
         ]);
         if (detailRes.ok) {
           const dData = await detailRes.json();
@@ -418,7 +464,7 @@ export default function App() {
 
       // Fetch active private chat conversation
       if (activePrivateChatId) {
-        const pRes = await fetch(`/api/dashboard/private-chats/${activePrivateChatId}/messages`);
+        const pRes = await deduplicatedFetch(`/api/dashboard/private-chats/${activePrivateChatId}/messages`);
         if (pRes.ok) {
           const pData = await pRes.json();
           setPrivateChatMessages(pData.messages || []);
@@ -431,8 +477,13 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 4000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchData, 5000);
+    return () => {
+      clearInterval(interval);
+      if (settingsDebounceTimerRef.current) {
+        clearTimeout(settingsDebounceTimerRef.current);
+      }
+    };
   }, [selectedChatId, activeGroupDetailId, activePrivateChatId]);
 
   // Handle connection test
@@ -1003,20 +1054,22 @@ export default function App() {
     }
   };
 
-  // Send Message Execution
+  // Send Message Execution (In-Flight Lock + Idempotency Key)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sendTargetId || !sendMessageContent.trim()) return;
+    if (!sendTargetId || !sendMessageContent.trim() || sendingMessage) return;
     setSendingMessage(true);
     setSendResult(null);
     try {
+      const clientRequestId = `send_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const res = await fetch('/api/dashboard/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           targetType: sendTargetType,
           targetId: sendTargetId,
-          message: sendMessageContent.trim()
+          message: sendMessageContent.trim(),
+          clientRequestId
         })
       });
       const data = await res.json();
@@ -1032,19 +1085,21 @@ export default function App() {
     }
   };
 
-  // Send Private Reply
+  // Send Private Reply (In-Flight Lock + Idempotency Key)
   const handleSendPrivateReply = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activePrivateChatId || !privateReplyText.trim()) return;
+    if (!activePrivateChatId || !privateReplyText.trim() || sendingPrivateReply) return;
     setSendingPrivateReply(true);
     try {
+      const clientRequestId = `priv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const res = await fetch('/api/dashboard/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           targetType: 'private',
           targetId: activePrivateChatId,
-          message: privateReplyText.trim()
+          message: privateReplyText.trim(),
+          clientRequestId
         })
       });
       if (res.ok) {
@@ -1082,12 +1137,14 @@ export default function App() {
     setSendingGroupMessage(true);
     setGroupMessageFeedback(null);
     try {
+      const clientRequestId = `grp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const payload: any = {
         targetType: 'group',
         targetId: activeGroupDetailId,
         chatId: activeGroupDetailId,
         message: groupComposerText.trim(),
-        text: groupComposerText.trim()
+        text: groupComposerText.trim(),
+        clientRequestId
       };
       if (groupReplyTarget?.messageId) {
         payload.replyToMessageId = groupReplyTarget.messageId;
@@ -1125,17 +1182,19 @@ export default function App() {
     }
   };
 
-  // Broadcast Execution
+  // Broadcast Execution (In-Flight Lock + Unique Broadcast ID)
   const handleBroadcast = async () => {
-    if (broadcastSelectedGroups.length === 0 || !broadcastContent.trim()) return;
+    if (broadcastSelectedGroups.length === 0 || !broadcastContent.trim() || broadcasting) return;
     setBroadcasting(true);
     setBroadcastResult(null);
     setShowBroadcastConfirm(false);
     try {
+      const broadcastId = `bcast_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const res = await fetch('/api/dashboard/broadcast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          broadcastId,
           groupIds: broadcastSelectedGroups,
           message: broadcastContent.trim()
         })
@@ -1153,27 +1212,101 @@ export default function App() {
     }
   };
 
-  // Update Group Setting Helper
-  const updateSetting = async (key: string, value: any) => {
+  // Flush Pending Debounced Settings Batch to Backend (Single Combined PATCH)
+  const flushPendingSettings = async () => {
     if (!activeGroupDetailId) return;
+    if (settingsDebounceTimerRef.current) {
+      clearTimeout(settingsDebounceTimerRef.current);
+      settingsDebounceTimerRef.current = null;
+    }
+
+    const payload = { ...pendingSettingsBatchRef.current };
+    if (Object.keys(payload).length === 0) return;
+
+    pendingSettingsBatchRef.current = {};
+    const clientTimestamp = Date.now();
+    lastSettingsSentTimestampRef.current = clientTimestamp;
+    payload._clientTimestamp = clientTimestamp;
+
     setSavingSettings(true);
+    setSettingsSaveStatus('saving');
+    setSettingsSaveError(null);
+
     try {
       const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/settings`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [key]: value })
+        body: JSON.stringify(payload)
       });
+      const data = await res.json();
       if (res.ok) {
-        fetchData();
+        if (clientTimestamp >= lastSettingsSentTimestampRef.current) {
+          setSettingsSaveStatus('saved');
+          if (settingsSaveStatusTimerRef.current) clearTimeout(settingsSaveStatusTimerRef.current);
+          settingsSaveStatusTimerRef.current = setTimeout(() => {
+            setSettingsSaveStatus('idle');
+          }, 2500);
+        }
       } else {
-        const data = await res.json();
-        alert(`⚠️ Setting update failed: ${data.error || 'Validation error'}`);
+        setSettingsSaveStatus('error');
+        setSettingsSaveError(data.error || 'Autosave failed');
       }
     } catch (err: any) {
-      alert(`❌ Error: ${err.message}`);
+      setSettingsSaveStatus('error');
+      setSettingsSaveError(err.message || 'Network error');
     } finally {
       setSavingSettings(false);
     }
+  };
+
+  // Update Group Setting Helper (1500ms Debounce with Batching & Optimistic UI Update)
+  const updateSetting = (key: string, value: any, immediate: boolean = false) => {
+    if (!activeGroupDetailId) return;
+
+    // 1. Optimistic local state update for instant UI feedback
+    setGroupDetails((prev: any) => {
+      if (!prev) return prev;
+      const updated = { ...prev };
+      const keys = key.split('.');
+      if (keys.length === 1) {
+        updated.settings = { ...(updated.settings || {}), [key]: value };
+      } else if (keys.length === 2) {
+        updated.settings = {
+          ...(updated.settings || {}),
+          [keys[0]]: {
+            ...(updated.settings?.[keys[0]] || {}),
+            [keys[1]]: value
+          }
+        };
+      }
+      return updated;
+    });
+
+    // 2. Deep merge into pending batch
+    const keys = key.split('.');
+    if (keys.length === 1) {
+      pendingSettingsBatchRef.current[key] = value;
+    } else if (keys.length === 2) {
+      pendingSettingsBatchRef.current[keys[0]] = {
+        ...(pendingSettingsBatchRef.current[keys[0]] || groupDetails?.settings?.[keys[0]] || {}),
+        [keys[1]]: value
+      };
+    }
+
+    if (immediate) {
+      flushPendingSettings();
+      return;
+    }
+
+    setSettingsSaveStatus('saving');
+
+    // 3. Debounce 1500ms
+    if (settingsDebounceTimerRef.current) {
+      clearTimeout(settingsDebounceTimerRef.current);
+    }
+    settingsDebounceTimerRef.current = setTimeout(() => {
+      flushPendingSettings();
+    }, 1500);
   };
 
   const botInfo = overview?.botStatus?.botInfo;
@@ -1186,13 +1319,13 @@ export default function App() {
     : groupDetails?.logs || [];
 
   const filteredLogs = rawLogs.filter((l: ModerationLog) => {
-    const matchesSearch = searchQuery === '' || 
-      l.action?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      l.targetUsername?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      l.adminUsername?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      l.reason?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      l.details?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      l.chatTitle?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = debouncedSearchQuery === '' || 
+      l.action?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
+      l.targetUsername?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
+      l.adminUsername?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
+      l.reason?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
+      l.details?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
+      l.chatTitle?.toLowerCase().includes(debouncedSearchQuery.toLowerCase());
 
     const matchesType = logFilterType === 'ALL' || l.action?.toLowerCase() === logFilterType.toLowerCase();
     return matchesSearch && matchesType;
@@ -2022,7 +2155,7 @@ export default function App() {
                     <ArrowLeft className="w-4 h-4" />
                   </button>
                   <div>
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2.5 flex-wrap">
                       <h2 className="text-lg font-bold">{groupDetails.chatTitle}</h2>
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
                         groupDetails.status === 'Active' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' :
@@ -2032,6 +2165,22 @@ export default function App() {
                       }`}>
                         {groupDetails.status}
                       </span>
+                      {settingsSaveStatus === 'saving' && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
+                          <RefreshCw className="w-3 h-3 animate-spin" /> Saving...
+                        </span>
+                      )}
+                      {settingsSaveStatus === 'saved' && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          <CheckCircle2 className="w-3 h-3" /> Saved ✓
+                        </span>
+                      )}
+                      {settingsSaveStatus === 'error' && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                          <AlertCircle className="w-3 h-3" /> Save failed
+                          <button onClick={() => flushPendingSettings()} className="underline ml-1 font-bold hover:text-rose-200">Retry</button>
+                        </span>
+                      )}
                     </div>
                     <p className={`text-xs ${themeMutedText} font-mono mt-0.5`}>
                       Chat ID: {groupDetails.chatId} • Authority: {groupDetails.botRole || '🛡️ Administrator'}
@@ -3167,7 +3316,7 @@ export default function App() {
 
                     <div className="flex flex-wrap gap-2 pt-1 max-h-72 overflow-y-auto pr-1">
                       {groupAbuseWords
-                        .filter(w => !abuseSearch || w.toLowerCase().includes(abuseSearch.toLowerCase()))
+                        .filter(w => !debouncedAbuseSearch || w.toLowerCase().includes(debouncedAbuseSearch.toLowerCase()))
                         .map((w, idx) => (
                           <span
                             key={idx}
@@ -3229,8 +3378,8 @@ export default function App() {
                     <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
                       {groupMembersList
                         .filter(m => {
-                          if (!memberSearch) return true;
-                          const s = memberSearch.toLowerCase();
+                          if (!debouncedMemberSearch) return true;
+                          const s = debouncedMemberSearch.toLowerCase();
                           return (
                             String(m.userId).includes(s) ||
                             (m.firstName && m.firstName.toLowerCase().includes(s)) ||

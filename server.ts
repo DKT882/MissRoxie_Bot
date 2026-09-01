@@ -14,6 +14,8 @@ import { authManager } from './server/auth/authManager.js';
 
 dotenv.config();
 
+const inFlightLeaveOperations = new Set<number>();
+
 // Exported workflow for Leaving Groups with authoritative verification & stale handling
 export async function executeLeaveGroupWorkflow(
   chatId: number,
@@ -26,7 +28,16 @@ export async function executeLeaveGroupWorkflow(
     };
   }
 
-  const settings = db.getGroupSettings(chatId);
+  if (inFlightLeaveOperations.has(chatId)) {
+    return {
+      status: 409,
+      body: { error: 'A leave operation is already in progress for this group.', code: 'OPERATION_IN_PROGRESS' }
+    };
+  }
+
+  inFlightLeaveOperations.add(chatId);
+  try {
+    const settings = db.getGroupSettings(chatId);
 
   // 1. Check if group was already recorded as left locally
   if (settings.botLeft) {
@@ -265,13 +276,16 @@ export async function executeLeaveGroupWorkflow(
     details: `Roxie successfully verified and left group ${chatId} via Telegram leaveChat`
   });
 
-  return {
-    status: 200,
-    body: {
-      success: true,
-      message: 'Roxie has successfully verified and left the group on Telegram.'
-    }
-  };
+    return {
+      status: 200,
+      body: {
+        success: true,
+        message: 'Roxie has successfully verified and left the group on Telegram.'
+      }
+    };
+  } finally {
+    inFlightLeaveOperations.delete(chatId);
+  }
 }
 
 // Authoritative Operator Session Verification Helper
@@ -316,13 +330,16 @@ export function verifyOperatorAuth(req: any, requiredRole: 'VIEWER' | 'MODERATOR
   };
 }
 
+const recentClientRequestIds = new Map<string, { status: number; body: any }>();
+
 // Exported workflow for Direct Message / Reply-To-User with Authoritative Validation
 export async function executeSendMessageWorkflow(
   targetId: number | string,
   message: string,
   replyToMessageId?: number,
   operatorUsername: string = 'dashboard_admin',
-  sessionId?: string
+  sessionId?: string,
+  clientRequestId?: string
 ): Promise<{
   status: number;
   body: {
@@ -332,8 +349,18 @@ export async function executeSendMessageWorkflow(
     error?: string;
     code?: string;
     message?: string;
+    deduplicated?: boolean;
   };
 }> {
+  // 0. Idempotency Check
+  if (clientRequestId && recentClientRequestIds.has(clientRequestId)) {
+    const cached = recentClientRequestIds.get(clientRequestId)!;
+    return {
+      status: cached.status,
+      body: { ...cached.body, deduplicated: true }
+    };
+  }
+
   // 1. Validate Operator Authorization
   if (sessionId) {
     const session = authManager.getSession(sessionId);
@@ -512,16 +539,23 @@ export async function executeSendMessageWorkflow(
       : `Sent direct message as Roxie to ${numTargetId < 0 ? 'group' : 'chat'} ${numTargetId}`
   });
 
-  return {
-    status: 200,
-    body: {
-      success: true,
-      messageId: outgoingMsgId,
-      replyToMessageId: replyToMessageId || null,
-      message: replyToMessageId ? 'Reply sent as Roxie' : 'Message sent as Roxie'
+    const responsePayload = {
+      status: 200,
+      body: {
+        success: true,
+        messageId: outgoingMsgId,
+        replyToMessageId: replyToMessageId || null,
+        message: replyToMessageId ? 'Reply sent as Roxie' : 'Message sent as Roxie'
+      }
+    };
+
+    if (clientRequestId) {
+      recentClientRequestIds.set(clientRequestId, responsePayload);
+      setTimeout(() => recentClientRequestIds.delete(clientRequestId), 10_000);
     }
-  };
-}
+
+    return responsePayload;
+  }
 
 async function startServer() {
   const app = express();
@@ -896,6 +930,18 @@ async function startServer() {
         return res.status(400).json({ error: 'Invalid sticker pack identifier' });
       }
 
+      // Check if pack already exists in group configuration
+      const existingPacks = db.getGroupStickerPacks(chatId);
+      const alreadyExisting = existingPacks.find(p => p.name.toLowerCase() === cleanPackName.toLowerCase());
+      if (alreadyExisting) {
+        return res.json({
+          ok: true,
+          pack: alreadyExisting,
+          alreadyExisted: true,
+          message: `Sticker pack "${cleanPackName}" is already registered in this group.`
+        });
+      }
+
       // Query Telegram getStickerSet API
       const setRes = await telegramApi.getStickerSet(cleanPackName);
       if (!setRes.ok || !setRes.result) {
@@ -1102,10 +1148,28 @@ async function startServer() {
         }
       }
 
+      const clientTimestamp = updates._clientTimestamp ? Number(updates._clientTimestamp) : undefined;
+      if (clientTimestamp && db.isStaleSettingsUpdate(chatId, clientTimestamp)) {
+        return res.json({
+          ...prevSettings,
+          stale: true,
+          message: 'Settings update ignored because a newer configuration was already applied.'
+        });
+      }
+
+      if (clientTimestamp) {
+        db.recordSettingsTimestamp(chatId, clientTimestamp);
+      }
+
       const updated = db.updateGroupSettings(chatId, updates);
 
+      // Check if updates produced no actual state changes (idempotent request)
+      if (updated === prevSettings) {
+        return res.json({ ...updated, unchanged: true });
+      }
+
       // Detail specific frequency changes in audit log
-      let changeSummary = Object.keys(updates).join(', ');
+      let changeSummary = Object.keys(updates).filter(k => !k.startsWith('_')).join(', ');
       if (updates.autoResponse) {
         changeSummary = `autoResponse (mode: ${updates.autoResponse.mode || prevSettings.autoResponse?.mode}, cd: ${updates.autoResponse.cooldownSeconds ?? prevSettings.autoResponse?.cooldownSeconds}s)`;
       } else if (updates.autoSticker) {
@@ -1334,15 +1398,30 @@ async function startServer() {
       }
       const operator = (req as any).operator?.username || req.body.operator || 'dashboard_admin';
 
-      const result = await executeSendMessageWorkflow(targetId, text, replyToMessageId, operator, sessionId);
+      const clientRequestId = req.body.clientRequestId || req.body.idempotencyKey;
+      const result = await executeSendMessageWorkflow(targetId, text, replyToMessageId, operator, sessionId, clientRequestId);
       res.status(result.status).json(result.body);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
+  const activeBroadcastLocks = new Set<string>();
+  const recentBroadcastResults = new Map<string, any>();
+
   // 13. Broadcast announcement to multiple groups
   app.post('/api/dashboard/broadcast', async (req, res) => {
+    const broadcastId = (req.body.broadcastId || req.body.operationId || '').trim();
+    if (broadcastId) {
+      if (activeBroadcastLocks.has(broadcastId)) {
+        return res.status(409).json({ error: 'A broadcast with this operation ID is already in progress.', code: 'BROADCAST_IN_PROGRESS' });
+      }
+      if (recentBroadcastResults.has(broadcastId)) {
+        return res.json({ ...recentBroadcastResults.get(broadcastId), deduplicated: true });
+      }
+      activeBroadcastLocks.add(broadcastId);
+    }
+
     try {
       const { groupIds, message } = req.body;
       if (!Array.isArray(groupIds) || groupIds.length === 0) {
@@ -1388,15 +1467,26 @@ async function startServer() {
         details: `Broadcast: ${successful.length} sent, ${failed.length} failed`
       });
 
-      res.json({
+      const responsePayload = {
         total: groupIds.length,
         sent: successful.length,
         failed: failed.length,
         successful,
         errors: failed
-      });
+      };
+
+      if (broadcastId) {
+        recentBroadcastResults.set(broadcastId, responsePayload);
+        setTimeout(() => recentBroadcastResults.delete(broadcastId), 30_000);
+      }
+
+      res.json(responsePayload);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    } finally {
+      if (broadcastId) {
+        activeBroadcastLocks.delete(broadcastId);
+      }
     }
   });
 
@@ -2146,6 +2236,12 @@ async function startServer() {
   process.on('SIGINT', () => handleShutdown('SIGINT'));
 }
 
-if (!process.argv.some(arg => arg.includes('test') || arg.includes('Test'))) {
+const isDirectExecution = process.argv[1] && (
+  process.argv[1].endsWith('server.ts') ||
+  process.argv[1].endsWith('server.js') ||
+  process.argv[1].endsWith('server.cjs')
+);
+
+if (isDirectExecution && !process.argv.some(arg => arg.toLowerCase().includes('test')) && process.env.NODE_ENV !== 'test') {
   startServer();
 }

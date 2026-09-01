@@ -8,7 +8,7 @@
   },
   "status": {
     "botLeft": true,
-    "leftAt": "2026-08-31T14:14:30.734Z",
+    "leftAt": "2026-09-01T08:41:45.322Z",
     "unavailable": false,
     "unavailableAt": null,
     "unavailableReason": null
@@ -95,10 +95,10 @@
       "lastStickerTimestamp": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-09-01T07:31:09.272Z",
+    "updatedAt": "2026-09-01T08:41:44.888Z",
     "botLeft": true,
     "unavailable": false,
-    "leftAt": "2026-08-31T14:14:30.734Z",
+    "leftAt": "2026-09-01T08:41:45.322Z",
     "abuseWords": [],
     "notes": "",
     "lustMode": false,
@@ -173,7 +173,7 @@
       "displayName": "Ananya Verma",
       "username": "ananya_v",
       "content": "Group B message here",
-      "timestamp": 1788185667448,
+      "timestamp": 1788252101988,
       "messageId": 8802,
       "chatId": -100888777002,
       "mediaType": "text",
@@ -188,5 +188,5 @@
     "userMemories": []
   },
   "activity": [],
-  "updatedAt": "2026-09-01T07:31:09.286Z"
+  "updatedAt": "2026-09-01T08:41:45.328Z"
 }

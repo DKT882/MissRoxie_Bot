@@ -7,7 +7,7 @@
     "username": null
   },
   "status": {
-    "botLeft": true,
+    "botLeft": false,
     "leftAt": "2026-08-31T14:09:18.940Z",
     "unavailable": false,
     "unavailableAt": null,
@@ -44,7 +44,7 @@
     "locks": {},
     "filters": {},
     "welcomeEnabled": false,
-    "welcomeMessage": "Welcome {user} to {chat}!",
+    "welcomeMessage": "Welcome to Beta!",
     "goodbyeEnabled": false,
     "goodbyeMessage": "Goodbye {user}!",
     "autoDeleteJoinLeave": false,
@@ -97,8 +97,8 @@
       "nextAllowedAt": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-09-01T07:53:47.162Z",
-    "botLeft": true,
+    "updatedAt": "2026-09-01T08:42:56.032Z",
+    "botLeft": false,
     "leftAt": "2026-08-31T14:09:18.940Z",
     "unavailable": false,
     "abuseWords": [],
@@ -180,17 +180,6 @@
   },
   "activity": [
     {
-      "id": "dy71o80",
-      "timestamp": "2026-09-01T07:31:09.033Z",
-      "chatId": -100999888102,
-      "groupId": -100999888102,
-      "adminUsername": "admin_operator_roxie",
-      "command": "CONFIG_IMPORTED",
-      "action": "setting_change",
-      "result": "success",
-      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-09-014Z.json)"
-    },
-    {
       "id": "4vmvokj",
       "timestamp": "2026-09-01T07:45:07.142Z",
       "chatId": -100999888102,
@@ -211,7 +200,18 @@
       "action": "setting_change",
       "result": "success",
       "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: none)"
+    },
+    {
+      "id": "nzr6uzu",
+      "timestamp": "2026-09-01T08:30:46.042Z",
+      "chatId": -100999888102,
+      "groupId": -100999888102,
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: none)"
     }
   ],
-  "updatedAt": "2026-09-01T07:53:47.187Z"
+  "updatedAt": "2026-09-01T08:42:56.036Z"
 }

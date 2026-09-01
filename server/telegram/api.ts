@@ -1,6 +1,28 @@
 import { TelegramChatMember, TelegramUser, BotCommand, BotCommandScope } from './types.js';
 
+export interface TelegramApiCallOptions {
+  maxRetries?: number;
+  skipRateLimiter?: boolean;
+}
+
 export class TelegramApi {
+  // In-flight request deduplication cache
+  private inFlightStickerSets: Map<string, Promise<any>> = new Map();
+  // Known permissions cache to avoid redundant setChatPermissions calls
+  private knownChatPermissions: Map<string, string> = new Map();
+  // Outbound rate limit scheduler state
+  private lastRequestTimestamp: number = 0;
+  private minIntervalMs: number = 35; // ~28 requests/sec max
+  private maxRetries: number = 3;
+  // Rate limit event statistics
+  private rateLimitStats = {
+    total429s: 0,
+    retriesSucceeded: 0,
+    retriesExhausted: 0,
+    dedupedStickerRequests: 0,
+    skippedPermissionUpdates: 0
+  };
+
   private getToken(): string {
     const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
     if (!token) {
@@ -9,25 +31,113 @@ export class TelegramApi {
     return token;
   }
 
-  private async call<T = any>(method: string, body?: Record<string, any>): Promise<{ ok: boolean; result?: T; description?: string; error_code?: number }> {
-    try {
-      const token = this.getToken();
-      const url = `https://api.telegram.org/bot${token}/${method}`;
-      
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined
-      });
+  public getRateLimiterStats() {
+    return { ...this.rateLimitStats };
+  }
 
-      const data = await res.json();
-      return data;
-    } catch (err: any) {
-      return {
-        ok: false,
-        description: err.message || 'Network request failed'
-      };
+  public resetRateLimiterStats() {
+    this.rateLimitStats = {
+      total429s: 0,
+      retriesSucceeded: 0,
+      retriesExhausted: 0,
+      dedupedStickerRequests: 0,
+      skippedPermissionUpdates: 0
+    };
+    this.knownChatPermissions.clear();
+    this.inFlightStickerSets.clear();
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private async paceRequest(): Promise<void> {
+    const now = Date.now();
+    const elapsed = now - this.lastRequestTimestamp;
+    if (elapsed < this.minIntervalMs) {
+      await this.sleep(this.minIntervalMs - elapsed);
     }
+    this.lastRequestTimestamp = Date.now();
+  }
+
+  public async call<T = any>(
+    method: string,
+    body?: Record<string, any>,
+    options?: TelegramApiCallOptions
+  ): Promise<{ ok: boolean; result?: T; description?: string; error_code?: number; parameters?: { retry_after?: number }; skipped?: boolean }> {
+    const maxRetries = options?.maxRetries ?? this.maxRetries;
+    let attempt = 0;
+
+    while (attempt <= maxRetries) {
+      try {
+        if (!options?.skipRateLimiter) {
+          await this.paceRequest();
+        }
+
+        const token = this.getToken();
+        const url = `https://api.telegram.org/bot${token}/${method}`;
+        
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined
+        });
+
+        let data: any;
+        try {
+          data = await res.json();
+        } catch {
+          data = { ok: false, description: `Failed to parse response from Telegram API (HTTP ${res.status})`, error_code: res.status };
+        }
+
+        // Check if Telegram returned 429 Too Many Requests
+        if (res.status === 429 || data.error_code === 429) {
+          this.rateLimitStats.total429s++;
+          const retryAfterSec = data.parameters?.retry_after ?? (Number(res.headers?.get('retry-after')) || 3);
+          const backoffMs = Math.min(Math.max(retryAfterSec * 1000, 1000), 30_000) + 300; // bounded backoff with safety padding
+
+          console.warn(`[TelegramApi] Rate limit 429 hit on ${method}. Backing off for ${(backoffMs / 1000).toFixed(1)}s (Attempt ${attempt + 1}/${maxRetries + 1}). Chat: ${body?.chat_id || 'N/A'}`);
+
+          if (attempt < maxRetries) {
+            attempt++;
+            await this.sleep(backoffMs);
+            continue; // Retry
+          } else {
+            this.rateLimitStats.retriesExhausted++;
+            console.error(`[TelegramApi] Max retries (${maxRetries}) exhausted for ${method} after 429 rate limit.`);
+            return {
+              ok: false,
+              error_code: 429,
+              description: data.description || 'Telegram API rate limit exceeded after maximum retries',
+              parameters: { retry_after: retryAfterSec }
+            };
+          }
+        }
+
+        if (attempt > 0 && data.ok) {
+          this.rateLimitStats.retriesSucceeded++;
+        }
+
+        return data;
+      } catch (err: any) {
+        if (attempt < maxRetries && (err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.message?.includes('fetch failed'))) {
+          attempt++;
+          const backoffMs = 1000 * Math.pow(2, attempt - 1);
+          await this.sleep(backoffMs);
+          continue;
+        }
+
+        return {
+          ok: false,
+          description: err.message || 'Network request failed'
+        };
+      }
+    }
+
+    return {
+      ok: false,
+      description: 'Request failed after maximum retry attempts'
+    };
   }
 
   public async getMe(): Promise<{ ok: boolean; result?: TelegramUser; description?: string; error_code?: number }> {
@@ -420,7 +530,22 @@ export class TelegramApi {
   }
 
   public async getStickerSet(name: string): Promise<{ ok: boolean; result?: { name?: string; title?: string; stickers: Array<{ file_id: string; emoji?: string; [key: string]: any }> }; description?: string; error_code?: number }> {
-    return this.call('getStickerSet', { name });
+    const cleanKey = (name || '').toLowerCase().trim();
+    if (this.inFlightStickerSets.has(cleanKey)) {
+      this.rateLimitStats.dedupedStickerRequests++;
+      return this.inFlightStickerSets.get(cleanKey)!;
+    }
+
+    const promise = (async () => {
+      try {
+        return await this.call('getStickerSet', { name });
+      } finally {
+        this.inFlightStickerSets.delete(cleanKey);
+      }
+    })();
+
+    this.inFlightStickerSets.set(cleanKey, promise);
+    return promise;
   }
 
   public async deleteStickerSet(name: string): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
@@ -466,11 +591,25 @@ export class TelegramApi {
   public async setChatPermissions(
     chatId: number | string,
     permissions: Record<string, boolean>
-  ): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
-    return this.call('setChatPermissions', {
+  ): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number; skipped?: boolean }> {
+    const key = String(chatId);
+    const sortedPerms = JSON.stringify(Object.entries(permissions || {}).sort());
+    const current = this.knownChatPermissions.get(key);
+
+    if (current && current === sortedPerms) {
+      this.rateLimitStats.skippedPermissionUpdates++;
+      return { ok: true, result: true, skipped: true };
+    }
+
+    const res = await this.call('setChatPermissions', {
       chat_id: chatId,
       permissions
     });
+
+    if (res.ok) {
+      this.knownChatPermissions.set(key, sortedPerms);
+    }
+    return res;
   }
 }
 

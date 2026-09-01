@@ -170,7 +170,7 @@ const PRIVATE_BACKUP_DIR = path.join(BACKUP_DIR, 'private');
 const GLOBAL_DB_FILE = path.join(DATA_DIR, 'global.json');
 const DB_FILE = path.join(DATA_DIR, 'bot_storage.json');
 
-class StorageManager {
+export class StorageManager {
   public static readonly MAX_PACKS_PER_GROUP = 1000;
   public static readonly GROUP_MEMORY_LIMIT = GROUP_MEMORY_LIMIT;
 
@@ -256,6 +256,7 @@ class StorageManager {
     userLustLevels: {}
   };
   private raidStates: Record<number, RaidStateRecord> = {};
+  private lastSettingsTimestamps: Map<number, number> = new Map();
   private isLoaded: boolean = false;
   private saveTimeout: NodeJS.Timeout | null = null;
 
@@ -1610,8 +1611,48 @@ class StorageManager {
     return this.data.settings[chatId];
   }
 
+  public isStaleSettingsUpdate(chatId: number | string, clientTimestamp: number): boolean {
+    const numId = Number(chatId);
+    const last = this.lastSettingsTimestamps.get(numId) || 0;
+    if (clientTimestamp && clientTimestamp < last) {
+      return true; // Stale, superseded by newer request
+    }
+    return false;
+  }
+
+  public recordSettingsTimestamp(chatId: number | string, clientTimestamp: number): void {
+    const numId = Number(chatId);
+    if (clientTimestamp) {
+      const current = this.lastSettingsTimestamps.get(numId) || 0;
+      if (clientTimestamp > current) {
+        this.lastSettingsTimestamps.set(numId, clientTimestamp);
+      }
+    }
+  }
+
   public updateGroupSettings(chatId: number, updates: Partial<GroupSettings>): GroupSettings {
     const current = this.getGroupSettings(chatId);
+    
+    // Check if updates are identical to current settings (idempotency check)
+    let hasActualChanges = false;
+    for (const [k, v] of Object.entries(updates)) {
+      if (k === 'updatedAt' || k === '_clientTimestamp' || k === '_version') continue;
+      const currentVal = (current as any)[k];
+      if (typeof v === 'object' && v !== null) {
+        if (JSON.stringify(currentVal) !== JSON.stringify(v)) {
+          hasActualChanges = true;
+          break;
+        }
+      } else if (currentVal !== v) {
+        hasActualChanges = true;
+        break;
+      }
+    }
+
+    if (!hasActualChanges && !updates.autoResponse && !updates.autoSticker) {
+      return current; // Avoid redundant disk writes and memory object re-allocation
+    }
+
     const mergedAutoResponse = updates.autoResponse
       ? { ...(current.autoResponse || {}), ...updates.autoResponse }
       : current.autoResponse;

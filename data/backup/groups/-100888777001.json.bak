@@ -95,7 +95,7 @@
       "lastStickerTimestamp": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-09-01T07:31:09.244Z",
+    "updatedAt": "2026-09-01T07:31:09.264Z",
     "botLeft": false,
     "unavailable": false,
     "abuseWords": [],
@@ -171,8 +171,8 @@
       "name": "Roxie",
       "displayName": "Roxie",
       "content": "Hello everyone from dashboard!",
-      "timestamp": 1788185670404,
-      "messageId": 1092,
+      "timestamp": 1788252104925,
+      "messageId": 2145,
       "chatId": -100888777001,
       "mediaType": "text",
       "direction": "outgoing",
@@ -185,7 +185,7 @@
       "displayName": "Rahul Sharma",
       "username": "rahul_s",
       "content": "Hello Roxie, are you active?",
-      "timestamp": 1788185665423,
+      "timestamp": 1788252099950,
       "messageId": 4401,
       "chatId": -100888777001,
       "mediaType": "text",
@@ -198,8 +198,8 @@
       "name": "Roxie",
       "displayName": "Roxie",
       "content": "Hey Rahul! Yes, always here 😏",
-      "timestamp": 1788185670430,
-      "messageId": 10248,
+      "timestamp": 1788252104966,
+      "messageId": 9517,
       "chatId": -100888777001,
       "mediaType": "text",
       "direction": "outgoing",
@@ -217,27 +217,13 @@
       "name": "Roxie",
       "displayName": "Roxie",
       "content": "Log verification message",
-      "timestamp": 1788185670702,
+      "timestamp": 1788252105253,
       "messageId": 7711,
       "chatId": -100888777001,
       "mediaType": "text",
       "direction": "outgoing",
       "source": "dashboard",
       "sender": "Roxie"
-    },
-    {
-      "role": "user",
-      "name": "Vikram Patel",
-      "displayName": "Vikram Patel",
-      "username": "vikram_p",
-      "content": "Fresh Telegram message",
-      "timestamp": 1788185670727,
-      "messageId": 99123,
-      "chatId": -100888777001,
-      "mediaType": "text",
-      "direction": "incoming",
-      "source": "telegram",
-      "sender": "Vikram Patel"
     }
   ],
   "statistics": {
@@ -245,6 +231,79 @@
     "notes": [],
     "userMemories": []
   },
-  "activity": [],
-  "updatedAt": "2026-09-01T07:31:09.255Z"
+  "activity": [
+    {
+      "id": "pliyde4",
+      "timestamp": "2026-09-01T08:41:44.938Z",
+      "chatId": -100888777001,
+      "groupId": -100888777001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "send_message",
+      "action": "send_message",
+      "result": "success",
+      "details": "Sent direct message as Roxie to group -100888777001"
+    },
+    {
+      "id": "u54trpj",
+      "timestamp": "2026-09-01T08:41:44.978Z",
+      "chatId": -100888777001,
+      "groupId": -100888777001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "send_message",
+      "action": "send_message",
+      "result": "success",
+      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
+    },
+    {
+      "id": "g974lzf",
+      "timestamp": "2026-09-01T08:41:45.265Z",
+      "chatId": -100888777001,
+      "groupId": -100888777001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "auditor_admin",
+      "command": "send_message",
+      "action": "send_message",
+      "result": "success",
+      "details": "Sent direct message as Roxie to group -100888777001"
+    },
+    {
+      "id": "ict96jr",
+      "timestamp": "2026-09-01T08:41:45.275Z",
+      "chatId": -100888777001,
+      "groupId": -100888777001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "auditor_admin",
+      "command": "send_message",
+      "action": "send_message",
+      "result": "success",
+      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
+    },
+    {
+      "id": "siulvnu",
+      "timestamp": "2026-09-01T08:41:45.287Z",
+      "chatId": -100888777001,
+      "groupId": -100888777001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "send_message",
+      "action": "send_message",
+      "result": "success",
+      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
+    },
+    {
+      "id": "v6twe5u",
+      "timestamp": "2026-09-01T08:41:45.299Z",
+      "chatId": -100888777001,
+      "groupId": -100888777001,
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "send_message",
+      "action": "send_message",
+      "result": "success",
+      "details": "Sent direct message as Roxie to group -100888777001"
+    }
+  ],
+  "updatedAt": "2026-09-01T08:41:45.304Z"
 }

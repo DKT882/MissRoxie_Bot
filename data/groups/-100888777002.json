@@ -8,7 +8,7 @@
   },
   "status": {
     "botLeft": true,
-    "leftAt": "2026-08-31T14:14:30.734Z",
+    "leftAt": "2026-09-01T08:41:45.322Z",
     "unavailable": false,
     "unavailableAt": null,
     "unavailableReason": null
@@ -95,10 +95,10 @@
       "lastStickerTimestamp": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-09-01T07:31:09.272Z",
+    "updatedAt": "2026-09-01T08:41:44.888Z",
     "botLeft": true,
     "unavailable": false,
-    "leftAt": "2026-08-31T14:14:30.734Z",
+    "leftAt": "2026-09-01T08:41:45.322Z",
     "abuseWords": [],
     "notes": "",
     "lustMode": false,
@@ -173,7 +173,7 @@
       "displayName": "Ananya Verma",
       "username": "ananya_v",
       "content": "Group B message here",
-      "timestamp": 1788185667448,
+      "timestamp": 1788252101988,
       "messageId": 8802,
       "chatId": -100888777002,
       "mediaType": "text",
@@ -189,16 +189,17 @@
   },
   "activity": [
     {
-      "id": "ytcs5ir",
-      "timestamp": "2026-09-01T07:31:09.289Z",
+      "id": "2nwh6r2",
+      "timestamp": "2026-09-01T08:41:45.334Z",
       "chatId": -100888777002,
       "groupId": -100888777002,
-      "adminUsername": "admin_operator_roxie",
-      "command": "CONFIG_IMPORTED",
-      "action": "setting_change",
+      "actorRole": "DASHBOARD_ADMIN",
+      "adminUsername": "dashboard_admin",
+      "command": "leave_group",
+      "action": "leave_group",
       "result": "success",
-      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-09-271Z.json)"
+      "details": "Roxie successfully verified and left group -100888777002 via Telegram leaveChat"
     }
   ],
-  "updatedAt": "2026-09-01T07:31:09.293Z"
+  "updatedAt": "2026-09-01T08:41:45.338Z"
 }
