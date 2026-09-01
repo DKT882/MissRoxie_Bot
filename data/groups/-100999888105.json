@@ -95,12 +95,19 @@
       "lastStickerTimestamp": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-08-31T14:09:18.988Z",
+    "updatedAt": "2026-09-01T07:31:09.118Z",
     "botLeft": false,
     "unavailable": true,
     "unavailableAt": "2026-08-31T14:09:18.981Z",
     "unavailableReason": "Bad Request: chat not found",
-    "abuseWords": []
+    "abuseWords": [],
+    "notes": "",
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -126,7 +133,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -168,29 +175,16 @@
   },
   "activity": [
     {
-      "id": "vhv7sqf",
-      "timestamp": "2026-08-31T13:29:44.322Z",
+      "id": "7lu7pjb",
+      "timestamp": "2026-09-01T07:31:09.134Z",
       "chatId": -100999888105,
       "groupId": -100999888105,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "failure",
-      "details": "Cannot leave group -100999888105: Telegram returned \"Bad Request: chat not found\". Group marked as Unavailable / Stale."
-    },
-    {
-      "id": "pqzdu5a",
-      "timestamp": "2026-08-31T14:09:18.986Z",
-      "chatId": -100999888105,
-      "groupId": -100999888105,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "failure",
-      "details": "Cannot leave group -100999888105: Telegram returned \"Bad Request: chat not found\". Group marked as Unavailable / Stale."
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-09-116Z.json)"
     }
   ],
-  "updatedAt": "2026-08-31T14:14:51.130Z"
+  "updatedAt": "2026-09-01T07:31:09.139Z"
 }

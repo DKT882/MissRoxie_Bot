@@ -76,7 +76,7 @@
     "protectionFloodWindow": 5,
     "protectionDuplicateLimit": 3,
     "protectionLinkBurstLimit": 3,
-    "updatedAt": "2026-08-31T14:05:27.855Z",
+    "updatedAt": "2026-09-01T07:31:06.151Z",
     "lustMode": true,
     "botLeft": true,
     "autoResponse": {
@@ -102,7 +102,13 @@
     "stickerPacks": {},
     "unavailable": false,
     "abuseWords": [],
-    "leftAt": "2026-08-31T13:30:39.496Z"
+    "leftAt": "2026-08-31T13:30:39.496Z",
+    "notes": "",
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -128,7 +134,7 @@
   },
   "lustMode": {
     "enabled": true,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -221,51 +227,6 @@
     "notes": [],
     "userMemories": []
   },
-  "activity": [
-    {
-      "id": "iufhiv4",
-      "timestamp": "2026-08-31T13:14:39.803Z",
-      "chatId": -100999111001,
-      "groupId": -100999111001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Roxie successfully verified and left group -100999111001 via Telegram leaveChat"
-    },
-    {
-      "id": "4hrs918",
-      "timestamp": "2026-08-31T13:14:39.917Z",
-      "chatId": -100999111001,
-      "chatTitle": "Roxie Alpha Community",
-      "action": "setting_change",
-      "adminUsername": "dashboard_admin",
-      "details": "Enabled anti-raid protection",
-      "result": "success"
-    },
-    {
-      "id": "g1fnckr",
-      "timestamp": "2026-08-31T13:30:39.503Z",
-      "chatId": -100999111001,
-      "groupId": -100999111001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Roxie successfully verified and left group -100999111001 via Telegram leaveChat"
-    },
-    {
-      "id": "3o1dmi6",
-      "timestamp": "2026-08-31T13:30:39.656Z",
-      "chatId": -100999111001,
-      "chatTitle": "Roxie Alpha Community",
-      "action": "setting_change",
-      "adminUsername": "dashboard_admin",
-      "details": "Enabled anti-raid protection",
-      "result": "success"
-    }
-  ],
-  "updatedAt": "2026-08-31T14:07:14.931Z"
+  "activity": [],
+  "updatedAt": "2026-09-01T07:31:06.160Z"
 }

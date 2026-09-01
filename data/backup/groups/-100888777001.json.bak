@@ -95,10 +95,17 @@
       "lastStickerTimestamp": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-08-31T14:14:30.374Z",
+    "updatedAt": "2026-09-01T07:31:09.244Z",
     "botLeft": false,
     "unavailable": false,
-    "abuseWords": []
+    "abuseWords": [],
+    "notes": "",
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -124,7 +131,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -238,223 +245,6 @@
     "notes": [],
     "userMemories": []
   },
-  "activity": [
-    {
-      "id": "9pbnsn1",
-      "timestamp": "2026-08-31T13:29:15.372Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "gwxi72p",
-      "timestamp": "2026-08-31T13:29:15.391Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "tak50gr",
-      "timestamp": "2026-08-31T13:29:15.801Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "2vfekve",
-      "timestamp": "2026-08-31T13:29:15.805Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "zwp2405",
-      "timestamp": "2026-08-31T13:29:15.811Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "p9ak7ii",
-      "timestamp": "2026-08-31T13:29:15.815Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "z7xokfk",
-      "timestamp": "2026-08-31T14:08:53.763Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "l67d9u0",
-      "timestamp": "2026-08-31T14:08:53.779Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "uscelxh",
-      "timestamp": "2026-08-31T14:08:54.036Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "1hjb13k",
-      "timestamp": "2026-08-31T14:08:54.042Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "jbehtdd",
-      "timestamp": "2026-08-31T14:08:54.047Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "j4jvrfe",
-      "timestamp": "2026-08-31T14:08:54.053Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "su7r04c",
-      "timestamp": "2026-08-31T14:14:30.415Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "s5vqhis",
-      "timestamp": "2026-08-31T14:14:30.438Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "ssyxrfr",
-      "timestamp": "2026-08-31T14:14:30.707Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    },
-    {
-      "id": "kvfpyyz",
-      "timestamp": "2026-08-31T14:14:30.712Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "auditor_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "r19ujvi",
-      "timestamp": "2026-08-31T14:14:30.718Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent reply as Roxie to message 4401 in group -100888777001"
-    },
-    {
-      "id": "gofwsgi",
-      "timestamp": "2026-08-31T14:14:30.723Z",
-      "chatId": -100888777001,
-      "groupId": -100888777001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "send_message",
-      "action": "send_message",
-      "result": "success",
-      "details": "Sent direct message as Roxie to group -100888777001"
-    }
-  ],
-  "updatedAt": "2026-08-31T14:14:30.729Z"
+  "activity": [],
+  "updatedAt": "2026-09-01T07:31:09.255Z"
 }

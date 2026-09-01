@@ -100,33 +100,44 @@
     },
     "stickerPacks": {
       "roxieromancepack": {
-        "name": "RoxieRomancePack",
+        "name": "roxieromancepack",
         "title": "Roxie Romance Official",
+        "telegramUrl": "https://t.me/addstickers/RoxieRomancePack",
         "enabled": true,
         "stickerCount": 3,
         "stickers": [
           {
             "fileId": "custom_sticker_romance_01",
-            "emoji": "❤️"
+            "emoji": "❤️",
+            "category": "general",
+            "mood": "general"
           },
           {
             "fileId": "custom_sticker_romance_02",
-            "emoji": "💋"
+            "emoji": "💋",
+            "category": "general",
+            "mood": "general"
           },
           {
             "fileId": "custom_sticker_romance_03",
-            "emoji": "🥰"
+            "emoji": "🥰",
+            "category": "general",
+            "mood": "general"
           }
-        ],
-        "addedBy": "dashboard_admin",
-        "addedAt": "2026-08-31T13:31:04.236Z"
+        ]
       }
     },
-    "updatedAt": "2026-08-31T14:05:27.870Z",
+    "updatedAt": "2026-09-01T07:31:06.222Z",
     "lustMode": true,
     "botLeft": false,
     "unavailable": false,
-    "abuseWords": []
+    "abuseWords": [],
+    "notes": "",
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -152,7 +163,7 @@
   },
   "lustMode": {
     "enabled": true,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -228,26 +239,31 @@
   },
   "stickerPacks": [
     {
-      "name": "RoxieRomancePack",
+      "name": "roxieromancepack",
       "title": "Roxie Romance Official",
+      "telegramUrl": "https://t.me/addstickers/RoxieRomancePack",
       "enabled": true,
       "stickerCount": 3,
       "stickers": [
         {
           "fileId": "custom_sticker_romance_01",
-          "emoji": "❤️"
+          "emoji": "❤️",
+          "category": "general",
+          "mood": "general"
         },
         {
           "fileId": "custom_sticker_romance_02",
-          "emoji": "💋"
+          "emoji": "💋",
+          "category": "general",
+          "mood": "general"
         },
         {
           "fileId": "custom_sticker_romance_03",
-          "emoji": "🥰"
+          "emoji": "🥰",
+          "category": "general",
+          "mood": "general"
         }
-      ],
-      "addedBy": "dashboard_admin",
-      "addedAt": "2026-08-31T13:31:04.236Z"
+      ]
     }
   ],
   "abuseWords": [],
@@ -286,59 +302,6 @@
     "notes": [],
     "userMemories": []
   },
-  "activity": [
-    {
-      "id": "audit-test-1",
-      "timestamp": "2026-08-31T13:16:04.001Z",
-      "chatId": -100999222001,
-      "chatTitle": "Roxie Alpha Lab",
-      "groupId": -100999222001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "add_sticker_pack",
-      "action": "sticker_pack_add",
-      "result": "success",
-      "details": "Added sticker pack RoxieRomancePack"
-    },
-    {
-      "id": "audit-test-2",
-      "timestamp": "2026-08-31T13:16:04.002Z",
-      "chatId": -100999222001,
-      "chatTitle": "Roxie Alpha Lab",
-      "groupId": -100999222001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "dashboard_settings",
-      "action": "setting_change",
-      "result": "success",
-      "details": "Updated settings: autoResponse (mode: cooldown, cd: 45s)"
-    },
-    {
-      "id": "audit-test-1",
-      "timestamp": "2026-08-31T13:31:04.363Z",
-      "chatId": -100999222001,
-      "chatTitle": "Roxie Alpha Lab",
-      "groupId": -100999222001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "add_sticker_pack",
-      "action": "sticker_pack_add",
-      "result": "success",
-      "details": "Added sticker pack RoxieRomancePack"
-    },
-    {
-      "id": "audit-test-2",
-      "timestamp": "2026-08-31T13:31:04.368Z",
-      "chatId": -100999222001,
-      "chatTitle": "Roxie Alpha Lab",
-      "groupId": -100999222001,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "dashboard_settings",
-      "action": "setting_change",
-      "result": "success",
-      "details": "Updated settings: autoResponse (mode: cooldown, cd: 45s)"
-    }
-  ],
-  "updatedAt": "2026-08-31T14:07:14.942Z"
+  "activity": [],
+  "updatedAt": "2026-09-01T07:31:06.231Z"
 }

@@ -20,7 +20,7 @@
     "stickerProtection": true,
     "warnLimit": 3,
     "reportsEnabled": true,
-    "updatedAt": "2026-08-31T14:05:27.715Z",
+    "updatedAt": "2026-09-01T07:31:05.303Z",
     "warnAction": "ban",
     "warnExpireSeconds": 0,
     "floodEnabled": false,
@@ -87,7 +87,21 @@
     "botLeft": false,
     "unavailable": false,
     "abuseWords": [],
-    "customAbusiveWords": []
+    "customAbusiveWords": [],
+    "autoDeleteJoinLeave": false,
+    "notes": "",
+    "stopSpamEnabled": false,
+    "stopAbusiveEnabled": false,
+    "stopPromotionEnabled": false,
+    "fileProtection": false,
+    "imageProtection": false,
+    "gifProtection": false,
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -113,7 +127,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -154,5 +168,5 @@
     "userMemories": []
   },
   "activity": [],
-  "updatedAt": "2026-08-31T14:07:14.782Z"
+  "updatedAt": "2026-09-01T07:31:05.314Z"
 }

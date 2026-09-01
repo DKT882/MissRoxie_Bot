@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "chat": {
     "chatId": "-100999888102",
-    "title": "Locally Already Left Group",
+    "title": "Group Beta Test",
     "type": "supergroup",
     "username": null
   },
@@ -15,7 +15,7 @@
   },
   "settings": {
     "chatId": -100999888102,
-    "chatTitle": "Locally Already Left Group",
+    "chatTitle": "Group Beta Test",
     "warnLimit": 3,
     "warnAction": "ban",
     "warnExpireSeconds": 0,
@@ -83,7 +83,8 @@
       "randomize": false,
       "minSeconds": 30,
       "maxSeconds": 120,
-      "lastResponseTimestamp": 0
+      "lastResponseTimestamp": 0,
+      "nextAllowedAt": 0
     },
     "autoSticker": {
       "enabled": true,
@@ -92,14 +93,24 @@
       "randomize": false,
       "minSeconds": 60,
       "maxSeconds": 300,
-      "lastStickerTimestamp": 0
+      "lastStickerTimestamp": 0,
+      "nextAllowedAt": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-08-31T14:09:18.940Z",
+    "updatedAt": "2026-09-01T07:53:47.162Z",
     "botLeft": true,
     "leftAt": "2026-08-31T14:09:18.940Z",
     "unavailable": false,
-    "abuseWords": []
+    "abuseWords": [],
+    "antiSpam": false,
+    "lustModeEnabled": false,
+    "notes": "Group Beta Clean Note",
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -125,7 +136,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -136,7 +147,8 @@
     "randomize": false,
     "minSeconds": 30,
     "maxSeconds": 120,
-    "lastResponseTimestamp": 0
+    "lastResponseTimestamp": 0,
+    "nextAllowedAt": 0
   },
   "autoSticker": {
     "enabled": true,
@@ -145,7 +157,8 @@
     "randomize": false,
     "minSeconds": 60,
     "maxSeconds": 300,
-    "lastStickerTimestamp": 0
+    "lastStickerTimestamp": 0,
+    "nextAllowedAt": 0
   },
   "stickers": {
     "mediaLibrary": {
@@ -165,6 +178,29 @@
     "notes": [],
     "userMemories": []
   },
-  "activity": [],
-  "updatedAt": "2026-08-31T14:09:18.942Z"
+  "activity": [
+    {
+      "id": "dy71o80",
+      "timestamp": "2026-09-01T07:31:09.033Z",
+      "chatId": -100999888102,
+      "groupId": -100999888102,
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-09-014Z.json)"
+    },
+    {
+      "id": "4vmvokj",
+      "timestamp": "2026-09-01T07:45:07.142Z",
+      "chatId": -100999888102,
+      "groupId": -100999888102,
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: none)"
+    }
+  ],
+  "updatedAt": "2026-09-01T07:53:47.178Z"
 }

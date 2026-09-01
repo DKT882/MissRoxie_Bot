@@ -97,11 +97,17 @@
       "nextAllowedAt": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-08-31T14:05:27.875Z",
+    "updatedAt": "2026-09-01T07:31:06.243Z",
     "lustMode": true,
     "botLeft": false,
     "unavailable": false,
-    "abuseWords": []
+    "abuseWords": [],
+    "notes": "",
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -127,7 +133,7 @@
   },
   "lustMode": {
     "enabled": true,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -170,5 +176,5 @@
     "userMemories": []
   },
   "activity": [],
-  "updatedAt": "2026-08-31T14:07:14.946Z"
+  "updatedAt": "2026-09-01T07:31:06.252Z"
 }

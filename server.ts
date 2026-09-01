@@ -1911,6 +1911,164 @@ async function startServer() {
     }
   });
 
+  // --- Group Backup & Restore API Endpoints ---
+  app.get('/api/dashboard/groups/:chatId/backup/export-json', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+
+      const backup = db.exportGroupFullBackup(chatId);
+      const filename = `roxie_group_${Math.abs(chatId)}_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Type', 'application/json');
+      res.json(backup);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/dashboard/groups/:chatId/backup/export-csv', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+
+      const csv = db.exportGroupCSV(chatId);
+      const filename = `roxie_group_${Math.abs(chatId)}_report_${new Date().toISOString().slice(0, 10)}.csv`;
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.send(csv);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/backup/preview', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+
+      const { config, selectedSections } = req.body;
+      if (!config || typeof config !== 'object') {
+        return res.status(400).json({ error: 'Invalid configuration payload' });
+      }
+
+      const diff = db.previewGroupImport(chatId, config, selectedSections);
+      res.json(diff);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/backup/import', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+
+      const { config, selectedSections, overrideChatId } = req.body;
+      if (!config || typeof config !== 'object') {
+        return res.status(400).json({ error: 'Invalid configuration payload' });
+      }
+
+      const result = db.importGroupFullBackup(
+        chatId,
+        config,
+        selectedSections,
+        Boolean(overrideChatId),
+        auth.operatorUsername
+      );
+
+      if (!result.ok) {
+        return res.status(400).json(result);
+      }
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/dashboard/groups/:chatId/backup/history', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+
+      const history = db.listGroupSafetyBackups(chatId);
+      res.json(history);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/backup/restore-history', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+
+      const { filename } = req.body;
+      if (!filename || typeof filename !== 'string') {
+        return res.status(400).json({ error: 'Filename is required' });
+      }
+
+      const success = db.restoreGroupSafetyBackup(chatId, filename, auth.operatorUsername);
+      if (!success) {
+        return res.status(400).json({ ok: false, error: 'Failed to restore safety snapshot file' });
+      }
+
+      res.json({ ok: true, message: `Successfully restored safety backup ${filename}` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Bot-Wide Full Backup & Restore ---
+  app.get('/api/dashboard/backup/export-all', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'ADMIN');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+
+      const backup = db.exportAllBotBackup();
+      const filename = `roxie_full_bot_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Type', 'application/json');
+      res.json(backup);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/backup/restore-all', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'ADMIN');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+
+      const { payload, selectedGroupIds } = req.body;
+      if (!payload || typeof payload !== 'object') {
+        return res.status(400).json({ error: 'Invalid full bot backup payload' });
+      }
+
+      const result = db.restoreAllBotBackup(payload, selectedGroupIds, auth.operatorUsername);
+      if (!result.ok) {
+        return res.status(400).json(result);
+      }
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // 15. Activity / Audit Logs with filter
   app.get('/api/dashboard/activity', (req, res) => {
     try {

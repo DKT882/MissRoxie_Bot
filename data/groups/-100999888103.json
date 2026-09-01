@@ -95,11 +95,18 @@
       "lastStickerTimestamp": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-08-31T14:09:18.959Z",
+    "updatedAt": "2026-09-01T07:31:09.046Z",
     "botLeft": true,
     "unavailable": false,
     "leftAt": "2026-08-31T14:09:18.952Z",
-    "abuseWords": []
+    "abuseWords": [],
+    "notes": "",
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -125,7 +132,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -167,29 +174,16 @@
   },
   "activity": [
     {
-      "id": "h0ort2q",
-      "timestamp": "2026-08-31T13:29:44.281Z",
+      "id": "bjdmlg1",
+      "timestamp": "2026-09-01T07:31:09.062Z",
       "chatId": -100999888103,
       "groupId": -100999888103,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
       "result": "success",
-      "details": "Authoritative check confirmed Roxie membership status is \"left\" in -100999888103. Synchronized local state to Left."
-    },
-    {
-      "id": "nz75hyy",
-      "timestamp": "2026-08-31T14:09:18.958Z",
-      "chatId": -100999888103,
-      "groupId": -100999888103,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Authoritative check confirmed Roxie membership status is \"left\" in -100999888103. Synchronized local state to Left."
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-09-044Z.json)"
     }
   ],
-  "updatedAt": "2026-08-31T14:14:51.122Z"
+  "updatedAt": "2026-09-01T07:31:09.066Z"
 }

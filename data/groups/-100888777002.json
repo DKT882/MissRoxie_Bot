@@ -95,11 +95,18 @@
       "lastStickerTimestamp": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-08-31T14:14:30.740Z",
+    "updatedAt": "2026-09-01T07:31:09.272Z",
     "botLeft": true,
     "unavailable": false,
     "leftAt": "2026-08-31T14:14:30.734Z",
-    "abuseWords": []
+    "abuseWords": [],
+    "notes": "",
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -125,7 +132,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -182,41 +189,16 @@
   },
   "activity": [
     {
-      "id": "0jod2ep",
-      "timestamp": "2026-08-31T13:29:15.831Z",
+      "id": "ytcs5ir",
+      "timestamp": "2026-09-01T07:31:09.289Z",
       "chatId": -100888777002,
       "groupId": -100888777002,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
       "result": "success",
-      "details": "Roxie successfully verified and left group -100888777002 via Telegram leaveChat"
-    },
-    {
-      "id": "xr39p61",
-      "timestamp": "2026-08-31T14:08:54.068Z",
-      "chatId": -100888777002,
-      "groupId": -100888777002,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Roxie successfully verified and left group -100888777002 via Telegram leaveChat"
-    },
-    {
-      "id": "o2yy92c",
-      "timestamp": "2026-08-31T14:14:30.739Z",
-      "chatId": -100888777002,
-      "groupId": -100888777002,
-      "actorRole": "DASHBOARD_ADMIN",
-      "adminUsername": "dashboard_admin",
-      "command": "leave_group",
-      "action": "leave_group",
-      "result": "success",
-      "details": "Roxie successfully verified and left group -100888777002 via Telegram leaveChat"
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-09-271Z.json)"
     }
   ],
-  "updatedAt": "2026-08-31T14:14:51.150Z"
+  "updatedAt": "2026-09-01T07:31:09.293Z"
 }

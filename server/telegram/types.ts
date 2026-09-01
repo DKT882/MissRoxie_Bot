@@ -380,8 +380,9 @@ export interface GroupStickerPackConfig {
   name: string;
   title: string;
   enabled: boolean;
+  telegramUrl?: string;
   stickerCount?: number;
-  stickers?: Array<{ fileId: string; emoji?: string }>;
+  stickers?: Array<{ fileId: string; emoji?: string; category?: string; mood?: string; name?: string }>;
   addedBy?: string | number;
   addedAt?: string;
 }
@@ -434,15 +435,19 @@ export interface ScheduledMessage {
   id: string;
   chatId: number;
   chatTitle?: string;
-  adminId: number;
+  name?: string;
+  cron?: string;
+  timezone?: string;
+  enabled?: boolean;
+  adminId?: number;
   adminUsername?: string;
   message: string;
   messageText?: string;
   contentType?: 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation';
   mediaFileId?: string;
-  intervalMs: number;
-  intervalFormatted: string;
-  nextRun: string;
+  intervalMs?: number;
+  intervalFormatted?: string;
+  nextRun?: string;
   createdAt: string;
   runsCount: number;
 }

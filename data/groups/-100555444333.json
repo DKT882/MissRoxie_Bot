@@ -56,7 +56,7 @@
     "imageProtection": true,
     "fileProtection": true,
     "customAbusiveWords": [],
-    "updatedAt": "2026-08-31T14:07:14.845Z",
+    "updatedAt": "2026-09-01T07:31:05.681Z",
     "automodEnabled": false,
     "mediaAction": "delete",
     "warnEscalation": [],
@@ -95,7 +95,15 @@
     "chatTitle": "Group -100555444333",
     "botLeft": false,
     "unavailable": false,
-    "abuseWords": []
+    "abuseWords": [],
+    "autoDeleteJoinLeave": false,
+    "notes": "",
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -121,7 +129,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -238,6 +246,18 @@
     "notes": [],
     "userMemories": []
   },
-  "activity": [],
-  "updatedAt": "2026-08-31T14:14:51.016Z"
+  "activity": [
+    {
+      "id": "vy53yt3",
+      "timestamp": "2026-09-01T07:31:05.697Z",
+      "chatId": -100555444333,
+      "groupId": -100555444333,
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-05-680Z.json)"
+    }
+  ],
+  "updatedAt": "2026-09-01T07:31:05.699Z"
 }

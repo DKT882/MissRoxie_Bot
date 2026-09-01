@@ -67,7 +67,7 @@
     "automations": [],
     "rules": "",
     "lastAllTimestamp": 0,
-    "updatedAt": "2026-08-31T14:07:14.861Z",
+    "updatedAt": "2026-09-01T07:31:05.759Z",
     "chatbotEnabled": true,
     "chatbotMode": "auto",
     "protectionEnabled": true,
@@ -96,7 +96,14 @@
     "stickerPacks": {},
     "botLeft": false,
     "unavailable": false,
-    "abuseWords": []
+    "abuseWords": [],
+    "notes": "",
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -122,7 +129,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -162,6 +169,18 @@
     "notes": [],
     "userMemories": []
   },
-  "activity": [],
-  "updatedAt": "2026-08-31T14:14:51.029Z"
+  "activity": [
+    {
+      "id": "m42h7to",
+      "timestamp": "2026-09-01T07:31:05.775Z",
+      "chatId": -1004492955135,
+      "groupId": -1004492955135,
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-05-758Z.json)"
+    }
+  ],
+  "updatedAt": "2026-09-01T07:31:05.777Z"
 }

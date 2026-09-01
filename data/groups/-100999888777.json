@@ -54,7 +54,7 @@
     "goodbyeMessage": "Goodbye {user}!",
     "slowModeSeconds": 0,
     "reportsEnabled": true,
-    "updatedAt": "2026-08-31T14:07:14.819Z",
+    "updatedAt": "2026-09-01T07:31:05.545Z",
     "customAbusiveWords": [],
     "stopPromotionEnabled": true,
     "automodEnabled": false,
@@ -94,7 +94,20 @@
     "stickerPacks": {},
     "botLeft": false,
     "unavailable": false,
-    "abuseWords": []
+    "abuseWords": [],
+    "autoDeleteJoinLeave": false,
+    "notes": "",
+    "stopSpamEnabled": false,
+    "stopAbusiveEnabled": false,
+    "fileProtection": false,
+    "imageProtection": false,
+    "gifProtection": false,
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -125,7 +138,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -187,6 +200,18 @@
     ],
     "userMemories": []
   },
-  "activity": [],
-  "updatedAt": "2026-08-31T14:14:50.997Z"
+  "activity": [
+    {
+      "id": "b07bx9h",
+      "timestamp": "2026-09-01T07:31:05.559Z",
+      "chatId": -100999888777,
+      "groupId": -100999888777,
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-05-537Z.json)"
+    }
+  ],
+  "updatedAt": "2026-09-01T07:31:05.561Z"
 }

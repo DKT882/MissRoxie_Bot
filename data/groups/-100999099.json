@@ -94,11 +94,18 @@
       "lastStickerTimestamp": 0
     },
     "stickerPacks": {},
-    "updatedAt": "2026-08-31T14:07:14.999Z",
+    "updatedAt": "2026-09-01T07:31:09.366Z",
     "chatTitle": "Group -100999099",
     "botLeft": false,
     "unavailable": false,
-    "abuseWords": []
+    "abuseWords": [],
+    "notes": "",
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -124,7 +131,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -164,6 +171,18 @@
     "notes": [],
     "userMemories": []
   },
-  "activity": [],
-  "updatedAt": "2026-08-31T14:14:51.162Z"
+  "activity": [
+    {
+      "id": "psv9wum",
+      "timestamp": "2026-09-01T07:31:09.384Z",
+      "chatId": -100999099,
+      "groupId": -100999099,
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-09-365Z.json)"
+    }
+  ],
+  "updatedAt": "2026-09-01T07:31:09.388Z"
 }

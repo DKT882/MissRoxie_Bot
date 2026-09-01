@@ -51,7 +51,7 @@
     "goodbyeMessage": "Goodbye {user}!",
     "slowModeSeconds": 0,
     "reportsEnabled": true,
-    "updatedAt": "2026-08-31T14:05:27.761Z",
+    "updatedAt": "2026-09-01T07:31:05.600Z",
     "automodEnabled": false,
     "mediaAction": "delete",
     "warnEscalation": [],
@@ -90,7 +90,21 @@
     "botLeft": false,
     "unavailable": false,
     "abuseWords": [],
-    "customAbusiveWords": []
+    "customAbusiveWords": [],
+    "autoDeleteJoinLeave": false,
+    "notes": "",
+    "stopSpamEnabled": false,
+    "stopAbusiveEnabled": false,
+    "stopPromotionEnabled": false,
+    "fileProtection": false,
+    "imageProtection": false,
+    "gifProtection": false,
+    "lustMode": false,
+    "lustLevel": 0,
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
   },
   "permissions": {
     "contentPermissions": null,
@@ -118,7 +132,7 @@
   },
   "lustMode": {
     "enabled": false,
-    "level": 1,
+    "level": 0,
     "lustStickers": {},
     "userLustLevels": []
   },
@@ -286,11 +300,143 @@
         "intervalFormatted": "1h",
         "nextRun": "2026-08-30T19:11:01.361Z",
         "adminId": 999
+      },
+      {
+        "id": "ZYWSXD",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "55O99P",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "Z1CLUO",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "83NSXH",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "W1HJPK",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "M8HLLH",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "YDSVDX",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "2PHBNL",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "CM0L6Y",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "HR6JN8",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "MD5SE1",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
+      },
+      {
+        "id": "Q306OV",
+        "chatId": -100111222333,
+        "name": "Restored Schedule",
+        "cron": "0 12 * * *",
+        "message": "Daily check-in",
+        "enabled": true,
+        "timezone": "UTC",
+        "createdAt": "2026-09-01T07:31:05.600Z",
+        "runsCount": 0
       }
     ],
     "notes": [],
     "userMemories": []
   },
   "activity": [],
-  "updatedAt": "2026-08-31T14:07:14.827Z"
+  "updatedAt": "2026-09-01T07:31:05.608Z"
 }

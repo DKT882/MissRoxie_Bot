@@ -50,7 +50,10 @@ import {
   Zap,
   UserCheck,
   UserMinus,
-  Settings2
+  Settings2,
+  Upload,
+  Copy,
+  FileCode
 } from 'lucide-react';
 
 const LIVE_TESTS = [
@@ -207,6 +210,7 @@ export default function App() {
     | 'messages'
     | 'activity'
     | 'danger_zone'
+    | 'backup'
     | 'settings'
     | 'permissions'
   >('overview');
@@ -224,6 +228,26 @@ export default function App() {
     maintenanceMode: false
   });
   const [savingGlobal, setSavingGlobal] = useState<boolean>(false);
+
+  // Backup & Restore states
+  const [backupEditorJson, setBackupEditorJson] = useState<string>('');
+  const [backupEditorError, setBackupEditorError] = useState<string | null>(null);
+  const [backupEditorSuccess, setBackupEditorSuccess] = useState<string | null>(null);
+  const [backupImportJson, setBackupImportJson] = useState<string>('');
+  const [backupImportSelectedSections, setBackupImportSelectedSections] = useState<string[]>([
+    'settings', 'welcome', 'moderation', 'contentProtection', 'abuseWords',
+    'stickers', 'lustMode', 'autoResponse', 'autoSticker', 'slowmode',
+    'personality', 'schedules', 'notes'
+  ]);
+  const [backupOverrideChatId, setBackupOverrideChatId] = useState<boolean>(false);
+  const [backupDiffPreview, setBackupDiffPreview] = useState<any | null>(null);
+  const [backupHistoryList, setBackupHistoryList] = useState<any[]>([]);
+  const [backupNotification, setBackupNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [backupLoading, setBackupLoading] = useState<boolean>(false);
+  const [copiedJsonToast, setCopiedJsonToast] = useState<boolean>(false);
+  const [botBackupJson, setBotBackupJson] = useState<string>('');
+  const [botBackupNotification, setBotBackupNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [botBackupLoading, setBotBackupLoading] = useState<boolean>(false);
 
   // Group Full Management States
   const [groupAbuseWords, setGroupAbuseWords] = useState<string[]>([]);
@@ -354,14 +378,15 @@ export default function App() {
       // Fetch group details if a group is open or selected
       const targetDetailId = activeGroupDetailId || (selectedChatId !== 'all' ? selectedChatId : null);
       if (targetDetailId) {
-        const [detailRes, modsRes, permsRes, groupStickersRes, abuseRes, membersRes, lustUsersRes] = await Promise.all([
+        const [detailRes, modsRes, permsRes, groupStickersRes, abuseRes, membersRes, lustUsersRes, historyRes] = await Promise.all([
           fetch(`/api/dashboard/groups/${targetDetailId}`),
           fetch(`/api/dashboard/groups/${targetDetailId}/moderators`),
           fetch(`/api/dashboard/groups/${targetDetailId}/permissions`),
           fetch(`/api/dashboard/groups/${targetDetailId}/stickers`),
           fetch(`/api/dashboard/groups/${targetDetailId}/abuse-words`),
           fetch(`/api/dashboard/groups/${targetDetailId}/members`),
-          fetch(`/api/dashboard/groups/${targetDetailId}/lust/users`)
+          fetch(`/api/dashboard/groups/${targetDetailId}/lust/users`),
+          fetch(`/api/dashboard/groups/${targetDetailId}/backup/history`)
         ]);
         if (detailRes.ok) {
           const dData = await detailRes.json();
@@ -379,6 +404,7 @@ export default function App() {
         }
         if (membersRes.ok) setGroupMembersList(await membersRes.json());
         if (lustUsersRes.ok) setGroupLustUsers(await lustUsersRes.json());
+        if (historyRes && historyRes.ok) setBackupHistoryList(await historyRes.json());
       } else {
         setGroupDetails(null);
         setGroupModerators(null);
@@ -387,6 +413,7 @@ export default function App() {
         setGroupAbuseWords([]);
         setGroupMembersList([]);
         setGroupLustUsers([]);
+        setBackupHistoryList([]);
       }
 
       // Fetch active private chat conversation
@@ -729,6 +756,250 @@ export default function App() {
       alert(`✕ Error: ${err.message}`);
     } finally {
       setExecutingDangerAction(false);
+    }
+  };
+
+  // --- Backup & Restore Handlers ---
+  const handleDownloadGroupJson = async () => {
+    if (!activeGroupDetailId) return;
+    try {
+      setBackupLoading(true);
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/backup/export-json`);
+      if (!res.ok) throw new Error('Failed to export JSON');
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `roxie_group_${Math.abs(Number(activeGroupDetailId))}_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setBackupNotification({ type: 'success', message: 'Lossless JSON configuration backup downloaded!' });
+    } catch (e: any) {
+      setBackupNotification({ type: 'error', message: e.message || 'Download failed' });
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleDownloadGroupCsv = async () => {
+    if (!activeGroupDetailId) return;
+    try {
+      setBackupLoading(true);
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/backup/export-csv`);
+      if (!res.ok) throw new Error('Failed to export CSV');
+      const csvText = await res.text();
+      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `roxie_group_${Math.abs(Number(activeGroupDetailId))}_report_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setBackupNotification({ type: 'success', message: 'Human-readable CSV report downloaded!' });
+    } catch (e: any) {
+      setBackupNotification({ type: 'error', message: e.message || 'CSV download failed' });
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleCopyGroupJson = async () => {
+    if (!activeGroupDetailId) return;
+    try {
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/backup/export-json`);
+      if (!res.ok) throw new Error('Failed to fetch JSON');
+      const data = await res.json();
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+      setCopiedJsonToast(true);
+      setTimeout(() => setCopiedJsonToast(false), 3000);
+      setBackupNotification({ type: 'success', message: 'Configuration JSON copied to clipboard!' });
+    } catch (e: any) {
+      setBackupNotification({ type: 'error', message: 'Failed to copy to clipboard' });
+    }
+  };
+
+  const handleLoadGroupJsonIntoEditor = async () => {
+    if (!activeGroupDetailId) return;
+    try {
+      setBackupLoading(true);
+      setBackupEditorError(null);
+      setBackupEditorSuccess(null);
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/backup/export-json`);
+      if (!res.ok) throw new Error('Failed to load JSON');
+      const data = await res.json();
+      setBackupEditorJson(JSON.stringify(data, null, 2));
+      setBackupEditorSuccess('Loaded latest group configuration into editor');
+    } catch (e: any) {
+      setBackupEditorError(e.message || 'Failed to load configuration');
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleValidateEditorJson = () => {
+    setBackupEditorError(null);
+    setBackupEditorSuccess(null);
+    if (!backupEditorJson.trim()) {
+      setBackupEditorError('Editor is empty. Click "Load Group JSON" to populate.');
+      return false;
+    }
+    try {
+      const parsed = JSON.parse(backupEditorJson);
+      if (typeof parsed !== 'object' || parsed === null) {
+        setBackupEditorError('Root value must be a JSON object');
+        return false;
+      }
+      setBackupEditorSuccess('✅ JSON is completely valid syntax!');
+      return true;
+    } catch (e: any) {
+      setBackupEditorError(`Syntax Error: ${e.message}`);
+      return false;
+    }
+  };
+
+  const handleFormatEditorJson = () => {
+    try {
+      const parsed = JSON.parse(backupEditorJson);
+      setBackupEditorJson(JSON.stringify(parsed, null, 2));
+      setBackupEditorError(null);
+      setBackupEditorSuccess('Formatted JSON successfully');
+    } catch (e: any) {
+      setBackupEditorError(`Cannot format: ${e.message}`);
+    }
+  };
+
+  const handlePreviewImport = async (jsonString: string) => {
+    if (!activeGroupDetailId) return;
+    try {
+      setBackupLoading(true);
+      setBackupNotification(null);
+      const parsed = JSON.parse(jsonString);
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/backup/preview`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          config: parsed,
+          selectedSections: backupImportSelectedSections
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Preview generation failed');
+      setBackupDiffPreview(data);
+    } catch (e: any) {
+      setBackupNotification({ type: 'error', message: `Preview failed: ${e.message}` });
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleApplyImport = async (jsonString: string) => {
+    if (!activeGroupDetailId) return;
+    try {
+      setBackupLoading(true);
+      setBackupNotification(null);
+      const parsed = JSON.parse(jsonString);
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/backup/import`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          config: parsed,
+          selectedSections: backupImportSelectedSections,
+          overrideChatId: backupOverrideChatId
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || 'Import failed');
+      setBackupNotification({ type: 'success', message: data.message || 'Configuration restored successfully!' });
+      setBackupDiffPreview(null);
+      fetchData();
+    } catch (e: any) {
+      setBackupNotification({ type: 'error', message: e.message || 'Import failed' });
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleRestoreSafetySnapshot = async (filename: string) => {
+    if (!activeGroupDetailId) return;
+    if (!confirm(`Restore safety backup snapshot "${filename}"? This will restore the group configuration.`)) return;
+    try {
+      setBackupLoading(true);
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/backup/restore-history`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ filename })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to restore snapshot');
+      setBackupNotification({ type: 'success', message: data.message || 'Safety backup snapshot restored!' });
+      fetchData();
+    } catch (e: any) {
+      setBackupNotification({ type: 'error', message: e.message });
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleExportAllBotBackup = async () => {
+    try {
+      setBotBackupLoading(true);
+      setBotBackupNotification(null);
+      const res = await fetch('/api/dashboard/backup/export-all');
+      if (!res.ok) throw new Error('Failed to export bot backup');
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `roxie_full_bot_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setBotBackupNotification({ type: 'success', message: `Full bot backup with ${data.totalGroups || 0} groups exported!` });
+    } catch (e: any) {
+      setBotBackupNotification({ type: 'error', message: e.message || 'Export failed' });
+    } finally {
+      setBotBackupLoading(false);
+    }
+  };
+
+  const handleRestoreAllBotBackup = async () => {
+    if (!botBackupJson.trim()) {
+      setBotBackupNotification({ type: 'error', message: 'Please paste or upload full bot backup JSON' });
+      return;
+    }
+    if (!confirm('Restore full bot backup? This will restore configurations for all groups contained in the backup file.')) return;
+    try {
+      setBotBackupLoading(true);
+      setBotBackupNotification(null);
+      const parsed = JSON.parse(botBackupJson);
+      const res = await fetch('/api/dashboard/backup/restore-all', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ payload: parsed })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || 'Full bot restore failed');
+      setBotBackupNotification({ type: 'success', message: data.message || 'Bot backup restored successfully!' });
+      fetchData();
+    } catch (e: any) {
+      setBotBackupNotification({ type: 'error', message: e.message || 'Restore failed' });
+    } finally {
+      setBotBackupLoading(false);
     }
   };
 
@@ -1551,6 +1822,88 @@ export default function App() {
                   ))}
                 </div>
               </div>
+
+              {/* Bot-Wide Full Backup & Restore */}
+              <div className={`${themeCardBg} border rounded-2xl p-6 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                      <Database className="w-4 h-4" /> Bot-Wide Complete Backup & Restore
+                    </h3>
+                    <p className={`text-[11px] ${themeMutedText}`}>
+                      Export or restore configurations for all {groups.length} Telegram groups and global flags in a single JSON backup.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleExportAllBotBackup}
+                    disabled={botBackupLoading}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-colors shadow-sm"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {botBackupLoading ? 'Exporting...' : 'Export All Groups JSON'}
+                  </button>
+                </div>
+
+                {botBackupNotification && (
+                  <div className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                    botBackupNotification.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                  }`}>
+                    {botBackupNotification.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                    <span>{botBackupNotification.message}</span>
+                  </div>
+                )}
+
+                <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-3`}>
+                  <span className="text-xs font-bold block">Restore Full Bot Backup</span>
+                  <p className={`text-[11px] ${themeMutedText}`}>
+                    Upload or paste a complete bot backup JSON file to restore all groups. All current group states will have safety backups created automatically before restoration.
+                  </p>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <label className="cursor-pointer px-3 py-1.5 bg-stone-700/40 hover:bg-stone-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 text-stone-300 border border-stone-600/30">
+                        <Upload className="w-3.5 h-3.5" /> Select .json File
+                        <input
+                          type="file"
+                          accept=".json,application/json"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onload = (ev) => {
+                                setBotBackupJson(ev.target?.result as string || '');
+                              };
+                              reader.readAsText(file);
+                            }
+                          }}
+                        />
+                      </label>
+                      {botBackupJson && (
+                        <span className="text-[11px] text-emerald-400 font-mono">
+                          JSON payload loaded ({botBackupJson.length} bytes)
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      value={botBackupJson}
+                      onChange={(e) => setBotBackupJson(e.target.value)}
+                      placeholder='Paste full bot backup JSON here: { "backupVersion": "1.0", "groups": { ... } }'
+                      rows={3}
+                      className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 text-xs font-mono focus:outline-none focus:border-emerald-500`}
+                    />
+                    <div className="flex items-center justify-end">
+                      <button
+                        onClick={handleRestoreAllBotBackup}
+                        disabled={!botBackupJson.trim() || botBackupLoading}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition-colors shadow-sm flex items-center gap-1.5"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${botBackupLoading ? 'animate-spin' : ''}`} />
+                        {botBackupLoading ? 'Restoring All Groups...' : 'Restore Full Bot Backup'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1709,6 +2062,7 @@ export default function App() {
                     { id: 'commands', label: '📜 Commands' },
                     { id: 'messages', label: `💬 Messages (${groupDetails.storedMessages?.length || 0})` },
                     { id: 'activity', label: '📋 Activity' },
+                    { id: 'backup', label: '💾 Backup & Restore' },
                     { id: 'danger_zone', label: '🚨 Danger Zone' }
                   ].map((tab: any) => (
                     <button
@@ -2996,6 +3350,413 @@ export default function App() {
                 </div>
               )}
 
+              {/* INNER TAB: BACKUP, EXPORT & RESTORE */}
+              {groupDetailTab === 'backup' && (
+                <div className="space-y-6">
+                  {/* Header Banner */}
+                  <div className={`${themeCardBg} border rounded-2xl p-6 space-y-3`}>
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                      <div className="space-y-1">
+                        <h3 className="text-base font-bold flex items-center gap-2 text-emerald-400">
+                          <Database className="w-5 h-5" /> 💾 Group Backup, Lossless Export & Restore Studio
+                        </h3>
+                        <p className={`text-xs ${themeMutedText}`}>
+                          Isolated backup management for Group <strong className="font-mono text-emerald-400">{activeGroupDetailId}</strong>. JSON is the authoritative lossless format; CSV provides a flattened summary for human inspection.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-semibold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Scope: 👥 GROUP ISOLATED
+                        </span>
+                      </div>
+                    </div>
+
+                    {backupNotification && (
+                      <div className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 ${
+                        backupNotification.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          {backupNotification.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                          <span>{backupNotification.message}</span>
+                        </div>
+                        <button onClick={() => setBackupNotification(null)} className="opacity-70 hover:opacity-100">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Section 1: Quick Export Cards */}
+                  <div className={`${themeCardBg} border rounded-2xl p-6 space-y-4`}>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
+                      <Download className="w-4 h-4" /> 1. Quick Export & Downloads
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* JSON Download */}
+                      <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex flex-col justify-between space-y-3`}>
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold flex items-center gap-1.5 text-blue-400">
+                            <FileCode className="w-4 h-4" /> 📥 Complete JSON Backup
+                          </span>
+                          <p className={`text-[11px] ${themeMutedText}`}>
+                            Machine-restorable lossless export containing all settings, sticker packs, abuse words, lust modes, and automations.
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleDownloadGroupJson}
+                          disabled={backupLoading}
+                          className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-sm disabled:opacity-50"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Download JSON Backup
+                        </button>
+                      </div>
+
+                      {/* CSV Download */}
+                      <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex flex-col justify-between space-y-3`}>
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold flex items-center gap-1.5 text-amber-400">
+                            <FileText className="w-4 h-4" /> 📊 Flattened CSV Report
+                          </span>
+                          <p className={`text-[11px] ${themeMutedText}`}>
+                            Human-readable spreadsheet export of active rules and policies. Note: Use JSON for complete lossless restore.
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleDownloadGroupCsv}
+                          disabled={backupLoading}
+                          className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-sm disabled:opacity-50"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Download CSV Report
+                        </button>
+                      </div>
+
+                      {/* Copy JSON */}
+                      <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex flex-col justify-between space-y-3`}>
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold flex items-center gap-1.5 text-purple-400">
+                            <Copy className="w-4 h-4" /> 📋 Copy JSON to Clipboard
+                          </span>
+                          <p className={`text-[11px] ${themeMutedText}`}>
+                            Directly copy the formatted backup payload to paste into code editors or other group configs.
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleCopyGroupJson}
+                          className="w-full py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          {copiedJsonToast ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          {copiedJsonToast ? 'Copied to Clipboard!' : 'Copy JSON Configuration'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 2: Direct JSON Editor */}
+                  <div className={`${themeCardBg} border rounded-2xl p-6 space-y-4`}>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
+                          <FileCode className="w-4 h-4" /> 2. Direct JSON Editor
+                        </h4>
+                        <p className={`text-[11px] ${themeMutedText}`}>
+                          Inspect and modify raw JSON parameters directly with instant syntax validation.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleLoadGroupJsonIntoEditor}
+                          disabled={backupLoading}
+                          className="px-3 py-1.5 bg-stone-700/50 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${backupLoading ? 'animate-spin' : ''}`} /> Load Current JSON
+                        </button>
+                        <button
+                          onClick={handleFormatEditorJson}
+                          disabled={!backupEditorJson.trim()}
+                          className="px-3 py-1.5 bg-stone-700/50 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-40"
+                        >
+                          Format
+                        </button>
+                        <button
+                          onClick={handleValidateEditorJson}
+                          disabled={!backupEditorJson.trim()}
+                          className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-40"
+                        >
+                          Validate Syntax
+                        </button>
+                      </div>
+                    </div>
+
+                    {backupEditorError && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 font-mono flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        <span>{backupEditorError}</span>
+                      </div>
+                    )}
+
+                    {backupEditorSuccess && (
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 font-mono flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>{backupEditorSuccess}</span>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <textarea
+                        value={backupEditorJson}
+                        onChange={(e) => {
+                          setBackupEditorJson(e.target.value);
+                          setBackupEditorError(null);
+                          setBackupEditorSuccess(null);
+                        }}
+                        placeholder='Click "Load Current JSON" above to populate this editor with the group configuration.'
+                        rows={12}
+                        className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 text-xs font-mono focus:outline-none focus:border-purple-500 leading-relaxed`}
+                        spellCheck={false}
+                      />
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <span className={`text-[11px] ${themeMutedText}`}>
+                          Editing JSON directly requires applying changes to take runtime effect.
+                        </span>
+                        <button
+                          onClick={() => {
+                            if (handleValidateEditorJson()) {
+                              handlePreviewImport(backupEditorJson);
+                            }
+                          }}
+                          disabled={!backupEditorJson.trim() || backupLoading}
+                          className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition-colors shadow-sm flex items-center gap-1.5"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Preview & Apply JSON Edits
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 3: Import & Partial Restore Studio */}
+                  <div className={`${themeCardBg} border rounded-2xl p-6 space-y-5`}>
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                        <Upload className="w-4 h-4" /> 3. Import & Partial Configuration Restore
+                      </h4>
+                      <p className={`text-[11px] ${themeMutedText}`}>
+                        Restore full backups or selectively restore specific categories without overwriting existing data.
+                      </p>
+                    </div>
+
+                    {/* File upload or paste input */}
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <label className="cursor-pointer px-4 py-2 bg-stone-700/40 hover:bg-stone-700/60 rounded-xl text-xs font-semibold flex items-center gap-2 text-stone-200 border border-stone-600/30 transition-colors">
+                          <Upload className="w-4 h-4" /> Upload .json Backup File
+                          <input
+                            type="file"
+                            accept=".json,application/json"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onload = (ev) => {
+                                  setBackupImportJson(ev.target?.result as string || '');
+                                };
+                                reader.readAsText(file);
+                              }
+                            }}
+                          />
+                        </label>
+                        {backupImportJson && (
+                          <span className="text-xs font-mono text-emerald-400 flex items-center gap-1">
+                            <Check className="w-3.5 h-3.5" /> JSON Loaded ({backupImportJson.length} bytes)
+                          </span>
+                        )}
+                      </div>
+
+                      <textarea
+                        value={backupImportJson}
+                        onChange={(e) => setBackupImportJson(e.target.value)}
+                        placeholder='Or paste exported group backup JSON here: { "backupVersion": "1.0", "settings": { ... } }'
+                        rows={4}
+                        className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 text-xs font-mono focus:outline-none focus:border-emerald-500`}
+                        spellCheck={false}
+                      />
+                    </div>
+
+                    {/* Group ID Mismatch Warning & Override */}
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-2`}>
+                      <div className="flex items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          id="overrideChatIdCheck"
+                          checked={backupOverrideChatId}
+                          onChange={(e) => setBackupOverrideChatId(e.target.checked)}
+                          className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <label htmlFor="overrideChatIdCheck" className="text-xs cursor-pointer select-none space-y-0.5 block">
+                          <span className="font-bold text-stone-200 block">
+                            Import as new configuration for this group (Allow Chat ID Override)
+                          </span>
+                          <span className={`text-[11px] ${themeMutedText} block`}>
+                            Enable this option if you are applying a configuration template exported from another group to this group ({activeGroupDetailId}).
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Partial Import Section Selector Checkboxes */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-stone-200">
+                          Select Categories to Restore:
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setBackupImportSelectedSections([
+                              'settings', 'welcome', 'moderation', 'contentProtection', 'abuseWords',
+                              'stickers', 'lustMode', 'autoResponse', 'autoSticker', 'slowmode',
+                              'personality', 'schedules', 'notes'
+                            ])}
+                            className="text-[11px] text-blue-400 hover:underline font-semibold"
+                          >
+                            Select All
+                          </button>
+                          <span className="text-stone-600">•</span>
+                          <button
+                            onClick={() => setBackupImportSelectedSections([])}
+                            className="text-[11px] text-stone-400 hover:underline font-semibold"
+                          >
+                            Clear All
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                        {[
+                          { id: 'settings', label: '⚙️ General Settings' },
+                          { id: 'welcome', label: '👋 Welcome & Goodbye' },
+                          { id: 'moderation', label: '🛡️ Moderation & Spam' },
+                          { id: 'contentProtection', label: '🔒 Content Protection' },
+                          { id: 'abuseWords', label: '🤬 Abuse Words List' },
+                          { id: 'stickers', label: '🎨 Sticker Packs & Library' },
+                          { id: 'lustMode', label: '❤️ Lust Mode & Levels' },
+                          { id: 'autoResponse', label: '🤖 Auto-Response Engine' },
+                          { id: 'autoSticker', label: '🎭 Auto-Sticker Engine' },
+                          { id: 'slowmode', label: '⏱️ Slowmode Delay' },
+                          { id: 'personality', label: '💬 AI & Personality' },
+                          { id: 'schedules', label: '📅 Schedules' },
+                          { id: 'notes', label: '📝 Group Notes' }
+                        ].map((sec) => {
+                          const isSelected = backupImportSelectedSections.includes(sec.id);
+                          return (
+                            <button
+                              key={sec.id}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setBackupImportSelectedSections(backupImportSelectedSections.filter(s => s !== sec.id));
+                                } else {
+                                  setBackupImportSelectedSections([...backupImportSelectedSections, sec.id]);
+                                }
+                              }}
+                              className={`p-2.5 rounded-xl border text-left text-xs font-semibold flex items-center justify-between transition-all ${
+                                isSelected
+                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                  : `${themeInnerCardBg} ${themeBorder} opacity-60 hover:opacity-90`
+                              }`}
+                            >
+                              <span>{sec.label}</span>
+                              {isSelected ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <div className="w-3.5 h-3.5" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Import Action Buttons */}
+                    <div className="flex items-center justify-end gap-3 pt-2 border-t border-stone-800">
+                      <button
+                        onClick={() => handlePreviewImport(backupImportJson)}
+                        disabled={!backupImportJson.trim() || backupLoading || backupImportSelectedSections.length === 0}
+                        className="px-4 py-2 bg-stone-700/50 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-semibold disabled:opacity-40 transition-colors flex items-center gap-1.5"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> 🔍 Preview Changes
+                      </button>
+                      <button
+                        onClick={() => handleApplyImport(backupImportJson)}
+                        disabled={!backupImportJson.trim() || backupLoading || backupImportSelectedSections.length === 0}
+                        className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition-colors shadow-sm flex items-center gap-1.5"
+                      >
+                        <Database className="w-3.5 h-3.5" /> 💾 Apply Configuration
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Section 4: Automatic Safety Backups History */}
+                  <div className={`${themeCardBg} border rounded-2xl p-6 space-y-4`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                          <Clock className="w-4 h-4" /> 4. Automatic Safety Backups History ({backupHistoryList.length})
+                        </h4>
+                        <p className={`text-[11px] ${themeMutedText}`}>
+                          Automatic snapshots saved in <code className="font-mono text-[10px]">data/backups/group_{activeGroupDetailId}/</code> before every configuration import.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => fetchData()}
+                        className="p-1.5 rounded-lg bg-stone-800/40 hover:bg-stone-800 text-stone-300 text-xs flex items-center gap-1"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" /> Refresh Snapshots
+                      </button>
+                    </div>
+
+                    {backupHistoryList.length === 0 ? (
+                      <div className={`p-6 ${themeInnerCardBg} border ${themeBorder} rounded-xl text-center space-y-1`}>
+                        <p className={`text-xs ${themeMutedText}`}>No pre-import safety backups recorded yet for this group.</p>
+                        <p className={`text-[10px] ${themeMutedText}`}>A snapshot is generated automatically each time a configuration is imported.</p>
+                      </div>
+                    ) : (
+                      <div className={`border ${themeBorder} rounded-xl overflow-hidden`}>
+                        <table className="w-full text-xs text-left">
+                          <thead className={`${themeInnerCardBg} border-b ${themeBorder} text-[11px] font-semibold text-stone-400`}>
+                            <tr>
+                              <th className="p-3">Snapshot Timestamp</th>
+                              <th className="p-3">File Name</th>
+                              <th className="p-3">Size</th>
+                              <th className="p-3 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-stone-800">
+                            {backupHistoryList.map((snap: any, idx: number) => (
+                              <tr key={idx} className="hover:bg-stone-800/20">
+                                <td className="p-3 font-mono text-[11px] text-stone-300">
+                                  {new Date(snap.timestamp).toLocaleString()}
+                                </td>
+                                <td className="p-3 font-mono text-[11px] text-blue-400">
+                                  {snap.filename}
+                                </td>
+                                <td className="p-3 font-mono text-[11px] text-stone-400">
+                                  {(snap.size / 1024).toFixed(1)} KB
+                                </td>
+                                <td className="p-3 text-right">
+                                  <button
+                                    onClick={() => handleRestoreSafetySnapshot(snap.filename)}
+                                    disabled={backupLoading}
+                                    className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 border border-amber-500/30 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1"
+                                  >
+                                    <RefreshCw className="w-3 h-3" /> Restore Snapshot
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* INNER TAB: DANGER ZONE */}
               {groupDetailTab === 'danger_zone' && (
                 <div className={`${themeCardBg} border border-red-500/30 rounded-2xl p-6 space-y-6 bg-red-950/5`}>
@@ -4037,6 +4798,128 @@ export default function App() {
               >
                 {executingDangerAction ? 'Executing...' : 'Confirm Action'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Backup Import Diff Preview Modal */}
+      {backupDiffPreview && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className={`${themeCardBg} border ${themeBorder} rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl max-h-[85vh] flex flex-col`}>
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <Eye className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-base font-bold">🔍 Configuration Changes Preview</h3>
+              </div>
+              <button
+                onClick={() => setBackupDiffPreview(null)}
+                className={`p-1 rounded-lg ${themeInnerCardBg} ${themeMutedText} hover:opacity-100`}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Target Group check */}
+            {!backupDiffPreview.matchedChatId && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-400 space-y-1">
+                <span className="font-bold flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4" /> Group ID Mismatch Detected
+                </span>
+                <p>
+                  Backup belongs to Group <strong>{backupDiffPreview.configChatId}</strong> but you are applying it to Group <strong>{backupDiffPreview.currentChatId}</strong>. Override confirmation is active.
+                </p>
+              </div>
+            )}
+
+            <div className="overflow-y-auto space-y-4 pr-1 flex-1 text-xs">
+              {/* Modified Section */}
+              {backupDiffPreview.modified?.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="font-bold text-amber-400 text-xs flex items-center gap-1.5">
+                    <SlidersHorizontal className="w-3.5 h-3.5" /> Modified Parameters ({backupDiffPreview.modified.length})
+                  </h4>
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl divide-y divide-stone-800`}>
+                    {backupDiffPreview.modified.map((m: any, idx: number) => (
+                      <div key={idx} className="p-2.5 flex items-center justify-between font-mono text-[11px]">
+                        <span className="font-semibold text-stone-200">{m.field}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-400 line-through opacity-80">{String(m.oldValue)}</span>
+                          <span className="text-stone-500">→</span>
+                          <span className="text-emerald-400 font-bold">{String(m.newValue)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Added Section */}
+              {backupDiffPreview.added?.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="font-bold text-emerald-400 text-xs flex items-center gap-1.5">
+                    <Plus className="w-3.5 h-3.5" /> Added Items ({backupDiffPreview.added.length})
+                  </h4>
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-2.5 space-y-1 font-mono text-[11px]`}>
+                    {backupDiffPreview.added.map((a: any, idx: number) => (
+                      <div key={idx} className="text-emerald-400 flex items-center gap-2">
+                        <span>+ {a.field}:</span>
+                        <span className="text-stone-300">{String(a.value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Removed Section */}
+              {backupDiffPreview.removed?.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="font-bold text-red-400 text-xs flex items-center gap-1.5">
+                    <Trash2 className="w-3.5 h-3.5" /> Removed Items ({backupDiffPreview.removed.length})
+                  </h4>
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-2.5 space-y-1 font-mono text-[11px]`}>
+                    {backupDiffPreview.removed.map((r: any, idx: number) => (
+                      <div key={idx} className="text-red-400 flex items-center gap-2">
+                        <span>- {r.field}:</span>
+                        <span className="text-stone-400 line-through">{String(r.value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Unchanged summary */}
+              {backupDiffPreview.unchanged?.length > 0 && (
+                <div className="space-y-1 pt-1">
+                  <span className={`text-[11px] ${themeMutedText}`}>
+                    • {backupDiffPreview.unchanged.length} parameters unchanged.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-stone-800">
+              <span className={`text-[11px] ${themeMutedText}`}>
+                A safety snapshot will be created automatically before applying.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setBackupDiffPreview(null)}
+                  className={`px-4 py-2 ${themeInnerCardBg} border ${themeBorder} rounded-xl text-xs font-semibold`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const payload = backupImportJson.trim() || backupEditorJson.trim();
+                    handleApplyImport(payload);
+                  }}
+                  disabled={backupLoading}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Check className="w-4 h-4" /> Apply Changes Now
+                </button>
+              </div>
             </div>
           </div>
         </div>

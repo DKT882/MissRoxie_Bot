@@ -529,10 +529,22 @@ class StorageManager {
         } catch {}
       }
 
-      // Safe atomic write (write to .tmp then rename)
+      // Safe write (write to .tmp with graceful fallback for Windows file locks)
       const jsonContent = JSON.stringify(safeData, null, 2);
-      fs.writeFileSync(tmpFile, jsonContent, 'utf-8');
-      fs.renameSync(tmpFile, targetFile);
+      try {
+        fs.writeFileSync(tmpFile, jsonContent, 'utf-8');
+        try {
+          if (fs.existsSync(targetFile)) {
+            try { fs.unlinkSync(targetFile); } catch {}
+          }
+          fs.renameSync(tmpFile, targetFile);
+        } catch {
+          fs.writeFileSync(targetFile, jsonContent, 'utf-8');
+          try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
+        }
+      } catch {
+        fs.writeFileSync(targetFile, jsonContent, 'utf-8');
+      }
       this.lastSaveSuccessful = true;
       this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
     } catch (err: any) {
@@ -2104,78 +2116,799 @@ class StorageManager {
     state.raidActiveUntil = active ? now + (durationSeconds || 300) : 0;
   }
 
-  // --- Configuration Export & Import ---
-  public exportGroupConfig(chatId: number): object {
-    const s = this.getGroupSettings(chatId);
-    const filters = this.getFilters(chatId);
-    const notes = this.getAllNotes(chatId);
-    const whitelist = this.getLinkWhitelist(chatId);
-    const locks = this.getLocks(chatId);
-    const mediaLib = this.getMediaLibrary();
+  // --- Configuration Export & Lossless Backup System ---
+  public exportGroupFullBackup(chatId: number | string): any {
+    const numId = Number(chatId);
+    const s = this.getGroupSettings(numId);
+    const mediaLib = this.getMediaLibrary(numId);
+    const abuseWordsList = s.abuseWords || s.customAbusiveWords || [];
+    const notes = this.getAllNotes(numId);
+    const schedules = this.getGroupSchedules(numId);
+    const locks = this.getLocks(numId);
+    const filters = this.getFilters(numId);
+    const whitelist = this.getLinkWhitelist(numId);
+
+    // Build sticker packs with Telegram URLs and metadata
+    const packsList: any[] = [];
+    if (s.stickerPacks && typeof s.stickerPacks === 'object') {
+      for (const [pName, pack] of Object.entries(s.stickerPacks)) {
+        if (pack && pack.name) {
+          const cleanName = pack.name.replace(/^https:\/\/t\.me\/addstickers\//i, '').replace(/[<>]/g, '').trim();
+          packsList.push({
+            name: cleanName,
+            title: pack.title || pack.name,
+            telegramUrl: pack.telegramUrl || `https://t.me/addstickers/${cleanName}`,
+            enabled: pack.enabled !== false,
+            stickerCount: pack.stickerCount || pack.stickers?.length || 0,
+            stickers: Array.isArray(pack.stickers) ? pack.stickers.map((stk: any) => ({
+              fileId: stk.fileId || stk.file_id,
+              emoji: stk.emoji || '✨',
+              category: stk.category || stk.mood || 'general',
+              mood: stk.mood || stk.category || 'general',
+              name: stk.name
+            })) : []
+          });
+        }
+      }
+    }
+
+    // Build user lust levels for this group
+    const userLustScores = Object.entries(this.data.userLustLevels || {})
+      .filter(([k]) => k.startsWith(`${numId}_`))
+      .map(([_, v]) => ({
+        userId: v.userId,
+        level: v.level,
+        lastUpdated: v.lastUpdated
+      }));
 
     return {
-      version: '3.1',
+      backupVersion: '1.0',
+      schemaVersion: 1,
       exportedAt: new Date().toISOString(),
-      chatId,
-      groupTitle: s.chatTitle || 'Roxie Protected Group',
-      settings: {
-        warnLimit: s.warnLimit,
-        warnAction: s.warnAction,
-        warnExpireSeconds: s.warnExpireSeconds,
-        floodEnabled: s.floodEnabled,
-        floodCount: s.floodCount,
-        floodWindow: s.floodWindow,
-        floodAction: s.floodAction,
-        raidEnabled: s.raidEnabled,
-        raidLimit: s.raidLimit,
-        raidWindow: s.raidWindow,
-        raidAction: s.raidAction,
-        raidDuration: s.raidDuration,
-        captchaEnabled: s.captchaEnabled,
-        captchaMode: s.captchaMode,
-        captchaTimeout: s.captchaTimeout,
-        captchaAction: s.captchaAction,
-        linksProtection: s.linksProtection,
-        linksWhitelist: whitelist,
-        mediaProtection: s.mediaProtection,
-        stickerProtection: s.stickerProtection,
-        gifsProtection: s.gifsProtection,
-        videosProtection: s.videosProtection,
-        photosProtection: s.photosProtection,
-        voiceProtection: s.voiceProtection,
-        audioProtection: s.audioProtection,
-        autoDeleteJoinLeave: s.autoDeleteJoinLeave ?? true,
-        locks,
-        welcomeEnabled: s.welcomeEnabled,
-        welcomeMessage: s.welcomeMessage,
-        goodbyeEnabled: s.goodbyeEnabled,
-        goodbyeMessage: s.goodbyeMessage,
-        slowModeSeconds: s.slowModeSeconds,
-        reportsEnabled: s.reportsEnabled,
-        chatbotEnabled: s.chatbotEnabled ?? true,
-        chatbotMode: s.chatbotMode || 'auto',
-        reactionEnabled: s.reactionEnabled ?? true,
-        reactionProbability: s.reactionProbability ?? 0.15,
-        protectionEnabled: s.protectionEnabled ?? true,
-        protectionFloodCount: s.protectionFloodCount ?? 5,
-        protectionFloodWindow: s.protectionFloodWindow ?? 5,
-        protectionDuplicateLimit: s.protectionDuplicateLimit ?? 3,
-        protectionLinkBurstLimit: s.protectionLinkBurstLimit ?? 3,
-        stopSpamEnabled: s.stopSpamEnabled ?? false,
-        stopAbusiveEnabled: s.stopAbusiveEnabled ?? false,
-        stopPromotionEnabled: s.stopPromotionEnabled ?? false,
-        automodEnabled: s.automodEnabled ?? false,
-        securityEnabled: s.securityEnabled ?? false,
-        joinmode: s.joinmode || 'normal',
-        autoAcceptEnabled: s.autoAcceptEnabled ?? false
+      group: {
+        chatId: String(numId),
+        chatTitle: s.chatTitle || `Group ${numId}`,
+        title: s.chatTitle || `Group ${numId}`,
+        username: (s as any).username || null,
+        type: numId < 0 ? 'supergroup' : 'group'
       },
-      filters,
-      notes: notes.map((n) => ({ name: n.name, content: n.content })),
-      mediaLibrary: {
-        stickers: mediaLib.stickers || {},
-        animations: mediaLib.animations || {},
-        stickerMetadata: mediaLib.stickerMetadata || {}
+      settings: {
+        chatTitle: s.chatTitle,
+        slowModeSeconds: s.slowModeSeconds ?? 0,
+        notes: s.notes || '',
+        warnLimit: s.warnLimit ?? 3,
+        warnAction: s.warnAction || 'ban',
+        warnExpireSeconds: s.warnExpireSeconds ?? 0,
+        autoAcceptEnabled: Boolean(s.autoAcceptEnabled),
+        captchaEnabled: Boolean(s.captchaEnabled),
+        captchaMode: s.captchaMode || 'button',
+        captchaTimeout: s.captchaTimeout ?? 120,
+        captchaAction: s.captchaAction || 'kick',
+        autoDeleteJoinLeave: Boolean(s.autoDeleteJoinLeave),
+        reportsEnabled: s.reportsEnabled !== false,
+        reactionEnabled: Boolean(s.reactionEnabled),
+        reactionProbability: s.reactionProbability ?? 0.15,
+        protectionDuplicateLimit: s.protectionDuplicateLimit ?? 3,
+        protectionLinkBurstLimit: s.protectionLinkBurstLimit ?? 3
+      },
+      welcome: {
+        welcomeEnabled: Boolean(s.welcomeEnabled),
+        welcomeMessage: s.welcomeMessage || 'Welcome {user} to {chat}!',
+        goodbyeEnabled: Boolean(s.goodbyeEnabled),
+        goodbyeMessage: s.goodbyeMessage || 'Goodbye {user}!',
+        enabled: Boolean(s.welcomeEnabled),
+        message: s.welcomeMessage || 'Welcome {user} to {chat}!'
+      },
+      moderation: {
+        antiSpam: Boolean((s as any).antiSpam ?? s.stopSpamEnabled),
+        antiFlood: Boolean((s as any).antiFlood ?? s.floodEnabled),
+        stopSpamEnabled: Boolean(s.stopSpamEnabled ?? (s as any).antiSpam),
+        floodEnabled: Boolean(s.floodEnabled ?? (s as any).antiFlood),
+        floodCount: s.floodCount ?? 8,
+        floodWindow: s.floodWindow ?? 5,
+        floodAction: s.floodAction || 'mute',
+        raidEnabled: Boolean(s.raidEnabled),
+        raidLimit: s.raidLimit ?? 8,
+        raidWindow: s.raidWindow ?? 30,
+        raidAction: s.raidAction || 'kick',
+        raidDuration: s.raidDuration ?? 300,
+        stopAbusiveEnabled: Boolean(s.stopAbusiveEnabled),
+        stopPromotionEnabled: Boolean(s.stopPromotionEnabled),
+        automodEnabled: Boolean(s.automodEnabled),
+        securityEnabled: Boolean(s.securityEnabled),
+        locks,
+        filters
+      },
+      contentProtection: {
+        antiLinks: Boolean((s as any).antiLinks ?? s.linksProtection),
+        blockVoiceNotes: Boolean((s as any).blockVoiceNotes ?? s.voiceProtection),
+        linksProtection: Boolean(s.linksProtection ?? (s as any).antiLinks),
+        stickerProtection: Boolean(s.stickerProtection),
+        fileProtection: Boolean(s.fileProtection),
+        imageProtection: Boolean(s.imageProtection),
+        gifProtection: Boolean(s.gifProtection),
+        voiceProtection: Boolean(s.voiceProtection ?? (s as any).blockVoiceNotes),
+        audioProtection: Boolean(s.audioProtection),
+        linksWhitelist: whitelist
+      },
+      abuseWords: abuseWordsList,
+      stickers: {
+        packs: packsList,
+        stickerProtection: Boolean(s.stickerProtection),
+        mediaLibrary: {
+          stickers: mediaLib?.stickers || {},
+          animations: mediaLib?.animations || {},
+          lustStickers: mediaLib?.lustStickers || {},
+          stickerMetadata: mediaLib?.stickerMetadata || {}
+        }
+      },
+      lustMode: {
+        enabled: Boolean((s as any).lustModeEnabled ?? s.lustMode),
+        level: (s as any).lustModeLevel ?? s.lustLevel ?? 0,
+        lustModeEnabled: Boolean((s as any).lustModeEnabled ?? s.lustMode),
+        lustModeLevel: (s as any).lustModeLevel ?? s.lustLevel ?? 0,
+        userLustLevels: userLustScores
+      },
+      autoResponse: {
+        enabled: Boolean(s.autoResponse?.enabled),
+        frequencyMinutes: (s.autoResponse as any)?.frequencyMinutes ?? 30,
+        triggerMode: (s.autoResponse as any)?.triggerMode || s.autoResponse?.mode || 'time',
+        sampleReplies: (s.autoResponse as any)?.sampleReplies || [],
+        mode: s.autoResponse?.mode || 'every_message',
+        cooldownSeconds: s.autoResponse?.cooldownSeconds ?? 30,
+        minSeconds: s.autoResponse?.minSeconds ?? 30,
+        maxSeconds: s.autoResponse?.maxSeconds ?? 120
+      },
+      autoSticker: {
+        enabled: Boolean(s.autoSticker?.enabled),
+        frequencyMinutes: (s.autoSticker as any)?.frequencyMinutes ?? 30,
+        defaultPacks: (s.autoSticker as any)?.defaultPacks || [],
+        mode: s.autoSticker?.mode || 'cooldown',
+        cooldownSeconds: s.autoSticker?.cooldownSeconds ?? 60,
+        minSeconds: s.autoSticker?.minSeconds ?? 60,
+        maxSeconds: s.autoSticker?.maxSeconds ?? 300
+      },
+      slowmode: {
+        slowModeSeconds: s.slowModeSeconds ?? 0
+      },
+      permissions: {
+        contentPermissions: this.data.contentPermissions?.[String(numId)] || null,
+        customRoles: this.data.customRoles?.[String(numId)] || {},
+        stickerFreeUsers: (this.data.stickerFreeUsers || []).filter((u: any) => u.chatId === numId)
+      },
+      commands: {
+        customCommands: (s as any).customCommands || {}
+      },
+      schedules: schedules.map((sc: any) => ({
+        id: sc.id,
+        name: sc.name || sc.title,
+        cron: sc.cron || sc.time,
+        enabled: sc.enabled !== false,
+        text: sc.text || sc.message,
+        message: sc.message || sc.text,
+        target: sc.target || String(numId),
+        timezone: sc.timezone || 'UTC'
+      })),
+      personality: {
+        chatbotEnabled: Boolean(s.chatbotEnabled),
+        chatbotMode: s.chatbotMode || 'auto',
+        personality: (s as any).personality || 'normal',
+        language: (s as any).language || 'hinglish',
+        brotherZoneEnabled: (s as any).brotherZoneEnabled ?? true,
+        coupleFilter: (s as any).coupleFilter ?? true
+      },
+      notes: notes.map((n) => ({ name: n.name, content: n.content }))
+    };
+  }
+
+  public exportGroupConfig(chatId: number): object {
+    return this.exportGroupFullBackup(chatId);
+  }
+
+  // --- CSV Human-Readable Flattened Export ---
+  public exportGroupCSV(chatId: number | string): string {
+    const backup = this.exportGroupFullBackup(chatId);
+    const rows: string[][] = [
+      ['type', 'category', 'key', 'value', 'details']
+    ];
+
+    const escapeCsv = (val: any) => {
+      if (val === undefined || val === null) return '';
+      const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
       }
+      return str;
+    };
+
+    // Group info
+    rows.push(['group', 'identity', 'chatId', backup.group.chatId, 'Telegram Chat ID']);
+    rows.push(['group', 'identity', 'title', backup.group.title, 'Group Title']);
+    if (backup.group.username) rows.push(['group', 'identity', 'username', backup.group.username, 'Group Username']);
+    rows.push(['group', 'identity', 'type', backup.group.type, 'Group Type']);
+
+    // General settings
+    for (const [k, v] of Object.entries(backup.settings)) {
+      rows.push(['setting', 'general', k, String(v), 'General Configuration']);
+    }
+
+    // Welcome & Goodbye
+    rows.push(['welcome', 'greeting', 'enabled', String(backup.welcome.enabled), 'Welcome Greeting Switch']);
+    rows.push(['welcome', 'greeting', 'message', backup.welcome.message, 'Welcome Message Template']);
+    rows.push(['welcome', 'departure', 'goodbyeEnabled', String(backup.welcome.goodbyeEnabled), 'Goodbye Switch']);
+    rows.push(['welcome', 'departure', 'goodbyeMessage', backup.welcome.goodbyeMessage, 'Goodbye Message Template']);
+
+    // Moderation
+    for (const [k, v] of Object.entries(backup.moderation)) {
+      if (typeof v !== 'object') {
+        rows.push(['moderation', 'antiSpam', k, String(v), 'Moderation Setting']);
+      }
+    }
+
+    // Content protection
+    for (const [k, v] of Object.entries(backup.contentProtection)) {
+      if (k === 'linksWhitelist') {
+        rows.push(['contentProtection', 'whitelist', 'domains', (v as string[]).join('; '), 'Whitelisted Domains']);
+      } else {
+        rows.push(['contentProtection', 'media', k, String(v), 'Content Protection Switch']);
+      }
+    }
+
+    // Abuse words
+    for (const w of backup.abuseWords) {
+      rows.push(['abuseWord', 'filter', 'word', w, 'Custom Abuse Word']);
+    }
+
+    // Sticker packs
+    for (const p of backup.stickers.packs) {
+      rows.push(['stickerPack', 'library', p.name, p.enabled ? 'Enabled' : 'Disabled', `${p.title} (${p.stickerCount} stickers) - ${p.telegramUrl}`]);
+    }
+
+    // Lust mode
+    rows.push(['lustMode', 'personality', 'enabled', String(backup.lustMode.enabled), 'Lust Mode Switch']);
+    rows.push(['lustMode', 'personality', 'level', String(backup.lustMode.level), 'Group Base Lust Level (0-4)']);
+
+    // Auto response & Auto sticker
+    rows.push(['autoResponse', 'automation', 'mode', backup.autoResponse.mode, `cooldown: ${backup.autoResponse.cooldownSeconds}s, enabled: ${backup.autoResponse.enabled}`]);
+    rows.push(['autoSticker', 'automation', 'mode', backup.autoSticker.mode, `cooldown: ${backup.autoSticker.cooldownSeconds}s, enabled: ${backup.autoSticker.enabled}`]);
+
+    // Slowmode
+    rows.push(['slowmode', 'delay', 'seconds', String(backup.slowmode.slowModeSeconds), backup.slowmode.slowModeSeconds > 0 ? `${backup.slowmode.slowModeSeconds}s delay` : 'Disabled']);
+
+    // Personality
+    for (const [k, v] of Object.entries(backup.personality)) {
+      rows.push(['personality', 'ai', k, String(v), 'Conversational Intelligence']);
+    }
+
+    // Schedules
+    for (const sc of backup.schedules) {
+      rows.push(['schedule', 'task', sc.name || sc.id, sc.cron || sc.time, `timezone: ${sc.timezone}, enabled: ${sc.enabled}`]);
+    }
+
+    // Notes
+    for (const n of backup.notes) {
+      rows.push(['note', 'storage', n.name, n.content, 'Group Note']);
+    }
+
+    return rows.map(r => r.map(escapeCsv).join(',')).join('\r\n');
+  }
+
+  // --- Pre-Import Safety Snapshots ---
+  public createGroupSafetyBackup(chatId: number | string): string {
+    const numId = Number(chatId);
+    const backupDir = path.join(this.dataDir, 'backups', `group_${numId}`);
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+    const fullBackup = this.exportGroupFullBackup(numId);
+    const timestampStr = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const filename = `backup_${timestampStr}.json`;
+    const filepath = path.join(backupDir, filename);
+    fs.writeFileSync(filepath, JSON.stringify(fullBackup, null, 2), 'utf-8');
+    return filename;
+  }
+
+  public listGroupSafetyBackups(chatId: number | string): Array<{ filename: string; timestamp: string; size: number; path: string }> {
+    const numId = Number(chatId);
+    const backupDir = path.join(this.dataDir, 'backups', `group_${numId}`);
+    if (!fs.existsSync(backupDir)) return [];
+    try {
+      const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.json'));
+      return files.map(filename => {
+        const fullPath = path.join(backupDir, filename);
+        const stat = fs.statSync(fullPath);
+        return {
+          filename,
+          timestamp: stat.mtime.toISOString(),
+          size: stat.size,
+          path: fullPath
+        };
+      }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    } catch {
+      return [];
+    }
+  }
+
+  public restoreGroupSafetyBackup(chatId: number | string, filename: string, operatorUsername?: string): boolean {
+    const numId = Number(chatId);
+    const cleanFilename = path.basename(filename);
+    const backupPath = path.join(this.dataDir, 'backups', `group_${numId}`, cleanFilename);
+    if (!fs.existsSync(backupPath)) return false;
+    try {
+      const raw = fs.readFileSync(backupPath, 'utf-8');
+      const data = JSON.parse(raw);
+      const res = this.importGroupFullBackup(numId, data, undefined, true, operatorUsername, true);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  // --- Change Preview / Diff Calculation ---
+  public previewGroupImport(
+    chatId: number | string,
+    incomingConfig: any,
+    selectedSections?: string[]
+  ): {
+    matchedChatId: boolean;
+    configChatId: string | null;
+    currentChatId: string;
+    modified: Array<{ field: string; section: string; oldValue: any; newValue: any }>;
+    added: Array<{ field: string; section: string; value: any }>;
+    removed: Array<{ field: string; section: string; value: any }>;
+    unchanged: Array<{ field: string; section: string; value: any }>;
+  } {
+    const numId = Number(chatId);
+    const current = this.exportGroupFullBackup(numId);
+    const rawConfigChatId = incomingConfig?.group?.chatId !== undefined ? incomingConfig.group.chatId : (incomingConfig?.chatId !== undefined ? incomingConfig.chatId : null);
+    const configChatId = rawConfigChatId !== null ? String(rawConfigChatId) : null;
+    const matchedChatId = configChatId ? String(configChatId) === String(numId) : true;
+
+    const modified: Array<{ field: string; section: string; oldValue: any; newValue: any }> = [];
+    const added: Array<{ field: string; section: string; value: any }> = [];
+    const removed: Array<{ field: string; section: string; value: any }> = [];
+    const unchanged: Array<{ field: string; section: string; value: any }> = [];
+
+    const sections = selectedSections || [
+      'settings', 'welcome', 'moderation', 'contentProtection', 'abuseWords',
+      'stickers', 'lustMode', 'autoResponse', 'autoSticker', 'slowmode',
+      'personality', 'schedules', 'notes'
+    ];
+
+    // Settings diff
+    if (sections.includes('settings') && incomingConfig.settings) {
+      for (const [k, v] of Object.entries(incomingConfig.settings)) {
+        const oldVal = current.settings[k];
+        if (oldVal !== undefined) {
+          if (oldVal !== v) {
+            modified.push({ field: k, section: 'settings', oldValue: oldVal, newValue: v });
+          } else {
+            unchanged.push({ field: k, section: 'settings', value: v });
+          }
+        } else {
+          added.push({ field: k, section: 'settings', value: v });
+        }
+      }
+    }
+
+    // Welcome diff
+    if (sections.includes('welcome') && incomingConfig.welcome) {
+      for (const [k, v] of Object.entries(incomingConfig.welcome)) {
+        const oldVal = current.welcome[k];
+        if (oldVal !== v) {
+          modified.push({ field: `welcome.${k}`, section: 'welcome', oldValue: oldVal, newValue: v });
+        } else {
+          unchanged.push({ field: `welcome.${k}`, section: 'welcome', value: v });
+        }
+      }
+    }
+
+    // Moderation diff
+    if (sections.includes('moderation') && incomingConfig.moderation) {
+      for (const [k, v] of Object.entries(incomingConfig.moderation)) {
+        if (typeof v !== 'object') {
+          const oldVal = current.moderation[k];
+          if (oldVal !== v) {
+            modified.push({ field: `moderation.${k}`, section: 'moderation', oldValue: oldVal, newValue: v });
+          } else {
+            unchanged.push({ field: `moderation.${k}`, section: 'moderation', value: v });
+          }
+        }
+      }
+    }
+
+    // Content Protection diff
+    if (sections.includes('contentProtection') && incomingConfig.contentProtection) {
+      for (const [k, v] of Object.entries(incomingConfig.contentProtection)) {
+        if (k !== 'linksWhitelist') {
+          const oldVal = current.contentProtection[k];
+          if (oldVal !== v) {
+            modified.push({ field: `contentProtection.${k}`, section: 'contentProtection', oldValue: oldVal, newValue: v });
+          } else {
+            unchanged.push({ field: `contentProtection.${k}`, section: 'contentProtection', value: v });
+          }
+        }
+      }
+    }
+
+    // Abuse Words diff
+    if (sections.includes('abuseWords') && Array.isArray(incomingConfig.abuseWords)) {
+      const oldWords = new Set(current.abuseWords || []);
+      const newWords = new Set(incomingConfig.abuseWords);
+      for (const w of newWords) {
+        if (!oldWords.has(w)) added.push({ field: `abuseWord:${w}`, section: 'abuseWords', value: w });
+      }
+      for (const w of oldWords) {
+        if (!newWords.has(w)) removed.push({ field: `abuseWord:${w}`, section: 'abuseWords', value: w });
+      }
+    }
+
+    // Sticker Packs diff
+    if (sections.includes('stickers') && incomingConfig.stickers?.packs) {
+      const oldPackNames = new Set((current.stickers?.packs || []).map((p: any) => p.name));
+      for (const p of incomingConfig.stickers.packs) {
+        if (!oldPackNames.has(p.name)) {
+          added.push({ field: `stickerPack:${p.name}`, section: 'stickers', value: p.title || p.name });
+        } else {
+          unchanged.push({ field: `stickerPack:${p.name}`, section: 'stickers', value: p.title || p.name });
+        }
+      }
+    }
+
+    // Lust Mode diff
+    if (sections.includes('lustMode') && incomingConfig.lustMode) {
+      if (current.lustMode.enabled !== incomingConfig.lustMode.enabled) {
+        modified.push({ field: 'lustMode.enabled', section: 'lustMode', oldValue: current.lustMode.enabled, newValue: incomingConfig.lustMode.enabled });
+      }
+      if (current.lustMode.level !== incomingConfig.lustMode.level) {
+        modified.push({ field: 'lustMode.level', section: 'lustMode', oldValue: current.lustMode.level, newValue: incomingConfig.lustMode.level });
+      }
+    }
+
+    // Auto Response diff
+    if (sections.includes('autoResponse') && incomingConfig.autoResponse) {
+      if (current.autoResponse.enabled !== incomingConfig.autoResponse.enabled) {
+        modified.push({ field: 'autoResponse.enabled', section: 'autoResponse', oldValue: current.autoResponse.enabled, newValue: incomingConfig.autoResponse.enabled });
+      }
+      if (current.autoResponse.cooldownSeconds !== incomingConfig.autoResponse.cooldownSeconds) {
+        modified.push({ field: 'autoResponse.cooldownSeconds', section: 'autoResponse', oldValue: `${current.autoResponse.cooldownSeconds}s`, newValue: `${incomingConfig.autoResponse.cooldownSeconds}s` });
+      }
+    }
+
+    // Auto Sticker diff
+    if (sections.includes('autoSticker') && incomingConfig.autoSticker) {
+      if (current.autoSticker.enabled !== incomingConfig.autoSticker.enabled) {
+        modified.push({ field: 'autoSticker.enabled', section: 'autoSticker', oldValue: current.autoSticker.enabled, newValue: incomingConfig.autoSticker.enabled });
+      }
+      if (current.autoSticker.cooldownSeconds !== incomingConfig.autoSticker.cooldownSeconds) {
+        modified.push({ field: 'autoSticker.cooldownSeconds', section: 'autoSticker', oldValue: `${current.autoSticker.cooldownSeconds}s`, newValue: `${incomingConfig.autoSticker.cooldownSeconds}s` });
+      }
+    }
+
+    return {
+      matchedChatId,
+      configChatId,
+      currentChatId: String(numId),
+      modified,
+      added,
+      removed,
+      unchanged
+    };
+  }
+
+  // --- Authoritative Group Import Execution ---
+  public importGroupFullBackup(
+    chatId: number | string,
+    config: any,
+    selectedSections?: string[],
+    overrideChatId: boolean = false,
+    operatorUsername: string = 'dashboard_admin',
+    skipSafetyBackup: boolean = false
+  ): { ok: boolean; success?: boolean; message: string; appliedSections: string[]; backupFile?: string; error?: string } {
+    const numId = Number(chatId);
+    if (!config || typeof config !== 'object') {
+      return { ok: false, success: false, message: 'Invalid backup format: Must be a JSON object.', appliedSections: [], error: 'INVALID_JSON' };
+    }
+
+    // Schema validation
+    if (!config.backupVersion && !config.settings && !config.welcome && !config.moderation && !config.group && !config.stickers) {
+      return { ok: false, success: false, message: 'Invalid backup schema: Missing backupVersion or recognized configuration sections.', appliedSections: [], error: 'INVALID_BACKUP_SCHEMA' };
+    }
+
+    // Group ID safety validation
+    const rawConfigChatId = config?.group?.chatId !== undefined ? config.group.chatId : (config?.chatId !== undefined ? config.chatId : null);
+    const configChatId = rawConfigChatId !== null ? String(rawConfigChatId) : null;
+    if (configChatId && configChatId !== String(numId) && !overrideChatId) {
+      return {
+        ok: false,
+        success: false,
+        message: `⚠️ This backup belongs to another Telegram group (${configChatId}). Enable override confirmation to apply it to this group (${numId}).`,
+        appliedSections: [],
+        error: 'MISMATCHED_GROUP_ID'
+      };
+    }
+
+    // Automatic Safety Backup before applying
+    let backupFile = '';
+    if (!skipSafetyBackup) {
+      try {
+        backupFile = this.createGroupSafetyBackup(numId);
+      } catch (e: any) {
+        console.warn(`[Storage] Failed to create pre-import safety backup for group ${numId}:`, e.message);
+      }
+    }
+
+    const sections = selectedSections && selectedSections.length > 0 ? selectedSections : [
+      'settings', 'welcome', 'moderation', 'contentProtection', 'abuseWords',
+      'stickers', 'lustMode', 'autoResponse', 'autoSticker', 'slowmode',
+      'personality', 'schedules', 'notes', 'permissions'
+    ];
+
+    const appliedSections: string[] = [];
+    const existing = this.getGroupSettings(numId);
+    const updates: Partial<GroupSettings> = {};
+
+    // 1. Settings section
+    if (sections.includes('settings') && (config.settings || config.general)) {
+      const src = config.settings || config.general;
+      if (typeof src.warnLimit === 'number') updates.warnLimit = Math.max(1, Math.min(20, src.warnLimit));
+      if (typeof src.warnAction === 'string' && ['ban', 'kick', 'mute', 'warn_only'].includes(src.warnAction)) updates.warnAction = src.warnAction;
+      if (typeof src.warnExpireSeconds === 'number') updates.warnExpireSeconds = Math.max(0, src.warnExpireSeconds);
+      if (typeof src.autoAcceptEnabled === 'boolean') updates.autoAcceptEnabled = src.autoAcceptEnabled;
+      if (typeof src.captchaEnabled === 'boolean') updates.captchaEnabled = src.captchaEnabled;
+      if (typeof src.captchaMode === 'string' && ['button', 'math'].includes(src.captchaMode)) updates.captchaMode = src.captchaMode;
+      if (typeof src.captchaTimeout === 'number') updates.captchaTimeout = Math.max(10, Math.min(600, src.captchaTimeout));
+      if (typeof src.autoDeleteJoinLeave === 'boolean') updates.autoDeleteJoinLeave = src.autoDeleteJoinLeave;
+      if (typeof src.reportsEnabled === 'boolean') updates.reportsEnabled = src.reportsEnabled;
+      if (typeof src.slowModeSeconds === 'number') updates.slowModeSeconds = src.slowModeSeconds;
+      if (typeof src.notes === 'string') updates.notes = src.notes as any;
+      if (typeof src.chatTitle === 'string') updates.chatTitle = src.chatTitle;
+      if (typeof src.antiSpam === 'boolean') (updates as any).antiSpam = src.antiSpam;
+      if (typeof src.antiFlood === 'boolean') (updates as any).antiFlood = src.antiFlood;
+      if (typeof src.antiLinks === 'boolean') (updates as any).antiLinks = src.antiLinks;
+      if (typeof src.blockVoiceNotes === 'boolean') (updates as any).blockVoiceNotes = src.blockVoiceNotes;
+      if (typeof src.protectionDuplicateLimit === 'number') updates.protectionDuplicateLimit = Math.max(1, src.protectionDuplicateLimit);
+      if (typeof src.protectionLinkBurstLimit === 'number') updates.protectionLinkBurstLimit = Math.max(1, src.protectionLinkBurstLimit);
+      appliedSections.push('settings');
+    }
+
+    // 2. Welcome section
+    if (sections.includes('welcome') && config.welcome) {
+      if (typeof config.welcome.welcomeEnabled === 'boolean') updates.welcomeEnabled = config.welcome.welcomeEnabled;
+      else if (typeof config.welcome.enabled === 'boolean') updates.welcomeEnabled = config.welcome.enabled;
+
+      if (typeof config.welcome.welcomeMessage === 'string') updates.welcomeMessage = config.welcome.welcomeMessage;
+      else if (typeof config.welcome.message === 'string') updates.welcomeMessage = config.welcome.message;
+
+      if (typeof config.welcome.goodbyeEnabled === 'boolean') updates.goodbyeEnabled = config.welcome.goodbyeEnabled;
+      if (typeof config.welcome.goodbyeMessage === 'string') updates.goodbyeMessage = config.welcome.goodbyeMessage;
+      appliedSections.push('welcome');
+    }
+
+    // 3. Moderation section
+    if (sections.includes('moderation') && config.moderation) {
+      const m = config.moderation;
+      if (typeof m.stopSpamEnabled === 'boolean') updates.stopSpamEnabled = m.stopSpamEnabled;
+      if (typeof m.floodEnabled === 'boolean') updates.floodEnabled = m.floodEnabled;
+      if (typeof m.floodCount === 'number') updates.floodCount = Math.max(1, Math.min(50, m.floodCount));
+      if (typeof m.floodWindow === 'number') updates.floodWindow = Math.max(1, Math.min(60, m.floodWindow));
+      if (typeof m.floodAction === 'string' && ['delete', 'mute', 'kick', 'ban'].includes(m.floodAction)) updates.floodAction = m.floodAction;
+      if (typeof m.raidEnabled === 'boolean') updates.raidEnabled = m.raidEnabled;
+      if (typeof m.raidLimit === 'number') updates.raidLimit = Math.max(1, Math.min(50, m.raidLimit));
+      if (typeof m.raidWindow === 'number') updates.raidWindow = Math.max(1, Math.min(120, m.raidWindow));
+      if (typeof m.raidAction === 'string' && ['kick', 'mute', 'ban', 'restrict'].includes(m.raidAction)) updates.raidAction = m.raidAction;
+      if (typeof m.raidDuration === 'number') updates.raidDuration = Math.max(10, Math.min(86400, m.raidDuration));
+      if (typeof m.stopAbusiveEnabled === 'boolean') updates.stopAbusiveEnabled = m.stopAbusiveEnabled;
+      if (typeof m.stopPromotionEnabled === 'boolean') updates.stopPromotionEnabled = m.stopPromotionEnabled;
+      if (typeof m.automodEnabled === 'boolean') updates.automodEnabled = m.automodEnabled;
+      if (typeof m.securityEnabled === 'boolean') updates.securityEnabled = m.securityEnabled;
+      if (m.locks && typeof m.locks === 'object') updates.locks = m.locks;
+      if (m.filters && typeof m.filters === 'object') {
+        for (const [k, v] of Object.entries(m.filters)) {
+          if (typeof v === 'string') this.setFilter(numId, k, v);
+        }
+      }
+      appliedSections.push('moderation');
+    }
+
+    // 4. Content Protection section
+    if (sections.includes('contentProtection') && (config.contentProtection || config.protection)) {
+      const cp = config.contentProtection || config.protection;
+      if (typeof cp.linksProtection === 'boolean') updates.linksProtection = cp.linksProtection;
+      if (typeof cp.stickerProtection === 'boolean') updates.stickerProtection = cp.stickerProtection;
+      if (typeof cp.fileProtection === 'boolean') updates.fileProtection = cp.fileProtection;
+      if (typeof cp.imageProtection === 'boolean') updates.imageProtection = cp.imageProtection;
+      if (typeof cp.gifProtection === 'boolean') updates.gifProtection = cp.gifProtection;
+      if (typeof cp.voiceProtection === 'boolean') updates.voiceProtection = cp.voiceProtection;
+      if (typeof cp.audioProtection === 'boolean') updates.audioProtection = cp.audioProtection;
+      if (Array.isArray(cp.linksWhitelist)) updates.linksWhitelist = cp.linksWhitelist.filter((w: any) => typeof w === 'string');
+      appliedSections.push('contentProtection');
+    }
+
+    // 5. Abuse Words section
+    if (sections.includes('abuseWords') && Array.isArray(config.abuseWords)) {
+      const cleanWords = config.abuseWords
+        .filter((w: any) => typeof w === 'string' && w.trim().length > 0)
+        .map((w: string) => w.trim().toLowerCase());
+      updates.abuseWords = Array.from(new Set(cleanWords));
+      updates.customAbusiveWords = updates.abuseWords;
+      appliedSections.push('abuseWords');
+    }
+
+    // 6. Stickers section
+    if (sections.includes('stickers')) {
+      const stkPacks = config.stickers?.packs || config.stickerPacks;
+      if (Array.isArray(stkPacks)) {
+        if (!existing.stickerPacks) existing.stickerPacks = {};
+        for (const pack of stkPacks) {
+          if (pack && pack.name) {
+            const cleanName = pack.name.replace(/^https:\/\/t\.me\/addstickers\//i, '').replace(/[<>]/g, '').trim().toLowerCase();
+            existing.stickerPacks[cleanName] = {
+              name: cleanName,
+              title: pack.title || pack.name,
+              telegramUrl: pack.telegramUrl || `https://t.me/addstickers/${cleanName}`,
+              enabled: pack.enabled !== false,
+              stickerCount: pack.stickerCount || pack.stickers?.length || 0,
+              stickers: pack.stickers || []
+            };
+          }
+        }
+        updates.stickerPacks = existing.stickerPacks;
+      }
+      // Media library custom stickers
+      const ml = config.stickers?.mediaLibrary || config.mediaLibrary;
+      if (ml && typeof ml === 'object') {
+        const lib = this.getMediaLibrary(numId);
+        if (ml.stickers && typeof ml.stickers === 'object') {
+          if (!lib.stickers) lib.stickers = {};
+          for (const [mood, fileIds] of Object.entries(ml.stickers)) {
+            if (Array.isArray(fileIds)) {
+              if (!lib.stickers[mood]) lib.stickers[mood] = [];
+              for (const fId of fileIds) {
+                if (typeof fId === 'string' && fId.length >= 10 && !lib.stickers[mood].includes(fId)) {
+                  lib.stickers[mood].push(fId);
+                }
+              }
+            }
+          }
+        }
+        if (ml.stickerMetadata && typeof ml.stickerMetadata === 'object') {
+          if (!lib.stickerMetadata) lib.stickerMetadata = {};
+          lib.stickerMetadata = { ...lib.stickerMetadata, ...ml.stickerMetadata };
+        }
+      }
+      appliedSections.push('stickers');
+    }
+
+    // 7. Lust Mode section
+    if (sections.includes('lustMode') && config.lustMode) {
+      if (typeof config.lustMode.enabled === 'boolean') updates.lustMode = config.lustMode.enabled;
+      if (typeof config.lustMode.level === 'number') updates.lustLevel = Math.max(0, Math.min(4, config.lustMode.level));
+      if (Array.isArray(config.lustMode.userLustLevels)) {
+        if (!this.data.userLustLevels) this.data.userLustLevels = {};
+        for (const ul of config.lustMode.userLustLevels) {
+          if (ul && ul.userId && typeof ul.level === 'number') {
+            const key = `${numId}_${ul.userId}`;
+            this.data.userLustLevels[key] = {
+              groupId: numId,
+              userId: ul.userId,
+              level: Math.max(0, Math.min(4, ul.level)),
+              lastUpdated: Date.now()
+            };
+          }
+        }
+      }
+      appliedSections.push('lustMode');
+    }
+
+    // 8. Auto Response section
+    if (sections.includes('autoResponse') && config.autoResponse) {
+      const ar = config.autoResponse;
+      updates.autoResponse = {
+        enabled: Boolean(ar.enabled),
+        mode: ['every_message', 'cooldown', 'random', 'disabled'].includes(ar.mode) ? ar.mode : 'every_message',
+        cooldownSeconds: typeof ar.cooldownSeconds === 'number' ? Math.max(10, Math.min(86400, ar.cooldownSeconds)) : 30,
+        minSeconds: typeof ar.minSeconds === 'number' ? Math.max(10, ar.minSeconds) : 30,
+        maxSeconds: typeof ar.maxSeconds === 'number' ? Math.max(10, ar.maxSeconds) : 120
+      };
+      appliedSections.push('autoResponse');
+    }
+
+    // 9. Auto Sticker section
+    if (sections.includes('autoSticker') && config.autoSticker) {
+      const as = config.autoSticker;
+      updates.autoSticker = {
+        enabled: Boolean(as.enabled),
+        mode: ['every_message', 'cooldown', 'random', 'disabled'].includes(as.mode) ? as.mode : 'cooldown',
+        cooldownSeconds: typeof as.cooldownSeconds === 'number' ? Math.max(10, Math.min(86400, as.cooldownSeconds)) : 60,
+        minSeconds: typeof as.minSeconds === 'number' ? Math.max(10, as.minSeconds) : 60,
+        maxSeconds: typeof as.maxSeconds === 'number' ? Math.max(10, as.maxSeconds) : 300
+      };
+      appliedSections.push('autoSticker');
+    }
+
+    // 10. Slowmode section
+    if (sections.includes('slowmode') && (config.slowmode !== undefined || config.settings?.slowModeSeconds !== undefined)) {
+      const sm = typeof config.settings?.slowModeSeconds === 'number' ? config.settings.slowModeSeconds : (typeof config.slowmode?.slowModeSeconds === 'number' ? config.slowmode.slowModeSeconds : undefined);
+      if (typeof sm === 'number') {
+        updates.slowModeSeconds = Math.max(0, Math.min(86400, sm));
+        appliedSections.push('slowmode');
+      }
+    }
+
+    // 11. Personality / AI section
+    if (sections.includes('personality') && (config.personality || config.ai)) {
+      const p = config.personality || config.ai;
+      if (typeof p.chatbotEnabled === 'boolean') updates.chatbotEnabled = p.chatbotEnabled;
+      if (typeof p.chatbotMode === 'string') updates.chatbotMode = p.chatbotMode;
+      if (typeof p.personality === 'string') (updates as any).personality = p.personality;
+      if (typeof p.language === 'string') (updates as any).language = p.language;
+      if (typeof p.brotherZoneEnabled === 'boolean') (updates as any).brotherZoneEnabled = p.brotherZoneEnabled;
+      if (typeof p.coupleFilter === 'boolean') (updates as any).coupleFilter = p.coupleFilter;
+      appliedSections.push('personality');
+    }
+
+    // 12. Schedules section
+    if (sections.includes('schedules') && Array.isArray(config.schedules)) {
+      for (const sc of config.schedules) {
+        if (sc && (sc.message || sc.name)) {
+          const newSchedule: ScheduledMessage = {
+            id: sc.id || Math.random().toString(36).substring(2, 8).toUpperCase(),
+            chatId: numId,
+            name: sc.name || 'Restored Schedule',
+            cron: sc.cron || sc.time || '0 12 * * *',
+            message: sc.message || 'Scheduled Message',
+            enabled: sc.enabled !== false,
+            timezone: sc.timezone || 'Asia/Kolkata',
+            createdAt: new Date().toISOString(),
+            runsCount: 0
+          };
+          const existingIdx = this.data.schedules.findIndex(
+            s => s.id === newSchedule.id || (s.chatId === numId && s.name.toLowerCase() === newSchedule.name.toLowerCase())
+          );
+          if (existingIdx >= 0) {
+            this.data.schedules[existingIdx] = newSchedule;
+          } else {
+            this.data.schedules.push(newSchedule);
+          }
+        }
+      }
+      appliedSections.push('schedules');
+    }
+
+    // 13. Notes section
+    if (sections.includes('notes') && Array.isArray(config.notes)) {
+      for (const n of config.notes) {
+        if (n && typeof n.name === 'string' && typeof n.content === 'string') {
+          this.saveNote(numId, n.name, n.content, 0);
+        }
+      }
+      appliedSections.push('notes');
+    }
+
+    // Apply accumulated group updates and persist to disk synchronously
+    this.updateGroupSettings(numId, updates);
+    this.saveGroupJsonSync(numId);
+
+    // Audit logging
+    this.logAction({
+      id: Math.random().toString(36).slice(2, 9),
+      timestamp: new Date().toISOString(),
+      chatId: numId,
+      groupId: numId,
+      adminUsername: operatorUsername,
+      command: appliedSections.length > 5 ? 'CONFIG_IMPORTED' : 'CONFIG_PARTIALLY_IMPORTED',
+      action: 'setting_change',
+      result: 'success',
+      details: `Imported sections: ${appliedSections.join(', ')} (Backup: ${backupFile || 'none'})`
+    });
+
+    return {
+      ok: true,
+      success: true,
+      message: `Successfully imported ${appliedSections.length} sections into Group ${numId}.`,
+      appliedSections,
+      backupFile
     };
   }
 
@@ -2184,117 +2917,81 @@ class StorageManager {
     config: any,
     importedBy: number
   ): { ok: boolean; message: string; appliedCount: number } {
-    if (!config || typeof config !== 'object' || !config.settings) {
-      return { ok: false, message: 'Invalid configuration format. Must contain "settings" object.', appliedCount: 0 };
-    }
-
-    const s = config.settings;
-    const updates: Partial<GroupSettings> = {};
-    let appliedCount = 0;
-
-    if (typeof s.warnLimit === 'number' && s.warnLimit >= 1 && s.warnLimit <= 20) { updates.warnLimit = s.warnLimit; appliedCount++; }
-    if (['ban', 'mute', 'kick', 'warn_only'].includes(s.warnAction)) { updates.warnAction = s.warnAction; appliedCount++; }
-    if (typeof s.warnExpireSeconds === 'number') { updates.warnExpireSeconds = s.warnExpireSeconds; appliedCount++; }
-    if (typeof s.floodEnabled === 'boolean') { updates.floodEnabled = s.floodEnabled; appliedCount++; }
-    if (typeof s.floodCount === 'number') { updates.floodCount = s.floodCount; appliedCount++; }
-    if (typeof s.floodWindow === 'number') { updates.floodWindow = s.floodWindow; appliedCount++; }
-    if (['delete', 'mute', 'kick', 'ban'].includes(s.floodAction)) { updates.floodAction = s.floodAction; appliedCount++; }
-    if (typeof s.raidEnabled === 'boolean') { updates.raidEnabled = s.raidEnabled; appliedCount++; }
-    if (typeof s.raidLimit === 'number') { updates.raidLimit = s.raidLimit; appliedCount++; }
-    if (typeof s.raidWindow === 'number') { updates.raidWindow = s.raidWindow; appliedCount++; }
-    if (['kick', 'mute', 'ban', 'restrict'].includes(s.raidAction)) { updates.raidAction = s.raidAction; appliedCount++; }
-    if (typeof s.raidDuration === 'number') { updates.raidDuration = s.raidDuration; appliedCount++; }
-    if (typeof s.captchaEnabled === 'boolean') { updates.captchaEnabled = s.captchaEnabled; appliedCount++; }
-    if (['button', 'math'].includes(s.captchaMode)) { updates.captchaMode = s.captchaMode; appliedCount++; }
-    if (typeof s.captchaTimeout === 'number') { updates.captchaTimeout = s.captchaTimeout; appliedCount++; }
-    if (['kick', 'mute', 'ban'].includes(s.captchaAction)) { updates.captchaAction = s.captchaAction; appliedCount++; }
-    if (typeof s.linksProtection === 'boolean') { updates.linksProtection = s.linksProtection; appliedCount++; }
-    if (Array.isArray(s.linksWhitelist)) { updates.linksWhitelist = s.linksWhitelist; appliedCount++; }
-    if (typeof s.mediaProtection === 'boolean') { updates.mediaProtection = s.mediaProtection; appliedCount++; }
-    if (typeof s.stickerProtection === 'boolean') { updates.stickerProtection = s.stickerProtection; appliedCount++; }
-    if (typeof s.gifsProtection === 'boolean') { updates.gifsProtection = s.gifsProtection; appliedCount++; }
-    if (typeof s.videosProtection === 'boolean') { updates.videosProtection = s.videosProtection; appliedCount++; }
-    if (typeof s.photosProtection === 'boolean') { updates.photosProtection = s.photosProtection; appliedCount++; }
-    if (typeof s.voiceProtection === 'boolean') { updates.voiceProtection = s.voiceProtection; appliedCount++; }
-    if (typeof s.audioProtection === 'boolean') { updates.audioProtection = s.audioProtection; appliedCount++; }
-    if (typeof s.autoDeleteJoinLeave === 'boolean') { updates.autoDeleteJoinLeave = s.autoDeleteJoinLeave; appliedCount++; }
-    if (s.locks && typeof s.locks === 'object') { updates.locks = s.locks; appliedCount++; }
-    if (typeof s.welcomeEnabled === 'boolean') { updates.welcomeEnabled = s.welcomeEnabled; appliedCount++; }
-    if (typeof s.welcomeMessage === 'string') { updates.welcomeMessage = s.welcomeMessage; appliedCount++; }
-    if (typeof s.goodbyeEnabled === 'boolean') { updates.goodbyeEnabled = s.goodbyeEnabled; appliedCount++; }
-    if (typeof s.goodbyeMessage === 'string') { updates.goodbyeMessage = s.goodbyeMessage; appliedCount++; }
-    if (typeof s.reportsEnabled === 'boolean') { updates.reportsEnabled = s.reportsEnabled; appliedCount++; }
-    if (typeof s.chatbotEnabled === 'boolean') { updates.chatbotEnabled = s.chatbotEnabled; appliedCount++; }
-    if (typeof s.chatbotMode === 'string') { updates.chatbotMode = s.chatbotMode; appliedCount++; }
-    if (typeof s.reactionEnabled === 'boolean') { updates.reactionEnabled = s.reactionEnabled; appliedCount++; }
-    if (typeof s.reactionProbability === 'number') { updates.reactionProbability = s.reactionProbability; appliedCount++; }
-    if (typeof s.protectionEnabled === 'boolean') { updates.protectionEnabled = s.protectionEnabled; appliedCount++; }
-    if (typeof s.protectionFloodCount === 'number') { updates.protectionFloodCount = s.protectionFloodCount; appliedCount++; }
-    if (typeof s.protectionFloodWindow === 'number') { updates.protectionFloodWindow = s.protectionFloodWindow; appliedCount++; }
-    if (typeof s.protectionDuplicateLimit === 'number') { updates.protectionDuplicateLimit = s.protectionDuplicateLimit; appliedCount++; }
-    if (typeof s.protectionLinkBurstLimit === 'number') { updates.protectionLinkBurstLimit = s.protectionLinkBurstLimit; appliedCount++; }
-    if (typeof s.stopSpamEnabled === 'boolean') { updates.stopSpamEnabled = s.stopSpamEnabled; appliedCount++; }
-    if (typeof s.stopAbusiveEnabled === 'boolean') { updates.stopAbusiveEnabled = s.stopAbusiveEnabled; appliedCount++; }
-    if (typeof s.stopPromotionEnabled === 'boolean') { updates.stopPromotionEnabled = s.stopPromotionEnabled; appliedCount++; }
-    if (typeof s.automodEnabled === 'boolean') { updates.automodEnabled = s.automodEnabled; appliedCount++; }
-    if (typeof s.securityEnabled === 'boolean') { updates.securityEnabled = s.securityEnabled; appliedCount++; }
-    if (['normal', 'captcha', 'strict'].includes(s.joinmode)) { updates.joinmode = s.joinmode; appliedCount++; }
-    if (typeof s.autoAcceptEnabled === 'boolean') { updates.autoAcceptEnabled = s.autoAcceptEnabled; appliedCount++; }
-
-    this.updateGroupSettings(chatId, updates);
-
-    // Import filters
-    if (config.filters && typeof config.filters === 'object') {
-      for (const [k, v] of Object.entries(config.filters)) {
-        if (typeof v === 'string') {
-          this.setFilter(chatId, k, v);
-          appliedCount++;
-        }
-      }
-    }
-
-    // Import notes
-    if (Array.isArray(config.notes)) {
-      for (const n of config.notes) {
-        if (n && typeof n.name === 'string' && typeof n.content === 'string') {
-          this.saveNote(chatId, n.name, n.content, importedBy);
-          appliedCount++;
-        }
-      }
-    }
-
-    // Import media library stickers & animations & metadata if present
-    if (config.mediaLibrary && typeof config.mediaLibrary === 'object') {
-      const ml = config.mediaLibrary;
-      if (ml.stickers && typeof ml.stickers === 'object') {
-        for (const [mood, fileIds] of Object.entries(ml.stickers)) {
-          if (Array.isArray(fileIds)) {
-            for (const fId of fileIds) {
-              if (typeof fId === 'string' && fId.length >= 15) {
-                const meta = ml.stickerMetadata && ml.stickerMetadata[fId] ? ml.stickerMetadata[fId] : undefined;
-                this.addStickerToLibrary(mood, fId, meta);
-                appliedCount++;
-              }
-            }
-          }
-        }
-      }
-      if (ml.animations && typeof ml.animations === 'object') {
-        for (const [mood, fileIds] of Object.entries(ml.animations)) {
-          if (Array.isArray(fileIds)) {
-            for (const fId of fileIds) {
-              if (typeof fId === 'string' && fId.length >= 15) {
-                this.addAnimationToLibrary(mood, fId);
-                appliedCount++;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return { ok: true, message: `Successfully imported ${appliedCount} configuration items.`, appliedCount };
+    const res = this.importGroupFullBackup(chatId, config, undefined, true);
+    return { ok: res.ok, message: res.message, appliedCount: res.appliedSections.length };
   }
+
+  // --- Complete Bot-Wide Export & Restore ---
+  public exportAllBotBackup(): {
+    backupVersion: string;
+    type?: string;
+    schemaVersion: number;
+    exportedAt: string;
+    totalGroups: number;
+    globalSettings: GlobalSettings;
+    groups: Record<string, any>;
+  } {
+    const groupsDict: Record<string, any> = {};
+    if (this.data.settings) {
+      for (const chatIdStr of Object.keys(this.data.settings)) {
+        const numId = Number(chatIdStr);
+        if (!isNaN(numId) && numId < 0) {
+          groupsDict[chatIdStr] = this.exportGroupFullBackup(numId);
+        }
+      }
+    }
+
+    return {
+      backupVersion: '1.0',
+      type: 'BOT_FULL_BACKUP',
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      totalGroups: Object.keys(groupsDict).length,
+      globalSettings: this.getGlobalSettings(),
+      groups: groupsDict
+    };
+  }
+
+  public restoreAllBotBackup(
+    payload: any,
+    selectedGroupIds?: number[],
+    operatorUsername: string = 'dashboard_admin'
+  ): { ok: boolean; success: boolean; message: string; restoredGroups: number; restoredGroupIds: number[] } {
+    if (!payload || typeof payload !== 'object' || !payload.groups) {
+      return { ok: false, success: false, message: 'Invalid bot backup format: Must contain "groups" dictionary.', restoredGroups: 0, restoredGroupIds: [] };
+    }
+
+    // Restore global settings if present
+    if (payload.globalSettings && typeof payload.globalSettings === 'object') {
+      this.updateGlobalSettings(payload.globalSettings);
+    }
+
+    const restoredGroups: number[] = [];
+    const targetGroups = selectedGroupIds && selectedGroupIds.length > 0
+      ? selectedGroupIds.map(String)
+      : Object.keys(payload.groups);
+
+    for (const gIdStr of targetGroups) {
+      const groupData = payload.groups[gIdStr];
+      const numId = Number(gIdStr);
+      if (groupData && !isNaN(numId)) {
+        const res = this.importGroupFullBackup(numId, groupData, undefined, true, operatorUsername, true);
+        if (res.ok) {
+          restoredGroups.push(numId);
+        }
+      }
+    }
+
+    this.saveGlobalJsonSync();
+    return {
+      ok: true,
+      success: true,
+      message: `Successfully restored ${restoredGroups.length} groups from bot backup.`,
+      restoredGroups: restoredGroups.length,
+      restoredGroupIds: restoredGroups
+    };
+  }
+
 
   // --- Temporary Moderation Actions (tmute & tban) ---
   public addTempAction(record: Omit<TempActionRecord, 'id' | 'createdAt'>): TempActionRecord {
@@ -2679,6 +3376,14 @@ class StorageManager {
   public getRecentLogs(limit: number = 30): ModerationLog[] {
     this.cleanOldLogs();
     return this.data.logs.slice(-limit);
+  }
+
+  public getAuditLogs(options?: { limit?: number; chatId?: number }): ModerationLog[] {
+    const limit = options?.limit || 50;
+    if (options?.chatId) {
+      return this.getGroupLogs(options.chatId, limit);
+    }
+    return this.getRecentLogs(limit);
   }
 
   public getGroupLogs(chatId: number, limit: number = 20): ModerationLog[] {

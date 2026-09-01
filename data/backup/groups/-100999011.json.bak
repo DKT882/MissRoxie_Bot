@@ -1,0 +1,229 @@
+{
+  "schemaVersion": 1,
+  "chat": {
+    "chatId": "-100999011",
+    "title": "Updated Alpha Title Only",
+    "type": "supergroup",
+    "username": null
+  },
+  "status": {
+    "botLeft": true,
+    "leftAt": "2026-08-31T14:14:50.950Z",
+    "unavailable": false,
+    "unavailableAt": null,
+    "unavailableReason": null
+  },
+  "settings": {
+    "chatId": -100999011,
+    "chatTitle": "Updated Alpha Title Only",
+    "warnLimit": 6,
+    "warnAction": "ban",
+    "warnExpireSeconds": 0,
+    "floodEnabled": false,
+    "floodCount": 8,
+    "floodWindow": 5,
+    "floodAction": "mute",
+    "raidEnabled": false,
+    "raidLimit": 8,
+    "raidWindow": 30,
+    "raidAction": "kick",
+    "raidDuration": 300,
+    "captchaEnabled": false,
+    "captchaMode": "button",
+    "captchaTimeout": 120,
+    "captchaAction": "kick",
+    "linksProtection": true,
+    "linksWhitelist": [],
+    "mediaProtection": true,
+    "stickerProtection": true,
+    "gifsProtection": false,
+    "videosProtection": false,
+    "photosProtection": false,
+    "voiceProtection": false,
+    "audioProtection": false,
+    "locks": {},
+    "filters": {},
+    "welcomeEnabled": false,
+    "welcomeMessage": "Welcome {user} to {chat}!",
+    "goodbyeEnabled": false,
+    "goodbyeMessage": "Goodbye {user}!",
+    "autoDeleteJoinLeave": false,
+    "slowModeSeconds": 45,
+    "reportsEnabled": false,
+    "chatbotEnabled": true,
+    "chatbotMode": "auto",
+    "reactionEnabled": true,
+    "reactionProbability": 0.15,
+    "stopSpamEnabled": false,
+    "stopAbusiveEnabled": false,
+    "stopPromotionEnabled": false,
+    "gifProtection": false,
+    "linkProtection": true,
+    "imageProtection": false,
+    "fileProtection": false,
+    "customAbusiveWords": [
+      "toxic_pattern_xyz",
+      "isolated_abuse_token"
+    ],
+    "automodEnabled": false,
+    "mediaAction": "delete",
+    "warnEscalation": [],
+    "securityEnabled": false,
+    "joinmode": "normal",
+    "autoAcceptEnabled": false,
+    "automations": [],
+    "rules": "",
+    "lastAllTimestamp": 0,
+    "protectionEnabled": true,
+    "protectionFloodCount": 5,
+    "protectionFloodWindow": 5,
+    "protectionDuplicateLimit": 4,
+    "protectionLinkBurstLimit": 3,
+    "autoResponse": {
+      "enabled": true,
+      "mode": "cooldown",
+      "cooldownSeconds": 50,
+      "randomize": false,
+      "minSeconds": 25,
+      "maxSeconds": 110,
+      "lastResponseTimestamp": 1788185690507,
+      "nextIntervalSeconds": 65,
+      "nextAllowedAt": 1788185755507
+    },
+    "autoSticker": {
+      "enabled": true,
+      "mode": "cooldown",
+      "cooldownSeconds": 80,
+      "randomize": false,
+      "minSeconds": 60,
+      "maxSeconds": 300,
+      "lastStickerTimestamp": 1788185690563,
+      "nextIntervalSeconds": 80,
+      "nextAllowedAt": 1788185770563
+    },
+    "stickerPacks": {
+      "superpack": {
+        "name": "superpack",
+        "title": "Super Pack Renamed",
+        "telegramUrl": "https://t.me/addstickers/SuperPack",
+        "enabled": false,
+        "stickerCount": 15,
+        "stickers": []
+      }
+    },
+    "updatedAt": "2026-09-01T07:31:09.303Z",
+    "botLeft": true,
+    "leftAt": "2026-08-31T14:14:50.950Z",
+    "unavailable": false,
+    "abuseWords": [
+      "toxic_pattern_xyz",
+      "isolated_abuse_token"
+    ],
+    "lustMode": true,
+    "lustLevel": 3,
+    "notes": "",
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true
+  },
+  "permissions": {
+    "contentPermissions": null,
+    "customRoles": {},
+    "stickerFreeUsers": []
+  },
+  "moderation": {
+    "locks": {},
+    "filters": {},
+    "linksWhitelist": [],
+    "approvedUsers": [],
+    "freedUsers": [],
+    "warnings": [],
+    "tempActions": [],
+    "abuseWords": [
+      "toxic_pattern_xyz",
+      "isolated_abuse_token"
+    ]
+  },
+  "ai": {
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true,
+    "welcomeEnabled": false
+  },
+  "lustMode": {
+    "enabled": true,
+    "level": 3,
+    "lustStickers": {},
+    "userLustLevels": []
+  },
+  "autoResponse": {
+    "enabled": true,
+    "mode": "cooldown",
+    "cooldownSeconds": 50,
+    "randomize": false,
+    "minSeconds": 25,
+    "maxSeconds": 110,
+    "lastResponseTimestamp": 1788185690507,
+    "nextIntervalSeconds": 65,
+    "nextAllowedAt": 1788185755507
+  },
+  "autoSticker": {
+    "enabled": true,
+    "mode": "cooldown",
+    "cooldownSeconds": 80,
+    "randomize": false,
+    "minSeconds": 60,
+    "maxSeconds": 300,
+    "lastStickerTimestamp": 1788185690563,
+    "nextIntervalSeconds": 80,
+    "nextAllowedAt": 1788185770563
+  },
+  "stickers": {
+    "mediaLibrary": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "stickerProtection": true
+  },
+  "stickerPacks": [
+    {
+      "name": "superpack",
+      "title": "Super Pack Renamed",
+      "telegramUrl": "https://t.me/addstickers/SuperPack",
+      "enabled": false,
+      "stickerCount": 15,
+      "stickers": []
+    }
+  ],
+  "abuseWords": [
+    "toxic_pattern_xyz",
+    "isolated_abuse_token"
+  ],
+  "members": [],
+  "moderators": [],
+  "messages": [
+    {
+      "role": "user",
+      "name": "Alok",
+      "displayName": "Alok",
+      "content": "Permanent memory test",
+      "timestamp": 1788184577199,
+      "messageId": 7771,
+      "chatId": -100999011,
+      "mediaType": "text",
+      "direction": "incoming",
+      "source": "telegram",
+      "sender": "Alok"
+    }
+  ],
+  "statistics": {
+    "schedules": [],
+    "notes": [],
+    "userMemories": []
+  },
+  "activity": [],
+  "updatedAt": "2026-09-01T07:31:09.316Z"
+}
