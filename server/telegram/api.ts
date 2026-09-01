@@ -469,7 +469,7 @@ export class TelegramApi {
     return this.call<TelegramChatMember>('getChatMember', {
       chat_id: chatId,
       user_id: userId
-    });
+    }, { timeoutMs: 3500, maxRetries: 1 });
   }
 
   public async getChatAdministrators(

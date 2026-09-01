@@ -86,6 +86,8 @@ export class TelegramMiddleware {
     return true;
   }
 
+  private static memberCache: Map<string, { member: TelegramChatMember; timestamp: number }> = new Map();
+
   /**
    * Safe fetcher for a chat member (strictly numeric user ID, never bot/anonymous proxy).
    */
@@ -93,9 +95,16 @@ export class TelegramMiddleware {
     if (!targetUserId || targetUserId === 0 || targetUserId === 1087968824) {
       return null;
     }
+    const cacheKey = `${chatId}_${targetUserId}`;
+    const cached = this.memberCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < 5 * 60 * 1000)) {
+      return cached.member;
+    }
+
     try {
       const res = await telegramApi.getChatMember(chatId, targetUserId);
       if (res.ok && res.result) {
+        this.memberCache.set(cacheKey, { member: res.result, timestamp: Date.now() });
         return res.result;
       }
     } catch {
