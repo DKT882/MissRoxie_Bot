@@ -549,7 +549,9 @@ export class StorageManager {
             }
           }
         }
-        this.saveGlobalJsonSync();
+        if (!fs.existsSync(this.globalFile)) {
+          this.saveGlobalJsonSync();
+        }
       }
     } catch (err: any) {
       console.error('Failed to initialize local bot storage:', err.message);
@@ -890,17 +892,23 @@ export class StorageManager {
       if (!this.data.approvedUsers) this.data.approvedUsers = {};
       this.data.approvedUsers[key] = data.moderation.approvedUsers;
     }
-    if (Array.isArray(data.moderation?.warnings)) {
+    if (Array.isArray(data.moderation?.warnings) && data.moderation.warnings.length > 0) {
+      if (!this.data.warnings) this.data.warnings = [];
+      const existingWarningIds = new Set(this.data.warnings.map((w: any) => w.id));
       for (const w of data.moderation.warnings) {
-        if (!this.data.warnings.some((x: any) => x.id === w.id)) {
+        if (w?.id && !existingWarningIds.has(w.id)) {
           this.data.warnings.push(w);
+          existingWarningIds.add(w.id);
         }
       }
     }
-    if (Array.isArray(data.moderation?.tempActions)) {
+    if (Array.isArray(data.moderation?.tempActions) && data.moderation.tempActions.length > 0) {
+      if (!this.data.tempActions) this.data.tempActions = [];
+      const existingActionIds = new Set(this.data.tempActions.map((t: any) => t.id));
       for (const t of data.moderation.tempActions) {
-        if (!this.data.tempActions.some((x: any) => x.id === t.id)) {
+        if (t?.id && !existingActionIds.has(t.id)) {
           this.data.tempActions.push(t);
+          existingActionIds.add(t.id);
         }
       }
     }
@@ -910,28 +918,38 @@ export class StorageManager {
       if (!this.data.notes) this.data.notes = {};
       this.data.notes[key] = data.statistics.notes;
     }
-    if (Array.isArray(data.statistics?.schedules)) {
-      for (const s of data.statistics.schedules) {
-        if (!this.data.schedules.some((x: any) => x.id === s.id)) {
+    if (Array.isArray(data.statistics?.schedules) && data.statistics.schedules.length > 0) {
+      if (!this.data.schedules) this.data.schedules = [];
+      const existingScheduleIds = new Set(this.data.schedules.map((s: any) => s.id));
+      const incomingSchedules = data.statistics.schedules.slice(-100);
+      for (const s of incomingSchedules) {
+        if (s?.id && !existingScheduleIds.has(s.id)) {
           this.data.schedules.push(s);
+          existingScheduleIds.add(s.id);
         }
       }
     }
 
     // 7. Activity logs
-    if (Array.isArray(data.activity)) {
-      for (const log of data.activity) {
-        if (!this.data.logs.some((l: any) => l.id === log.id)) {
+    if (Array.isArray(data.activity) && data.activity.length > 0) {
+      if (!this.data.logs) this.data.logs = [];
+      const existingLogIds = new Set(this.data.logs.map((l: any) => l.id));
+      const incomingLogs = data.activity.slice(-50);
+      for (const log of incomingLogs) {
+        if (log?.id && !existingLogIds.has(log.id)) {
           this.data.logs.push(log);
+          existingLogIds.add(log.id);
         }
       }
     }
 
     // 8. User lust levels
-    if (Array.isArray(data.lustMode?.userLustLevels)) {
+    if (Array.isArray(data.lustMode?.userLustLevels) && data.lustMode.userLustLevels.length > 0) {
       if (!this.data.userLustLevels) this.data.userLustLevels = {};
       for (const ul of data.lustMode.userLustLevels) {
-        this.data.userLustLevels[`${ul.groupId}_${ul.userId}`] = ul;
+        if (ul?.groupId && ul?.userId) {
+          this.data.userLustLevels[`${ul.groupId}_${ul.userId}`] = ul;
+        }
       }
     }
   }
