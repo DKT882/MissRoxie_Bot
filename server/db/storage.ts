@@ -184,8 +184,17 @@ export class StorageManager {
   public static readonly PRIVATE_CHAT_INACTIVITY_MS = PRIVATE_CHAT_INACTIVITY_MS;
   public static readonly MAX_BACKUPS_PER_GROUP = MAX_BACKUPS_PER_GROUP;
 
+  private activeDataDir: string = path.resolve(process.cwd(), 'data');
+  private configuredDataDir: string = process.env.ROXIE_DATA_DIR || process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
+  private isDataDirWritable: boolean = false;
+  private storageMode: 'persistent' | 'local_fallback' | 'degraded_readonly' = 'local_fallback';
+  private storageIndicator: 'persistent' | 'local_ephemeral' | 'error' = 'local_ephemeral';
+  private lastStorageError: string | null = null;
+  private lastLoggedErrorTime: number = 0;
+  private lastLoggedErrorMessage: string = '';
+
   public get dataDir(): string {
-    return process.env.ROXIE_DATA_DIR || process.env.DATA_DIR || path.join(process.cwd(), 'data');
+    return this.activeDataDir;
   }
 
   public get groupsDir(): string {
@@ -216,25 +225,166 @@ export class StorageManager {
     return path.join(this.dataDir, 'bot_storage.json');
   }
 
+  public resolveAndValidateStorage(): { activeDir: string; mode: 'persistent' | 'local_fallback' | 'degraded_readonly'; isWritable: boolean; error: string | null } {
+    const rawEnv = this.configuredDataDir || process.env.ROXIE_DATA_DIR || process.env.DATA_DIR;
+    const defaultLocalDir = path.resolve(process.cwd(), 'data');
+    const isRender = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+
+    if (rawEnv && rawEnv.trim().length > 0) {
+      const configuredPath = path.resolve(rawEnv.trim());
+      try {
+        if (!fs.existsSync(configuredPath)) {
+          fs.mkdirSync(configuredPath, { recursive: true });
+        }
+        const testFile = path.join(configuredPath, `.write_test_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.tmp`);
+        fs.writeFileSync(testFile, 'ok', 'utf-8');
+        try { fs.unlinkSync(testFile); } catch {}
+
+        return {
+          activeDir: configuredPath,
+          mode: 'persistent',
+          isWritable: true,
+          error: null
+        };
+      } catch (err: any) {
+        const errorMsg = `Permission/access failure on configured ROXIE_DATA_DIR='${rawEnv}': ${err.message}`;
+        try {
+          if (!fs.existsSync(defaultLocalDir)) {
+            fs.mkdirSync(defaultLocalDir, { recursive: true });
+          }
+          const testFile = path.join(defaultLocalDir, `.write_test_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.tmp`);
+          fs.writeFileSync(testFile, 'ok', 'utf-8');
+          try { fs.unlinkSync(testFile); } catch {}
+
+          return {
+            activeDir: defaultLocalDir,
+            mode: 'local_fallback',
+            isWritable: true,
+            error: errorMsg
+          };
+        } catch (localErr: any) {
+          return {
+            activeDir: defaultLocalDir,
+            mode: 'degraded_readonly',
+            isWritable: false,
+            error: `${errorMsg}; local fallback failed: ${localErr.message}`
+          };
+        }
+      }
+    } else {
+      try {
+        if (!fs.existsSync(defaultLocalDir)) {
+          fs.mkdirSync(defaultLocalDir, { recursive: true });
+        }
+        const testFile = path.join(defaultLocalDir, `.write_test_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.tmp`);
+        fs.writeFileSync(testFile, 'ok', 'utf-8');
+        try { fs.unlinkSync(testFile); } catch {}
+
+        return {
+          activeDir: defaultLocalDir,
+          mode: isRender ? 'local_fallback' : 'persistent',
+          isWritable: true,
+          error: null
+        };
+      } catch (err: any) {
+        return {
+          activeDir: defaultLocalDir,
+          mode: 'degraded_readonly',
+          isWritable: false,
+          error: `Default directory '${defaultLocalDir}' is unwritable: ${err.message}`
+        };
+      }
+    }
+  }
+
   public ensureDirectories(): void {
-    if (!fs.existsSync(this.dataDir)) {
-      fs.mkdirSync(this.dataDir, { recursive: true });
+    if (!this.isDataDirWritable) return;
+    try {
+      const dirs = [
+        this.dataDir,
+        this.groupsDir,
+        this.privateDir,
+        this.backupDir,
+        this.groupsBackupDir,
+        this.privateBackupDir
+      ];
+      for (const d of dirs) {
+        if (!fs.existsSync(d)) {
+          fs.mkdirSync(d, { recursive: true });
+        }
+      }
+    } catch (err: any) {
+      this.logStorageErrorOnce('ensureDirectories', err.message);
     }
-    if (!fs.existsSync(this.groupsDir)) {
-      fs.mkdirSync(this.groupsDir, { recursive: true });
+  }
+
+  public logStorageErrorOnce(operation: string, errorMsg: string): void {
+    this.lastSaveSuccessful = false;
+    this.lastStorageError = errorMsg;
+    const now = Date.now();
+    const key = `${operation}:${errorMsg}`;
+    if (this.lastLoggedErrorMessage !== key || (now - this.lastLoggedErrorTime > 60000)) {
+      this.lastLoggedErrorMessage = key;
+      this.lastLoggedErrorTime = now;
+      console.error(`[Storage] Failed during ${operation}: ${errorMsg}`);
     }
-    if (!fs.existsSync(this.privateDir)) {
-      fs.mkdirSync(this.privateDir, { recursive: true });
+  }
+
+  public atomicWriteJsonSync(targetFile: string, content: string): boolean {
+    const tmpFile = `${targetFile}.tmp`;
+    try {
+      fs.writeFileSync(tmpFile, content, 'utf-8');
+      try {
+        if (fs.existsSync(targetFile)) {
+          try { fs.unlinkSync(targetFile); } catch {}
+        }
+        fs.renameSync(tmpFile, targetFile);
+      } catch {
+        fs.writeFileSync(targetFile, content, 'utf-8');
+        try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
+      }
+      return true;
+    } catch (err: any) {
+      throw err;
     }
-    if (!fs.existsSync(this.backupDir)) {
-      fs.mkdirSync(this.backupDir, { recursive: true });
+  }
+
+  public getStorageHealthStatus(): 'PERSISTENT' | 'LOCAL_FALLBACK' | 'ERROR' {
+    if (!this.isDataDirWritable || this.storageMode === 'degraded_readonly') return 'ERROR';
+    if (this.storageMode === 'persistent') return 'PERSISTENT';
+    return 'LOCAL_FALLBACK';
+  }
+
+  public getStorageHealthIndicator(): 'persistent' | 'local_ephemeral' | 'error' {
+    if (!this.isDataDirWritable || this.storageMode === 'degraded_readonly') return 'error';
+    if (this.storageMode === 'persistent') return 'persistent';
+    return 'local_ephemeral';
+  }
+
+  public getSafeDataDirectoryDisplay(): string {
+    const dir = this.dataDir;
+    if (dir.includes('/var/data')) return '/var/data/roxie';
+    const cwd = process.cwd();
+    if (dir.startsWith(cwd)) {
+      return `.${dir.slice(cwd.length).replace(/\\/g, '/')}`;
     }
-    if (!fs.existsSync(this.groupsBackupDir)) {
-      fs.mkdirSync(this.groupsBackupDir, { recursive: true });
-    }
-    if (!fs.existsSync(this.privateBackupDir)) {
-      fs.mkdirSync(this.privateBackupDir, { recursive: true });
-    }
+    return path.basename(dir) || 'data';
+  }
+
+  public getConfiguredDataDirectoryDisplay(): string {
+    return process.env.ROXIE_DATA_DIR || process.env.DATA_DIR || './data';
+  }
+
+  public isStorageWritable(): boolean {
+    return this.isDataDirWritable;
+  }
+
+  public getStorageMode(): string {
+    return this.storageMode;
+  }
+
+  public getLastStorageError(): string | null {
+    return this.lastStorageError;
   }
 
   private groupWriteQueues: Map<string, Promise<void>> = new Map();
@@ -271,19 +421,33 @@ export class StorageManager {
   private isLoaded: boolean = false;
   private saveTimeout: NodeJS.Timeout | null = null;
 
-  constructor() {
+  constructor(customDataDir?: string) {
+    if (customDataDir) {
+      this.configuredDataDir = customDataDir;
+    }
     this.init();
   }
 
-  private init() {
+  public init() {
     try {
+      const validation = this.resolveAndValidateStorage();
+      this.activeDataDir = validation.activeDir;
+      this.storageMode = validation.mode;
+      this.isDataDirWritable = validation.isWritable;
+      this.lastStorageError = validation.error;
+      this.storageIndicator = validation.isWritable ? (validation.mode === 'persistent' ? 'persistent' : 'local_ephemeral') : 'error';
+
+      if (validation.error) {
+        console.warn(`[Roxie Storage] WARNING: ${validation.error}. Falling back safely to active directory '${this.activeDataDir}' (Mode: ${this.storageMode}).`);
+      }
+
       this.ensureDirectories();
 
       // Render Persistence Check
       const isRender = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
       const hasExplicitDataDir = Boolean(process.env.ROXIE_DATA_DIR);
       if (isRender && !hasExplicitDataDir) {
-        console.warn('[Roxie Storage] WARNING: ROXIE_DATA_DIR is not configured. Runtime filesystem persistence may be lost on Render restart/redeploy. Mount a Persistent Disk (e.g. /var/data/roxie) and configure ROXIE_DATA_DIR=/var/data/roxie.');
+        console.warn('[Roxie Storage] NOTICE: ROXIE_DATA_DIR is not configured. Runtime filesystem persistence may be lost on Render restart/redeploy. Mount a Persistent Disk (e.g. /var/data/roxie) and configure ROXIE_DATA_DIR=/var/data/roxie.');
       }
 
       if (fs.existsSync(this.dbFile)) {
@@ -354,35 +518,39 @@ export class StorageManager {
       console.log(`Data directory: ${this.dataDir}`);
       console.log(`Groups loaded: ${groupLoadResult.loadedCount}`);
       console.log(`Private chats loaded: ${privateLoadResult.loadedCount}`);
-      console.log(`Storage mode: ${hasExplicitDataDir ? 'persistent-path' : 'local-fallback'}`);
+      console.log(`Storage mode: ${this.storageMode}`);
+      console.log(`Storage status: ${this.storageIndicator.toUpperCase()}`);
+      console.log(`Directory writable: ${this.isDataDirWritable ? 'Yes' : 'No'}`);
       console.log(`Schema version: 1`);
 
       // 6. Safe Startup Migration: For any groups/private in memory without a file, generate one
-      if (this.data.settings) {
-        for (const idStr of Object.keys(this.data.settings)) {
-          const numId = Number(idStr);
-          if (!isNaN(numId) && numId < 0) {
-            const groupFile = path.join(this.groupsDir, `${numId}.json`);
-            if (!fs.existsSync(groupFile)) {
-              this.saveGroupJsonSync(numId);
+      if (this.isDataDirWritable) {
+        if (this.data.settings) {
+          for (const idStr of Object.keys(this.data.settings)) {
+            const numId = Number(idStr);
+            if (!isNaN(numId) && numId < 0) {
+              const groupFile = path.join(this.groupsDir, `${numId}.json`);
+              if (!fs.existsSync(groupFile)) {
+                this.saveGroupJsonSync(numId);
+              }
             }
           }
         }
-      }
-      if (this.data.privateConversations) {
-        for (const idStr of Object.keys(this.data.privateConversations)) {
-          const numId = Number(idStr);
-          if (!isNaN(numId) && numId > 0) {
-            const privateFile = path.join(this.privateDir, `${numId}.json`);
-            if (!fs.existsSync(privateFile)) {
-              this.savePrivateJsonSync(numId);
+        if (this.data.privateConversations) {
+          for (const idStr of Object.keys(this.data.privateConversations)) {
+            const numId = Number(idStr);
+            if (!isNaN(numId) && numId > 0) {
+              const privateFile = path.join(this.privateDir, `${numId}.json`);
+              if (!fs.existsSync(privateFile)) {
+                this.savePrivateJsonSync(numId);
+              }
             }
           }
         }
+        this.saveGlobalJsonSync();
       }
-      this.saveGlobalJsonSync();
-    } catch (err) {
-      console.error('Failed to initialize local bot storage:', err);
+    } catch (err: any) {
+      console.error('Failed to initialize local bot storage:', err.message);
     }
     this.cleanOldLogs();
     this.cleanExpiredMemories();
@@ -541,27 +709,14 @@ export class StorageManager {
         } catch {}
       }
 
-      // Safe write (write to .tmp with graceful fallback for Windows file locks)
+      // Safe write using atomic strategy (.tmp -> target)
       const jsonContent = JSON.stringify(safeData, null, 2);
-      try {
-        fs.writeFileSync(tmpFile, jsonContent, 'utf-8');
-        try {
-          if (fs.existsSync(targetFile)) {
-            try { fs.unlinkSync(targetFile); } catch {}
-          }
-          fs.renameSync(tmpFile, targetFile);
-        } catch {
-          fs.writeFileSync(targetFile, jsonContent, 'utf-8');
-          try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
-        }
-      } catch {
-        fs.writeFileSync(targetFile, jsonContent, 'utf-8');
-      }
+      this.atomicWriteJsonSync(targetFile, jsonContent);
       this.lastSaveSuccessful = true;
+      this.lastStorageError = null;
       this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
     } catch (err: any) {
-      this.lastSaveSuccessful = false;
-      console.error(`[Storage] Failed to save group ${chatId} JSON:`, err.message);
+      this.logStorageErrorOnce(`save group ${chatId} JSON`, err.message);
     }
   }
 
@@ -811,13 +966,11 @@ export class StorageManager {
     this.cleanExpiredMemories();
     try {
       this.ensureDirectories();
-      const tempFile = `${this.dbFile}.tmp`;
-      fs.writeFileSync(tempFile, JSON.stringify(this.data, null, 2), 'utf-8');
-      fs.renameSync(tempFile, this.dbFile);
+      this.atomicWriteJsonSync(this.dbFile, JSON.stringify(this.data, null, 2));
       this.lastSaveSuccessful = true;
-    } catch (err) {
-      this.lastSaveSuccessful = false;
-      console.error('Error persisting database:', err);
+      this.lastStorageError = null;
+    } catch (err: any) {
+      this.logStorageErrorOnce('persist database', err.message);
     }
   }
 
@@ -853,7 +1006,6 @@ export class StorageManager {
       const rawData = this.buildPrivateDataObject(numChatId);
       const safeData = this.sanitizeGroupData(rawData);
       const targetFile = path.join(this.privateDir, `${numChatId}.json`);
-      const tmpFile = path.join(this.privateDir, `${numChatId}.json.tmp`);
 
       if (fs.existsSync(targetFile)) {
         try {
@@ -863,13 +1015,12 @@ export class StorageManager {
       }
 
       const jsonContent = JSON.stringify(safeData, null, 2);
-      fs.writeFileSync(tmpFile, jsonContent, 'utf-8');
-      fs.renameSync(tmpFile, targetFile);
+      this.atomicWriteJsonSync(targetFile, jsonContent);
       this.lastSaveSuccessful = true;
+      this.lastStorageError = null;
       this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
     } catch (err: any) {
-      this.lastSaveSuccessful = false;
-      console.error(`[Storage] Failed to save private chat ${chatId} JSON:`, err.message);
+      this.logStorageErrorOnce(`save private chat ${chatId} JSON`, err.message);
     }
   }
 
@@ -1037,12 +1188,12 @@ export class StorageManager {
       };
       const safeData = this.sanitizeGroupData(globalData);
       const targetFile = this.globalFile;
-      const tmpFile = `${targetFile}.tmp`;
       const jsonContent = JSON.stringify(safeData, null, 2);
-      fs.writeFileSync(tmpFile, jsonContent, 'utf-8');
-      fs.renameSync(tmpFile, targetFile);
+      this.atomicWriteJsonSync(targetFile, jsonContent);
+      this.lastSaveSuccessful = true;
+      this.lastStorageError = null;
     } catch (err: any) {
-      console.error('[Storage] Failed to save global.json:', err.message);
+      this.logStorageErrorOnce('save global.json', err.message);
     }
   }
 

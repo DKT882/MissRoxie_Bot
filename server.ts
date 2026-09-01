@@ -565,7 +565,24 @@ async function startServer() {
   const startupResult = DisasterRecoveryService.startupRecovery();
   console.log('ROXIE STARTUP DIAGNOSTICS:', startupResult);
 
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err && (err.type === 'entity.too.large' || err.status === 413 || err.statusCode === 413)) {
+      return res.status(413).json({
+        ok: false,
+        error: 'Backup file is too large. Maximum allowed size is 10 MB.',
+        code: 'PAYLOAD_TOO_LARGE'
+      });
+    }
+    if (err instanceof SyntaxError && 'body' in err) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Invalid JSON payload received.',
+        code: 'INVALID_JSON'
+      });
+    }
+    next(err);
+  });
   app.use(enterpriseRouter);
   app.use(phase8Router);
 
@@ -2048,6 +2065,15 @@ async function startServer() {
         return res.status(400).json({ error: 'Invalid configuration payload' });
       }
 
+      const contentLength = Number(req.headers['content-length'] || 0);
+      if (contentLength > 10 * 1024 * 1024) {
+        return res.status(413).json({
+          ok: false,
+          error: 'Backup file is too large. Maximum allowed size is 10 MB.',
+          code: 'PAYLOAD_TOO_LARGE'
+        });
+      }
+
       const diff = db.previewGroupImport(chatId, config, selectedSections);
       res.json(diff);
     } catch (err: any) {
@@ -2057,6 +2083,15 @@ async function startServer() {
 
   app.post('/api/dashboard/groups/:chatId/backup/import', (req, res) => {
     try {
+      const contentLength = Number(req.headers['content-length'] || 0);
+      if (contentLength > 10 * 1024 * 1024) {
+        return res.status(413).json({
+          ok: false,
+          error: 'Backup file is too large. Maximum allowed size is 10 MB.',
+          code: 'PAYLOAD_TOO_LARGE'
+        });
+      }
+
       const chatId = Number(req.params.chatId);
       if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid group chatId' });
       const auth = verifyOperatorAuth(req, 'MODERATOR');

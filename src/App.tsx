@@ -4582,14 +4582,28 @@ export default function App() {
                   { name: 'Telegram Polling', status: healthData?.components?.telegramPolling?.status || 'HEALTHY', ok: healthData?.components?.telegramPolling?.status !== 'DEGRADED' },
                   { name: 'Scheduler', status: healthData?.components?.scheduler?.status || 'HEALTHY', ok: true },
                   { name: 'AI Chatbot', status: healthData?.components?.ai?.status || 'HEALTHY', ok: true },
-                  { name: 'Storage / DB', status: healthData?.components?.storage?.connected ? 'Connected' : 'Connected', ok: true }
-                ].map((comp, idx) => (
-                  <div key={idx} className={`${themeCardBg} border rounded-2xl p-4 space-y-2`}>
-                    <div className="flex items-center justify-between">
-                      <span className={`text-xs font-semibold ${themeMutedText}`}>{comp.name}</span>
-                      <span className={`w-2 h-2 rounded-full ${comp.ok ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  {
+                    name: 'Storage Persistence',
+                    status: healthData?.components?.storage?.indicator === 'persistent' ? '🟢 Persistent' :
+                            healthData?.components?.storage?.indicator === 'local_ephemeral' ? '🟡 Local / Ephemeral' : '🔴 Persistence Error',
+                    ok: healthData?.components?.storage?.indicator !== 'error',
+                    extra: (
+                      <div className={`text-[11px] ${themeMutedText} space-y-0.5 pt-1.5 border-t border-white/5`}>
+                        <div className="truncate"><span className="font-semibold">Data Dir:</span> {healthData?.components?.storage?.dataDirectory || 'data'}</div>
+                        <div><span className="font-semibold">Writable:</span> {healthData?.components?.storage?.isWritable ? 'Yes' : 'No'}</div>
+                      </div>
+                    )
+                  }
+                ].map((comp: any, idx) => (
+                  <div key={idx} className={`${themeCardBg} border rounded-2xl p-4 space-y-2 flex flex-col justify-between`}>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-xs font-semibold ${themeMutedText}`}>{comp.name}</span>
+                        <span className={`w-2 h-2 rounded-full ${comp.ok ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                      </div>
+                      <div className="text-sm font-bold">{comp.status}</div>
                     </div>
-                    <div className="text-sm font-bold">{comp.status}</div>
+                    {comp.extra && comp.extra}
                   </div>
                 ))}
               </div>

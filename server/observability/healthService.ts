@@ -83,7 +83,14 @@ export class HealthDiagnosticsService {
         },
         storage: {
           connected: storageConnected,
-          activeGroups: activeGroupsCount
+          activeGroups: activeGroupsCount,
+          status: (db as any).getStorageHealthStatus ? (db as any).getStorageHealthStatus() : 'LOCAL_FALLBACK',
+          indicator: (db as any).getStorageHealthIndicator ? (db as any).getStorageHealthIndicator() : 'local_ephemeral',
+          dataDirectory: (db as any).getSafeDataDirectoryDisplay ? (db as any).getSafeDataDirectoryDisplay() : 'data',
+          configuredDirectory: (db as any).getConfiguredDataDirectoryDisplay ? (db as any).getConfiguredDataDirectoryDisplay() : './data',
+          isWritable: (db as any).isStorageWritable ? (db as any).isStorageWritable() : true,
+          mode: (db as any).getStorageMode ? (db as any).getStorageMode() : 'local_fallback',
+          lastError: (db as any).getLastStorageError ? (db as any).getLastStorageError() : null
         }
       },
       metrics: metrics.counters,
