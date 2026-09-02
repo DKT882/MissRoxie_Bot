@@ -36,6 +36,7 @@ export interface CommandCatalogItem {
   auditLogged: boolean;
   aliases?: string[];
   scopes?: CommandScope[];
+  suggestInTelegramMenu?: boolean;
 }
 
 export const COMMAND_CATALOG: CommandCatalogItem[] = [
@@ -64,7 +65,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: true,
     modifiesState: false,
     auditLogged: false,
-    scopes: ['group', 'private']
+    scopes: ['group', 'private'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/ping',
@@ -77,7 +79,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: true,
     modifiesState: false,
     auditLogged: false,
-    scopes: ['group', 'private']
+    scopes: ['group', 'private'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/status',
@@ -116,7 +119,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: true,
     modifiesState: false,
     auditLogged: false,
-    scopes: ['group', 'private']
+    scopes: ['group', 'private'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/roxie',
@@ -156,7 +160,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: false,
     modifiesState: false,
     auditLogged: false,
-    scopes: ['group', 'private']
+    scopes: ['group', 'private'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/forgetme',
@@ -1351,7 +1356,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: false,
     modifiesState: true,
     auditLogged: true,
-    scopes: ['group', 'admin']
+    scopes: ['group', 'admin'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/getnote',
@@ -1364,7 +1370,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: true,
     modifiesState: false,
     auditLogged: false,
-    scopes: ['group']
+    scopes: ['group'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/notes',
@@ -1377,7 +1384,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: true,
     modifiesState: false,
     auditLogged: false,
-    scopes: ['group']
+    scopes: ['group'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/delnote',
@@ -1390,7 +1398,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: false,
     modifiesState: true,
     auditLogged: true,
-    scopes: ['group', 'admin']
+    scopes: ['group', 'admin'],
+    suggestInTelegramMenu: false
   },
 
   // ==================== CONFIGURATION ====================
@@ -1405,7 +1414,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: false,
     modifiesState: false,
     auditLogged: false,
-    scopes: ['group', 'admin']
+    scopes: ['group', 'admin'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/importconfig',
@@ -1418,7 +1428,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: false,
     modifiesState: true,
     auditLogged: true,
-    scopes: ['group', 'admin']
+    scopes: ['group', 'admin'],
+    suggestInTelegramMenu: false
   },
 
   // ==================== SUB-MEDIA TOGGLES ====================
@@ -1590,8 +1601,9 @@ export function getCommandsForTelegramScope(
   const seen = new Set<string>();
   const result: Array<{ command: string; description: string }> = [];
 
-  // Expose full COMMAND_CATALOG without scope-based visibility filtering
+  // Expose full COMMAND_CATALOG without scope-based visibility filtering (excluding suggestInTelegramMenu: false)
   for (const item of COMMAND_CATALOG) {
+    if (item.suggestInTelegramMenu === false) continue;
     const rawCmd = item.command.replace(/^\//, '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 32);
     if (rawCmd && !seen.has(rawCmd)) {
       seen.add(rawCmd);
