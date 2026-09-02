@@ -29,12 +29,16 @@ export async function registerBotCommands(): Promise<{
   const privateCommands = getCommandsForTelegramScope('all_private_chats');
   const defaultCommands = getCommandsForTelegramScope('default');
 
-  // Clear any stale chat-specific or chat_administrator-specific command overrides for protected production groups
+  // Clear any stale chat-specific, chat_administrator-specific, or language-specific command overrides for protected production groups
   const protectedGroups = [-1003901820979, -1004356470022, -1004331070653, -1004494262619];
   for (const gid of protectedGroups) {
     await telegramApi.deleteMyCommands({ type: 'chat_administrators', chat_id: gid }).catch(() => {});
     await telegramApi.deleteMyCommands({ type: 'chat', chat_id: gid }).catch(() => {});
+    await telegramApi.deleteMyCommands({ type: 'chat_administrators', chat_id: gid }, 'en').catch(() => {});
+    await telegramApi.deleteMyCommands({ type: 'chat', chat_id: gid }, 'en').catch(() => {});
   }
+  await telegramApi.deleteMyCommands({ type: 'all_chat_administrators' }, 'en').catch(() => {});
+  await telegramApi.deleteMyCommands({ type: 'all_group_chats' }, 'en').catch(() => {});
 
   // 1. Register all commands for administrators scope (capped at 100 for Telegram API limit)
   const adminRes = await telegramApi.setMyCommands(adminCommands, {
