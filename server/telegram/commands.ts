@@ -15,7 +15,122 @@ import {
 } from './commandCatalog.js';
 import { ChatbotService, ROXIE_SUPPORTED_MOODS } from './chatbot.js';
 
-export const ADMIN_COMMANDS: BotCommand[] = getCommandsForTelegramScope('all_chat_administrators');
+export const TELEGRAM_SUGGESTED_COMMANDS: readonly BotCommand[] = Object.freeze([
+  { command: "help", description: "Show Roxie's complete interactive command help guide." },
+  { command: "status", description: "View current bot status, operational health, and group configuration overview." },
+  { command: "settings", description: "View group moderation, media, and security settings." },
+  { command: "roxie", description: "Manage Roxie AI chatbot status (on/off/status)." },
+  { command: "lustmode", description: "Toggle Roxie lust / spicy personality mode with custom sticker support." },
+  { command: "forgetme", description: "Delete your stored chatbot memory facts and personalized data for this chat." },
+  { command: "ban", description: "Permanently ban a member from the group." },
+  { command: "unban", description: "Unban a previously banned member." },
+  { command: "kick", description: "Remove a member from the group." },
+  { command: "mute", description: "Mute a member in the group." },
+  { command: "unmute", description: "Unmute a muted member." },
+  { command: "dban", description: "Delete replied message and ban its sender." },
+  { command: "dmute", description: "Delete replied message and mute its sender." },
+  { command: "dkick", description: "Delete replied message and kick its sender." },
+  { command: "sban", description: "Silently ban member and delete the triggering command message." },
+  { command: "smute", description: "Silently mute member and delete the triggering command message." },
+  { command: "skick", description: "Silently kick member and delete the triggering command message." },
+  { command: "warn", description: "Issue a formal warning to a member." },
+  { command: "warnings", description: "View active warning count and log for a member." },
+  { command: "resetwarns", description: "Clear all active warnings for a member." },
+  { command: "setwarnlimit", description: "Set warning threshold before automatic punitive action." },
+  { command: "warnsettings", description: "Configure warning escalation thresholds, expiry duration, and actions." },
+  { command: "del", description: "Delete replied message." },
+  { command: "clear", description: "Purge recent messages by count, duration, or replied message." },
+  { command: "media", description: "View or configure media protection toggles and action modes." },
+  { command: "stickers", description: "List registered sticker packs and mood summary for this chat." },
+  { command: "addstickerpack", description: "Import entire sticker pack into bot media library by replying to a sticker or by pack name/link." },
+  { command: "addbulkstickers", description: "Bulk import multiple Telegram sticker packs by links or names." },
+  { command: "addsticker", description: "Save an individual sticker into bot media library by replying to it." },
+  { command: "addgif", description: "Add a GIF/animation to bot media library by replying to it." },
+  { command: "liststickers", description: "List stored stickers and GIFs in the media library." },
+  { command: "removesticker", description: "Remove a media item by file ID or reply." },
+  { command: "stickerpackremove", description: "Delete entire sticker pack by replying to a sticker or remove from current group." },
+  { command: "clearstickers", description: "Clear stored stickers and GIFs for a mood or all moods." },
+  { command: "teststicker", description: "Test direct Telegram sticker dispatch using a verified sticker file_id." },
+  { command: "free", description: "Exempt member from sticker and media restrictions." },
+  { command: "unfree", description: "Revoke media exemption from member." },
+  { command: "freelist", description: "List all media-exempted members." },
+  { command: "lock", description: "Lock a specific content type (stickers, gifs, links, media, etc.)." },
+  { command: "unlock", description: "Unlock a specific content type." },
+  { command: "locks", description: "View active content locks for this group." },
+  { command: "link", description: "Toggle general link protection filter (on/off)." },
+  { command: "linkallow", description: "Whitelist allowed link domain or URL pattern." },
+  { command: "linkunallow", description: "Remove domain from link whitelist." },
+  { command: "linkallowlist", description: "List all whitelisted link domains." },
+  { command: "stopspam", description: "Toggle smart spam detection and removal." },
+  { command: "stopabusive", description: "Toggle abusive language filtering." },
+  { command: "stoppromotion", description: "Toggle promotional content and ad filtering." },
+  { command: "automod", description: "Toggle smart auto moderation (spam, abusive, promo)." },
+  { command: "security", description: "Toggle unified security center (CAPTCHA & Anti-Raid)." },
+  { command: "captcha", description: "Toggle join CAPTCHA verification for new members." },
+  { command: "antiraid", description: "Toggle anti-raid protection to safeguard against automated join floods." },
+  { command: "joinmode", description: "Set group join mode (normal, captcha, strict)." },
+  { command: "autoaccept", description: "Toggle automatic approval for join requests." },
+  { command: "automation", description: "Manage custom automation trigger rules." },
+  { command: "chatbot", description: "Toggle Roxie AI chatbot response integration in this group." },
+  { command: "protection", description: "Manage smart user protection status (on/off/status)." },
+  { command: "roxiereaction", description: "Configure smart emoji reactions by Roxie (on/off/status/rate)." },
+  { command: "addabuse", description: "Add custom abusive word to group moderation dictionary." },
+  { command: "removeabuse", description: "Remove custom abusive word from group dictionary." },
+  { command: "listabuse", description: "List all custom abusive words registered for this group." },
+  { command: "clearabuse", description: "Clear all custom abusive words for this group." },
+  { command: "flood", description: "Configure flood control message threshold, window, and action." },
+  { command: "filter", description: "Create custom auto-reply keyword filter." },
+  { command: "unfilter", description: "Remove a custom auto-reply keyword filter." },
+  { command: "filters", description: "List all active custom keyword filters." },
+  { command: "report", description: "Report a message or spammer to group administrators." },
+  { command: "welcome", description: "Toggle welcome messages on or off." },
+  { command: "setwelcome", description: "Configure custom welcome message template. Supports {first_name}, {username}, {mention}, {chat_title}, {id}." },
+  { command: "goodbye", description: "Toggle goodbye departure messages on or off." },
+  { command: "setgoodbye", description: "Configure custom goodbye message template. Supports {first_name}, {username}, {mention}, {chat_title}, {id}." },
+  { command: "autodeljoin", description: "Toggle auto-deletion of join/leave system messages after 3-4 seconds." },
+  { command: "setrules", description: "Set group rules text." },
+  { command: "rules", description: "Display current group rules." },
+  { command: "clearrules", description: "Clear group rules text." },
+  { command: "pin", description: "Pin replied message in chat." },
+  { command: "unpin", description: "Unpin replied message in chat." },
+  { command: "unpinall", description: "Unpin all pinned messages in chat." },
+  { command: "slowmode", description: "Set chat slowmode interval between consecutive messages." },
+  { command: "promote", description: "Promote a member to administrator." },
+  { command: "demote", description: "Demote an administrator back to regular member." },
+  { command: "permissions", description: "Open interactive administrator permission editor." },
+  { command: "setmod", description: "Assign custom bot moderator role to a member." },
+  { command: "delmod", description: "Revoke custom bot moderator role from a member." },
+  { command: "adminlog", description: "View recent moderation audit logs." },
+  { command: "say", description: "Broadcast announcement as bot or reply to user. Preserves formatting, line breaks, and emojis." },
+  { command: "all", description: "Mention all known group members in broadcast. Preserves multiline text and paragraph breaks." },
+  { command: "schedule", description: "Schedule recurring or one-shot announcements, reminders, or media." },
+  { command: "listschedules", description: "List active scheduled messages and jobs." },
+  { command: "deleteschedule", description: "Delete scheduled job by ID." },
+  { command: "gif", description: "Toggle GIF and animation protection filter (on/off)." },
+  { command: "image", description: "Toggle photo and image protection filter (on/off)." },
+  { command: "file", description: "Toggle document and file protection filter (on/off)." },
+  { command: "video", description: "Toggle video and video note protection filter (on/off)." },
+  { command: "voice", description: "Toggle voice note protection filter (on/off)." },
+  { command: "audio", description: "Toggle audio file and music protection filter (on/off)." },
+  { command: "roxiemode", description: "Set Roxie AI chatbot behavior mode (normal|friendly|auto)." },
+  { command: "clearmemory", description: "Clear Roxie AI chatbot conversation history and context for this chat." },
+  { command: "tmute", description: "Temporarily mute a member for a specified duration." },
+  { command: "tban", description: "Temporarily ban a member for a specified duration." },
+]);
+
+// Structural assertion verifying exact 100 suggestion commands and zero duplicates
+if (TELEGRAM_SUGGESTED_COMMANDS.length !== 100) {
+  throw new Error(`TELEGRAM_SUGGESTED_COMMANDS count must be exactly 100, got ${TELEGRAM_SUGGESTED_COMMANDS.length}`);
+}
+const seenSuggestionNames = new Set<string>();
+for (const cmd of TELEGRAM_SUGGESTED_COMMANDS) {
+  if (seenSuggestionNames.has(cmd.command)) {
+    throw new Error(`Duplicate command name in TELEGRAM_SUGGESTED_COMMANDS: ${cmd.command}`);
+  }
+  seenSuggestionNames.add(cmd.command);
+}
+
+export const ADMIN_COMMANDS: BotCommand[] = [...TELEGRAM_SUGGESTED_COMMANDS];
 
 export async function registerBotCommands(): Promise<{
   adminCommandsSet: boolean;
@@ -24,10 +139,12 @@ export async function registerBotCommands(): Promise<{
 }> {
   const errors: string[] = [];
 
-  const adminCommands = getCommandsForTelegramScope('all_chat_administrators');
-  const groupCommands = getCommandsForTelegramScope('all_group_chats');
-  const privateCommands = getCommandsForTelegramScope('all_private_chats');
-  const defaultCommands = getCommandsForTelegramScope('default');
+  // Authoritative 100-command list independent of permission/execution structures
+  const authoritativeCommands = [...TELEGRAM_SUGGESTED_COMMANDS];
+
+  if (authoritativeCommands.length !== 100) {
+    throw new Error(`Fatal: Authoritative Telegram suggestion list must contain exactly 100 commands, got ${authoritativeCommands.length}`);
+  }
 
   // 1. Clear any stale chat-specific, chat_administrator-specific, or language-specific command overrides for protected production groups
   const protectedGroups = [-1003901820979, -1004356470022, -1004331070653, -1004494262619];
@@ -40,52 +157,52 @@ export async function registerBotCommands(): Promise<{
   await telegramApi.deleteMyCommands({ type: 'all_chat_administrators' }, 'en').catch(() => {});
   await telegramApi.deleteMyCommands({ type: 'all_group_chats' }, 'en').catch(() => {});
 
-  // 2. Register all commands for administrators scope (capped at 100 for Telegram API limit)
-  const adminRes = await telegramApi.setMyCommands(adminCommands, {
+  // 2. Register authoritative commands for administrators scope
+  const adminRes = await telegramApi.setMyCommands(authoritativeCommands, {
     type: 'all_chat_administrators'
   });
   if (adminRes.ok) {
-    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_chat_administrators', count: adminCommands.length, commands: adminCommands.map(c => c.command) }));
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_chat_administrators', count: authoritativeCommands.length, commands: authoritativeCommands.map(c => c.command) }));
   } else {
     console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'all_chat_administrators', error_code: adminRes.error_code, description: adminRes.description }));
     errors.push(`Failed to set admin commands: ${adminRes.description}`);
   }
 
-  // 3. Register public group commands for group chats scope
-  const groupRes = await telegramApi.setMyCommands(groupCommands, {
+  // 3. Register authoritative commands for group chats scope
+  const groupRes = await telegramApi.setMyCommands(authoritativeCommands, {
     type: 'all_group_chats'
   });
   if (groupRes.ok) {
-    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_group_chats', count: groupCommands.length, commands: groupCommands.map(c => c.command) }));
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_group_chats', count: authoritativeCommands.length, commands: authoritativeCommands.map(c => c.command) }));
   } else {
     console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'all_group_chats', error_code: groupRes.error_code, description: groupRes.description }));
     errors.push(`Failed to set group commands: ${groupRes.description}`);
   }
 
-  // 4. Register private chat commands for private chats scope
-  const privateRes = await telegramApi.setMyCommands(privateCommands, {
+  // 4. Register authoritative commands for private chats scope
+  const privateRes = await telegramApi.setMyCommands(authoritativeCommands, {
     type: 'all_private_chats'
   });
   if (privateRes.ok) {
-    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_private_chats', count: privateCommands.length, commands: privateCommands.map(c => c.command) }));
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_private_chats', count: authoritativeCommands.length, commands: authoritativeCommands.map(c => c.command) }));
   } else {
     console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'all_private_chats', error_code: privateRes.error_code, description: privateRes.description }));
     errors.push(`Failed to set private commands: ${privateRes.description}`);
   }
 
-  // 5. Register public commands for default scope
-  const defaultRes = await telegramApi.setMyCommands(defaultCommands, {
+  // 5. Register authoritative commands for default scope
+  const defaultRes = await telegramApi.setMyCommands(authoritativeCommands, {
     type: 'default'
   });
   if (defaultRes.ok) {
-    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'default', count: defaultCommands.length, commands: defaultCommands.map(c => c.command) }));
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'default', count: authoritativeCommands.length, commands: authoritativeCommands.map(c => c.command) }));
   } else {
     console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'default', error_code: defaultRes.error_code, description: defaultRes.description }));
     errors.push(`Failed to set default commands: ${defaultRes.description}`);
   }
 
   console.log('COMMAND_MENU_AUTHORITATIVE: 100 commands registered successfully');
-  console.log(`TELEGRAM_SCOPE_VERIFICATION: all_chat_administrators=${adminCommands.length} all_group_chats=${groupCommands.length} all_private_chats=${privateCommands.length} default=${defaultCommands.length}`);
+  console.log(`TELEGRAM_SCOPE_VERIFICATION: all_chat_administrators=${authoritativeCommands.length} all_group_chats=${authoritativeCommands.length} all_private_chats=${authoritativeCommands.length} default=${authoritativeCommands.length}`);
   console.log('TELEGRAM_PROTECTED_GROUP_OVERRIDES: -1003901820979 chat=0 chat_administrators=0 chat_member=0');
 
   return {
