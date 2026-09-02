@@ -146,6 +146,11 @@ export async function registerBotCommands(): Promise<{
     throw new Error(`Fatal: Authoritative Telegram suggestion list must contain exactly 100 commands, got ${authoritativeCommands.length}`);
   }
 
+  const uniqueCommandNames = new Set(authoritativeCommands.map(c => c.command));
+  if (uniqueCommandNames.size !== 100) {
+    throw new Error(`Fatal: Unique command count must be 100, got ${uniqueCommandNames.size}`);
+  }
+
   // 1. Clear any stale chat-specific, chat_administrator-specific, or language-specific command overrides for protected production groups
   const protectedGroups = [-1003901820979, -1004356470022, -1004331070653, -1004494262619];
   for (const gid of protectedGroups) {
@@ -158,6 +163,13 @@ export async function registerBotCommands(): Promise<{
   await telegramApi.deleteMyCommands({ type: 'all_group_chats' }, 'en').catch(() => {});
 
   // 2. Register authoritative commands for administrators scope
+  console.log(JSON.stringify({
+    event: 'TELEGRAM_SET_COMMANDS_PAYLOAD',
+    scope: 'all_chat_administrators',
+    command_count: authoritativeCommands.length,
+    unique_command_count: uniqueCommandNames.size,
+    command_names: authoritativeCommands.map(c => c.command)
+  }));
   const adminRes = await telegramApi.setMyCommands(authoritativeCommands, {
     type: 'all_chat_administrators'
   });
@@ -169,6 +181,13 @@ export async function registerBotCommands(): Promise<{
   }
 
   // 3. Register authoritative commands for group chats scope
+  console.log(JSON.stringify({
+    event: 'TELEGRAM_SET_COMMANDS_PAYLOAD',
+    scope: 'all_group_chats',
+    command_count: authoritativeCommands.length,
+    unique_command_count: uniqueCommandNames.size,
+    command_names: authoritativeCommands.map(c => c.command)
+  }));
   const groupRes = await telegramApi.setMyCommands(authoritativeCommands, {
     type: 'all_group_chats'
   });
@@ -180,6 +199,13 @@ export async function registerBotCommands(): Promise<{
   }
 
   // 4. Register authoritative commands for private chats scope
+  console.log(JSON.stringify({
+    event: 'TELEGRAM_SET_COMMANDS_PAYLOAD',
+    scope: 'all_private_chats',
+    command_count: authoritativeCommands.length,
+    unique_command_count: uniqueCommandNames.size,
+    command_names: authoritativeCommands.map(c => c.command)
+  }));
   const privateRes = await telegramApi.setMyCommands(authoritativeCommands, {
     type: 'all_private_chats'
   });
@@ -191,6 +217,13 @@ export async function registerBotCommands(): Promise<{
   }
 
   // 5. Register authoritative commands for default scope
+  console.log(JSON.stringify({
+    event: 'TELEGRAM_SET_COMMANDS_PAYLOAD',
+    scope: 'default',
+    command_count: authoritativeCommands.length,
+    unique_command_count: uniqueCommandNames.size,
+    command_names: authoritativeCommands.map(c => c.command)
+  }));
   const defaultRes = await telegramApi.setMyCommands(authoritativeCommands, {
     type: 'default'
   });
@@ -201,9 +234,14 @@ export async function registerBotCommands(): Promise<{
     errors.push(`Failed to set default commands: ${defaultRes.description}`);
   }
 
-  console.log('COMMAND_MENU_AUTHORITATIVE: 100 commands registered successfully');
-  console.log(`TELEGRAM_SCOPE_VERIFICATION: all_chat_administrators=${authoritativeCommands.length} all_group_chats=${authoritativeCommands.length} all_private_chats=${authoritativeCommands.length} default=${authoritativeCommands.length}`);
-  console.log('TELEGRAM_PROTECTED_GROUP_OVERRIDES: -1003901820979 chat=0 chat_administrators=0 chat_member=0');
+  const allSucceeded = adminRes.ok && groupRes.ok && privateRes.ok && defaultRes.ok;
+  if (allSucceeded) {
+    console.log('COMMAND_MENU_AUTHORITATIVE: 100 commands confirmed by Telegram');
+    console.log(`TELEGRAM_SCOPE_VERIFICATION: all_chat_administrators=${authoritativeCommands.length} all_group_chats=${authoritativeCommands.length} all_private_chats=${authoritativeCommands.length} default=${authoritativeCommands.length}`);
+    console.log('TELEGRAM_PROTECTED_GROUP_OVERRIDES: -1003901820979 chat=0 chat_administrators=0 chat_member=0');
+  } else {
+    console.error(`COMMAND_REGISTRATION_FAILED: Registration incomplete. Errors: ${errors.join(', ')}`);
+  }
 
   return {
     adminCommandsSet: adminRes.ok && groupRes.ok && privateRes.ok,
