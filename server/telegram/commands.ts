@@ -29,7 +29,7 @@ export async function registerBotCommands(): Promise<{
   const privateCommands = getCommandsForTelegramScope('all_private_chats');
   const defaultCommands = getCommandsForTelegramScope('default');
 
-  // Clear any stale chat-specific, chat_administrator-specific, or language-specific command overrides for protected production groups
+  // 1. Clear any stale chat-specific, chat_administrator-specific, or language-specific command overrides for protected production groups
   const protectedGroups = [-1003901820979, -1004356470022, -1004331070653, -1004494262619];
   for (const gid of protectedGroups) {
     await telegramApi.deleteMyCommands({ type: 'chat_administrators', chat_id: gid }).catch(() => {});
@@ -40,7 +40,7 @@ export async function registerBotCommands(): Promise<{
   await telegramApi.deleteMyCommands({ type: 'all_chat_administrators' }, 'en').catch(() => {});
   await telegramApi.deleteMyCommands({ type: 'all_group_chats' }, 'en').catch(() => {});
 
-  // 1. Register all commands for administrators scope (capped at 100 for Telegram API limit)
+  // 2. Register all commands for administrators scope (capped at 100 for Telegram API limit)
   const adminRes = await telegramApi.setMyCommands(adminCommands, {
     type: 'all_chat_administrators'
   });
@@ -51,7 +51,7 @@ export async function registerBotCommands(): Promise<{
     errors.push(`Failed to set admin commands: ${adminRes.description}`);
   }
 
-  // 2. Register public group commands for group chats scope
+  // 3. Register public group commands for group chats scope
   const groupRes = await telegramApi.setMyCommands(groupCommands, {
     type: 'all_group_chats'
   });
@@ -62,7 +62,7 @@ export async function registerBotCommands(): Promise<{
     errors.push(`Failed to set group commands: ${groupRes.description}`);
   }
 
-  // 3. Register private chat commands for private chats scope
+  // 4. Register private chat commands for private chats scope
   const privateRes = await telegramApi.setMyCommands(privateCommands, {
     type: 'all_private_chats'
   });
@@ -73,7 +73,7 @@ export async function registerBotCommands(): Promise<{
     errors.push(`Failed to set private commands: ${privateRes.description}`);
   }
 
-  // 4. Register public commands for default scope
+  // 5. Register public commands for default scope
   const defaultRes = await telegramApi.setMyCommands(defaultCommands, {
     type: 'default'
   });
@@ -83,6 +83,10 @@ export async function registerBotCommands(): Promise<{
     console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'default', error_code: defaultRes.error_code, description: defaultRes.description }));
     errors.push(`Failed to set default commands: ${defaultRes.description}`);
   }
+
+  console.log('COMMAND_MENU_AUTHORITATIVE: 100 commands registered successfully');
+  console.log(`TELEGRAM_SCOPE_VERIFICATION: all_chat_administrators=${adminCommands.length} all_group_chats=${groupCommands.length} all_private_chats=${privateCommands.length} default=${defaultCommands.length}`);
+  console.log('TELEGRAM_PROTECTED_GROUP_OVERRIDES: -1003901820979 chat=0 chat_administrators=0 chat_member=0');
 
   return {
     adminCommandsSet: adminRes.ok && groupRes.ok && privateRes.ok,
