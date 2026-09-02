@@ -631,36 +631,8 @@ export class ModerationService {
       text: '✅ Verified successfully! You can now chat.'
     });
 
-    // Send welcome message if enabled
-    const settings = db.getGroupSettings(session.chatId);
-    if (settings.welcomeEnabled) {
-      const member = callbackQuery.from;
-      const cacheKey = `${session.chatId}:${member.id}`;
-      const now = Date.now();
-      const lastWelcomed = ModerationService.welcomedUsersCache.get(cacheKey) || 0;
-      if (now - lastWelcomed >= 15000) {
-        ModerationService.welcomedUsersCache.set(cacheKey, now);
-        const firstName = member.first_name || 'Member';
-        const lastName = member.last_name || '';
-        const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
-        const username = member.username ? `@${member.username}` : displayName;
-        const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
-        const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
-
-        const text = template
-          .replace(/{first_name}/gi, firstName)
-          .replace(/{last_name}/gi, lastName)
-          .replace(/{user}/gi, displayName)
-          .replace(/{name}/gi, displayName)
-          .replace(/{username}/gi, username)
-          .replace(/{mention}/gi, mention)
-          .replace(/{chat_title}/gi, settings.chatTitle || 'the group')
-          .replace(/{chat}/gi, settings.chatTitle || 'the group')
-          .replace(/{id}/gi, String(member.id));
-
-        await telegramApi.sendMessage(session.chatId, text, { parse_mode: 'HTML' });
-      }
-    }
+    // Send welcome message if enabled (deferred until verification)
+    await this.sendWelcome(session.chatId, callbackQuery.from);
 
     return true;
   }
@@ -908,6 +880,98 @@ export class ModerationService {
   }
 
   /**
+   * Send Welcome Greeting to a specific member with deduplication and placeholder formatting.
+   */
+  public static async sendWelcome(
+    chatId: number,
+    member: TelegramUser,
+    chatTitle?: string
+  ): Promise<boolean> {
+    if (!chatId || !member) return false;
+
+    const settings = db.getGroupSettings(chatId, chatTitle);
+    if (!settings.welcomeEnabled) return false;
+
+    // Skip welcoming the bot itself
+    if (member.is_bot) {
+      const me = await telegramApi.getMe().catch(() => null);
+      if (member.id === me?.result?.id) return false;
+    }
+
+    const cacheKey = `${chatId}:${member.id}`;
+    const now = Date.now();
+    const lastWelcomed = ModerationService.welcomedUsersCache.get(cacheKey) || 0;
+    if (now - lastWelcomed < 15000) {
+      return false; // deduplicate within 15 seconds
+    }
+    ModerationService.welcomedUsersCache.set(cacheKey, now);
+
+    const title = chatTitle || settings.chatTitle || 'the group';
+    const firstName = member.first_name || 'Member';
+    const lastName = member.last_name || '';
+    const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
+    const username = member.username ? `@${member.username}` : displayName;
+    const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
+    const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
+
+    const text = template
+      .replace(/{first_name}/gi, firstName)
+      .replace(/{last_name}/gi, lastName)
+      .replace(/{user}/gi, displayName)
+      .replace(/{name}/gi, displayName)
+      .replace(/{username}/gi, username)
+      .replace(/{mention}/gi, mention)
+      .replace(/{chat_title}/gi, title)
+      .replace(/{chat}/gi, title)
+      .replace(/{id}/gi, String(member.id));
+
+    await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' }).catch(() => {});
+    return true;
+  }
+
+  /**
+   * Send Goodbye Farewell when a member leaves with deduplication and placeholder formatting.
+   */
+  public static async sendGoodbye(
+    chatId: number,
+    member: TelegramUser,
+    chatTitle?: string
+  ): Promise<boolean> {
+    if (!chatId || !member) return false;
+
+    const settings = db.getGroupSettings(chatId, chatTitle);
+    if (!settings.goodbyeEnabled) return false;
+
+    // Skip goodbye for the bot itself
+    if (member.is_bot) {
+      const me = await telegramApi.getMe().catch(() => null);
+      if (member.id === me?.result?.id) return false;
+    }
+
+    const title = chatTitle || settings.chatTitle || 'the group';
+    const firstName = member.first_name || 'Member';
+    const lastName = member.last_name || '';
+    const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
+    const username = member.username ? `@${member.username}` : displayName;
+    const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
+    const template = settings.goodbyeMessage || 'Goodbye {user}!';
+
+    const text = template
+      .replace(/{first_name}/gi, firstName)
+      .replace(/{last_name}/gi, lastName)
+      .replace(/{user}/gi, displayName)
+      .replace(/{name}/gi, displayName)
+      .replace(/{username}/gi, username)
+      .replace(/{mention}/gi, mention)
+      .replace(/{chat_title}/gi, title)
+      .replace(/{chat}/gi, title)
+      .replace(/{id}/gi, String(member.id));
+
+    await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' }).catch(() => {});
+    return true;
+  }
+
+  /**
    * Welcome and Goodbye Message Handler.
    */
   public static async handleWelcomeAndGoodbye(message: TelegramMessage): Promise<void> {
@@ -926,68 +990,16 @@ export class ModerationService {
       }
     }
 
-    // New chat members join
-    if (message.new_chat_members && message.new_chat_members.length > 0 && settings.welcomeEnabled) {
+    // New chat members join (if CAPTCHA is enabled, welcome is deferred until CAPTCHA verification)
+    if (message.new_chat_members && message.new_chat_members.length > 0 && !settings.captchaEnabled) {
       for (const member of message.new_chat_members) {
-        // Skip welcoming the bot itself
-        const me = await telegramApi.getMe();
-        if (member.id === me.result?.id) continue;
-
-        const cacheKey = `${chatId}:${member.id}`;
-        const now = Date.now();
-        const lastWelcomed = ModerationService.welcomedUsersCache.get(cacheKey) || 0;
-        if (now - lastWelcomed < 15000) {
-          continue; // skip duplicate welcome within 15 seconds
-        }
-        ModerationService.welcomedUsersCache.set(cacheKey, now);
-
-        const firstName = member.first_name || 'Member';
-        const lastName = member.last_name || '';
-        const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
-        const username = member.username ? `@${member.username}` : displayName;
-        const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
-        const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
-
-        const text = template
-          .replace(/{first_name}/gi, firstName)
-          .replace(/{last_name}/gi, lastName)
-          .replace(/{user}/gi, displayName)
-          .replace(/{name}/gi, displayName)
-          .replace(/{username}/gi, username)
-          .replace(/{mention}/gi, mention)
-          .replace(/{chat_title}/gi, chatTitle)
-          .replace(/{chat}/gi, chatTitle)
-          .replace(/{id}/gi, String(member.id));
-
-        await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
+        await this.sendWelcome(chatId, member, chatTitle);
       }
     }
 
     // Member left
-    if (message.left_chat_member && settings.goodbyeEnabled) {
-      const member = message.left_chat_member;
-      const me = await telegramApi.getMe();
-      if (member.id !== me.result?.id) {
-        const firstName = member.first_name || 'Member';
-        const lastName = member.last_name || '';
-        const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
-        const username = member.username ? `@${member.username}` : displayName;
-        const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
-        const template = settings.goodbyeMessage || 'Goodbye {user}!';
-
-        const text = template
-          .replace(/{first_name}/gi, firstName)
-          .replace(/{last_name}/gi, lastName)
-          .replace(/{user}/gi, displayName)
-          .replace(/{name}/gi, displayName)
-          .replace(/{username}/gi, username)
-          .replace(/{mention}/gi, mention)
-          .replace(/{chat_title}/gi, chatTitle)
-          .replace(/{chat}/gi, chatTitle)
-          .replace(/{id}/gi, String(member.id));
-
-        await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
-      }
+    if (message.left_chat_member) {
+      await this.sendGoodbye(chatId, message.left_chat_member, chatTitle);
     }
   }
 

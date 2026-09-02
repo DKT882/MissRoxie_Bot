@@ -474,6 +474,8 @@ export class TelegramBotManager {
           }
         } else if ((update as any).chat_member) {
           await this.handleChatMemberUpdate((update as any).chat_member);
+        } else if ((update as any).my_chat_member) {
+          await this.handleChatMemberUpdate((update as any).my_chat_member);
         }
 
         const totalPipelineMs = Date.now() - pipelineStart;
@@ -566,9 +568,9 @@ export class TelegramBotManager {
       }
       const raidTriggered = await ModerationService.handleAntiRaid(chatId, message.new_chat_members, message.chat.title);
       if (!raidTriggered) {
-        const me = await telegramApi.getMe();
+        const me = await telegramApi.getMe().catch(() => null);
         for (const newMember of message.new_chat_members) {
-          if (newMember.id !== me.result?.id) {
+          if (newMember.id !== me?.result?.id) {
             await ModerationService.handleCaptchaOnJoin(chatId, newMember, message.chat.title);
           }
         }
@@ -836,15 +838,21 @@ export class TelegramBotManager {
     const settings = db.getGroupSettings(chatId, chatMemberUpdate.chat.title);
     const chatTitle = chatMemberUpdate.chat.title || 'the group';
 
-    // Member joined via invite link or approval
+    // Member joined via invite link, join request, or direct addition
     if (newStatus === 'member' && oldStatus !== 'member' && user) {
-      const me = await telegramApi.getMe();
-      if (user.id !== me.result?.id) {
+      const me = await telegramApi.getMe().catch(() => null);
+      if (user.id !== me?.result?.id) {
         const raidTriggered = await ModerationService.handleAntiRaid(chatId, [user], chatTitle);
         if (!raidTriggered) {
-          await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);
+          const captchaSent = await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);
+          // If CAPTCHA was not triggered/enabled, send welcome immediately
+          if (!captchaSent) {
+            await ModerationService.sendWelcome(chatId, user, chatTitle);
+          }
         }
       }
+    } else if ((newStatus === 'left' || newStatus === 'kicked') && oldStatus === 'member' && user) {
+      await ModerationService.sendGoodbye(chatId, user, chatTitle);
     }
   }
 

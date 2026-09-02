@@ -1577,40 +1577,101 @@ export function getAdminCatalog(): CommandCatalogItem[] {
   return COMMAND_CATALOG.filter(item => item.permission === 'Admin' || item.permission === 'Owner' || !item.isPublic);
 }
 
+// Primary curated command lists per Telegram scope for clean, user-friendly "/" menu suggestions
+const PRIMARY_ADMIN_COMMANDS = [
+  '/help',
+  '/settings',
+  '/status',
+  '/ban',
+  '/unban',
+  '/kick',
+  '/mute',
+  '/unmute',
+  '/warn',
+  '/warnings',
+  '/clear',
+  '/del',
+  '/locks',
+  '/welcome',
+  '/goodbye',
+  '/slowmode',
+  '/pin',
+  '/unpin',
+  '/adminlog',
+  '/rules',
+  '/roxie',
+  '/lustmode'
+];
+
+const PRIMARY_GROUP_COMMANDS = [
+  '/help',
+  '/start',
+  '/ping',
+  '/settings',
+  '/rules',
+  '/notes',
+  '/report',
+  '/mymemory',
+  '/forgetme'
+];
+
+const PRIMARY_PRIVATE_COMMANDS = [
+  '/help',
+  '/start',
+  '/ping',
+  '/settings',
+  '/live',
+  '/mymemory',
+  '/forgetme'
+];
+
+const PRIMARY_DEFAULT_COMMANDS = [
+  '/help',
+  '/start',
+  '/ping',
+  '/settings',
+  '/rules',
+  '/mymemory',
+  '/forgetme'
+];
+
 export function getCommandsForTelegramScope(scope: 'all_chat_administrators' | 'all_group_chats' | 'all_private_chats' | 'default'): Array<{ command: string; description: string }> {
-  let filtered: CommandCatalogItem[] = [];
+  let targetCmds: string[] = [];
 
   switch (scope) {
     case 'all_chat_administrators':
-      filtered = COMMAND_CATALOG.filter(item => item.scopes?.includes('group') || item.scopes?.includes('admin'));
+      targetCmds = PRIMARY_ADMIN_COMMANDS;
       break;
     case 'all_group_chats':
-      filtered = COMMAND_CATALOG.filter(item => item.permission === 'Everyone' && (item.scopes?.includes('group') ?? true));
+      targetCmds = PRIMARY_GROUP_COMMANDS;
       break;
     case 'all_private_chats':
-      filtered = COMMAND_CATALOG.filter(item => item.scopes?.includes('private'));
+      targetCmds = PRIMARY_PRIVATE_COMMANDS;
       break;
     case 'default':
     default:
-      filtered = COMMAND_CATALOG.filter(item => item.permission === 'Everyone');
+      targetCmds = PRIMARY_DEFAULT_COMMANDS;
       break;
   }
 
-  // Safe conservative limits per scope to strictly avoid BOT_COMMANDS_TOO_MUCH from Telegram API
-  const maxLimit = scope === 'all_chat_administrators' ? 75 : scope === 'all_group_chats' ? 45 : 30;
+  const catalogLookup = new Map<string, CommandCatalogItem>();
+  for (const item of COMMAND_CATALOG) {
+    catalogLookup.set(item.command.toLowerCase(), item);
+  }
+
   const seen = new Set<string>();
   const result: Array<{ command: string; description: string }> = [];
 
-  for (const item of filtered) {
-    const rawCmd = item.command.replace(/^\//, '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 32);
+  for (const cmd of targetCmds) {
+    const item = catalogLookup.get(cmd.toLowerCase());
+    const rawCmd = cmd.replace(/^\//, '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 32);
     if (rawCmd && !seen.has(rawCmd)) {
       seen.add(rawCmd);
       result.push({
         command: rawCmd,
-        description: (item.description || 'Command').slice(0, 256)
+        description: (item?.description || 'Command').slice(0, 256)
       });
     }
-    if (result.length >= maxLimit) break;
   }
 
   return result;
