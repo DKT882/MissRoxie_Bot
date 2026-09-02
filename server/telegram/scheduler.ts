@@ -11,6 +11,10 @@ export class MessageScheduler {
   private executions: number = 0;
   private failures: number = 0;
 
+  // SAFETY: Permanently disabled by default until scheduled broadcast requirements are re-audited
+  public static readonly IS_ENABLED_BY_DEFAULT: boolean = false;
+  public static readonly MAX_EXECUTABLE_SCHEDULES: number = 50;
+
   public getStatus() {
     return {
       running: this.isRunning,
@@ -21,17 +25,26 @@ export class MessageScheduler {
 
   public start() {
     if (this.isRunning) return;
-    if (process.env.DISABLE_SCHEDULER === 'true') {
+
+    // Hard requirement: Scheduler execution is disabled in production
+    const isExplicitlyEnabled = process.env.ENABLE_SCHEDULER === 'true';
+    if (!isExplicitlyEnabled) {
+      this.isRunning = false;
       console.log(JSON.stringify({
         event: 'SCHEDULER_STATE',
         enabled: false,
-        reason: 'Disabled via process.env.DISABLE_SCHEDULER'
+        loadedScheduleCount: 0,
+        activeTimerCount: 0
       }));
       return;
     }
 
     this.isRunning = true;
-    const initialSchedules = db.getAllSchedules().filter(s => s.chatId !== -100111222333 && String(s.chatId) !== '-100111222333');
+    const initialSchedules = db.getAllSchedules().filter(s => {
+      const cid = Number(s.chatId);
+      return cid !== -100111222333 && cid !== -100888777 && cid !== -1009876543210 && cid !== -100777888999 && cid !== -100999888101;
+    }).slice(0, MessageScheduler.MAX_EXECUTABLE_SCHEDULES);
+
     console.log(JSON.stringify({
       event: 'SCHEDULER_STATE',
       enabled: true,
@@ -45,9 +58,6 @@ export class MessageScheduler {
     this.timer = setInterval(() => {
       this.checkAndExecuteSchedules();
     }, 15000);
-
-    // Initial check immediately
-    this.checkAndExecuteSchedules();
   }
 
   public stop() {
@@ -85,7 +95,7 @@ export class MessageScheduler {
   }
 
   public async checkAndExecuteSchedules() {
-    if (process.env.DISABLE_SCHEDULER === 'true') {
+    if (process.env.ENABLE_SCHEDULER !== 'true') {
       return;
     }
 

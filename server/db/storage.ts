@@ -515,7 +515,48 @@ export class StorageManager {
         console.log(`[Storage] Restored ${privateLoadResult.loadedCount} private chat JSON files (${privateLoadResult.errorsCount} errors handled safely).`);
       }
 
-      // 5. Print startup diagnostics (Section 18)
+      // 5. Print Schedule Inventory Telemetry
+      const dbFileSize = fs.existsSync(this.dbFile) ? fs.statSync(this.dbFile).size : 0;
+      const rawSchedules = this.data.schedules || [];
+      const dummyChatIds = new Set([-100111222333, -100888777, -1009876543210, -100777888999, -100999888101]);
+      
+      let legacyCount = 0;
+      let dummyCount = 0;
+      const validSchedules = rawSchedules.filter(s => {
+        const cid = Number(s?.chatId);
+        if (cid === -100111222333) {
+          legacyCount++;
+          return false;
+        }
+        if (dummyChatIds.has(cid)) {
+          dummyCount++;
+          return false;
+        }
+        return Boolean(cid);
+      });
+
+      this.data.schedules = validSchedules;
+
+      const uniqueTargetChats = Array.from(new Set(validSchedules.map(s => s.chatId)));
+
+      console.log(JSON.stringify({
+        event: 'SCHEDULE_STORAGE_INVENTORY',
+        sourceFile: this.dbFile,
+        fileSizeBytes: dbFileSize,
+        totalSchedules: validSchedules.length,
+        uniqueTargetChatIds: uniqueTargetChats,
+        legacyTargetCount: legacyCount,
+        dummyTargetCount: dummyCount
+      }));
+
+      console.log(JSON.stringify({
+        event: 'SCHEDULER_LOAD_COMPLETE',
+        totalLoaded: validSchedules.length,
+        uniqueTargetChats,
+        activeCount: validSchedules.length
+      }));
+
+      // 6. Print startup diagnostics (Section 18)
       console.log(`[Roxie Storage]`);
       console.log(`Data directory: ${this.dataDir}`);
       console.log(`Groups loaded: ${groupLoadResult.loadedCount}`);

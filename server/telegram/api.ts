@@ -70,8 +70,16 @@ export class TelegramApi {
     options?: TelegramApiCallOptions
   ): Promise<{ ok: boolean; result?: T; description?: string; error_code?: number; parameters?: { retry_after?: number }; skipped?: boolean }> {
     const rawChatId = body?.chat_id;
+    const numChatId = Number(rawChatId);
+    const isDummyTarget = numChatId === -100111222333 ||
+      numChatId === -100888777 ||
+      numChatId === -1009876543210 ||
+      numChatId === -100777888999 ||
+      numChatId === -100999888101 ||
+      String(rawChatId).includes('100111222333');
+
     // Centralized Hard Guard: Never allow HTTP requests to legacy dummy target
-    if (rawChatId === -100111222333 || rawChatId === '-100111222333' || String(rawChatId).includes('100111222333')) {
+    if (isDummyTarget) {
       const stack = new Error().stack?.split('\n').slice(2, 6).map(s => s.trim()) || [];
       console.error(JSON.stringify({
         event: 'TELEGRAM_INVALID_LEGACY_TARGET',
@@ -82,7 +90,7 @@ export class TelegramApi {
       return {
         ok: false,
         error_code: 400,
-        description: 'Blocked call to legacy dummy chat target (-100111222333)'
+        description: `Blocked call to legacy dummy chat target (${rawChatId})`
       };
     }
 
