@@ -133,9 +133,26 @@ export class TelegramApi {
           await this.paceRequest();
         }
 
+        if (method === 'setMyCommands' || method === 'deleteMyCommands') {
+          const rawCommands = Array.isArray(body?.commands) ? body.commands : [];
+          const uniqueNames = Array.from(new Set(rawCommands.map((c: any) => c?.command)));
+          const extraFields = rawCommands.some((c: any) => Object.keys(c || {}).some(k => k !== 'command' && k !== 'description'));
+          console.log(JSON.stringify({
+            event: 'TELEGRAM_HTTP_PRE_FETCH_PAYLOAD',
+            method,
+            body_length: body ? JSON.stringify(body).length : 0,
+            commands_length: rawCommands.length,
+            unique_commands_count: uniqueNames.length,
+            command_names: uniqueNames,
+            scope: body?.scope,
+            language_code: body?.language_code,
+            has_extra_fields: extraFields
+          }));
+        }
+
         const url = `https://api.telegram.org/bot${token}/${method}`;
         const signal = AbortSignal.timeout(timeoutMs);
-        
+
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
