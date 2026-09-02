@@ -577,7 +577,7 @@ export class ChatbotService {
     const key = String(chatId);
     let existed = false;
     for (const k of this.conversations.keys()) {
-      if (k.startsWith(`${key}_`) || k === key || k === `group_${key}` || k === `dm_${key}`) {
+      if (k.startsWith(`${key}_`) || k === key || k === `group_${key}` || k === `dm_${key}` || k === `group:${key}` || k === `dm:${key}`) {
         this.conversations.delete(k);
         existed = true;
       }
@@ -588,7 +588,7 @@ export class ChatbotService {
 
   public static getOrCreateConversation(chatId: number, _userId?: number): ConversationContext {
     const isGroup = Number(chatId) < 0;
-    const key = String(chatId);
+    const key = isGroup ? `group:${chatId}` : `dm:${chatId}`;
     let conv = this.conversations.get(key);
     if (!conv) {
       conv = { messages: [], lastActivity: Date.now() };
@@ -2064,7 +2064,7 @@ export class ChatbotService {
     const msgId = reqCtx?.messageId ?? message.message_id;
     const userId = message.from?.id || 0;
     const isPrivate = message.chat.type === 'private';
-    const convKey = String(chatId);
+    const convKey = isPrivate ? `dm:${chatId}` : `group:${chatId}`;
     const userName = message.from?.first_name 
       ? (message.from.last_name ? `${message.from.first_name} ${message.from.last_name}` : message.from.first_name)
       : (message.from?.username ? `@${message.from.username}` : (userId ? `User ${userId}` : 'User'));
@@ -2465,13 +2465,14 @@ STRICT CONVERSATION RULES:
     let contextCount = 0;
     if (!isPrivate) {
       // In group chats, ALWAYS read from the ONE shared group conversation memory containing all members' messages
-      const sourceList = priorGroupEntries.slice(-25);
+      const sourceList = structuredClone(priorGroupEntries).slice(-25);
       contextCount = sourceList.length;
       if (sourceList.length > 0) {
         transcript = sourceList.map(e => `${e.name || (e.role === 'assistant' ? 'Roxie' : 'User')}: ${e.content}`).join('\n');
       }
     } else {
-      const boundedHistory = conv.messages.slice(-this.MAX_CONTEXT_MESSAGES);
+      const historySnapshot = structuredClone(conv.messages);
+      const boundedHistory = historySnapshot.slice(-this.MAX_CONTEXT_MESSAGES);
       contextCount = boundedHistory.length;
       if (boundedHistory.length > 0) {
         transcript = boundedHistory.map(m => `${m.role === 'assistant' ? 'Roxie' : 'User'}: ${m.content}`).join('\n');
@@ -2510,6 +2511,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     console.log(`CHATBOT_CONTEXT ${JSON.stringify({
       requestId,
       chatId,
+      conversationKey: convKey,
       messageId: msgId,
       contextMessageCount: contextCount,
       latestUserMessage: userText.slice(0, 100),
@@ -2524,14 +2526,16 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     console.log(JSON.stringify({
       event: 'AI_REQUEST_START',
       requestId,
-      updateId: reqCtx?.updateId,
       chatId,
+      conversationKey: convKey,
       messageId: msgId,
+      updateId: reqCtx?.updateId,
       primaryModel: configuredModels[0] || 'deepseek/deepseek-chat'
     }));
 
     let replyContent: string | null = null;
     let modelUsed: string = configuredModels[0] || 'deepseek/deepseek-chat';
+    const aiStartTime = Date.now();
 
     await this.acquireAiSlot();
     try {
@@ -2569,6 +2573,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
                 requestId,
                 updateId: reqCtx?.updateId,
                 chatId,
+                conversationKey: convKey,
                 messageId: msgId,
                 model: modelUsed
               }));
@@ -2586,6 +2591,16 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     } finally {
       this.releaseAiSlot();
     }
+
+    const aiElapsedMs = Date.now() - aiStartTime;
+    console.log(JSON.stringify({
+      event: 'AI_REQUEST_END',
+      requestId,
+      chatId,
+      conversationKey: convKey,
+      elapsedMs: aiElapsedMs,
+      modelUsed
+    }));
 
     if (!replyContent) {
       metricsTracker.increment('ai_failures');
@@ -2895,8 +2910,18 @@ Core Rules:
     console.log(`CHATBOT_DECISION ${JSON.stringify(decision)}`);
 
     const targetChatId = reqCtx?.chatId ?? decision.chatId;
+    if (reqCtx && targetChatId !== reqCtx.chatId) {
+      console.error(JSON.stringify({
+        event: 'TELEGRAM_ROUTE_CRITICAL_MISMATCH',
+        sourceChatId: reqCtx.chatId,
+        targetChatId,
+        messageId: reqCtx.messageId
+      }));
+      throw new Error(`CRITICAL ROUTE MISMATCH: attempted send to ${targetChatId} for message received in ${reqCtx.chatId}`);
+    }
+
     const isGroup = targetChatId < 0;
-    const convKey = String(targetChatId);
+    const convKey = isGroup ? `group:${targetChatId}` : `dm:${targetChatId}`;
     let conv = this.conversations.get(convKey);
     if (!conv) {
       conv = { messages: [], lastActivity: Date.now() };

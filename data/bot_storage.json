@@ -1011,103 +1011,6 @@
       "brotherZoneEnabled": true,
       "coupleFilter": true
     },
-    "-100111222333": {
-      "chatId": -100111222333,
-      "chatTitle": "SVGI Developers",
-      "warnLimit": 3,
-      "warnAction": "ban",
-      "warnExpireSeconds": 0,
-      "floodEnabled": false,
-      "floodCount": 8,
-      "floodWindow": 5,
-      "floodAction": "mute",
-      "raidEnabled": false,
-      "raidLimit": 8,
-      "raidWindow": 30,
-      "raidAction": "kick",
-      "raidDuration": 300,
-      "captchaEnabled": false,
-      "captchaMode": "button",
-      "captchaTimeout": 120,
-      "captchaAction": "kick",
-      "linksProtection": true,
-      "linksWhitelist": [],
-      "mediaProtection": true,
-      "stickerProtection": true,
-      "gifsProtection": false,
-      "videosProtection": false,
-      "photosProtection": false,
-      "voiceProtection": false,
-      "audioProtection": false,
-      "locks": {},
-      "filters": {
-        "rules": "Group rules apply."
-      },
-      "welcomeEnabled": false,
-      "welcomeMessage": "Welcome {user} to {chat}!",
-      "goodbyeEnabled": false,
-      "goodbyeMessage": "Goodbye {user}!",
-      "slowModeSeconds": 0,
-      "reportsEnabled": true,
-      "updatedAt": "2026-09-01T15:23:41.473Z",
-      "automodEnabled": false,
-      "mediaAction": "delete",
-      "warnEscalation": [],
-      "securityEnabled": false,
-      "joinmode": "normal",
-      "autoAcceptEnabled": false,
-      "automations": [],
-      "rules": "",
-      "lastAllTimestamp": 0,
-      "chatbotEnabled": true,
-      "chatbotMode": "auto",
-      "protectionEnabled": true,
-      "protectionFloodCount": 5,
-      "protectionFloodWindow": 5,
-      "protectionDuplicateLimit": 3,
-      "protectionLinkBurstLimit": 3,
-      "autoResponse": {
-        "enabled": true,
-        "mode": "every_message",
-        "cooldownSeconds": 30,
-        "randomize": false,
-        "minSeconds": 30,
-        "maxSeconds": 120,
-        "lastResponseTimestamp": 1788282243516,
-        "nextIntervalSeconds": 0,
-        "nextAllowedAt": 0
-      },
-      "autoSticker": {
-        "enabled": true,
-        "mode": "cooldown",
-        "cooldownSeconds": 60,
-        "randomize": false,
-        "minSeconds": 60,
-        "maxSeconds": 300,
-        "lastStickerTimestamp": 1788276221468,
-        "nextIntervalSeconds": 60,
-        "nextAllowedAt": 1788276281468
-      },
-      "stickerPacks": {},
-      "botLeft": false,
-      "unavailable": false,
-      "abuseWords": [],
-      "customAbusiveWords": [],
-      "autoDeleteJoinLeave": false,
-      "notes": "",
-      "stopSpamEnabled": false,
-      "stopAbusiveEnabled": false,
-      "stopPromotionEnabled": false,
-      "fileProtection": false,
-      "imageProtection": false,
-      "gifProtection": false,
-      "lustMode": false,
-      "lustLevel": 0,
-      "personality": "normal",
-      "language": "hinglish",
-      "brotherZoneEnabled": true,
-      "coupleFilter": true
-    },
     "-100444555666": {
       "chatId": -100444555666,
       "chatTitle": "Roxie Testing Group",
@@ -5290,36 +5193,6 @@
       "reason": "Breaking group rules"
     },
     {
-      "id": "357d3kk",
-      "timestamp": "2026-08-25T18:41:32.054Z",
-      "count": 1,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
-    },
-    {
-      "id": "2xz90wp",
-      "timestamp": "2026-08-25T18:58:18.110Z",
-      "count": 2,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
-    },
-    {
-      "id": "ul2tl6f",
-      "timestamp": "2026-08-25T19:17:55.317Z",
-      "count": 3,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
-    },
-    {
       "id": "zn5v3bm",
       "timestamp": "2026-08-25T19:17:55.959Z",
       "count": 1,
@@ -5329,16 +5202,6 @@
       "adminId": 1002,
       "adminUsername": "admin_user",
       "reason": "Dashboard warn test"
-    },
-    {
-      "id": "e9ym0ez",
-      "timestamp": "2026-08-25T19:18:12.310Z",
-      "count": 4,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
     },
     {
       "id": "svxp5ys",
@@ -5352,16 +5215,6 @@
       "reason": "Dashboard warn test"
     },
     {
-      "id": "870vemx",
-      "timestamp": "2026-08-26T08:53:26.672Z",
-      "count": 5,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
-    },
-    {
       "id": "lxwem6k",
       "timestamp": "2026-08-26T08:53:27.350Z",
       "count": 3,
@@ -5371,16 +5224,6 @@
       "adminId": 1002,
       "adminUsername": "admin_user",
       "reason": "Dashboard warn test"
-    },
-    {
-      "id": "qi0dg0q",
-      "timestamp": "2026-08-26T08:54:23.506Z",
-      "count": 6,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
     },
     {
       "id": "au976ph",
@@ -5394,16 +5237,6 @@
       "reason": "Dashboard warn test"
     },
     {
-      "id": "z8hfzrw",
-      "timestamp": "2026-08-26T09:06:54.356Z",
-      "count": 7,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
-    },
-    {
       "id": "wwvad7f",
       "timestamp": "2026-08-26T09:06:54.932Z",
       "count": 5,
@@ -5413,16 +5246,6 @@
       "adminId": 1002,
       "adminUsername": "admin_user",
       "reason": "Dashboard warn test"
-    },
-    {
-      "id": "gjoqt17",
-      "timestamp": "2026-08-26T09:07:52.076Z",
-      "count": 8,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
     },
     {
       "id": "9ey1yvw",
@@ -5436,16 +5259,6 @@
       "reason": "Dashboard warn test"
     },
     {
-      "id": "5k1w05x",
-      "timestamp": "2026-08-26T09:08:35.957Z",
-      "count": 9,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
-    },
-    {
       "id": "1h7q96v",
       "timestamp": "2026-08-26T09:08:36.516Z",
       "count": 7,
@@ -5455,16 +5268,6 @@
       "adminId": 1002,
       "adminUsername": "admin_user",
       "reason": "Dashboard warn test"
-    },
-    {
-      "id": "luyztiu",
-      "timestamp": "2026-08-27T07:31:13.747Z",
-      "count": 10,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
     },
     {
       "id": "k99960l",
@@ -5478,16 +5281,6 @@
       "reason": "Dashboard warn test"
     },
     {
-      "id": "5a4mnwe",
-      "timestamp": "2026-08-27T07:32:20.185Z",
-      "count": 11,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
-    },
-    {
       "id": "xw036e2",
       "timestamp": "2026-08-27T07:32:20.763Z",
       "count": 9,
@@ -5497,16 +5290,6 @@
       "adminId": 1002,
       "adminUsername": "admin_user",
       "reason": "Dashboard warn test"
-    },
-    {
-      "id": "i2zch8a",
-      "timestamp": "2026-08-27T08:30:57.958Z",
-      "count": 12,
-      "chatId": -100111222333,
-      "userId": 111111,
-      "userUsername": "user_a",
-      "reason": "Warning 1",
-      "adminId": 999
     },
     {
       "id": "cdslynv",
@@ -5587,7 +5370,6 @@
       "savedAt": "2026-08-27T08:30:40.885Z"
     },
     "-1001": [],
-    "-100111222333": [],
     "-100123456789": [],
     "-1002": [],
     "-1003937532464": [],
@@ -5651,7 +5433,6 @@
   },
   "approvedUsers": {
     "-1001": [],
-    "-100111222333": [],
     "-100123456789": [],
     "-1002": [],
     "-1003937532464": [],
@@ -5708,39 +5489,6 @@
   "captchaSessions": [],
   "schedules": [
     {
-      "id": "ZYWSXD",
-      "createdAt": "2026-08-25T18:41:32.055Z",
-      "runsCount": 19,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
-      "id": "55O99P",
-      "createdAt": "2026-08-25T18:58:18.112Z",
-      "runsCount": 19,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
-      "id": "Z1CLUO",
-      "createdAt": "2026-08-25T19:17:55.318Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
       "id": "L7ZX1O",
       "createdAt": "2026-08-25T19:17:55.961Z",
       "runsCount": 0,
@@ -5750,17 +5498,6 @@
       "message": "Automated test message",
       "scheduledTime": 1787689075961,
       "createdBy": "Admin"
-    },
-    {
-      "id": "83NSXH",
-      "createdAt": "2026-08-25T19:18:12.310Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
     },
     {
       "id": "30C7LJ",
@@ -5774,17 +5511,6 @@
       "createdBy": "Admin"
     },
     {
-      "id": "W1HJPK",
-      "createdAt": "2026-08-26T08:53:26.672Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
       "id": "4BRCH1",
       "createdAt": "2026-08-26T08:53:27.352Z",
       "runsCount": 0,
@@ -5794,17 +5520,6 @@
       "message": "Automated test message",
       "scheduledTime": 1787738007352,
       "createdBy": "Admin"
-    },
-    {
-      "id": "M8HLLH",
-      "createdAt": "2026-08-26T08:54:23.506Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
     },
     {
       "id": "JTVEGF",
@@ -5817,17 +5532,6 @@
       "createdBy": "Admin"
     },
     {
-      "id": "YDSVDX",
-      "createdAt": "2026-08-26T09:06:54.357Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
       "id": "WF7F50",
       "createdAt": "2026-08-26T09:06:54.934Z",
       "runsCount": 0,
@@ -5836,17 +5540,6 @@
       "message": "Automated test message",
       "scheduledTime": 1787738814934,
       "createdBy": "Admin"
-    },
-    {
-      "id": "2PHBNL",
-      "createdAt": "2026-08-26T09:07:52.077Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
     },
     {
       "id": "E5Y0LU",
@@ -5859,17 +5552,6 @@
       "createdBy": "Admin"
     },
     {
-      "id": "CM0L6Y",
-      "createdAt": "2026-08-26T09:08:35.957Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
       "id": "9RNOR6",
       "createdAt": "2026-08-26T09:08:36.518Z",
       "runsCount": 0,
@@ -5878,17 +5560,6 @@
       "message": "Automated test message",
       "scheduledTime": 1787738916518,
       "createdBy": "Admin"
-    },
-    {
-      "id": "HR6JN8",
-      "createdAt": "2026-08-27T07:31:13.748Z",
-      "runsCount": 14,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
     },
     {
       "id": "XDFP97",
@@ -5901,17 +5572,6 @@
       "createdBy": "Admin"
     },
     {
-      "id": "MD5SE1",
-      "createdAt": "2026-08-27T07:32:20.186Z",
-      "runsCount": 14,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
       "id": "2G3OVE",
       "createdAt": "2026-08-27T07:32:20.766Z",
       "runsCount": 0,
@@ -5920,17 +5580,6 @@
       "message": "Automated test message",
       "scheduledTime": 1787819540766,
       "createdBy": "Admin"
-    },
-    {
-      "id": "Q306OV",
-      "createdAt": "2026-08-27T08:30:57.959Z",
-      "runsCount": 13,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
     },
     {
       "id": "7X5NCQ",
@@ -1295743,21 +1295392,6 @@
   ],
   "logs": [
     {
-      "id": "8c66gq5",
-      "timestamp": "2026-09-01T17:04:03.360Z",
-      "chatId": -100111222333,
-      "chatTitle": "Group Alpha",
-      "groupId": -100111222333,
-      "actorId": 1001,
-      "actorRole": "ADMIN",
-      "adminUserId": 1001,
-      "adminUsername": "Admin",
-      "command": "clearmemory",
-      "action": "setting_change",
-      "result": "success",
-      "reason": "Cleared chatbot conversation memory"
-    },
-    {
       "id": "mxfa4i5",
       "timestamp": "2026-09-01T17:04:03.396Z",
       "chatId": -100444555666,
@@ -1298892,7 +1298526,6 @@
     "-1004353139683_77770010": "MODERATOR",
     "-1003937532464_8204962552": "MODERATOR",
     "-1001": {},
-    "-100111222333": {},
     "-100123456789": {},
     "-1002": {},
     "-1003937532464": {},
@@ -1299684,11 +1299317,6 @@
       "stickerMetadata": {}
     },
     "-1001": {
-      "stickers": {},
-      "animations": {},
-      "stickerMetadata": {}
-    },
-    "-100111222333": {
       "stickers": {},
       "animations": {},
       "stickerMetadata": {}
@@ -1321346,122 +1320974,6 @@
           "timestamp": 1788282243317
         }
       ]
-    },
-    "-100111222333": {
-      "chatId": -100111222333,
-      "messages": [
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "hii",
-          "timestamp": 1788282243450
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "helloo",
-          "timestamp": 1788282243458
-        },
-        {
-          "role": "user",
-          "userId": 1002,
-          "name": "Riya",
-          "content": "kya kar rahe ho log?",
-          "timestamp": 1788282243466
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "bas yahin hu 😭",
-          "timestamp": 1788282243474
-        },
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "kal exam hai",
-          "timestamp": 1788282243483
-        },
-        {
-          "role": "user",
-          "userId": 1002,
-          "name": "Riya",
-          "content": "seriously??",
-          "timestamp": 1788282243491
-        },
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "Roxie kuch padha nahi maine",
-          "timestamp": 1788282243499,
-          "messageId": 301
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "tum dono ko ab yaad aa raha hai? 😂",
-          "timestamp": 1788282243508
-        }
-      ],
-      "lastUpdated": 1788282243508,
-      "entries": [
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "hii",
-          "timestamp": 1788282243450
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "helloo",
-          "timestamp": 1788282243458
-        },
-        {
-          "role": "user",
-          "userId": 1002,
-          "name": "Riya",
-          "content": "kya kar rahe ho log?",
-          "timestamp": 1788282243466
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "bas yahin hu 😭",
-          "timestamp": 1788282243474
-        },
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "kal exam hai",
-          "timestamp": 1788282243483
-        },
-        {
-          "role": "user",
-          "userId": 1002,
-          "name": "Riya",
-          "content": "seriously??",
-          "timestamp": 1788282243491
-        },
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "Roxie kuch padha nahi maine",
-          "timestamp": 1788282243499,
-          "messageId": 301
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "tum dono ko ab yaad aa raha hai? 😂",
-          "timestamp": 1788282243508
-        }
-      ]
     }
   },
   "groupMemories": {
@@ -1342888,122 +1342400,6 @@
           "name": "Roxie",
           "content": "Reply to 520",
           "timestamp": 1788282243317
-        }
-      ]
-    },
-    "-100111222333": {
-      "chatId": -100111222333,
-      "messages": [
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "hii",
-          "timestamp": 1788282243450
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "helloo",
-          "timestamp": 1788282243458
-        },
-        {
-          "role": "user",
-          "userId": 1002,
-          "name": "Riya",
-          "content": "kya kar rahe ho log?",
-          "timestamp": 1788282243466
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "bas yahin hu 😭",
-          "timestamp": 1788282243474
-        },
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "kal exam hai",
-          "timestamp": 1788282243483
-        },
-        {
-          "role": "user",
-          "userId": 1002,
-          "name": "Riya",
-          "content": "seriously??",
-          "timestamp": 1788282243491
-        },
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "Roxie kuch padha nahi maine",
-          "timestamp": 1788282243499,
-          "messageId": 301
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "tum dono ko ab yaad aa raha hai? 😂",
-          "timestamp": 1788282243508
-        }
-      ],
-      "lastUpdated": 1788282243508,
-      "entries": [
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "hii",
-          "timestamp": 1788282243450
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "helloo",
-          "timestamp": 1788282243458
-        },
-        {
-          "role": "user",
-          "userId": 1002,
-          "name": "Riya",
-          "content": "kya kar rahe ho log?",
-          "timestamp": 1788282243466
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "bas yahin hu 😭",
-          "timestamp": 1788282243474
-        },
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "kal exam hai",
-          "timestamp": 1788282243483
-        },
-        {
-          "role": "user",
-          "userId": 1002,
-          "name": "Riya",
-          "content": "seriously??",
-          "timestamp": 1788282243491
-        },
-        {
-          "role": "user",
-          "userId": 1001,
-          "name": "Aman",
-          "content": "Roxie kuch padha nahi maine",
-          "timestamp": 1788282243499,
-          "messageId": 301
-        },
-        {
-          "role": "assistant",
-          "name": "Roxie",
-          "content": "tum dono ko ab yaad aa raha hai? 😂",
-          "timestamp": 1788282243508
         }
       ]
     }

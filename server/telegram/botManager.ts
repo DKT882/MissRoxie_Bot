@@ -391,6 +391,16 @@ export class TelegramBotManager {
     const targetChatId = reqCtx.chatId;
 
     const executeTask = async () => {
+      const queueWaitMs = Date.now() - receivedAt;
+      const pipelineStart = Date.now();
+      console.log(JSON.stringify({
+        event: 'MESSAGE_PIPELINE_START',
+        update_id: update.update_id,
+        chat_id: reqCtx.chatId,
+        message_id: reqCtx.messageId,
+        queue_wait_ms: queueWaitMs
+      }));
+
       await TelegramBotManager.acquireGlobalSlot();
       try {
         console.log(JSON.stringify({
@@ -413,12 +423,16 @@ export class TelegramBotManager {
           await this.handleChatMemberUpdate((update as any).chat_member);
         }
 
+        const totalPipelineMs = Date.now() - pipelineStart;
         metricsTracker.increment('telegram_updates_processed');
         console.log(JSON.stringify({
-          event: 'TELEGRAM_UPDATE_PROCESSED',
+          event: 'MESSAGE_PIPELINE_END',
           update_id: update.update_id,
           chat_id: reqCtx.chatId,
-          message_id: reqCtx.messageId
+          message_id: reqCtx.messageId,
+          queue_wait_ms: queueWaitMs,
+          pipeline_ms: totalPipelineMs,
+          total_ms: Date.now() - receivedAt
         }));
       } catch (updateErr: any) {
         metricsTracker.increment('telegram_updates_failed');

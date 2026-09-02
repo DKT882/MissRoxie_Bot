@@ -17,7 +17,6 @@
     "-1004353139683_77770010": "MODERATOR",
     "-1003937532464_8204962552": "MODERATOR",
     "-1001": {},
-    "-100111222333": {},
     "-100123456789": {},
     "-1002": {},
     "-1003937532464": {},
@@ -78,39 +77,6 @@
   },
   "schedules": [
     {
-      "id": "ZYWSXD",
-      "createdAt": "2026-08-25T18:41:32.055Z",
-      "runsCount": 19,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
-      "id": "55O99P",
-      "createdAt": "2026-08-25T18:58:18.112Z",
-      "runsCount": 19,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
-      "id": "Z1CLUO",
-      "createdAt": "2026-08-25T19:17:55.318Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
       "id": "L7ZX1O",
       "createdAt": "2026-08-25T19:17:55.961Z",
       "runsCount": 0,
@@ -120,17 +86,6 @@
       "message": "Automated test message",
       "scheduledTime": 1787689075961,
       "createdBy": "Admin"
-    },
-    {
-      "id": "83NSXH",
-      "createdAt": "2026-08-25T19:18:12.310Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
     },
     {
       "id": "30C7LJ",
@@ -144,17 +99,6 @@
       "createdBy": "Admin"
     },
     {
-      "id": "W1HJPK",
-      "createdAt": "2026-08-26T08:53:26.672Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
       "id": "4BRCH1",
       "createdAt": "2026-08-26T08:53:27.352Z",
       "runsCount": 0,
@@ -164,17 +108,6 @@
       "message": "Automated test message",
       "scheduledTime": 1787738007352,
       "createdBy": "Admin"
-    },
-    {
-      "id": "M8HLLH",
-      "createdAt": "2026-08-26T08:54:23.506Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
     },
     {
       "id": "JTVEGF",
@@ -187,17 +120,6 @@
       "createdBy": "Admin"
     },
     {
-      "id": "YDSVDX",
-      "createdAt": "2026-08-26T09:06:54.357Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
       "id": "WF7F50",
       "createdAt": "2026-08-26T09:06:54.934Z",
       "runsCount": 0,
@@ -206,17 +128,6 @@
       "message": "Automated test message",
       "scheduledTime": 1787738814934,
       "createdBy": "Admin"
-    },
-    {
-      "id": "2PHBNL",
-      "createdAt": "2026-08-26T09:07:52.077Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
     },
     {
       "id": "E5Y0LU",
@@ -229,17 +140,6 @@
       "createdBy": "Admin"
     },
     {
-      "id": "CM0L6Y",
-      "createdAt": "2026-08-26T09:08:35.957Z",
-      "runsCount": 18,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
       "id": "9RNOR6",
       "createdAt": "2026-08-26T09:08:36.518Z",
       "runsCount": 0,
@@ -248,17 +148,6 @@
       "message": "Automated test message",
       "scheduledTime": 1787738916518,
       "createdBy": "Admin"
-    },
-    {
-      "id": "HR6JN8",
-      "createdAt": "2026-08-27T07:31:13.748Z",
-      "runsCount": 14,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
     },
     {
       "id": "XDFP97",
@@ -271,17 +160,6 @@
       "createdBy": "Admin"
     },
     {
-      "id": "MD5SE1",
-      "createdAt": "2026-08-27T07:32:20.186Z",
-      "runsCount": 14,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
-    },
-    {
       "id": "2G3OVE",
       "createdAt": "2026-08-27T07:32:20.766Z",
       "runsCount": 0,
@@ -290,17 +168,6 @@
       "message": "Automated test message",
       "scheduledTime": 1787819540766,
       "createdBy": "Admin"
-    },
-    {
-      "id": "Q306OV",
-      "createdAt": "2026-08-27T08:30:57.959Z",
-      "runsCount": 13,
-      "chatId": -100111222333,
-      "message": "Daily check-in",
-      "intervalMs": 3600000,
-      "intervalFormatted": "1h",
-      "nextRun": "2026-08-30T19:11:01.361Z",
-      "adminId": 999
     },
     {
       "id": "7X5NCQ",
@@ -1290113,21 +1289980,6 @@
   ],
   "logs": [
     {
-      "id": "8c66gq5",
-      "timestamp": "2026-09-01T17:04:03.360Z",
-      "chatId": -100111222333,
-      "chatTitle": "Group Alpha",
-      "groupId": -100111222333,
-      "actorId": 1001,
-      "actorRole": "ADMIN",
-      "adminUserId": 1001,
-      "adminUsername": "Admin",
-      "command": "clearmemory",
-      "action": "setting_change",
-      "result": "success",
-      "reason": "Cleared chatbot conversation memory"
-    },
-    {
       "id": "mxfa4i5",
       "timestamp": "2026-09-01T17:04:03.396Z",
       "chatId": -100444555666,
@@ -1290152,21 +1290004,6 @@
       "action": "setting_change",
       "result": "success",
       "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-05-786Z.json)"
-    },
-    {
-      "id": "0cxrjgi",
-      "timestamp": "2026-09-01T18:06:43.104Z",
-      "chatId": -100111222333,
-      "chatTitle": "Group Alpha",
-      "groupId": -100111222333,
-      "actorId": 1001,
-      "actorRole": "ADMIN",
-      "adminUserId": 1001,
-      "adminUsername": "Admin",
-      "command": "clearmemory",
-      "action": "setting_change",
-      "result": "success",
-      "reason": "Cleared chatbot conversation memory"
     },
     {
       "id": "m0lb77w",

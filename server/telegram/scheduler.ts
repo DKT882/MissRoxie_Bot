@@ -21,7 +21,26 @@ export class MessageScheduler {
 
   public start() {
     if (this.isRunning) return;
+    if (process.env.DISABLE_SCHEDULER === 'true') {
+      console.log(JSON.stringify({
+        event: 'SCHEDULER_STATE',
+        enabled: false,
+        reason: 'Disabled via process.env.DISABLE_SCHEDULER'
+      }));
+      return;
+    }
+
     this.isRunning = true;
+    const initialSchedules = db.getAllSchedules().filter(s => s.chatId !== -100111222333 && String(s.chatId) !== '-100111222333');
+    console.log(JSON.stringify({
+      event: 'SCHEDULER_STATE',
+      enabled: true,
+      loadedScheduleCount: initialSchedules.length,
+      activeTimerCount: 1,
+      scheduleIds: initialSchedules.map(s => s.id),
+      targetChatIds: Array.from(new Set(initialSchedules.map(s => s.chatId)))
+    }));
+
     // Check every 15 seconds
     this.timer = setInterval(() => {
       this.checkAndExecuteSchedules();
@@ -66,6 +85,10 @@ export class MessageScheduler {
   }
 
   public async checkAndExecuteSchedules() {
+    if (process.env.DISABLE_SCHEDULER === 'true') {
+      return;
+    }
+
     // Process any expired temporary moderation actions (tmute & tban)
     try {
       await ModerationService.processExpiredTempActions();
@@ -80,7 +103,8 @@ export class MessageScheduler {
       console.warn('Error processing expired captcha sessions in scheduler:', err);
     }
 
-    const schedules = db.getAllSchedules();
+    const allSchedules = db.getAllSchedules();
+    const schedules = allSchedules.filter(s => s.chatId && s.chatId !== -100111222333 && String(s.chatId) !== '-100111222333');
     const now = Date.now();
 
     for (const schedule of schedules) {

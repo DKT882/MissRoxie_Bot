@@ -69,8 +69,26 @@ export class TelegramApi {
     body?: Record<string, any>,
     options?: TelegramApiCallOptions
   ): Promise<{ ok: boolean; result?: T; description?: string; error_code?: number; parameters?: { retry_after?: number }; skipped?: boolean }> {
+    const rawChatId = body?.chat_id;
+    // Centralized Hard Guard: Never allow HTTP requests to legacy dummy target
+    if (rawChatId === -100111222333 || rawChatId === '-100111222333' || String(rawChatId).includes('100111222333')) {
+      const stack = new Error().stack?.split('\n').slice(2, 6).map(s => s.trim()) || [];
+      console.error(JSON.stringify({
+        event: 'TELEGRAM_INVALID_LEGACY_TARGET',
+        chat_id: rawChatId,
+        method,
+        stack
+      }));
+      return {
+        ok: false,
+        error_code: 400,
+        description: 'Blocked call to legacy dummy chat target (-100111222333)'
+      };
+    }
+
     const maxRetries = options?.maxRetries ?? this.maxRetries;
     const timeoutMs = options?.timeoutMs ?? 20000;
+    const reqId = `tg_${method}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     let attempt = 0;
 
     let token: string;
@@ -85,6 +103,16 @@ export class TelegramApi {
     }
 
     while (attempt <= maxRetries) {
+      const startedAt = Date.now();
+      console.log(JSON.stringify({
+        event: 'TELEGRAM_REQUEST_START',
+        requestId: reqId,
+        method,
+        chatId: rawChatId,
+        startedAt,
+        attempt: attempt + 1
+      }));
+
       try {
         if (!options?.skipRateLimiter) {
           await this.paceRequest();
@@ -99,6 +127,8 @@ export class TelegramApi {
           body: body ? JSON.stringify(body) : undefined,
           signal
         });
+
+        const elapsedMs = Date.now() - startedAt;
 
         let data: any;
         try {
@@ -121,7 +151,16 @@ export class TelegramApi {
             continue; // Retry
           } else {
             this.rateLimitStats.retriesExhausted++;
-            console.error(`[TelegramApi] Max retries (${maxRetries}) exhausted for ${method} after 429 rate limit.`);
+            console.error(JSON.stringify({
+              event: 'TELEGRAM_REQUEST_FAILED',
+              requestId: reqId,
+              method,
+              chatId: rawChatId,
+              elapsedMs,
+              attempt: attempt + 1,
+              error_code: 429,
+              description: data.description || 'Rate limit exceeded'
+            }));
             return {
               ok: false,
               error_code: 429,
@@ -131,14 +170,45 @@ export class TelegramApi {
           }
         }
 
-        if (attempt > 0 && data.ok) {
-          this.rateLimitStats.retriesSucceeded++;
+        if (data.ok) {
+          if (attempt > 0) {
+            this.rateLimitStats.retriesSucceeded++;
+          }
+          console.log(JSON.stringify({
+            event: 'TELEGRAM_REQUEST_SUCCESS',
+            requestId: reqId,
+            method,
+            chatId: rawChatId,
+            elapsedMs,
+            attempt: attempt + 1
+          }));
+        } else {
+          console.error(JSON.stringify({
+            event: 'TELEGRAM_REQUEST_FAILED',
+            requestId: reqId,
+            method,
+            chatId: rawChatId,
+            elapsedMs,
+            attempt: attempt + 1,
+            error_code: data.error_code,
+            description: data.description
+          }));
         }
 
         return data;
       } catch (err: any) {
+        const elapsedMs = Date.now() - startedAt;
         if (err.name === 'TimeoutError' || err.name === 'AbortError' || err.message?.includes('aborted') || err.message?.includes('timeout')) {
-          console.warn(`[TelegramApi] Request timed out on ${method} (${timeoutMs}ms). Chat: ${body?.chat_id || 'N/A'}`);
+          console.warn(JSON.stringify({
+            event: 'TELEGRAM_REQUEST_FAILED',
+            requestId: reqId,
+            method,
+            chatId: rawChatId,
+            elapsedMs,
+            attempt: attempt + 1,
+            error_code: 408,
+            description: `Telegram API request timed out after ${timeoutMs}ms`
+          }));
           return {
             ok: false,
             error_code: 408,
@@ -152,6 +222,16 @@ export class TelegramApi {
           await this.sleep(backoffMs);
           continue;
         }
+
+        console.error(JSON.stringify({
+          event: 'TELEGRAM_REQUEST_FAILED',
+          requestId: reqId,
+          method,
+          chatId: rawChatId,
+          elapsedMs,
+          attempt: attempt + 1,
+          description: err.message || 'Network request failed'
+        }));
 
         return {
           ok: false,
@@ -202,6 +282,14 @@ export class TelegramApi {
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     const replyId = options?.reply_parameters?.message_id || options?.reply_to_message_id;
+    const stackTrace = new Error().stack?.split('\n').slice(2, 6).map(s => s.trim()) || [];
+    console.log(JSON.stringify({
+      event: 'TELEGRAM_SEND_CALLSITE',
+      chatId,
+      method: 'sendMessage',
+      reply_to_message_id: replyId,
+      stack: stackTrace
+    }));
 
     console.log(JSON.stringify({
       event: 'TELEGRAM_SEND_START',
