@@ -119,37 +119,11 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     scopes: ['group', 'private']
   },
   {
-    command: '/clearmemory',
-    category: 'General',
-    description: 'Clear Roxie AI chatbot conversation history and context for this chat.',
-    syntax: '/clearmemory',
-    example: '/clearmemory',
-    permission: 'Admin',
-    targetType: 'None',
-    isPublic: false,
-    modifiesState: true,
-    auditLogged: true,
-    scopes: ['group', 'private']
-  },
-  {
     command: '/roxie',
     category: 'General',
     description: 'Manage Roxie AI chatbot status (on/off/status).',
     syntax: '/roxie <on|off|status>',
     example: '/roxie on',
-    permission: 'Admin',
-    targetType: 'Config',
-    isPublic: false,
-    modifiesState: true,
-    auditLogged: true,
-    scopes: ['group']
-  },
-  {
-    command: '/roxiemode',
-    category: 'General',
-    description: 'Set Roxie AI chatbot behavior mode (normal|friendly|auto).',
-    syntax: '/roxiemode <normal|friendly|auto>',
-    example: '/roxiemode friendly',
     permission: 'Admin',
     targetType: 'Config',
     isPublic: false,
@@ -270,34 +244,6 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     scopes: ['group', 'admin']
   },
   {
-    command: '/tmute',
-    category: 'Moderation',
-    description: 'Temporarily mute a member for a specified duration.',
-    syntax: '/tmute <duration> @username [reason]',
-    example: '/tmute 2h @spammer',
-    permission: 'Admin',
-    telegramPermission: 'can_restrict_members',
-    targetType: 'Duration',
-    isPublic: false,
-    modifiesState: true,
-    auditLogged: true,
-    scopes: ['group', 'admin']
-  },
-  {
-    command: '/tban',
-    category: 'Moderation',
-    description: 'Temporarily ban a member for a specified duration.',
-    syntax: '/tban <duration> @username [reason]',
-    example: '/tban 1d @spammer',
-    permission: 'Admin',
-    telegramPermission: 'can_restrict_members',
-    targetType: 'Duration',
-    isPublic: false,
-    modifiesState: true,
-    auditLogged: true,
-    scopes: ['group', 'admin']
-  },
-  {
     command: '/dban',
     category: 'Moderation',
     description: 'Delete replied message and ban its sender.',
@@ -381,6 +327,7 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     auditLogged: true,
     scopes: ['group', 'admin']
   },
+
 
   // ==================== WARNINGS ====================
   {
@@ -493,87 +440,6 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: false,
     modifiesState: false,
     auditLogged: false,
-    scopes: ['group', 'admin']
-  },
-  {
-    command: '/gif',
-    category: 'Media & Stickers',
-    description: 'Toggle GIF and animation protection filter (on/off).',
-    syntax: '/gif <on|off>',
-    example: '/gif off',
-    permission: 'Admin',
-    targetType: 'Config',
-    isPublic: false,
-    modifiesState: true,
-    auditLogged: true,
-    aliases: ['/gifs'],
-    scopes: ['group', 'admin']
-  },
-  {
-    command: '/image',
-    category: 'Media & Stickers',
-    description: 'Toggle photo and image protection filter (on/off).',
-    syntax: '/image <on|off>',
-    example: '/image off',
-    permission: 'Admin',
-    targetType: 'Config',
-    isPublic: false,
-    modifiesState: true,
-    auditLogged: true,
-    aliases: ['/images', '/photo', '/photos'],
-    scopes: ['group', 'admin']
-  },
-  {
-    command: '/file',
-    category: 'Media & Stickers',
-    description: 'Toggle document and file protection filter (on/off).',
-    syntax: '/file <on|off>',
-    example: '/file off',
-    permission: 'Admin',
-    targetType: 'Config',
-    isPublic: false,
-    modifiesState: true,
-    auditLogged: true,
-    scopes: ['group', 'admin']
-  },
-  {
-    command: '/video',
-    category: 'Media & Stickers',
-    description: 'Toggle video and video note protection filter (on/off).',
-    syntax: '/video <on|off>',
-    example: '/video off',
-    permission: 'Admin',
-    targetType: 'Config',
-    isPublic: false,
-    modifiesState: true,
-    auditLogged: true,
-    aliases: ['/videos'],
-    scopes: ['group', 'admin']
-  },
-  {
-    command: '/voice',
-    category: 'Media & Stickers',
-    description: 'Toggle voice note protection filter (on/off).',
-    syntax: '/voice <on|off>',
-    example: '/voice off',
-    permission: 'Admin',
-    targetType: 'Config',
-    isPublic: false,
-    modifiesState: true,
-    auditLogged: true,
-    scopes: ['group', 'admin']
-  },
-  {
-    command: '/audio',
-    category: 'Media & Stickers',
-    description: 'Toggle audio file and music protection filter (on/off).',
-    syntax: '/audio <on|off>',
-    example: '/audio off',
-    permission: 'Admin',
-    targetType: 'Config',
-    isPublic: false,
-    modifiesState: true,
-    auditLogged: true,
     scopes: ['group', 'admin']
   },
   {
@@ -1553,6 +1419,145 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     modifiesState: true,
     auditLogged: true,
     scopes: ['group', 'admin']
+  },
+
+  // ==================== SUB-MEDIA TOGGLES ====================
+  {
+    command: '/gif',
+    category: 'Media & Stickers',
+    description: 'Toggle GIF and animation protection filter (on/off).',
+    syntax: '/gif <on|off>',
+    example: '/gif off',
+    permission: 'Admin',
+    targetType: 'Config',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    aliases: ['/gifs'],
+    scopes: ['group', 'admin']
+  },
+  {
+    command: '/image',
+    category: 'Media & Stickers',
+    description: 'Toggle photo and image protection filter (on/off).',
+    syntax: '/image <on|off>',
+    example: '/image off',
+    permission: 'Admin',
+    targetType: 'Config',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    aliases: ['/images', '/photo', '/photos'],
+    scopes: ['group', 'admin']
+  },
+  {
+    command: '/file',
+    category: 'Media & Stickers',
+    description: 'Toggle document and file protection filter (on/off).',
+    syntax: '/file <on|off>',
+    example: '/file off',
+    permission: 'Admin',
+    targetType: 'Config',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    scopes: ['group', 'admin']
+  },
+  {
+    command: '/video',
+    category: 'Media & Stickers',
+    description: 'Toggle video and video note protection filter (on/off).',
+    syntax: '/video <on|off>',
+    example: '/video off',
+    permission: 'Admin',
+    targetType: 'Config',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    aliases: ['/videos'],
+    scopes: ['group', 'admin']
+  },
+  {
+    command: '/voice',
+    category: 'Media & Stickers',
+    description: 'Toggle voice note protection filter (on/off).',
+    syntax: '/voice <on|off>',
+    example: '/voice off',
+    permission: 'Admin',
+    targetType: 'Config',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    scopes: ['group', 'admin']
+  },
+  {
+    command: '/audio',
+    category: 'Media & Stickers',
+    description: 'Toggle audio file and music protection filter (on/off).',
+    syntax: '/audio <on|off>',
+    example: '/audio off',
+    permission: 'Admin',
+    targetType: 'Config',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    scopes: ['group', 'admin']
+  },
+
+  // ==================== SECONDARY SUB-VARIANTS ====================
+  {
+    command: '/roxiemode',
+    category: 'General',
+    description: 'Set Roxie AI chatbot behavior mode (normal|friendly|auto).',
+    syntax: '/roxiemode <normal|friendly|auto>',
+    example: '/roxiemode friendly',
+    permission: 'Admin',
+    targetType: 'Config',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    scopes: ['group']
+  },
+  {
+    command: '/clearmemory',
+    category: 'General',
+    description: 'Clear Roxie AI chatbot conversation history and context for this chat.',
+    syntax: '/clearmemory',
+    example: '/clearmemory',
+    permission: 'Admin',
+    targetType: 'None',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    scopes: ['group', 'private']
+  },
+  {
+    command: '/tmute',
+    category: 'Moderation',
+    description: 'Temporarily mute a member for a specified duration.',
+    syntax: '/tmute <duration> @username [reason]',
+    example: '/tmute 2h @spammer',
+    permission: 'Admin',
+    telegramPermission: 'can_restrict_members',
+    targetType: 'Duration',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    scopes: ['group', 'admin']
+  },
+  {
+    command: '/tban',
+    category: 'Moderation',
+    description: 'Temporarily ban a member for a specified duration.',
+    syntax: '/tban <duration> @username [reason]',
+    example: '/tban 1d @spammer',
+    permission: 'Admin',
+    telegramPermission: 'can_restrict_members',
+    targetType: 'Duration',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    scopes: ['group', 'admin']
   }
 ];
 
@@ -1578,45 +1583,15 @@ export function getAdminCatalog(): CommandCatalogItem[] {
 }
 
 export function getCommandsForTelegramScope(
-  scope: 'all_chat_administrators' | 'all_group_chats' | 'all_private_chats' | 'default'
+  _scope?: 'all_chat_administrators' | 'all_group_chats' | 'all_private_chats' | 'default'
 ): Array<{ command: string; description: string }> {
-  let filtered: CommandCatalogItem[] = [];
-
-  switch (scope) {
-    case 'all_chat_administrators':
-      // Admin scope: All commands applicable in group or admin context (all group admin tools, moderation, config, settings)
-      filtered = COMMAND_CATALOG.filter(item => {
-        const scopes = item.scopes || ['group'];
-        return scopes.includes('admin') || scopes.includes('group');
-      });
-      break;
-    case 'all_group_chats':
-      // Group scope: All commands valid in group for general members
-      filtered = COMMAND_CATALOG.filter(item => {
-        const scopes = item.scopes || ['group'];
-        return scopes.includes('group') && item.permission === 'Everyone';
-      });
-      break;
-    case 'all_private_chats':
-      // Private scope: All commands valid in private chat
-      filtered = COMMAND_CATALOG.filter(item => {
-        const scopes = item.scopes || ['group'];
-        return scopes.includes('private');
-      });
-      break;
-    case 'default':
-    default:
-      // Default scope: General public commands
-      filtered = COMMAND_CATALOG.filter(item => item.permission === 'Everyone');
-      break;
-  }
-
   // Official Telegram Bot API constraint: at most 100 commands per scope
   const TELEGRAM_MAX_COMMANDS_PER_SCOPE = 100;
   const seen = new Set<string>();
   const result: Array<{ command: string; description: string }> = [];
 
-  for (const item of filtered) {
+  // Expose full COMMAND_CATALOG without scope-based visibility filtering
+  for (const item of COMMAND_CATALOG) {
     const rawCmd = item.command.replace(/^\//, '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 32);
     if (rawCmd && !seen.has(rawCmd)) {
       seen.add(rawCmd);
