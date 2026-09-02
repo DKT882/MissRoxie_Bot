@@ -38,6 +38,40 @@ export class TelegramBotManager {
   private lastStoredMessageTimestamp: string | null = null;
   private lastResponseTimestamp: string | null = null;
 
+  // Per-chat sequential serialization queue
+  private static chatQueues: Map<number, Promise<void>> = new Map();
+  // Global concurrency semaphore for active expensive message processing
+  private static activeProcessingCount: number = 0;
+  public static readonly MAX_CONCURRENT_GLOBAL_PROCESSING = 4;
+  private static globalSlotWaiters: Array<() => void> = [];
+
+  public static async acquireGlobalSlot(): Promise<void> {
+    if (this.activeProcessingCount < this.MAX_CONCURRENT_GLOBAL_PROCESSING) {
+      this.activeProcessingCount++;
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.globalSlotWaiters.push(() => {
+        this.activeProcessingCount++;
+        resolve();
+      });
+    });
+  }
+
+  public static releaseGlobalSlot(): void {
+    this.activeProcessingCount--;
+    if (this.globalSlotWaiters.length > 0) {
+      const next = this.globalSlotWaiters.shift();
+      if (next) next();
+    }
+  }
+
+  public static resetQueues(): void {
+    this.chatQueues.clear();
+    this.activeProcessingCount = 0;
+    this.globalSlotWaiters = [];
+  }
+
   public getReconnectCount(): number {
     return this.reconnectCount;
   }
@@ -275,6 +309,21 @@ export class TelegramBotManager {
           }
 
           if (updatesToProcess.length > 0) {
+            console.log(JSON.stringify({
+              event: 'TELEGRAM_UPDATE_BACKLOG',
+              received_count: updatesToProcess.length,
+              oldest_update_id: updatesToProcess[0]?.update_id,
+              newest_update_id: updatesToProcess[updatesToProcess.length - 1]?.update_id,
+              active_chats_queued: TelegramBotManager.chatQueues.size
+            }));
+
+            console.log(JSON.stringify({
+              event: 'TELEGRAM_CONCURRENCY',
+              active_updates: TelegramBotManager.activeProcessingCount,
+              queued_chats: TelegramBotManager.chatQueues.size,
+              max_concurrency: TelegramBotManager.MAX_CONCURRENT_GLOBAL_PROCESSING
+            }));
+
             await Promise.allSettled(updatesToProcess.map(u => this.processUpdate(u)));
           }
         }
@@ -308,7 +357,7 @@ export class TelegramBotManager {
     }
   }
 
-  private async processUpdate(update: TelegramUpdate) {
+  public async processUpdate(update: TelegramUpdate) {
     metricsTracker.increment('telegram_updates_received');
     const receivedAt = Date.now();
     const msg = update.message || update.edited_message;
@@ -339,41 +388,65 @@ export class TelegramBotManager {
       receivedAt
     };
 
-    try {
-      console.log(JSON.stringify({
-        event: 'TELEGRAM_UPDATE_PROCESSING',
-        update_id: update.update_id,
-        chat_id: reqCtx.chatId,
-        message_id: reqCtx.messageId
-      }));
+    const targetChatId = reqCtx.chatId;
 
-      if (update.message) {
-        await this.handleMessage(update.message, false, reqCtx);
-      } else if (update.edited_message) {
-        await this.handleMessage(update.edited_message, true, reqCtx);
-      } else if (update.callback_query) {
-        const handledCaptcha = await ModerationService.handleCaptchaCallback(update.callback_query);
-        if (!handledCaptcha) {
-          await CommandHandler.handleCallbackQuery(update.callback_query);
+    const executeTask = async () => {
+      await TelegramBotManager.acquireGlobalSlot();
+      try {
+        console.log(JSON.stringify({
+          event: 'TELEGRAM_UPDATE_PROCESSING',
+          update_id: update.update_id,
+          chat_id: reqCtx.chatId,
+          message_id: reqCtx.messageId
+        }));
+
+        if (update.message) {
+          await this.handleMessage(update.message, false, reqCtx);
+        } else if (update.edited_message) {
+          await this.handleMessage(update.edited_message, true, reqCtx);
+        } else if (update.callback_query) {
+          const handledCaptcha = await ModerationService.handleCaptchaCallback(update.callback_query);
+          if (!handledCaptcha) {
+            await CommandHandler.handleCallbackQuery(update.callback_query);
+          }
+        } else if ((update as any).chat_member) {
+          await this.handleChatMemberUpdate((update as any).chat_member);
         }
-      } else if ((update as any).chat_member) {
-        await this.handleChatMemberUpdate((update as any).chat_member);
-      }
 
-      metricsTracker.increment('telegram_updates_processed');
-      console.log(JSON.stringify({
-        event: 'TELEGRAM_UPDATE_PROCESSED',
-        update_id: update.update_id,
-        chat_id: reqCtx.chatId,
-        message_id: reqCtx.messageId
-      }));
-    } catch (updateErr: any) {
-      metricsTracker.increment('telegram_updates_failed');
-      errorTracker.recordError({
-        source: 'TELEGRAM',
-        severity: 'ERROR',
-        message: `Failed to process update ${update.update_id}: ${updateErr.message}`
-      });
+        metricsTracker.increment('telegram_updates_processed');
+        console.log(JSON.stringify({
+          event: 'TELEGRAM_UPDATE_PROCESSED',
+          update_id: update.update_id,
+          chat_id: reqCtx.chatId,
+          message_id: reqCtx.messageId
+        }));
+      } catch (updateErr: any) {
+        metricsTracker.increment('telegram_updates_failed');
+        errorTracker.recordError({
+          source: 'TELEGRAM',
+          severity: 'ERROR',
+          message: `Failed to process update ${update.update_id}: ${updateErr.message}`
+        });
+      } finally {
+        TelegramBotManager.releaseGlobalSlot();
+      }
+    };
+
+    // Per-chat serialization: sequential queue for same chat, independent across different chats
+    if (targetChatId !== 0) {
+      const previous = TelegramBotManager.chatQueues.get(targetChatId) ?? Promise.resolve();
+      const current = previous
+        .catch(() => {})
+        .then(() => executeTask())
+        .finally(() => {
+          if (TelegramBotManager.chatQueues.get(targetChatId) === current) {
+            TelegramBotManager.chatQueues.delete(targetChatId);
+          }
+        });
+      TelegramBotManager.chatQueues.set(targetChatId, current);
+      return current;
+    } else {
+      return executeTask();
     }
   }
 

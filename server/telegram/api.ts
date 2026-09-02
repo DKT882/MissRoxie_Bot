@@ -202,6 +202,14 @@ export class TelegramApi {
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     const replyId = options?.reply_parameters?.message_id || options?.reply_to_message_id;
+
+    console.log(JSON.stringify({
+      event: 'TELEGRAM_SEND_START',
+      chat_id: chatId,
+      method: 'sendMessage',
+      reply_to_message_id: replyId
+    }));
+
     let res = await this.call('sendMessage', {
       chat_id: chatId,
       text,
@@ -210,7 +218,7 @@ export class TelegramApi {
       reply_parameters: replyId ? { message_id: replyId } : undefined,
       disable_web_page_preview: options?.disable_web_page_preview ?? true,
       reply_markup: options?.reply_markup
-    });
+    }, { timeoutMs: 12000, maxRetries: 2 });
 
     // Fallback 1: If Telegram rejected due to deleted/missing replied message, retry without reply parameters
     if (!res.ok && replyId && (
@@ -225,7 +233,7 @@ export class TelegramApi {
         parse_mode: options?.parse_mode || 'HTML',
         disable_web_page_preview: options?.disable_web_page_preview ?? true,
         reply_markup: options?.reply_markup
-      });
+      }, { timeoutMs: 10000, maxRetries: 1 });
       if (retryWithoutReply.ok) {
         res = retryWithoutReply;
       }
@@ -243,7 +251,7 @@ export class TelegramApi {
         text: text.replace(/<[^>]+>/g, ''),
         disable_web_page_preview: options?.disable_web_page_preview ?? true,
         reply_markup: options?.reply_markup
-      });
+      }, { timeoutMs: 10000, maxRetries: 1 });
       if (retryPlainText.ok) {
         res = retryPlainText;
       }
@@ -310,7 +318,7 @@ export class TelegramApi {
     return this.call('deleteMessage', {
       chat_id: chatId,
       message_id: messageId
-    });
+    }, { timeoutMs: 4000, maxRetries: 1 });
   }
 
   public async deleteMessages(chatId: number | string, messageIds: number[]): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
@@ -320,7 +328,7 @@ export class TelegramApi {
     return this.call('deleteMessages', {
       chat_id: chatId,
       message_ids: messageIds
-    });
+    }, { timeoutMs: 6000, maxRetries: 1 });
   }
 
   public async banChatMember(
@@ -519,7 +527,7 @@ export class TelegramApi {
     return this.call('sendChatAction', {
       chat_id: chatId,
       action
-    });
+    }, { timeoutMs: 2500, maxRetries: 0 });
   }
 
   public async sendSticker(
@@ -692,7 +700,7 @@ export class TelegramApi {
       message_id: messageId,
       reaction: reactionPayload,
       is_big: isBig
-    });
+    }, { timeoutMs: 2500, maxRetries: 0 });
   }
 
   public async leaveChat(chatId: number | string): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {

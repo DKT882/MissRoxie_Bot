@@ -542,6 +542,32 @@ export class ChatbotService {
     return true;
   }
 
+  // Global bounded concurrency for AI calls (max 3 simultaneous OpenRouter requests)
+  private static activeAiRequests: number = 0;
+  private static MAX_CONCURRENT_AI_REQUESTS = 3;
+  private static aiSlotWaiters: Array<() => void> = [];
+
+  private static async acquireAiSlot(): Promise<void> {
+    if (this.activeAiRequests < this.MAX_CONCURRENT_AI_REQUESTS) {
+      this.activeAiRequests++;
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.aiSlotWaiters.push(() => {
+        this.activeAiRequests++;
+        resolve();
+      });
+    });
+  }
+
+  private static releaseAiSlot(): void {
+    this.activeAiRequests--;
+    if (this.aiSlotWaiters.length > 0) {
+      const next = this.aiSlotWaiters.shift();
+      if (next) next();
+    }
+  }
+
   public static releaseGate(chatId: number, messageId: number): void {
     const key = `${chatId}_${messageId}`;
     this.activeProcessingKeys.delete(key);
@@ -2491,64 +2517,86 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
       personality: isLustMode ? 'LustMode-Couple' : 'psychologist-style'
     })}`);
 
-    await telegramApi.sendChatAction(chatId, 'typing');
+    // Fire-and-forget non-blocking typing status (never blocks AI or message response)
+    telegramApi.sendChatAction(chatId, 'typing').catch(() => {});
     metricsTracker.increment('ai_requests');
 
     console.log(JSON.stringify({
       event: 'AI_REQUEST_START',
       requestId,
+      updateId: reqCtx?.updateId,
       chatId,
+      messageId: msgId,
       primaryModel: configuredModels[0] || 'deepseek/deepseek-chat'
     }));
 
     let replyContent: string | null = null;
     let modelUsed: string = configuredModels[0] || 'deepseek/deepseek-chat';
 
-    for (const modelToTry of configuredModels) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
+    await this.acquireAiSlot();
+    try {
+      for (const modelToTry of configuredModels) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-      try {
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'HTTP-Referer': 'https://ai.studio',
-            'X-Title': 'Roxie Telegram Bot',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: modelToTry,
-            messages: apiMessages,
-            max_tokens: 120,
-            temperature: 0.8
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+        try {
+          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'HTTP-Referer': 'https://ai.studio',
+              'X-Title': 'Roxie Telegram Bot',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: modelToTry,
+              messages: apiMessages,
+              max_tokens: 120,
+              temperature: 0.8
+            }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
 
-        if (response.ok) {
-          const data = await response.json();
-          const content = data.choices?.[0]?.message?.content?.trim();
-          if (content) {
-            replyContent = content;
-            modelUsed = modelToTry;
-            console.log(JSON.stringify({ event: 'AI_REQUEST_SUCCESS', requestId, model: modelUsed }));
-            break;
+          if (response.ok) {
+            const data = await response.json();
+            const content = data.choices?.[0]?.message?.content?.trim();
+            if (content) {
+              replyContent = content;
+              modelUsed = modelToTry;
+              console.log(JSON.stringify({
+                event: 'AI_REQUEST_SUCCESS',
+                requestId,
+                updateId: reqCtx?.updateId,
+                chatId,
+                messageId: msgId,
+                model: modelUsed
+              }));
+              break;
+            }
+          } else {
+            const errText = await response.text();
+            console.warn(`CHATBOT_MODEL_FALLBACK { fromModel: "${modelToTry}", status: ${response.status}, error: "${errText.slice(0, 80)}" }`);
           }
-        } else {
-          const errText = await response.text();
-          console.warn(`CHATBOT_MODEL_FALLBACK { fromModel: "${modelToTry}", status: ${response.status}, error: "${errText.slice(0, 80)}" }`);
+        } catch (err: any) {
+          clearTimeout(timeoutId);
+          console.warn(`CHATBOT_MODEL_FALLBACK { fromModel: "${modelToTry}", error: "${err.message}" }`);
         }
-      } catch (err: any) {
-        clearTimeout(timeoutId);
-        console.warn(`CHATBOT_MODEL_FALLBACK { fromModel: "${modelToTry}", error: "${err.message}" }`);
       }
+    } finally {
+      this.releaseAiSlot();
     }
 
     if (!replyContent) {
       metricsTracker.increment('ai_failures');
-      console.error(JSON.stringify({ event: 'AI_REQUEST_FAILED', requestId, chatId, reason: 'All OpenRouter models failed' }));
+      console.error(JSON.stringify({
+        event: 'AI_REQUEST_FAILED',
+        requestId,
+        updateId: reqCtx?.updateId,
+        chatId,
+        messageId: msgId,
+        reason: 'All OpenRouter models failed'
+      }));
       // Provide conversational fallback so bot never goes completely mute
       replyContent = isLustMode 
         ? 'Acha jaan, thoda connection slow hai, par main yahin hoon! 💕'
