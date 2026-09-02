@@ -127,44 +127,59 @@ export class MessageScheduler {
       const nextRunTime = new Date(schedule.nextRun).getTime();
       if (isNaN(nextRunTime) || now >= nextRunTime) {
         try {
+          // If auto-delete is enabled for this schedule, delete its previous message
+          if (schedule.autoDeletePrevious && schedule.lastSentMessageId) {
+            try {
+              const delRes = await telegramApi.deleteMessage(schedule.chatId, schedule.lastSentMessageId);
+              if (!delRes.ok && delRes.description) {
+                console.error(`[ERROR] Failed to delete previous scheduled message scheduleId=${schedule.id} messageId=${schedule.lastSentMessageId} error=${delRes.description}`);
+              }
+            } catch (delErr: any) {
+              console.error(`[ERROR] Failed to delete previous scheduled message scheduleId=${schedule.id} messageId=${schedule.lastSentMessageId} error=${delErr?.message || delErr}`);
+            }
+          }
+
           const textContent = schedule.messageText || schedule.message || '';
           const sendOptions: any = {};
           if (schedule.replyToMessageId) {
             sendOptions.reply_to_message_id = schedule.replyToMessageId;
           }
 
+          let sendRes: any;
           if (schedule.contentType === 'photo' && schedule.mediaFileId) {
-            await telegramApi.sendPhoto(schedule.chatId, schedule.mediaFileId, {
+            sendRes = await telegramApi.sendPhoto(schedule.chatId, schedule.mediaFileId, {
               caption: textContent,
               parse_mode: 'HTML',
               ...sendOptions
             });
           } else if (schedule.contentType === 'video' && schedule.mediaFileId) {
-            await telegramApi.sendVideo(schedule.chatId, schedule.mediaFileId, {
+            sendRes = await telegramApi.sendVideo(schedule.chatId, schedule.mediaFileId, {
               caption: textContent,
               parse_mode: 'HTML',
               ...sendOptions
             });
           } else if (schedule.contentType === 'document' && schedule.mediaFileId) {
-            await telegramApi.sendDocument(schedule.chatId, schedule.mediaFileId, {
+            sendRes = await telegramApi.sendDocument(schedule.chatId, schedule.mediaFileId, {
               caption: textContent,
               parse_mode: 'HTML',
               ...sendOptions
             });
           } else if (schedule.contentType === 'animation' && schedule.mediaFileId) {
-            await telegramApi.sendAnimation(schedule.chatId, schedule.mediaFileId, {
+            sendRes = await telegramApi.sendAnimation(schedule.chatId, schedule.mediaFileId, {
               caption: textContent,
               parse_mode: 'HTML',
               ...sendOptions
             });
           } else if (schedule.contentType === 'sticker' && schedule.mediaFileId) {
-            await telegramApi.sendSticker(schedule.chatId, schedule.mediaFileId, sendOptions);
+            sendRes = await telegramApi.sendSticker(schedule.chatId, schedule.mediaFileId, sendOptions);
             if (textContent) {
-              await telegramApi.sendMessage(schedule.chatId, textContent, sendOptions);
+              sendRes = await telegramApi.sendMessage(schedule.chatId, textContent, sendOptions);
             }
           } else {
-            await telegramApi.sendMessage(schedule.chatId, textContent, sendOptions);
+            sendRes = await telegramApi.sendMessage(schedule.chatId, textContent, sendOptions);
           }
+
+          const newSentMessageId = sendRes?.result?.message_id;
           
           db.addLog({
             chatId: schedule.chatId,
@@ -178,12 +193,12 @@ export class MessageScheduler {
           this.executions++;
           metricsTracker.increment('scheduler_runs');
 
-          // Calculate next run time
+          // Calculate next run time and update lastSentMessageId
           if (schedule.intervalMs && schedule.intervalMs > 0 && schedule.scheduleType !== 'one_time') {
             const nextDate = new Date(now + schedule.intervalMs).toISOString();
-            db.updateScheduleNextRun(schedule.id, nextDate, 'success');
+            db.updateScheduleNextRun(schedule.id, nextDate, 'success', undefined, newSentMessageId);
           } else {
-            db.updateScheduleNextRun(schedule.id, '', 'success');
+            db.updateScheduleNextRun(schedule.id, '', 'success', undefined, newSentMessageId);
             db.toggleSchedule(schedule.id, false);
           }
         } catch (err: any) {
@@ -216,7 +231,8 @@ export class MessageScheduler {
     intervalStr: string,
     messageText: string,
     contentType?: 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation',
-    mediaFileId?: string
+    mediaFileId?: string,
+    autoDeletePrevious?: boolean
   ): { success: boolean; schedule?: ScheduledMessage; error?: string } {
     const parsed = this.parseInterval(intervalStr);
     if (!parsed) {
@@ -246,7 +262,8 @@ export class MessageScheduler {
       mediaFileId,
       intervalMs: parsed.ms,
       intervalFormatted: parsed.formatted,
-      nextRun
+      nextRun,
+      autoDeletePrevious: autoDeletePrevious || false
     });
 
     db.addLog({

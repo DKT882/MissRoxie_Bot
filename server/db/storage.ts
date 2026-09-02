@@ -3716,13 +3716,16 @@ export class StorageManager {
     return s;
   }
 
-  public updateScheduleNextRun(id: string, nextRun: string, status?: 'success' | 'failure', error?: string): void {
+  public updateScheduleNextRun(id: string, nextRun: string, status?: 'success' | 'failure', error?: string, lastSentMessageId?: number): void {
     const s = this.data.schedules.find((x) => x.id === id);
     if (s) {
       s.nextRun = nextRun;
       s.lastRun = new Date().toISOString();
       s.lastStatus = status || 'success';
       if (error) s.lastError = error;
+      if (lastSentMessageId !== undefined) {
+        s.lastSentMessageId = lastSentMessageId;
+      }
       s.runsCount = (s.runsCount || 0) + 1;
       this.scheduleSave(s.chatId);
     }

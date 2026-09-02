@@ -464,6 +464,8 @@ export interface ScheduledMessage {
   lastStatus?: 'success' | 'failure' | 'pending';
   lastError?: string;
   replyToMessageId?: number;
+  autoDeletePrevious?: boolean;
+  lastSentMessageId?: number;
   createdAt: string;
   runsCount: number;
 }

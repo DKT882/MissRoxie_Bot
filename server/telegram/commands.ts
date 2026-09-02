@@ -3962,17 +3962,45 @@ export class CommandHandler {
     if (ctx.args.length < 1) {
       await telegramApi.sendMessage(
         ctx.chatId,
-        `ℹ️ <b>Usage:</b>\n<code>/schedule &lt;time&gt; [message]</code> (or reply to a message/media to schedule it)\n\n` +
+        `ℹ️ <b>Usage:</b>\n<code>/schedule &lt;time&gt; [delOn|delOff] [message]</code> (or reply to a message/media to schedule it)\n\n` +
         `<b>Examples:</b>\n` +
-        `• <code>/schedule 30m Check out our promo! https://example.com</code>\n` +
-        `• <code>/schedule 2h</code> (replying to photo/video/sticker/media/text)\n` +
+        `• <code>/schedule 30m delOn Check out our promo! https://example.com</code>\n` +
+        `• <code>/schedule 2h delOn</code> (replying to photo/video/sticker/media/text)\n` +
         `• <code>/schedule 1d Daily announcements...</code>`
       );
       return;
     }
 
     const intervalStr = ctx.args[0];
-    let messageText = CommandHandler.getCommandText(ctx, 1);
+    let autoDeletePrevious = false;
+    let textStartIndex = 1;
+
+    // Check if second argument is delOn or delOff
+    if (ctx.args.length > 1) {
+      const secondArg = ctx.args[1].toLowerCase();
+      if (secondArg === 'delon') {
+        autoDeletePrevious = true;
+        textStartIndex = 2;
+      } else if (secondArg === 'deloff') {
+        autoDeletePrevious = false;
+        textStartIndex = 2;
+      }
+    }
+
+    let messageText = CommandHandler.getCommandText(ctx, textStartIndex);
+
+    // Also check if delOn/delOff was passed at the very end of messageText
+    if (ctx.args.length > 2 && textStartIndex === 1) {
+      const lastArg = ctx.args[ctx.args.length - 1].toLowerCase();
+      if (lastArg === 'delon') {
+        autoDeletePrevious = true;
+        messageText = messageText.replace(/\s+delon$/i, '').trim();
+      } else if (lastArg === 'deloff') {
+        autoDeletePrevious = false;
+        messageText = messageText.replace(/\s+deloff$/i, '').trim();
+      }
+    }
+
     let contentType: 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation' = 'text';
     let mediaFileId: string | undefined;
 
@@ -4021,7 +4049,8 @@ export class CommandHandler {
       intervalStr,
       messageText,
       contentType,
-      mediaFileId
+      mediaFileId,
+      autoDeletePrevious
     );
 
     if (res.success && res.schedule) {
@@ -4031,6 +4060,7 @@ export class CommandHandler {
         `<b>Schedule ID:</b> <code>${res.schedule.id}</code>\n` +
         `<b>Type:</b> ${res.schedule.contentType || 'text'}\n` +
         `<b>Frequency:</b> Every ${res.schedule.intervalFormatted}\n` +
+        `<b>Auto-delete Previous:</b> ${res.schedule.autoDeletePrevious ? 'Enabled (delOn)' : 'Disabled (delOff)'}\n` +
         `<b>Next Run:</b> ${new Date(res.schedule.nextRun).toLocaleTimeString()}\n\n` +
         `<i>Use <code>/listschedules</code> to view all or <code>/deleteschedule ${res.schedule.id}</code> to remove.</i>`
       );
@@ -4051,7 +4081,7 @@ export class CommandHandler {
 
     const list = schedules
       .map((s, idx) => (
-        `<b>${idx + 1}. [<code>${s.id}</code>] Every ${s.intervalFormatted}</b>\n` +
+        `<b>${idx + 1}. [<code>${s.id}</code>] Every ${s.intervalFormatted}${s.autoDeletePrevious ? ' [delOn]' : ''}</b>\n` +
         `<i>"${escapeHtml(s.message.length > 50 ? s.message.slice(0, 47) + '...' : s.message)}"</i>\n` +
         `Next: ${new Date(s.nextRun).toLocaleTimeString()} (Runs: ${s.runsCount})\n`
       ))
