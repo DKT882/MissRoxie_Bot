@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import './server/observability/logger.js';
 import { telegramBot } from './server/telegram.js';
 import { db } from './server/db/storage.js';
 import { COMMAND_CATALOG } from './server/telegram/commandCatalog.js';
