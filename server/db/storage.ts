@@ -739,12 +739,18 @@ export class StorageManager {
     const numChatId = Number(chatId);
     if (isNaN(numChatId) || numChatId >= 0) return; // Supergroups and groups have negative IDs
 
+    const writeStart = Date.now();
+    console.log(JSON.stringify({
+      event: 'STORAGE_WRITE_START',
+      chat_id: numChatId,
+      type: 'group'
+    }));
+
     try {
       this.ensureDirectories();
       const rawData = this.buildGroupDataObject(numChatId);
       const safeData = this.sanitizeGroupData(rawData);
       const targetFile = path.join(this.groupsDir, `${numChatId}.json`);
-      const tmpFile = path.join(this.groupsDir, `${numChatId}.json.tmp`);
 
       // Safe backup of previous valid file before replacement
       if (fs.existsSync(targetFile)) {
@@ -760,6 +766,14 @@ export class StorageManager {
       this.lastSaveSuccessful = true;
       this.lastStorageError = null;
       this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
+
+      const writeElapsed = Date.now() - writeStart;
+      console.log(JSON.stringify({
+        event: 'STORAGE_WRITE_END',
+        chat_id: numChatId,
+        type: 'group',
+        elapsedMs: writeElapsed
+      }));
     } catch (err: any) {
       this.logStorageErrorOnce(`save group ${chatId} JSON`, err.message);
     }
@@ -1062,6 +1076,13 @@ export class StorageManager {
     const numChatId = Number(chatId);
     if (isNaN(numChatId) || numChatId <= 0) return;
 
+    const writeStart = Date.now();
+    console.log(JSON.stringify({
+      event: 'STORAGE_WRITE_START',
+      chat_id: numChatId,
+      type: 'private'
+    }));
+
     try {
       this.ensureDirectories();
       const rawData = this.buildPrivateDataObject(numChatId);
@@ -1080,6 +1101,14 @@ export class StorageManager {
       this.lastSaveSuccessful = true;
       this.lastStorageError = null;
       this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
+
+      const writeElapsed = Date.now() - writeStart;
+      console.log(JSON.stringify({
+        event: 'STORAGE_WRITE_END',
+        chat_id: numChatId,
+        type: 'private',
+        elapsedMs: writeElapsed
+      }));
     } catch (err: any) {
       this.logStorageErrorOnce(`save private chat ${chatId} JSON`, err.message);
     }

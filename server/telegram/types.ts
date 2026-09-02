@@ -1,4 +1,5 @@
 export interface TelegramRequestContext {
+  readonly traceId?: string;
   readonly updateId?: number;
   readonly chatId: number;
   readonly messageId: number;

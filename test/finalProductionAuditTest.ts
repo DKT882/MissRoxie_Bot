@@ -360,7 +360,9 @@ async function runAuditTests() {
   console.log('================================================================\n');
 }
 
-runAuditTests().catch(err => {
+runAuditTests().then(() => {
+  process.exit(0);
+}).catch(err => {
   console.error('Audit test failed:', err);
   process.exit(1);
 });

@@ -13,6 +13,12 @@ export class TelegramApi {
   private knownChatPermissions: Map<string, string> = new Map();
   // Cached bot user profile
   private cachedBotInfo: { user: TelegramUser; timestamp: number } | null = null;
+
+  // In-Memory Metadata TTL Caches (60 seconds TTL)
+  private chatCache: Map<string, { data: any; expiresAt: number }> = new Map();
+  private chatMemberCache: Map<string, { data: TelegramChatMember; expiresAt: number }> = new Map();
+  private chatAdminsCache: Map<string, { data: TelegramChatMember[]; expiresAt: number }> = new Map();
+  private chatMemberCountCache: Map<string, { data: number; expiresAt: number }> = new Map();
   // Outbound rate limit scheduler state
   private lastRequestTimestamp: number = 0;
   private minIntervalMs: number = 35; // ~28 requests/sec max
@@ -570,18 +576,40 @@ export class TelegramApi {
     chatId: number | string,
     userId: number
   ): Promise<{ ok: boolean; result?: TelegramChatMember; description?: string; error_code?: number }> {
-    return this.call<TelegramChatMember>('getChatMember', {
+    const key = `${chatId}_${userId}`;
+    const cached = this.chatMemberCache.get(key);
+    if (cached && Date.now() < cached.expiresAt) {
+      return { ok: true, result: cached.data };
+    }
+
+    const res = await this.call<TelegramChatMember>('getChatMember', {
       chat_id: chatId,
       user_id: userId
     }, { timeoutMs: 3500, maxRetries: 1 });
+
+    if (res.ok && res.result) {
+      this.chatMemberCache.set(key, { data: res.result, expiresAt: Date.now() + 60000 });
+    }
+    return res;
   }
 
   public async getChatAdministrators(
     chatId: number | string
   ): Promise<{ ok: boolean; result?: TelegramChatMember[]; description?: string; error_code?: number }> {
-    return this.call<TelegramChatMember[]>('getChatAdministrators', {
+    const key = String(chatId);
+    const cached = this.chatAdminsCache.get(key);
+    if (cached && Date.now() < cached.expiresAt) {
+      return { ok: true, result: cached.data };
+    }
+
+    const res = await this.call<TelegramChatMember[]>('getChatAdministrators', {
       chat_id: chatId
-    });
+    }, { timeoutMs: 4000, maxRetries: 1 });
+
+    if (res.ok && res.result) {
+      this.chatAdminsCache.set(key, { data: res.result, expiresAt: Date.now() + 60000 });
+    }
+    return res;
   }
 
   public async setChatSlowModeDelay(
@@ -804,11 +832,31 @@ export class TelegramApi {
   }
 
   public async getChat(chatId: number | string): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    return this.call('getChat', { chat_id: chatId });
+    const key = String(chatId);
+    const cached = this.chatCache.get(key);
+    if (cached && Date.now() < cached.expiresAt) {
+      return { ok: true, result: cached.data };
+    }
+
+    const res = await this.call('getChat', { chat_id: chatId }, { timeoutMs: 3500, maxRetries: 1 });
+    if (res.ok && res.result) {
+      this.chatCache.set(key, { data: res.result, expiresAt: Date.now() + 60000 });
+    }
+    return res;
   }
 
   public async getChatMemberCount(chatId: number | string): Promise<{ ok: boolean; result?: number; description?: string; error_code?: number }> {
-    return this.call('getChatMemberCount', { chat_id: chatId });
+    const key = String(chatId);
+    const cached = this.chatMemberCountCache.get(key);
+    if (cached && Date.now() < cached.expiresAt) {
+      return { ok: true, result: cached.data };
+    }
+
+    const res = await this.call<number>('getChatMemberCount', { chat_id: chatId }, { timeoutMs: 3500, maxRetries: 1 });
+    if (res.ok && res.result !== undefined) {
+      this.chatMemberCountCache.set(key, { data: res.result, expiresAt: Date.now() + 60000 });
+    }
+    return res;
   }
 
   public async setChatPermissions(

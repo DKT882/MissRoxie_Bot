@@ -1,4 +1,4 @@
-﻿import assert from 'assert';
+import assert from 'assert';
 import { ChatbotService } from '../server/telegram/chatbot.js';
 import { TelegramMessage, TelegramUser, TelegramRequestContext } from '../server/telegram/types.js';
 
@@ -145,7 +145,9 @@ async function runConcurrencyTests() {
   console.log('================================================================\n');
 }
 
-runConcurrencyTests().catch(err => {
+runConcurrencyTests().then(() => {
+  process.exit(0);
+}).catch(err => {
   console.error('Concurrency test failed:', err);
   process.exit(1);
 });

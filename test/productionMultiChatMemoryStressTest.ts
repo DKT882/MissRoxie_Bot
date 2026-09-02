@@ -1,4 +1,4 @@
-﻿import assert from 'assert';
+import assert from 'assert';
 import { TelegramBotManager } from '../server/telegram/botManager.js';
 import { ChatbotService } from '../server/telegram/chatbot.js';
 import { TelegramMessage, TelegramUser, TelegramRequestContext } from '../server/telegram/types.js';
@@ -189,7 +189,9 @@ async function runProductionStressTests() {
   console.log('================================================================\n');
 }
 
-runProductionStressTests().catch(err => {
+runProductionStressTests().then(() => {
+  process.exit(0);
+}).catch(err => {
   console.error('Production stress test failed:', err);
   process.exit(1);
 });

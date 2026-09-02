@@ -542,20 +542,34 @@ export class ChatbotService {
     return true;
   }
 
-  // Global bounded concurrency for AI calls (max 3 simultaneous OpenRouter requests)
-  private static activeAiRequests: number = 0;
-  private static MAX_CONCURRENT_AI_REQUESTS = 3;
-  private static aiSlotWaiters: Array<() => void> = [];
+  // Global bounded concurrency for AI calls (max 4 simultaneous OpenRouter requests)
+  public static activeAiRequests: number = 0;
+  public static readonly MAX_CONCURRENT_AI_REQUESTS = 4;
+  private static aiSlotWaiters: Array<(waitMs: number) => void> = [];
 
-  private static async acquireAiSlot(): Promise<void> {
+  private static async acquireAiSlot(): Promise<number> {
+    const enqueueTime = Date.now();
     if (this.activeAiRequests < this.MAX_CONCURRENT_AI_REQUESTS) {
       this.activeAiRequests++;
-      return;
+      console.log(JSON.stringify({
+        event: 'AI_ACTIVE_REQUESTS',
+        active: this.activeAiRequests,
+        queue_length: this.aiSlotWaiters.length,
+        max_concurrency: this.MAX_CONCURRENT_AI_REQUESTS
+      }));
+      return 0;
     }
-    return new Promise<void>((resolve) => {
-      this.aiSlotWaiters.push(() => {
+    return new Promise<number>((resolve) => {
+      this.aiSlotWaiters.push((waitMs: number) => {
         this.activeAiRequests++;
-        resolve();
+        console.log(JSON.stringify({
+          event: 'AI_ACTIVE_REQUESTS',
+          active: this.activeAiRequests,
+          queue_length: this.aiSlotWaiters.length,
+          ai_request_wait_ms: waitMs,
+          max_concurrency: this.MAX_CONCURRENT_AI_REQUESTS
+        }));
+        resolve(waitMs);
       });
     });
   }
@@ -564,7 +578,9 @@ export class ChatbotService {
     this.activeAiRequests--;
     if (this.aiSlotWaiters.length > 0) {
       const next = this.aiSlotWaiters.shift();
-      if (next) next();
+      if (next) {
+        next(0);
+      }
     }
   }
 
@@ -1987,6 +2003,17 @@ export class ChatbotService {
     const msgId = reqCtx?.messageId ?? message.message_id ?? 0;
     if (!chatId || !msgId) return false;
 
+    if (reqCtx) {
+      console.log(JSON.stringify({
+        event: 'MESSAGE_TRACE_CHATBOT_START',
+        traceId: reqCtx.traceId,
+        updateId: reqCtx.updateId,
+        chatId,
+        messageId: msgId,
+        elapsedMs: Date.now() - reqCtx.receivedAt
+      }));
+    }
+
     // 1. Strict Command Precedence: Commands MUST NEVER enter the chatbot pipeline
     const textOrCaption = (message.text || message.caption || '').trim();
     if (textOrCaption.startsWith('/') || textOrCaption.startsWith('!')) {
@@ -2010,6 +2037,7 @@ export class ChatbotService {
       if (decision.chatId !== chatId) {
         console.error(JSON.stringify({
           event: 'TELEGRAM_ROUTE_MISMATCH',
+          traceId: reqCtx?.traceId,
           update_id: reqCtx?.updateId,
           incoming_chat_id: chatId,
           attempted_chat_id: decision.chatId,
@@ -2020,6 +2048,7 @@ export class ChatbotService {
 
       console.log(JSON.stringify({
         event: 'TELEGRAM_MESSAGE_ROUTE',
+        traceId: reqCtx?.traceId,
         update_id: reqCtx?.updateId,
         incoming_chat_id: chatId,
         response_chat_id: decision.chatId,
@@ -2028,20 +2057,48 @@ export class ChatbotService {
       }));
 
       const sendStartedAt = Date.now();
+      if (reqCtx) {
+        console.log(JSON.stringify({
+          event: 'MESSAGE_TRACE_SEND_START',
+          traceId: reqCtx.traceId,
+          updateId: reqCtx.updateId,
+          chatId,
+          messageId: msgId,
+          elapsedMs: Date.now() - reqCtx.receivedAt
+        }));
+      }
+
       const sent = await this.dispatchResponse(decision, reqCtx);
       const sendFinishedAt = Date.now();
 
-      if (sent) {
+      if (reqCtx) {
+        const sendMs = sendFinishedAt - sendStartedAt;
         console.log(JSON.stringify({
-          event: 'TELEGRAM_MESSAGE_TIMING',
-          update_id: reqCtx?.updateId,
-          chat_id: chatId,
-          message_id: msgId,
-          received_at: reqCtx?.receivedAt || processingStartedAt,
-          processing_started_at: processingStartedAt,
-          send_started_at: sendStartedAt,
-          send_finished_at: sendFinishedAt,
-          total_ms: sendFinishedAt - (reqCtx?.receivedAt || processingStartedAt)
+          event: 'MESSAGE_TRACE_SEND_END',
+          traceId: reqCtx.traceId,
+          updateId: reqCtx.updateId,
+          chatId,
+          messageId: msgId,
+          send_ms: sendMs,
+          elapsedMs: Date.now() - reqCtx.receivedAt
+        }));
+
+        const totalMs = sendFinishedAt - reqCtx.receivedAt;
+        const telegramReceiveDelayMs = message.date ? Math.max(0, reqCtx.receivedAt - message.date * 1000) : 0;
+        const queueWaitMs = processingStartedAt - reqCtx.receivedAt;
+        const chatbotPrepMs = sendStartedAt - processingStartedAt;
+
+        console.log(JSON.stringify({
+          event: 'MESSAGE_TRACE_COMPLETE',
+          traceId: reqCtx.traceId,
+          updateId: reqCtx.updateId,
+          chatId,
+          messageId: msgId,
+          telegram_receive_delay_ms: telegramReceiveDelayMs,
+          queue_wait_ms: queueWaitMs,
+          chatbot_preparation_ms: chatbotPrepMs,
+          send_ms: sendMs,
+          total_ms: totalMs
         }));
       }
 
@@ -2523,6 +2580,18 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     telegramApi.sendChatAction(chatId, 'typing').catch(() => {});
     metricsTracker.increment('ai_requests');
 
+    if (reqCtx) {
+      console.log(JSON.stringify({
+        event: 'MESSAGE_TRACE_AI_START',
+        traceId: reqCtx.traceId,
+        updateId: reqCtx.updateId,
+        chatId,
+        messageId: msgId,
+        primaryModel: configuredModels[0] || 'deepseek/deepseek-chat',
+        elapsedMs: Date.now() - reqCtx.receivedAt
+      }));
+    }
+
     console.log(JSON.stringify({
       event: 'AI_REQUEST_START',
       requestId,
@@ -2593,6 +2662,19 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     }
 
     const aiElapsedMs = Date.now() - aiStartTime;
+    if (reqCtx) {
+      console.log(JSON.stringify({
+        event: 'MESSAGE_TRACE_AI_END',
+        traceId: reqCtx.traceId,
+        updateId: reqCtx.updateId,
+        chatId,
+        messageId: msgId,
+        ai_ms: aiElapsedMs,
+        modelUsed,
+        elapsedMs: Date.now() - reqCtx.receivedAt
+      }));
+    }
+
     console.log(JSON.stringify({
       event: 'AI_REQUEST_END',
       requestId,

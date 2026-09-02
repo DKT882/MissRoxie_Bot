@@ -1,4 +1,4 @@
-﻿import assert from 'assert';
+import assert from 'assert';
 import { TelegramBotManager } from '../server/telegram/botManager.js';
 import { ChatbotService } from '../server/telegram/chatbot.js';
 import { TelegramMessage, TelegramUser, TelegramRequestContext } from '../server/telegram/types.js';
@@ -204,7 +204,9 @@ async function runIsolationStressTest() {
   console.log('================================================================\n');
 }
 
-runIsolationStressTest().catch(err => {
+runIsolationStressTest().then(() => {
+  process.exit(0);
+}).catch(err => {
   console.error('Chat isolation stress test failed:', err);
   process.exit(1);
 });
