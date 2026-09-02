@@ -458,7 +458,12 @@ export interface ScheduledMessage {
   mediaFileId?: string;
   intervalMs?: number;
   intervalFormatted?: string;
+  scheduleType?: 'one_time' | 'daily' | 'weekly' | 'interval' | 'custom';
   nextRun?: string;
+  lastRun?: string;
+  lastStatus?: 'success' | 'failure' | 'pending';
+  lastError?: string;
+  replyToMessageId?: number;
   createdAt: string;
   runsCount: number;
 }

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig } from '../telegram/types.js';
 import { getDefaultStickersStats } from '../telegram/defaultStickers.js';
+import { logDebug } from '../observability/logger.js';
 
 interface RaidStateRecord {
   recentJoins: number[];
@@ -740,11 +741,11 @@ export class StorageManager {
     if (isNaN(numChatId) || numChatId >= 0) return; // Supergroups and groups have negative IDs
 
     const writeStart = Date.now();
-    console.log(JSON.stringify({
+    logDebug({
       event: 'STORAGE_WRITE_START',
       chat_id: numChatId,
       type: 'group'
-    }));
+    });
 
     try {
       this.ensureDirectories();
@@ -768,12 +769,12 @@ export class StorageManager {
       this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
 
       const writeElapsed = Date.now() - writeStart;
-      console.log(JSON.stringify({
+      logDebug({
         event: 'STORAGE_WRITE_END',
         chat_id: numChatId,
         type: 'group',
         elapsedMs: writeElapsed
-      }));
+      });
     } catch (err: any) {
       this.logStorageErrorOnce(`save group ${chatId} JSON`, err.message);
     }
@@ -1077,11 +1078,11 @@ export class StorageManager {
     if (isNaN(numChatId) || numChatId <= 0) return;
 
     const writeStart = Date.now();
-    console.log(JSON.stringify({
+    logDebug({
       event: 'STORAGE_WRITE_START',
       chat_id: numChatId,
       type: 'private'
-    }));
+    });
 
     try {
       this.ensureDirectories();
@@ -1103,12 +1104,12 @@ export class StorageManager {
       this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
 
       const writeElapsed = Date.now() - writeStart;
-      console.log(JSON.stringify({
+      logDebug({
         event: 'STORAGE_WRITE_END',
         chat_id: numChatId,
         type: 'private',
         elapsedMs: writeElapsed
-      }));
+      });
     } catch (err: any) {
       this.logStorageErrorOnce(`save private chat ${chatId} JSON`, err.message);
     }
@@ -3670,22 +3671,58 @@ export class StorageManager {
     return newSchedule;
   }
 
-  public deleteSchedule(chatId: number, scheduleId: string): boolean {
+  public deleteSchedule(chatIdOrId: number | string, maybeScheduleId?: string): boolean {
     const initial = this.data.schedules.length;
-    this.data.schedules = this.data.schedules.filter(
-      (s) => !(s.chatId === chatId && s.id.toUpperCase() === scheduleId.toUpperCase())
-    );
+    let targetChatId: number | undefined;
+
+    if (maybeScheduleId !== undefined && typeof chatIdOrId === 'number') {
+      targetChatId = chatIdOrId;
+      this.data.schedules = this.data.schedules.filter(
+        (s) => !(s.chatId === chatIdOrId && s.id.toUpperCase() === maybeScheduleId.toUpperCase())
+      );
+    } else {
+      const idStr = String(chatIdOrId).toUpperCase();
+      const matched = this.data.schedules.find(s => s.id.toUpperCase() === idStr);
+      if (matched) targetChatId = matched.chatId;
+      this.data.schedules = this.data.schedules.filter(
+        (s) => s.id.toUpperCase() !== idStr
+      );
+    }
+
     const changed = initial > this.data.schedules.length;
-    if (changed) {
-      this.scheduleSave(chatId);
+    if (changed && targetChatId !== undefined) {
+      this.scheduleSave(targetChatId);
     }
     return changed;
   }
 
-  public updateScheduleNextRun(id: string, nextRun: string): void {
+  public getScheduleById(id: string): ScheduledMessage | undefined {
+    return this.data.schedules.find((s) => s.id.toUpperCase() === id.toUpperCase());
+  }
+
+  public updateSchedule(id: string, updates: Partial<ScheduledMessage>): ScheduledMessage | null {
+    const s = this.data.schedules.find((x) => x.id.toUpperCase() === id.toUpperCase());
+    if (!s) return null;
+    Object.assign(s, updates);
+    this.scheduleSave(s.chatId);
+    return s;
+  }
+
+  public toggleSchedule(id: string, enabled?: boolean): ScheduledMessage | null {
+    const s = this.data.schedules.find((x) => x.id.toUpperCase() === id.toUpperCase());
+    if (!s) return null;
+    s.enabled = enabled !== undefined ? enabled : !s.enabled;
+    this.scheduleSave(s.chatId);
+    return s;
+  }
+
+  public updateScheduleNextRun(id: string, nextRun: string, status?: 'success' | 'failure', error?: string): void {
     const s = this.data.schedules.find((x) => x.id === id);
     if (s) {
       s.nextRun = nextRun;
+      s.lastRun = new Date().toISOString();
+      s.lastStatus = status || 'success';
+      if (error) s.lastError = error;
       s.runsCount = (s.runsCount || 0) + 1;
       this.scheduleSave(s.chatId);
     }
@@ -3941,6 +3978,10 @@ export class StorageManager {
       return true;
     }
     return false;
+  }
+
+  public deleteAutomation(chatId: number, id: string): boolean {
+    return this.removeAutomation(chatId, id);
   }
 
   public toggleAutomation(chatId: number, id: string, enabled: boolean): boolean {

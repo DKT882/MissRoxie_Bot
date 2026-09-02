@@ -11,6 +11,7 @@ import { SmartProtectionService } from './smartProtection.js';
 import { ReactionService } from './reactionService.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
+import { logDebug } from '../observability/logger.js';
 
 function escapeHtml(text: string): string {
   return text
@@ -251,11 +252,11 @@ export class TelegramBotManager {
         metricsTracker.increment('telegram_api_requests');
         const offset = this.lastUpdateId ? this.lastUpdateId + 1 : undefined;
         const pollReqStart = Date.now();
-        console.log(JSON.stringify({
+        logDebug({
           event: 'POLLING_REQUEST_START',
           offset,
           timeout: 20
-        }));
+        });
 
         const data = await telegramApi.getUpdates(
           offset,
@@ -264,12 +265,12 @@ export class TelegramBotManager {
         );
 
         const pollElapsed = Date.now() - pollReqStart;
-        console.log(JSON.stringify({
+        logDebug({
           event: 'POLLING_RESPONSE',
           ok: data.ok,
           update_count: Array.isArray(data.result) ? data.result.length : 0,
           elapsedMs: pollElapsed
-        }));
+        });
 
         if (!data.ok) {
           metricsTracker.increment('telegram_api_errors');
@@ -316,20 +317,20 @@ export class TelegramBotManager {
           }
 
           if (updatesToProcess.length > 0) {
-            console.log(JSON.stringify({
+            logDebug({
               event: 'POLLING_UPDATE_RECEIVED_AT',
               received_count: updatesToProcess.length,
               oldest_update_id: updatesToProcess[0]?.update_id,
               newest_update_id: updatesToProcess[updatesToProcess.length - 1]?.update_id,
               active_chats_queued: TelegramBotManager.chatQueues.size
-            }));
+            });
 
-            console.log(JSON.stringify({
+            logDebug({
               event: 'TELEGRAM_CONCURRENCY',
               active_updates: TelegramBotManager.activeProcessingCount,
               queued_chats: TelegramBotManager.chatQueues.size,
               max_concurrency: TelegramBotManager.MAX_CONCURRENT_GLOBAL_PROCESSING
-            }));
+            });
 
             // CRITICAL: Immediately enqueue into background queues without blocking the next getUpdates polling request
             for (const u of updatesToProcess) {
@@ -338,10 +339,10 @@ export class TelegramBotManager {
               });
             }
 
-            console.log(JSON.stringify({
+            logDebug({
               event: 'POLLING_NEXT_REQUEST',
               next_offset: this.lastUpdateId ? this.lastUpdateId + 1 : undefined
-            }));
+            });
           }
         }
       } catch (err: any) {
@@ -385,7 +386,7 @@ export class TelegramBotManager {
     const traceId = `tr_${update.update_id || '0'}_${msg?.chat?.id || '0'}_${msg?.message_id || '0'}_${Date.now()}`;
     const telegramReceiveDelayMs = msg?.date ? Math.max(0, receivedAt - msg.date * 1000) : 0;
 
-    console.log(JSON.stringify({
+    logDebug({
       event: 'MESSAGE_TRACE_RECEIVED',
       traceId,
       updateId: update.update_id,
@@ -394,10 +395,10 @@ export class TelegramBotManager {
       userId: msg?.from?.id,
       telegram_receive_delay_ms: telegramReceiveDelayMs,
       elapsedMs: 0
-    }));
+    });
 
     if (msg) {
-      console.log(JSON.stringify({
+      logDebug({
         event: 'TELEGRAM_UPDATE_RECEIVED',
         update_id: update.update_id,
         chat_id: msg.chat?.id,
@@ -406,7 +407,7 @@ export class TelegramBotManager {
         is_command: isCmd,
         has_text: Boolean(textOrCap),
         has_media: hasMedia
-      }));
+      });
     }
 
     const reqCtx: TelegramRequestContext = {
@@ -422,20 +423,20 @@ export class TelegramBotManager {
 
     const targetChatId = reqCtx.chatId;
 
-    console.log(JSON.stringify({
+    logDebug({
       event: 'MESSAGE_TRACE_QUEUE_ENTER',
       traceId,
       updateId: update.update_id,
       chatId: reqCtx.chatId,
       messageId: reqCtx.messageId,
       elapsedMs: Date.now() - receivedAt
-    }));
+    });
 
     const executeTask = async () => {
       const queueWaitMs = Date.now() - receivedAt;
       const pipelineStart = Date.now();
 
-      console.log(JSON.stringify({
+      logDebug({
         event: 'MESSAGE_TRACE_QUEUE_START',
         traceId,
         updateId: update.update_id,
@@ -443,24 +444,24 @@ export class TelegramBotManager {
         messageId: reqCtx.messageId,
         queue_wait_ms: queueWaitMs,
         elapsedMs: queueWaitMs
-      }));
+      });
 
-      console.log(JSON.stringify({
+      logDebug({
         event: 'MESSAGE_PIPELINE_START',
         update_id: update.update_id,
         chat_id: reqCtx.chatId,
         message_id: reqCtx.messageId,
         queue_wait_ms: queueWaitMs
-      }));
+      });
 
       await TelegramBotManager.acquireGlobalSlot();
       try {
-        console.log(JSON.stringify({
+        logDebug({
           event: 'TELEGRAM_UPDATE_PROCESSING',
           update_id: update.update_id,
           chat_id: reqCtx.chatId,
           message_id: reqCtx.messageId
-        }));
+        });
 
         if (update.message) {
           await this.handleMessage(update.message, false, reqCtx);
@@ -477,7 +478,7 @@ export class TelegramBotManager {
 
         const totalPipelineMs = Date.now() - pipelineStart;
         metricsTracker.increment('telegram_updates_processed');
-        console.log(JSON.stringify({
+        logDebug({
           event: 'MESSAGE_PIPELINE_END',
           update_id: update.update_id,
           chat_id: reqCtx.chatId,
@@ -485,7 +486,7 @@ export class TelegramBotManager {
           queue_wait_ms: queueWaitMs,
           pipeline_ms: totalPipelineMs,
           total_ms: Date.now() - receivedAt
-        }));
+        });
       } catch (updateErr: any) {
         metricsTracker.increment('telegram_updates_failed');
         errorTracker.recordError({
@@ -539,14 +540,14 @@ export class TelegramBotManager {
 
     const authStart = Date.now();
     if (reqCtx) {
-      console.log(JSON.stringify({
+      logDebug({
         event: 'MESSAGE_TRACE_AUTH_START',
         traceId: reqCtx.traceId,
         updateId: reqCtx.updateId,
         chatId,
         messageId: reqCtx.messageId,
         elapsedMs: Date.now() - reqCtx.receivedAt
-      }));
+      });
     }
 
     // Global per-user rate limiter check
@@ -592,7 +593,7 @@ export class TelegramBotManager {
     }
 
     if (reqCtx) {
-      console.log(JSON.stringify({
+      logDebug({
         event: 'MESSAGE_TRACE_AUTH_END',
         traceId: reqCtx.traceId,
         updateId: reqCtx.updateId,
@@ -600,7 +601,7 @@ export class TelegramBotManager {
         messageId: reqCtx.messageId,
         auth_ms: Date.now() - authStart,
         elapsedMs: Date.now() - reqCtx.receivedAt
-      }));
+      });
     }
 
     // 0. Check Hashtag Notes Shortcuts (#notename)
@@ -729,14 +730,14 @@ export class TelegramBotManager {
 
     const storageStart = Date.now();
     if (reqCtx) {
-      console.log(JSON.stringify({
+      logDebug({
         event: 'MESSAGE_TRACE_STORAGE_START',
         traceId: reqCtx.traceId,
         updateId: reqCtx.updateId,
         chatId,
         messageId: reqCtx.messageId,
         elapsedMs: Date.now() - reqCtx.receivedAt
-      }));
+      });
     }
 
     // Record incoming group message in persistent memory for Group Messages dashboard & real replies
@@ -757,12 +758,12 @@ export class TelegramBotManager {
         replyToMessageId: message.reply_to_message?.message_id
       });
       this.lastStoredMessageTimestamp = new Date().toISOString();
-      console.log(JSON.stringify({
+      logDebug({
         event: 'STORAGE_MESSAGE_SAVED',
         chat_id: chatId,
         message_id: message.message_id,
         chat_type: 'group'
-      }));
+      });
     } else if (chatId && chatId > 0 && userId && message.message_id) {
       // Record incoming private chat message in persistent memory for Control Center dashboard
       db.addPrivateMessage(chatId, userId, {
@@ -776,16 +777,16 @@ export class TelegramBotManager {
         language: ChatbotService.detectLanguage(content).language
       });
       this.lastStoredMessageTimestamp = new Date().toISOString();
-      console.log(JSON.stringify({
+      logDebug({
         event: 'STORAGE_MESSAGE_SAVED',
         chat_id: chatId,
         message_id: message.message_id,
         chat_type: 'private'
-      }));
+      });
     }
 
     if (reqCtx) {
-      console.log(JSON.stringify({
+      logDebug({
         event: 'MESSAGE_TRACE_STORAGE_END',
         traceId: reqCtx.traceId,
         updateId: reqCtx.updateId,
@@ -793,7 +794,7 @@ export class TelegramBotManager {
         messageId: reqCtx.messageId,
         storage_ms: Date.now() - storageStart,
         elapsedMs: Date.now() - reqCtx.receivedAt
-      }));
+      });
     }
 
     // 7. Check Smart Telegram Reactions (non-blocking & independent)
@@ -807,12 +808,12 @@ export class TelegramBotManager {
       this.recordResponseSent();
     }
 
-    console.log(JSON.stringify({
+    logDebug({
       event: 'TELEGRAM_MESSAGE_PROCESSED',
       chat_id: chatId,
       message_id: message.message_id,
       is_command: false
-    }));
+    });
   }
 
   private async handleChatMemberUpdate(chatMemberUpdate: {

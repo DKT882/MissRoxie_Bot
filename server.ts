@@ -1521,6 +1521,165 @@ export async function startServer() {
     }
   });
 
+  // --- Scheduled Messages & Rules Dashboard APIs ---
+  app.get('/api/dashboard/schedules', (req, res) => {
+    try {
+      const chatIdParam = req.query.chatId as string;
+      if (chatIdParam) {
+        const chatId = Number(chatIdParam);
+        const schedules = db.getGroupSchedules(chatId);
+        return res.json({ schedules });
+      }
+      const schedules = db.getAllSchedules();
+      res.json({ schedules });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/schedules', async (req, res) => {
+    try {
+      const { chatId, message, messageText, name, scheduleType, intervalMs, intervalFormatted, nextRun, timezone, contentType, mediaFileId, replyToMessageId, enabled } = req.body;
+      const numChatId = Number(chatId);
+      if (!numChatId || isNaN(numChatId)) {
+        return res.status(400).json({ error: 'Valid target chatId is required.' });
+      }
+
+      // Hard safety blocker for dummy test targets
+      if (numChatId === -100111222333 || String(chatId).includes('100111222333')) {
+        return res.status(400).json({ error: 'Target chatId is a blocked legacy test destination.' });
+      }
+
+      const text = (messageText || message || '').trim();
+      if (!text && !mediaFileId) {
+        return res.status(400).json({ error: 'Message text or media is required for schedule.' });
+      }
+
+      const newSchedule = db.addSchedule({
+        chatId: numChatId,
+        chatTitle: req.body.chatTitle || `Chat ${numChatId}`,
+        name: name || (text.slice(0, 30) || 'Scheduled Message'),
+        message: text,
+        messageText: text,
+        scheduleType: scheduleType || 'interval',
+        intervalMs: intervalMs ? Number(intervalMs) : undefined,
+        intervalFormatted: intervalFormatted || undefined,
+        nextRun: nextRun || new Date(Date.now() + 60000).toISOString(),
+        timezone: timezone || 'UTC',
+        contentType: contentType || 'text',
+        mediaFileId: mediaFileId || undefined,
+        replyToMessageId: replyToMessageId ? Number(replyToMessageId) : undefined,
+        enabled: enabled !== false,
+        adminUsername: (req as any).operator?.username || 'dashboard_admin',
+        lastStatus: 'pending'
+      });
+
+      res.json({ success: true, schedule: newSchedule });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put('/api/dashboard/schedules/:id', (req, res) => {
+    try {
+      const id = req.params.id;
+      const updates = req.body;
+      if (updates.chatId && (Number(updates.chatId) === -100111222333 || String(updates.chatId).includes('100111222333'))) {
+        return res.status(400).json({ error: 'Target chatId is a blocked legacy test destination.' });
+      }
+      const updated = db.updateSchedule(id, updates);
+      if (!updated) {
+        return res.status(404).json({ error: 'Schedule not found.' });
+      }
+      res.json({ success: true, schedule: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/schedules/:id/toggle', (req, res) => {
+    try {
+      const id = req.params.id;
+      const updated = db.toggleSchedule(id, req.body.enabled);
+      if (!updated) {
+        return res.status(404).json({ error: 'Schedule not found.' });
+      }
+      res.json({ success: true, schedule: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/dashboard/schedules/:id', (req, res) => {
+    try {
+      const id = req.params.id;
+      const s = db.getScheduleById(id);
+      if (!s) {
+        return res.status(404).json({ error: 'Schedule not found.' });
+      }
+      const deleted = db.deleteSchedule(s.chatId, id);
+      res.json({ success: deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Group Automations / Rules Endpoints
+  app.get('/api/dashboard/groups/:chatId/automations', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const automations = db.getAutomations(chatId);
+      res.json({ automations });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/automations', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const { trigger, action, parameters, enabled } = req.body;
+      if (!trigger || !action) {
+        return res.status(400).json({ error: 'Trigger and action are required.' });
+      }
+      const newAuto = {
+        id: Math.random().toString(36).substring(2, 8).toUpperCase(),
+        trigger,
+        action,
+        parameters,
+        enabled: enabled !== false,
+        createdBy: 0,
+        createdAt: new Date().toISOString()
+      };
+      db.addAutomation(chatId, newAuto);
+      res.json({ success: true, automation: newAuto });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/dashboard/groups/:chatId/automations/:id', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const autoId = req.params.id;
+      const deleted = db.deleteAutomation(chatId, autoId);
+      res.json({ success: deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/groups/:chatId/automations/:id/toggle', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const autoId = req.params.id;
+      const toggled = db.toggleAutomation(chatId, autoId, req.body.enabled);
+      res.json({ success: toggled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // --- Control Center: Global Settings ---
   app.get('/api/dashboard/control-center/global', (req, res) => {
     try {

@@ -1,4 +1,5 @@
 import { TelegramChatMember, TelegramUser, BotCommand, BotCommandScope } from './types.js';
+import { logDebug } from '../observability/logger.js';
 
 export interface TelegramApiCallOptions {
   maxRetries?: number;
@@ -118,14 +119,14 @@ export class TelegramApi {
 
     while (attempt <= maxRetries) {
       const startedAt = Date.now();
-      console.log(JSON.stringify({
+      logDebug({
         event: 'TELEGRAM_REQUEST_START',
         requestId: reqId,
         method,
         chatId: rawChatId,
         startedAt,
         attempt: attempt + 1
-      }));
+      });
 
       try {
         if (!options?.skipRateLimiter) {
@@ -188,14 +189,14 @@ export class TelegramApi {
           if (attempt > 0) {
             this.rateLimitStats.retriesSucceeded++;
           }
-          console.log(JSON.stringify({
+          logDebug({
             event: 'TELEGRAM_REQUEST_SUCCESS',
             requestId: reqId,
             method,
             chatId: rawChatId,
             elapsedMs,
             attempt: attempt + 1
-          }));
+          });
         } else {
           console.error(JSON.stringify({
             event: 'TELEGRAM_REQUEST_FAILED',
@@ -297,20 +298,20 @@ export class TelegramApi {
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     const replyId = options?.reply_parameters?.message_id || options?.reply_to_message_id;
     const stackTrace = new Error().stack?.split('\n').slice(2, 6).map(s => s.trim()) || [];
-    console.log(JSON.stringify({
+    logDebug({
       event: 'TELEGRAM_SEND_CALLSITE',
       chatId,
       method: 'sendMessage',
       reply_to_message_id: replyId,
       stack: stackTrace
-    }));
+    });
 
-    console.log(JSON.stringify({
+    logDebug({
       event: 'TELEGRAM_SEND_START',
       chat_id: chatId,
       method: 'sendMessage',
       reply_to_message_id: replyId
-    }));
+    });
 
     let res = await this.call('sendMessage', {
       chat_id: chatId,
@@ -360,12 +361,12 @@ export class TelegramApi {
     }
 
     if (res.ok) {
-      console.log(JSON.stringify({
+      logDebug({
         event: 'TELEGRAM_SEND_SUCCESS',
         chat_id: chatId,
         message_id: res.result?.message_id,
         method: 'sendMessage'
-      }));
+      });
     } else {
       console.error(JSON.stringify({
         event: 'TELEGRAM_SEND_FAILED',
@@ -669,7 +670,7 @@ export class TelegramApi {
       reply_markup: options?.reply_markup
     });
     if (res.ok) {
-      console.log(JSON.stringify({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendSticker' }));
+      logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendSticker' });
     } else {
       console.error(JSON.stringify({ event: 'TELEGRAM_SEND_FAILED', chat_id: chatId, method: 'sendSticker', error_code: res.error_code, description: res.description }));
     }
@@ -695,7 +696,7 @@ export class TelegramApi {
       reply_markup: options?.reply_markup
     });
     if (res.ok) {
-      console.log(JSON.stringify({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendPhoto' }));
+      logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendPhoto' });
     } else {
       console.error(JSON.stringify({ event: 'TELEGRAM_SEND_FAILED', chat_id: chatId, method: 'sendPhoto', error_code: res.error_code, description: res.description }));
     }
@@ -721,7 +722,7 @@ export class TelegramApi {
       reply_markup: options?.reply_markup
     });
     if (res.ok) {
-      console.log(JSON.stringify({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendVideo' }));
+      logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendVideo' });
     } else {
       console.error(JSON.stringify({ event: 'TELEGRAM_SEND_FAILED', chat_id: chatId, method: 'sendVideo', error_code: res.error_code, description: res.description }));
     }
@@ -747,7 +748,7 @@ export class TelegramApi {
       reply_markup: options?.reply_markup
     });
     if (res.ok) {
-      console.log(JSON.stringify({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendDocument' }));
+      logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendDocument' });
     } else {
       console.error(JSON.stringify({ event: 'TELEGRAM_SEND_FAILED', chat_id: chatId, method: 'sendDocument', error_code: res.error_code, description: res.description }));
     }
@@ -773,7 +774,7 @@ export class TelegramApi {
       reply_markup: options?.reply_markup
     });
     if (res.ok) {
-      console.log(JSON.stringify({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendAnimation' }));
+      logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendAnimation' });
     } else {
       console.error(JSON.stringify({ event: 'TELEGRAM_SEND_FAILED', chat_id: chatId, method: 'sendAnimation', error_code: res.error_code, description: res.description }));
     }

@@ -1,10 +1,10 @@
-﻿import fs from 'fs';
+import fs from 'fs';
 import path from 'path';
 import { db } from '../db/storage.js';
 import { telegramApi } from '../telegram/api.js';
 
-export const PROTECTED_CHAT_IDS = [-1004331070653, -1004356470022, -1004494262619, -5377649576];
-export const PROTECTED_NAMES = ['horny log', 'horney log', 'bade log', 'lovers'];
+export const PROTECTED_CHAT_IDS = [-1004356470022, -1004331070653, -1004494262619, -1003901820979];
+export const PROTECTED_NAMES = ['lovers', 'bade log', 'horny log', 'horney log', 'susss and roxie', 'susss'];
 
 export function normalizeTitle(raw: string): string {
   if (!raw) return '';
@@ -173,14 +173,20 @@ export async function runDummyDataCleanup(options: { dryRun: boolean }): Promise
     ? fs.readdirSync(privateDir).filter(f => f.endsWith('.json'))
     : [];
 
+  const KNOWN_TEST_PRIVATE_IDS = [8881001, 8881234];
+
   for (const file of privateFiles) {
     const userId = Number(file.replace('.json', ''));
+    if (!KNOWN_TEST_PRIVATE_IDS.includes(userId)) {
+      // Preserve real user DMs
+      continue;
+    }
     if (dryRun) {
       privateChats.push({
         chatId: userId,
         userId,
         action: 'DRY_RUN_WOULD_CLEAN',
-        reason: 'Dummy private conversation history. Dry run: no action taken.'
+        reason: 'Confirmed test private chat fixture. Dry run: no action taken.'
       });
     } else {
       db.deletePrivateChatData(userId);
@@ -188,7 +194,7 @@ export async function runDummyDataCleanup(options: { dryRun: boolean }): Promise
         chatId: userId,
         userId,
         action: 'CLEANED',
-        reason: 'Purged local dummy private conversation history.'
+        reason: 'Purged confirmed test private chat fixture.'
       });
     }
   }

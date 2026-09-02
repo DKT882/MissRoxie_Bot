@@ -213,7 +213,58 @@ export default function App() {
     | 'backup'
     | 'settings'
     | 'permissions'
+    | 'schedules'
   >('overview');
+
+  // Scheduled Messages & Rules State
+  const [schedulesList, setSchedulesList] = useState<any[]>([]);
+  const [schedulesLoading, setSchedulesLoading] = useState<boolean>(false);
+  const [schedulesFilterChatId, setSchedulesFilterChatId] = useState<number | 'all'>('all');
+  const [showCreateScheduleModal, setShowCreateScheduleModal] = useState<boolean>(false);
+  const [editingSchedule, setEditingSchedule] = useState<any | null>(null);
+  const [newScheduleForm, setNewScheduleForm] = useState<{
+    chatId: number | string;
+    name: string;
+    message: string;
+    scheduleType: 'one_time' | 'daily' | 'weekly' | 'interval' | 'custom';
+    intervalStr: string;
+    nextRunDate: string;
+    nextRunTime: string;
+    timezone: string;
+    contentType: string;
+    mediaFileId: string;
+    replyToMessageId: string;
+    enabled: boolean;
+  }>({
+    chatId: '',
+    name: '',
+    message: '',
+    scheduleType: 'interval',
+    intervalStr: '1h',
+    nextRunDate: new Date().toISOString().split('T')[0],
+    nextRunTime: '12:00',
+    timezone: 'UTC',
+    contentType: 'text',
+    mediaFileId: '',
+    replyToMessageId: '',
+    enabled: true
+  });
+
+  // Group Automations State
+  const [groupAutomationsList, setGroupAutomationsList] = useState<any[]>([]);
+  const [automationsLoading, setAutomationsLoading] = useState<boolean>(false);
+  const [showCreateAutomationModal, setShowCreateAutomationModal] = useState<boolean>(false);
+  const [newAutomationForm, setNewAutomationForm] = useState<{
+    trigger: string;
+    action: string;
+    parameters: string;
+    enabled: boolean;
+  }>({
+    trigger: 'spam_detected',
+    action: 'delete_message',
+    parameters: '',
+    enabled: true
+  });
 
   // Global Settings state
   const [globalSettings, setGlobalSettings] = useState<any>({
@@ -397,14 +448,15 @@ export default function App() {
   // Primary Data Fetcher (Optimized with in-flight deduplication)
   const fetchData = async () => {
     try {
-      const [overviewRes, groupsRes, cmdsRes, statusRes, healthRes, dmsRes, stickersRes] = await Promise.all([
+      const [overviewRes, groupsRes, cmdsRes, statusRes, healthRes, dmsRes, stickersRes, schedulesRes] = await Promise.all([
         deduplicatedFetch('/api/dashboard/overview'),
         deduplicatedFetch('/api/dashboard/groups'),
         deduplicatedFetch('/api/commands'),
         deduplicatedFetch('/api/telegram/status'),
         deduplicatedFetch('/api/health'),
         deduplicatedFetch('/api/dashboard/private-chats'),
-        deduplicatedFetch('/api/dashboard/stickers')
+        deduplicatedFetch('/api/dashboard/stickers'),
+        deduplicatedFetch('/api/dashboard/schedules')
       ]);
 
       if (overviewRes.ok) setOverview(await overviewRes.json());
@@ -414,6 +466,10 @@ export default function App() {
       if (healthRes.ok) setHealthData(await healthRes.json());
       if (dmsRes.ok) setPrivateChats(await dmsRes.json());
       if (stickersRes.ok) setGlobalStickersData(await stickersRes.json());
+      if (schedulesRes.ok) {
+        const sData = await schedulesRes.json();
+        setSchedulesList(sData.schedules || []);
+      }
 
       // Fetch global settings
       try {
@@ -425,7 +481,7 @@ export default function App() {
       const targetDetailId = activeGroupDetailId || (selectedChatId !== 'all' ? selectedChatId : null);
       if (targetDetailId) {
         // Fetch all group sub-resources with Promise.allSettled so no single slow or failing sub-resource blocks the others
-        const [detailResult, modsResult, permsResult, groupStickersResult, abuseResult, membersResult, lustUsersResult, historyResult] = await Promise.allSettled([
+        const [detailResult, modsResult, permsResult, groupStickersResult, abuseResult, membersResult, lustUsersResult, historyResult, autoResult] = await Promise.allSettled([
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}`),
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/moderators`),
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/permissions`),
@@ -433,8 +489,16 @@ export default function App() {
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/abuse-words`),
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/members`),
           deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/lust/users`),
-          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/backup/history`)
+          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/backup/history`),
+          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/automations`)
         ]);
+
+        if (autoResult.status === 'fulfilled' && autoResult.value.ok) {
+          try {
+            const aData = await autoResult.value.json();
+            setGroupAutomationsList(aData.automations || []);
+          } catch {}
+        }
 
         if (detailResult.status === 'fulfilled' && detailResult.value.ok) {
           try {
@@ -1266,6 +1330,155 @@ export default function App() {
     }
   };
 
+  // Schedule and Automation Action Handlers
+  const handleSaveSchedule = async () => {
+    if (!newScheduleForm.chatId || !newScheduleForm.message.trim()) return;
+    setSchedulesLoading(true);
+    try {
+      const payload: any = {
+        chatId: Number(newScheduleForm.chatId),
+        name: newScheduleForm.name.trim() || newScheduleForm.message.trim().slice(0, 30),
+        message: newScheduleForm.message.trim(),
+        messageText: newScheduleForm.message.trim(),
+        scheduleType: newScheduleForm.scheduleType,
+        timezone: newScheduleForm.timezone || 'UTC',
+        contentType: newScheduleForm.contentType || 'text',
+        mediaFileId: newScheduleForm.mediaFileId.trim() || undefined,
+        replyToMessageId: newScheduleForm.replyToMessageId ? Number(newScheduleForm.replyToMessageId) : undefined,
+        enabled: newScheduleForm.enabled
+      };
+
+      if (newScheduleForm.scheduleType === 'interval') {
+        payload.intervalFormatted = newScheduleForm.intervalStr || '1h';
+        const rawStr = (newScheduleForm.intervalStr || '1h').toLowerCase().trim();
+        const num = parseFloat(rawStr) || 1;
+        if (rawStr.endsWith('m')) payload.intervalMs = num * 60 * 1000;
+        else if (rawStr.endsWith('d')) payload.intervalMs = num * 24 * 60 * 60 * 1000;
+        else payload.intervalMs = num * 60 * 60 * 1000;
+        payload.nextRun = new Date(Date.now() + payload.intervalMs).toISOString();
+      } else {
+        const dateStr = `${newScheduleForm.nextRunDate}T${newScheduleForm.nextRunTime || '12:00'}:00`;
+        const parsedDate = new Date(dateStr);
+        payload.nextRun = isNaN(parsedDate.getTime()) ? new Date(Date.now() + 3600000).toISOString() : parsedDate.toISOString();
+      }
+
+      const method = editingSchedule ? 'PUT' : 'POST';
+      const endpoint = editingSchedule ? `/api/dashboard/schedules/${editingSchedule.id}` : '/api/dashboard/schedules';
+
+      const res = await fetch(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setShowCreateScheduleModal(false);
+        setEditingSchedule(null);
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to save schedule:', err);
+    } finally {
+      setSchedulesLoading(false);
+    }
+  };
+
+  const handleToggleSchedule = async (id: string, currentEnabled: boolean) => {
+    try {
+      const res = await fetch(`/api/dashboard/schedules/${id}/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !currentEnabled })
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to toggle schedule:', err);
+    }
+  };
+
+  const handleDeleteSchedule = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this scheduled message?')) return;
+    try {
+      const res = await fetch(`/api/dashboard/schedules/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to delete schedule:', err);
+    }
+  };
+
+  const handleSaveAutomation = async () => {
+    const targetChatId = activeGroupDetailId || (schedulesFilterChatId !== 'all' ? schedulesFilterChatId : null);
+    if (!targetChatId) return;
+    setAutomationsLoading(true);
+    try {
+      const res = await fetch(`/api/dashboard/groups/${targetChatId}/automations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trigger: newAutomationForm.trigger,
+          action: newAutomationForm.action,
+          parameters: newAutomationForm.parameters.trim() || undefined,
+          enabled: newAutomationForm.enabled
+        })
+      });
+      if (res.ok) {
+        setShowCreateAutomationModal(false);
+        setNewAutomationForm({ trigger: 'spam_detected', action: 'delete_message', parameters: '', enabled: true });
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to save automation:', err);
+    } finally {
+      setAutomationsLoading(false);
+    }
+  };
+
+  const handleDeleteAutomation = async (chatId: number, autoId: string) => {
+    if (!confirm('Are you sure you want to delete this automation rule?')) return;
+    try {
+      const res = await fetch(`/api/dashboard/groups/${chatId}/automations/${autoId}`, { method: 'DELETE' });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to delete automation:', err);
+    }
+  };
+
+  const handleToggleAutomation = async (chatId: number, autoId: string, currentEnabled: boolean) => {
+    try {
+      const res = await fetch(`/api/dashboard/groups/${chatId}/automations/${autoId}/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !currentEnabled })
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to toggle automation:', err);
+    }
+  };
+
+  const fetchAutomations = async (targetChatId: number) => {
+    if (!targetChatId) return;
+    setAutomationsLoading(true);
+    try {
+      const res = await deduplicatedFetch(`/api/dashboard/groups/${targetChatId}/automations`);
+      if (res.ok) {
+        const data = await res.json();
+        setGroupAutomationsList(data.automations || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch automations:', err);
+    } finally {
+      setAutomationsLoading(false);
+    }
+  };
+
   // Flush Pending Debounced Settings Batch to Backend (Single Combined PATCH)
   const flushPendingSettings = async () => {
     if (!activeGroupDetailId) return;
@@ -1619,6 +1832,7 @@ export default function App() {
               <div className="space-y-1">
                 <div className={`px-3 text-[10px] font-bold uppercase tracking-wider ${themeMutedText}`}>Actions</div>
                 {[
+                  { id: 'schedules', label: '⏰ Schedules & Rules', icon: Clock, badge: schedulesList.length },
                   { id: 'send-message', label: '📢 Send Message', icon: Send },
                   { id: 'broadcast', label: '📣 Broadcast', icon: Radio }
                 ].map((item) => {
@@ -2273,6 +2487,7 @@ export default function App() {
                     { id: 'telegram_permissions', label: '🔐 Permissions' },
                     { id: 'commands', label: '📜 Commands' },
                     { id: 'messages', label: `💬 Messages (${groupDetails.storedMessages?.length || 0})` },
+                    { id: 'schedules', label: `⏰ Schedules & Rules (${schedulesList.filter(s => s.chatId === activeGroupDetailId).length})` },
                     { id: 'activity', label: '📋 Activity' },
                     { id: 'backup', label: '💾 Backup & Restore' },
                     { id: 'danger_zone', label: '🚨 Danger Zone' }
@@ -4088,6 +4303,193 @@ export default function App() {
                 </div>
               )}
 
+              {/* INNER TAB: GROUP SCHEDULES & RULES */}
+              {groupDetailTab === 'schedules' && (
+                <div className="space-y-6">
+                  {/* Scheduled Messages for this group */}
+                  <div className={`${themeCardBg} border rounded-2xl p-6 space-y-4`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-bold flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-blue-500" /> Scheduled Messages ({schedulesList.filter(s => s.chatId === activeGroupDetailId).length})
+                        </h3>
+                        <p className={`text-xs ${themeMutedText}`}>Automated recurring broadcasts and scheduled announcements for {groupDetails.chatTitle}.</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEditingSchedule(null);
+                          setNewScheduleForm({
+                            chatId: activeGroupDetailId,
+                            name: '',
+                            message: '',
+                            scheduleType: 'interval',
+                            intervalStr: '1h',
+                            nextRunDate: new Date().toISOString().split('T')[0],
+                            nextRunTime: '12:00',
+                            timezone: 'UTC',
+                            contentType: 'text',
+                            mediaFileId: '',
+                            replyToMessageId: '',
+                            enabled: true
+                          });
+                          setShowCreateScheduleModal(true);
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> New Schedule
+                      </button>
+                    </div>
+
+                    {schedulesList.filter(s => s.chatId === activeGroupDetailId).length === 0 ? (
+                      <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-8 text-center space-y-2`}>
+                        <Clock className="w-8 h-8 text-stone-500 mx-auto opacity-40" />
+                        <p className="text-xs font-semibold text-stone-400">No scheduled messages configured for this group</p>
+                        <p className={`text-[11px] ${themeMutedText}`}>Create a schedule to automatically send hourly reminders, daily announcements, or custom broadcasts.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {schedulesList.filter(s => s.chatId === activeGroupDetailId).map((s: any) => (
+                          <div key={s.id} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs`}>
+                            <div className="space-y-1 max-w-xl">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-300 font-bold">ID: {s.id}</span>
+                                <span className="font-semibold text-sm">{s.name || 'Scheduled Message'}</span>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${s.enabled !== false ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-stone-800 text-stone-400'}`}>
+                                  {s.enabled !== false ? '● Active' : '○ Paused'}
+                                </span>
+                                {s.scheduleType && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 uppercase font-semibold">
+                                    {s.scheduleType}
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`line-clamp-2 text-xs ${isDark ? 'text-stone-300' : 'text-slate-700'}`}>{s.message || s.messageText}</p>
+                              <div className={`flex flex-wrap items-center gap-3 text-[11px] ${themeMutedText} pt-1`}>
+                                <span>Interval: <strong className="text-stone-300">{s.intervalFormatted || 'Custom'}</strong></span>
+                                <span>Next: <strong className="text-stone-300">{s.nextRun ? new Date(s.nextRun).toLocaleString() : 'N/A'}</strong></span>
+                                <span>Runs: <strong className="text-stone-300">{s.runsCount || 0}</strong></span>
+                                {s.lastStatus && (
+                                  <span className={s.lastStatus === 'success' ? 'text-emerald-400' : 'text-rose-400'}>
+                                    Last: {s.lastStatus}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                onClick={() => handleToggleSchedule(s.id, s.enabled !== false)}
+                                className={`px-2.5 py-1 rounded-lg font-semibold text-xs border ${
+                                  s.enabled !== false
+                                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
+                                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                                }`}
+                              >
+                                {s.enabled !== false ? 'Pause' : 'Enable'}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingSchedule(s);
+                                  setNewScheduleForm({
+                                    chatId: s.chatId,
+                                    name: s.name || '',
+                                    message: s.message || s.messageText || '',
+                                    scheduleType: s.scheduleType || 'interval',
+                                    intervalStr: s.intervalFormatted || '1h',
+                                    nextRunDate: s.nextRun ? new Date(s.nextRun).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                                    nextRunTime: s.nextRun ? new Date(s.nextRun).toISOString().split('T')[1].slice(0, 5) : '12:00',
+                                    timezone: s.timezone || 'UTC',
+                                    contentType: s.contentType || 'text',
+                                    mediaFileId: s.mediaFileId || '',
+                                    replyToMessageId: s.replyToMessageId ? String(s.replyToMessageId) : '',
+                                    enabled: s.enabled !== false
+                                  });
+                                  setShowCreateScheduleModal(true);
+                                }}
+                                className={`px-2.5 py-1 rounded-lg ${themeInnerCardBg} border ${themeBorder} text-stone-300 hover:text-white`}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteSchedule(s.id)}
+                                className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20"
+                                title="Delete Schedule"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Automation Rules for this group */}
+                  <div className={`${themeCardBg} border rounded-2xl p-6 space-y-4`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-bold flex items-center gap-2">
+                          <Zap className="w-4 h-4 text-amber-500" /> Automation Rules ({groupAutomationsList.length})
+                        </h3>
+                        <p className={`text-xs ${themeMutedText}`}>Reactive automation triggers and enforcement actions for {groupDetails.chatTitle}.</p>
+                      </div>
+                      <button
+                        onClick={() => setShowCreateAutomationModal(true)}
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add Rule
+                      </button>
+                    </div>
+
+                    {groupAutomationsList.length === 0 ? (
+                      <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-8 text-center space-y-2`}>
+                        <Zap className="w-8 h-8 text-stone-500 mx-auto opacity-40" />
+                        <p className="text-xs font-semibold text-stone-400">No automation rules configured for this group</p>
+                        <p className={`text-[11px] ${themeMutedText}`}>Add custom reactive rules (e.g., auto-delete spam, instant user warns, link blocks).</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {groupAutomationsList.map((a: any) => (
+                          <div key={a.id} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between text-xs`}>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-300 font-bold">RULE: {a.id}</span>
+                                <span className="font-semibold text-blue-400">Trigger: {a.trigger}</span>
+                                <span className="text-stone-500">➔</span>
+                                <span className="font-semibold text-amber-400">Action: {a.action}</span>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${a.enabled !== false ? 'bg-emerald-500/10 text-emerald-400' : 'bg-stone-800 text-stone-400'}`}>
+                                  {a.enabled !== false ? 'Active' : 'Disabled'}
+                                </span>
+                              </div>
+                              {a.parameters && (
+                                <p className={`text-[11px] ${themeMutedText}`}>Parameters: <code className="font-mono">{a.parameters}</code></p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleToggleAutomation(activeGroupDetailId, a.id, a.enabled !== false)}
+                                className={`px-2 py-1 rounded-lg text-xs font-semibold border ${
+                                  a.enabled !== false
+                                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                }`}
+                              >
+                                {a.enabled !== false ? 'Disable' : 'Enable'}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAutomation(activeGroupDetailId, a.id)}
+                                className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
             </div>
           )}
 
@@ -4348,6 +4750,253 @@ export default function App() {
                   {sendingMessage ? 'Sending...' : 'Send Message'}
                 </button>
               </form>
+            </div>
+          )}
+
+          {/* TAB: SCHEDULES & RULES */}
+          {activeNav === 'schedules' && (
+            <div className="space-y-6">
+              {/* Header & Main Schedule Management */}
+              <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-bold flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-blue-500" /> Scheduled Messages ({schedulesList.length})
+                    </h3>
+                    <p className={`text-xs ${themeMutedText}`}>Configure automated recurring messages, intervals, and one-time announcements across all chats.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setEditingSchedule(null);
+                        setNewScheduleForm({
+                          chatId: groups[0]?.chatId || '',
+                          name: '',
+                          message: '',
+                          scheduleType: 'interval',
+                          intervalStr: '1h',
+                          nextRunDate: new Date().toISOString().split('T')[0],
+                          nextRunTime: '12:00',
+                          timezone: 'UTC',
+                          contentType: 'text',
+                          mediaFileId: '',
+                          replyToMessageId: '',
+                          enabled: true
+                        });
+                        setShowCreateScheduleModal(true);
+                      }}
+                      className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> New Schedule
+                    </button>
+                    <button
+                      onClick={() => fetchData()}
+                      disabled={schedulesLoading}
+                      className={`p-2 rounded-xl ${themeInnerCardBg} border ${themeBorder} text-stone-400 hover:text-white transition-colors`}
+                      title="Refresh"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${schedulesLoading ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter by Target Group */}
+                <div className="flex items-center gap-2 text-xs">
+                  <span className={`font-semibold ${themeMutedText}`}>Filter Target:</span>
+                  <select
+                    value={schedulesFilterChatId}
+                    onChange={(e) => setSchedulesFilterChatId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                    className={`${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-1.5 text-xs font-semibold focus:outline-none`}
+                  >
+                    <option value="all">All Groups ({schedulesList.length} schedules)</option>
+                    {groups.map(g => (
+                      <option key={g.chatId} value={g.chatId}>
+                        {g.chatTitle} ({schedulesList.filter(s => s.chatId === g.chatId).length})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Schedules List */}
+                {schedulesList.filter(s => schedulesFilterChatId === 'all' || s.chatId === schedulesFilterChatId).length === 0 ? (
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-10 text-center space-y-3`}>
+                    <Clock className="w-10 h-10 text-stone-500 mx-auto opacity-40" />
+                    <p className="text-sm font-semibold text-stone-300">No scheduled messages found</p>
+                    <p className={`text-xs ${themeMutedText} max-w-sm mx-auto`}>
+                      Click "New Schedule" to create automated recurring announcements, hourly reminders, or scheduled notices for any group.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {schedulesList
+                      .filter(s => schedulesFilterChatId === 'all' || s.chatId === schedulesFilterChatId)
+                      .map((s: any) => {
+                        const targetGroup = groups.find(g => g.chatId === s.chatId);
+                        return (
+                          <div key={s.id} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs`}>
+                            <div className="space-y-1.5 max-w-2xl">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-300 font-bold">ID: {s.id}</span>
+                                <span className="font-bold text-sm">{s.name || 'Scheduled Broadcast'}</span>
+                                <span className="text-stone-400">➔</span>
+                                <span className="font-semibold text-blue-400">{targetGroup?.chatTitle || s.chatTitle || `Chat ${s.chatId}`}</span>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${s.enabled !== false ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-stone-800 text-stone-400'}`}>
+                                  {s.enabled !== false ? '● Active' : '○ Paused'}
+                                </span>
+                                {s.scheduleType && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 uppercase font-semibold">
+                                    {s.scheduleType}
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`line-clamp-2 text-xs ${isDark ? 'text-stone-300' : 'text-slate-700'}`}>{s.message || s.messageText}</p>
+                              <div className={`flex flex-wrap items-center gap-3 text-[11px] ${themeMutedText} pt-1`}>
+                                <span>Interval: <strong className="text-stone-300">{s.intervalFormatted || 'Custom'}</strong></span>
+                                <span>Next: <strong className="text-stone-300">{s.nextRun ? new Date(s.nextRun).toLocaleString() : 'N/A'}</strong></span>
+                                <span>Runs: <strong className="text-stone-300">{s.runsCount || 0}</strong></span>
+                                {s.lastRun && (
+                                  <span>Last: <strong className="text-stone-300">{new Date(s.lastRun).toLocaleString()}</strong></span>
+                                )}
+                                {s.lastStatus && (
+                                  <span className={s.lastStatus === 'success' ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+                                    Status: {s.lastStatus}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                onClick={() => handleToggleSchedule(s.id, s.enabled !== false)}
+                                className={`px-3 py-1.5 rounded-xl font-semibold text-xs border transition-colors ${
+                                  s.enabled !== false
+                                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
+                                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                                }`}
+                              >
+                                {s.enabled !== false ? 'Pause' : 'Enable'}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingSchedule(s);
+                                  setNewScheduleForm({
+                                    chatId: s.chatId,
+                                    name: s.name || '',
+                                    message: s.message || s.messageText || '',
+                                    scheduleType: s.scheduleType || 'interval',
+                                    intervalStr: s.intervalFormatted || '1h',
+                                    nextRunDate: s.nextRun ? new Date(s.nextRun).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                                    nextRunTime: s.nextRun ? new Date(s.nextRun).toISOString().split('T')[1].slice(0, 5) : '12:00',
+                                    timezone: s.timezone || 'UTC',
+                                    contentType: s.contentType || 'text',
+                                    mediaFileId: s.mediaFileId || '',
+                                    replyToMessageId: s.replyToMessageId ? String(s.replyToMessageId) : '',
+                                    enabled: s.enabled !== false
+                                  });
+                                  setShowCreateScheduleModal(true);
+                                }}
+                                className={`px-3 py-1.5 rounded-xl ${themeInnerCardBg} border ${themeBorder} text-stone-300 hover:text-white transition-colors`}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteSchedule(s.id)}
+                                className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-colors"
+                                title="Delete Schedule"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+
+              {/* Group Automation Rules Section */}
+              <div className={`${themeCardBg} border rounded-2xl p-6 space-y-4`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-bold flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-500" /> Group Automation Rules
+                    </h3>
+                    <p className={`text-xs ${themeMutedText}`}>Configure reactive automation triggers and moderation actions for individual groups.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={schedulesFilterChatId === 'all' ? (groups[0]?.chatId || '') : schedulesFilterChatId}
+                      onChange={(e) => {
+                        const cid = Number(e.target.value);
+                        setSchedulesFilterChatId(cid);
+                        fetchAutomations(cid);
+                      }}
+                      className={`${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-1.5 text-xs font-semibold focus:outline-none`}
+                    >
+                      {groups.map(g => (
+                        <option key={g.chatId} value={g.chatId}>
+                          {g.chatTitle}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => setShowCreateAutomationModal(true)}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Rule
+                    </button>
+                  </div>
+                </div>
+
+                {groupAutomationsList.length === 0 ? (
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-8 text-center space-y-2`}>
+                    <Zap className="w-8 h-8 text-stone-500 mx-auto opacity-40" />
+                    <p className="text-xs font-semibold text-stone-400">No automation rules configured for selected group</p>
+                    <p className={`text-[11px] ${themeMutedText}`}>Add custom reactive rules (e.g., auto-delete spam, instant user warns, link blocks).</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {groupAutomationsList.map((a: any) => {
+                      const curChatId = schedulesFilterChatId === 'all' ? groups[0]?.chatId : schedulesFilterChatId;
+                      return (
+                        <div key={a.id} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex items-center justify-between text-xs`}>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-300 font-bold">RULE: {a.id}</span>
+                              <span className="font-semibold text-blue-400">Trigger: {a.trigger}</span>
+                              <span className="text-stone-500">➔</span>
+                              <span className="font-semibold text-amber-400">Action: {a.action}</span>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${a.enabled !== false ? 'bg-emerald-500/10 text-emerald-400' : 'bg-stone-800 text-stone-400'}`}>
+                                {a.enabled !== false ? 'Active' : 'Disabled'}
+                              </span>
+                            </div>
+                            {a.parameters && (
+                              <p className={`text-[11px] ${themeMutedText}`}>Parameters: <code className="font-mono">{a.parameters}</code></p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleToggleAutomation(Number(curChatId), a.id, a.enabled !== false)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${
+                                a.enabled !== false
+                                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              }`}
+                            >
+                              {a.enabled !== false ? 'Disable' : 'Enable'}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteAutomation(Number(curChatId), a.id)}
+                              className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -5334,6 +5983,307 @@ export default function App() {
                 <span>{new Date(selectedEvent.timestamp).toLocaleString()}</span>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create / Edit Schedule Modal */}
+      {showCreateScheduleModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${themeCardBg} border rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto`}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <Clock className="w-4 h-4 text-blue-500" />
+                {editingSchedule ? 'Edit Scheduled Message' : 'Create Scheduled Message'}
+              </h3>
+              <button
+                onClick={() => { setShowCreateScheduleModal(false); setEditingSchedule(null); }}
+                className={`p-1.5 rounded-lg ${themeInnerCardBg} border ${themeBorder} text-stone-400 hover:text-white`}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={(e) => { e.preventDefault(); handleSaveSchedule(); }} className="space-y-4 text-xs">
+              {/* Target Group */}
+              <div className="space-y-1.5">
+                <label className="font-semibold block">Target Group</label>
+                <select
+                  value={newScheduleForm.chatId}
+                  onChange={(e) => setNewScheduleForm({ ...newScheduleForm, chatId: Number(e.target.value) })}
+                  disabled={Boolean(editingSchedule)}
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-blue-500`}
+                >
+                  <option value="">Select a group...</option>
+                  {groups.map(g => (
+                    <option key={g.chatId} value={g.chatId}>
+                      {g.chatTitle} (ID: {g.chatId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Schedule Title */}
+              <div className="space-y-1.5">
+                <label className="font-semibold block">Schedule Name / Label</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Daily Morning Greeting, Hourly Reminder"
+                  value={newScheduleForm.name}
+                  onChange={(e) => setNewScheduleForm({ ...newScheduleForm, name: e.target.value })}
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-500`}
+                />
+              </div>
+
+              {/* Message Content */}
+              <div className="space-y-1.5">
+                <label className="font-semibold block">Message Content (HTML supported)</label>
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Enter message text to broadcast..."
+                  value={newScheduleForm.message}
+                  onChange={(e) => setNewScheduleForm({ ...newScheduleForm, message: e.target.value })}
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 text-xs focus:outline-none focus:border-blue-500 font-sans`}
+                />
+              </div>
+
+              {/* Schedule Type & Frequency */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="font-semibold block">Schedule Type</label>
+                  <select
+                    value={newScheduleForm.scheduleType}
+                    onChange={(e: any) => setNewScheduleForm({ ...newScheduleForm, scheduleType: e.target.value })}
+                    className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none`}
+                  >
+                    <option value="interval">Recurring Interval (e.g. 1h, 30m)</option>
+                    <option value="one_time">One-Time Execution</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                </div>
+
+                {newScheduleForm.scheduleType === 'interval' ? (
+                  <div className="space-y-1.5">
+                    <label className="font-semibold block">Interval Format</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 30m, 1h, 2h, 1d"
+                      value={newScheduleForm.intervalStr}
+                      onChange={(e) => setNewScheduleForm({ ...newScheduleForm, intervalStr: e.target.value })}
+                      className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <label className="font-semibold block">Timezone</label>
+                    <select
+                      value={newScheduleForm.timezone}
+                      onChange={(e) => setNewScheduleForm({ ...newScheduleForm, timezone: e.target.value })}
+                      className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none`}
+                    >
+                      <option value="UTC">UTC</option>
+                      <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                      <option value="America/New_York">America/New_York (EST)</option>
+                      <option value="Europe/London">Europe/London (GMT)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Date & Time if One-Time / Daily */}
+              {newScheduleForm.scheduleType !== 'interval' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="font-semibold block">Execution Date</label>
+                    <input
+                      type="date"
+                      value={newScheduleForm.nextRunDate}
+                      onChange={(e) => setNewScheduleForm({ ...newScheduleForm, nextRunDate: e.target.value })}
+                      className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="font-semibold block">Execution Time</label>
+                    <input
+                      type="time"
+                      value={newScheduleForm.nextRunTime}
+                      onChange={(e) => setNewScheduleForm({ ...newScheduleForm, nextRunTime: e.target.value })}
+                      className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Content Type & Media */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="font-semibold block">Content Type</label>
+                  <select
+                    value={newScheduleForm.contentType}
+                    onChange={(e) => setNewScheduleForm({ ...newScheduleForm, contentType: e.target.value })}
+                    className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none`}
+                  >
+                    <option value="text">Text Only</option>
+                    <option value="photo">Photo / Image</option>
+                    <option value="sticker">Sticker</option>
+                    <option value="animation">GIF / Animation</option>
+                    <option value="video">Video</option>
+                    <option value="document">Document</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="font-semibold block">Reply To Message ID (optional)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 1234"
+                    value={newScheduleForm.replyToMessageId}
+                    onChange={(e) => setNewScheduleForm({ ...newScheduleForm, replyToMessageId: e.target.value })}
+                    className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                  />
+                </div>
+              </div>
+
+              {newScheduleForm.contentType !== 'text' && (
+                <div className="space-y-1.5">
+                  <label className="font-semibold block">Media File ID / URL</label>
+                  <input
+                    type="text"
+                    placeholder="Telegram file_id or public media URL"
+                    value={newScheduleForm.mediaFileId}
+                    onChange={(e) => setNewScheduleForm({ ...newScheduleForm, mediaFileId: e.target.value })}
+                    className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                  />
+                </div>
+              )}
+
+              {/* Enabled Switch */}
+              <div className="flex items-center gap-3 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={newScheduleForm.enabled}
+                    onChange={(e) => setNewScheduleForm({ ...newScheduleForm, enabled: e.target.checked })}
+                    className="w-4 h-4 rounded text-blue-600"
+                  />
+                  <span>Enable Schedule Immediately</span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-800">
+                <button
+                  type="button"
+                  onClick={() => { setShowCreateScheduleModal(false); setEditingSchedule(null); }}
+                  className={`px-4 py-2 ${themeInnerCardBg} border ${themeBorder} rounded-xl text-xs font-semibold`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={schedulesLoading || !newScheduleForm.chatId || !newScheduleForm.message.trim()}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 transition-colors shadow-sm flex items-center gap-1.5"
+                >
+                  {schedulesLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  {editingSchedule ? 'Save Changes' : 'Create Schedule'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create Automation Rule Modal */}
+      {showCreateAutomationModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${themeCardBg} border rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl`}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-500" />
+                Add Automation Rule
+              </h3>
+              <button
+                onClick={() => setShowCreateAutomationModal(false)}
+                className={`p-1.5 rounded-lg ${themeInnerCardBg} border ${themeBorder} text-stone-400 hover:text-white`}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={(e) => { e.preventDefault(); handleSaveAutomation(); }} className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-semibold block">Trigger Condition</label>
+                <select
+                  value={newAutomationForm.trigger}
+                  onChange={(e) => setNewAutomationForm({ ...newAutomationForm, trigger: e.target.value })}
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none`}
+                >
+                  <option value="spam_detected">Spam Message Detected</option>
+                  <option value="link_posted">Unauthorized Link Posted</option>
+                  <option value="abuse_word_detected">Abuse Word / Hate Speech</option>
+                  <option value="caps_flood">Excessive Capslock Flood</option>
+                  <option value="forward_flood">Channel Forward Flood</option>
+                  <option value="join_event">New Member Join</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-semibold block">Enforcement Action</label>
+                <select
+                  value={newAutomationForm.action}
+                  onChange={(e) => setNewAutomationForm({ ...newAutomationForm, action: e.target.value })}
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none`}
+                >
+                  <option value="delete_message">Delete Message Immediately</option>
+                  <option value="warn_user">Issue Warning to User</option>
+                  <option value="mute_user">Temporarily Mute User</option>
+                  <option value="kick_user">Kick User from Group</option>
+                  <option value="ban_user">Permanently Ban User</option>
+                  <option value="send_alert">Send Alert Notice to Chat</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-semibold block">Parameters (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. duration=10m or alert message"
+                  value={newAutomationForm.parameters}
+                  onChange={(e) => setNewAutomationForm({ ...newAutomationForm, parameters: e.target.value })}
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={newAutomationForm.enabled}
+                    onChange={(e) => setNewAutomationForm({ ...newAutomationForm, enabled: e.target.checked })}
+                    className="w-4 h-4 rounded text-amber-600"
+                  />
+                  <span>Enable Rule Immediately</span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-800">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateAutomationModal(false)}
+                  className={`px-4 py-2 ${themeInnerCardBg} border ${themeBorder} rounded-xl text-xs font-semibold`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={automationsLoading}
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 transition-colors shadow-sm flex items-center gap-1.5"
+                >
+                  {automationsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  Save Rule
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

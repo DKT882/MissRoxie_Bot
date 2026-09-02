@@ -114,41 +114,56 @@ export class MessageScheduler {
     }
 
     const allSchedules = db.getAllSchedules();
-    const schedules = allSchedules.filter(s => s.chatId && s.chatId !== -100111222333 && String(s.chatId) !== '-100111222333');
+    const schedules = allSchedules.filter(s => 
+      s.chatId && 
+      s.chatId !== -100111222333 && 
+      String(s.chatId) !== '-100111222333' && 
+      s.enabled !== false
+    );
     const now = Date.now();
 
     for (const schedule of schedules) {
+      if (!schedule.nextRun) continue;
       const nextRunTime = new Date(schedule.nextRun).getTime();
-      if (now >= nextRunTime) {
+      if (isNaN(nextRunTime) || now >= nextRunTime) {
         try {
           const textContent = schedule.messageText || schedule.message || '';
+          const sendOptions: any = {};
+          if (schedule.replyToMessageId) {
+            sendOptions.reply_to_message_id = schedule.replyToMessageId;
+          }
+
           if (schedule.contentType === 'photo' && schedule.mediaFileId) {
             await telegramApi.sendPhoto(schedule.chatId, schedule.mediaFileId, {
               caption: textContent,
-              parse_mode: 'HTML'
+              parse_mode: 'HTML',
+              ...sendOptions
             });
           } else if (schedule.contentType === 'video' && schedule.mediaFileId) {
             await telegramApi.sendVideo(schedule.chatId, schedule.mediaFileId, {
               caption: textContent,
-              parse_mode: 'HTML'
+              parse_mode: 'HTML',
+              ...sendOptions
             });
           } else if (schedule.contentType === 'document' && schedule.mediaFileId) {
             await telegramApi.sendDocument(schedule.chatId, schedule.mediaFileId, {
               caption: textContent,
-              parse_mode: 'HTML'
+              parse_mode: 'HTML',
+              ...sendOptions
             });
           } else if (schedule.contentType === 'animation' && schedule.mediaFileId) {
             await telegramApi.sendAnimation(schedule.chatId, schedule.mediaFileId, {
               caption: textContent,
-              parse_mode: 'HTML'
+              parse_mode: 'HTML',
+              ...sendOptions
             });
           } else if (schedule.contentType === 'sticker' && schedule.mediaFileId) {
-            await telegramApi.sendSticker(schedule.chatId, schedule.mediaFileId);
+            await telegramApi.sendSticker(schedule.chatId, schedule.mediaFileId, sendOptions);
             if (textContent) {
-              await telegramApi.sendMessage(schedule.chatId, textContent);
+              await telegramApi.sendMessage(schedule.chatId, textContent, sendOptions);
             }
           } else {
-            await telegramApi.sendMessage(schedule.chatId, textContent);
+            await telegramApi.sendMessage(schedule.chatId, textContent, sendOptions);
           }
           
           db.addLog({
@@ -164,8 +179,13 @@ export class MessageScheduler {
           metricsTracker.increment('scheduler_runs');
 
           // Calculate next run time
-          const nextDate = new Date(now + schedule.intervalMs).toISOString();
-          db.updateScheduleNextRun(schedule.id, nextDate);
+          if (schedule.intervalMs && schedule.intervalMs > 0 && schedule.scheduleType !== 'one_time') {
+            const nextDate = new Date(now + schedule.intervalMs).toISOString();
+            db.updateScheduleNextRun(schedule.id, nextDate, 'success');
+          } else {
+            db.updateScheduleNextRun(schedule.id, '', 'success');
+            db.toggleSchedule(schedule.id, false);
+          }
         } catch (err: any) {
           this.failures++;
           metricsTracker.increment('scheduler_failures');
@@ -175,6 +195,7 @@ export class MessageScheduler {
             db.deleteSchedule(schedule.chatId, schedule.id);
           } else {
             console.error(`Error executing schedule ${schedule.id}:`, err.message);
+            db.updateScheduleNextRun(schedule.id, schedule.nextRun || '', 'failure', err.message);
           }
           errorTracker.recordError({
             source: 'SCHEDULER',

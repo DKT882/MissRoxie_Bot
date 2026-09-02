@@ -3,6 +3,7 @@ import { telegramApi } from './api.js';
 import { db, isSensitiveData, GROUP_MEMORY_LIMIT, GroupConversationEntry } from '../db/storage.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
+import { logDebug } from '../observability/logger.js';
 import {
   DEFAULT_STICKERS_BY_MOOD,
   MOOD_FALLBACK_MATRIX,
@@ -551,24 +552,24 @@ export class ChatbotService {
     const enqueueTime = Date.now();
     if (this.activeAiRequests < this.MAX_CONCURRENT_AI_REQUESTS) {
       this.activeAiRequests++;
-      console.log(JSON.stringify({
+      logDebug({
         event: 'AI_ACTIVE_REQUESTS',
         active: this.activeAiRequests,
         queue_length: this.aiSlotWaiters.length,
         max_concurrency: this.MAX_CONCURRENT_AI_REQUESTS
-      }));
+      });
       return 0;
     }
     return new Promise<number>((resolve) => {
       this.aiSlotWaiters.push((waitMs: number) => {
         this.activeAiRequests++;
-        console.log(JSON.stringify({
+        logDebug({
           event: 'AI_ACTIVE_REQUESTS',
           active: this.activeAiRequests,
           queue_length: this.aiSlotWaiters.length,
           ai_request_wait_ms: waitMs,
           max_concurrency: this.MAX_CONCURRENT_AI_REQUESTS
-        }));
+        });
         resolve(waitMs);
       });
     });
@@ -2046,7 +2047,7 @@ export class ChatbotService {
         decision.chatId = chatId;
       }
 
-      console.log(JSON.stringify({
+      logDebug({
         event: 'TELEGRAM_MESSAGE_ROUTE',
         traceId: reqCtx?.traceId,
         update_id: reqCtx?.updateId,
@@ -2054,18 +2055,18 @@ export class ChatbotService {
         response_chat_id: decision.chatId,
         message_id: msgId,
         reply_to_message_id: decision.replyToMessageId
-      }));
+      });
 
       const sendStartedAt = Date.now();
       if (reqCtx) {
-        console.log(JSON.stringify({
+        logDebug({
           event: 'MESSAGE_TRACE_SEND_START',
           traceId: reqCtx.traceId,
           updateId: reqCtx.updateId,
           chatId,
           messageId: msgId,
           elapsedMs: Date.now() - reqCtx.receivedAt
-        }));
+        });
       }
 
       const sent = await this.dispatchResponse(decision, reqCtx);
@@ -2073,7 +2074,7 @@ export class ChatbotService {
 
       if (reqCtx) {
         const sendMs = sendFinishedAt - sendStartedAt;
-        console.log(JSON.stringify({
+        logDebug({
           event: 'MESSAGE_TRACE_SEND_END',
           traceId: reqCtx.traceId,
           updateId: reqCtx.updateId,
@@ -2081,14 +2082,14 @@ export class ChatbotService {
           messageId: msgId,
           send_ms: sendMs,
           elapsedMs: Date.now() - reqCtx.receivedAt
-        }));
+        });
 
         const totalMs = sendFinishedAt - reqCtx.receivedAt;
         const telegramReceiveDelayMs = message.date ? Math.max(0, reqCtx.receivedAt - message.date * 1000) : 0;
         const queueWaitMs = processingStartedAt - reqCtx.receivedAt;
         const chatbotPrepMs = sendStartedAt - processingStartedAt;
 
-        console.log(JSON.stringify({
+        logDebug({
           event: 'MESSAGE_TRACE_COMPLETE',
           traceId: reqCtx.traceId,
           updateId: reqCtx.updateId,
@@ -2099,7 +2100,7 @@ export class ChatbotService {
           chatbot_preparation_ms: chatbotPrepMs,
           send_ms: sendMs,
           total_ms: totalMs
-        }));
+        });
       }
 
       return sent;
@@ -2565,7 +2566,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
       { role: 'user', content: userPromptContent }
     ];
 
-    console.log(`CHATBOT_CONTEXT ${JSON.stringify({
+    logDebug(`CHATBOT_CONTEXT ${JSON.stringify({
       requestId,
       chatId,
       conversationKey: convKey,
@@ -2581,7 +2582,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     metricsTracker.increment('ai_requests');
 
     if (reqCtx) {
-      console.log(JSON.stringify({
+      logDebug({
         event: 'MESSAGE_TRACE_AI_START',
         traceId: reqCtx.traceId,
         updateId: reqCtx.updateId,
@@ -2589,10 +2590,10 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         messageId: msgId,
         primaryModel: configuredModels[0] || 'deepseek/deepseek-chat',
         elapsedMs: Date.now() - reqCtx.receivedAt
-      }));
+      });
     }
 
-    console.log(JSON.stringify({
+    logDebug({
       event: 'AI_REQUEST_START',
       requestId,
       chatId,
@@ -2600,7 +2601,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
       messageId: msgId,
       updateId: reqCtx?.updateId,
       primaryModel: configuredModels[0] || 'deepseek/deepseek-chat'
-    }));
+    });
 
     let replyContent: string | null = null;
     let modelUsed: string = configuredModels[0] || 'deepseek/deepseek-chat';
@@ -2663,7 +2664,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
 
     const aiElapsedMs = Date.now() - aiStartTime;
     if (reqCtx) {
-      console.log(JSON.stringify({
+      logDebug({
         event: 'MESSAGE_TRACE_AI_END',
         traceId: reqCtx.traceId,
         updateId: reqCtx.updateId,
@@ -2672,17 +2673,17 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         ai_ms: aiElapsedMs,
         modelUsed,
         elapsedMs: Date.now() - reqCtx.receivedAt
-      }));
+      });
     }
 
-    console.log(JSON.stringify({
+    logDebug({
       event: 'AI_REQUEST_END',
       requestId,
       chatId,
       conversationKey: convKey,
       elapsedMs: aiElapsedMs,
       modelUsed
-    }));
+    });
 
     if (!replyContent) {
       metricsTracker.increment('ai_failures');
@@ -2727,12 +2728,12 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     }
     cleanedText = cleanedText || 'Acha!';
 
-    console.log(JSON.stringify({
+    logDebug({
       event: 'AI_RESPONSE_SANITIZED',
       requestId,
       length: cleanedText.length,
       modelUsed
-    }));
+    });
 
     if (isLustMode) {
       // Lust Mode ONLY uses CUSTOM stickers and STRICTLY allows ONLY TWO response formats:
