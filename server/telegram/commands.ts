@@ -4,7 +4,7 @@ import { db } from '../db/storage.js';
 import { ModerationService, parseDuration } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { mapTelegramError } from './errorMapper.js';
-import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand } from './types.js';
+import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand, CachedMember } from './types.js';
 import {
   COMMAND_CATALOG,
   getCatalogItem,
@@ -4112,9 +4112,52 @@ export class CommandHandler {
     }
   }
 
-  // ==========================================
-  // 13. BOT SEND MESSAGE (/say, /all) & PHASE 9A CONTENT CONTROLS
-  // ==========================================
+  public static buildAllMentionsChunks(
+    members: CachedMember[],
+    defaultMsg: string,
+    botId?: number,
+    chunkSize: number = 12
+  ): { mentions: string[]; chunks: string[] } {
+    const seenUserIds = new Set<number>();
+    const mentions: string[] = [];
+
+    for (const m of members) {
+      if (!m || !m.userId) continue;
+      if (botId && m.userId === botId) continue;
+      if (seenUserIds.has(m.userId)) continue;
+
+      const rawUname = (m.username || '').trim();
+      const cleanUname = rawUname.replace(/^@/, '').trim();
+      const lowerUname = cleanUname.toLowerCase();
+
+      // Exclude bots
+      if (lowerUname.includes('bot') || lowerUname.endsWith('bot') || (m as any).is_bot) {
+        continue;
+      }
+
+      seenUserIds.add(m.userId);
+
+      if (cleanUname.length > 0) {
+        mentions.push(`@${cleanUname}`);
+      } else {
+        const displayName = m.firstName?.trim() || 'Member';
+        mentions.push(`<a href="tg://user?id=${m.userId}">${escapeHtml(displayName)}</a>`);
+      }
+    }
+
+    if (mentions.length === 0) {
+      return { mentions: [], chunks: [] };
+    }
+
+    const chunks: string[] = [];
+    for (let i = 0; i < mentions.length; i += chunkSize) {
+      const chunkMentions = mentions.slice(i, i + chunkSize);
+      chunks.push(`${defaultMsg}\n\n${chunkMentions.join(' ')}`);
+    }
+
+    return { mentions, chunks };
+  }
+
   private static async handleAll(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
 
@@ -4140,17 +4183,30 @@ export class CommandHandler {
       return;
     }
 
+    // Refresh administrators to ensure latest admins are cached in group members
+    try {
+      const adminRes = await telegramApi.getChatAdministrators(ctx.chatId);
+      if (adminRes.ok && Array.isArray(adminRes.result)) {
+        for (const admin of adminRes.result) {
+          if (admin.user && !admin.user.is_bot) {
+            db.cacheUser(admin.user, ctx.chatId);
+          }
+        }
+      }
+    } catch {
+      // Non-blocking: fallback to already stored members
+    }
+
     const customText = CommandHandler.getCommandText(ctx, 0);
     const defaultMsg = customText || 'Hiee';
     const members = db.getGroupMembersList(ctx.chatId);
 
-    const validMembers = members.filter(m => {
-      const uname = (m.username || '').toLowerCase();
-      if (uname.includes('bot') || uname.endsWith('bot') || (m as any).is_bot) return false;
-      return true;
-    });
+    // Get bot ID to exclude self
+    const botId = (await telegramApi.getMe())?.result?.id;
 
-    if (validMembers.length === 0) {
+    const { mentions, chunks } = CommandHandler.buildAllMentionsChunks(members, defaultMsg, botId, 12);
+
+    if (mentions.length === 0) {
       await telegramApi.sendMessage(
         ctx.chatId,
         '⚠️ I don\'t have enough cached group members to mention everyone yet.',
@@ -4169,27 +4225,6 @@ export class CommandHandler {
       return;
     }
 
-    const header = `${defaultMsg}\n\n`;
-    const chunks: string[] = [];
-    let currentChunk: string[] = [];
-    let currentLength = header.length;
-
-    for (const m of validMembers) {
-      const displayName = m.firstName || m.username || `User ${m.userId}`;
-      const mention = `<a href="tg://user?id=${m.userId}">${escapeHtml(displayName)}</a>`;
-      if (currentLength + mention.length + 2 > 3800) {
-        chunks.push(header + currentChunk.join(' '));
-        currentChunk = [mention];
-        currentLength = header.length + mention.length;
-      } else {
-        currentChunk.push(mention);
-        currentLength += mention.length + 1;
-      }
-    }
-    if (currentChunk.length > 0) {
-      chunks.push(header + currentChunk.join(' '));
-    }
-
     for (let i = 0; i < chunks.length; i++) {
       await telegramApi.sendMessage(ctx.chatId, chunks[i], {
         reply_to_message_id: i === 0 && ctx.message.reply_to_message?.message_id ? ctx.message.reply_to_message.message_id : undefined,
@@ -4204,7 +4239,7 @@ export class CommandHandler {
       command: 'all',
       action: 'warn',
       result: 'success',
-      details: `Mentioned ${validMembers.length} members across ${chunks.length} message(s)`
+      details: `Mentioned ${mentions.length} members across ${chunks.length} message(s)`
     });
   }
 
