@@ -829,6 +829,7 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
   },
   {
     command: '/autoaccept',
+    aliases: ['/autoacceptjoin'],
     category: 'Smart Protection',
     description: 'Toggle automatic approval for join requests.',
     syntax: '/autoaccept <on|off>',

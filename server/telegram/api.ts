@@ -868,6 +868,26 @@ export class TelegramApi {
     return this.call('leaveChat', { chat_id: chatId });
   }
 
+  public async approveChatJoinRequest(
+    chatId: number | string,
+    userId: number
+  ): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    return this.call('approveChatJoinRequest', {
+      chat_id: chatId,
+      user_id: userId
+    });
+  }
+
+  public async declineChatJoinRequest(
+    chatId: number | string,
+    userId: number
+  ): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
+    return this.call('declineChatJoinRequest', {
+      chat_id: chatId,
+      user_id: userId
+    });
+  }
+
   public async getChat(chatId: number | string): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     const key = String(chatId);
     const cached = this.chatCache.get(key);

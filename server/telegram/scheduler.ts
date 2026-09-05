@@ -8,6 +8,8 @@ import { errorTracker } from '../observability/errorService.js';
 export class MessageScheduler {
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
+  private isChecking: boolean = false;
+  private executingScheduleIds: Set<string> = new Set();
   private executions: number = 0;
   private failures: number = 0;
 
@@ -99,127 +101,154 @@ export class MessageScheduler {
       return;
     }
 
-    // Process any expired temporary moderation actions (tmute & tban)
-    try {
-      await ModerationService.processExpiredTempActions();
-    } catch (err) {
-      console.warn('Error processing expired temp actions in scheduler:', err);
+    if (this.isChecking) {
+      return;
     }
+    this.isChecking = true;
 
-    // Process any expired CAPTCHA sessions
     try {
-      await ModerationService.processExpiredCaptchaSessions();
-    } catch (err) {
-      console.warn('Error processing expired captcha sessions in scheduler:', err);
-    }
+      // Process any expired temporary moderation actions (tmute & tban)
+      try {
+        await ModerationService.processExpiredTempActions();
+      } catch (err) {
+        console.warn('Error processing expired temp actions in scheduler:', err);
+      }
 
-    const allSchedules = db.getAllSchedules();
-    const schedules = allSchedules.filter(s => 
-      s.chatId && 
-      s.chatId !== -100111222333 && 
-      String(s.chatId) !== '-100111222333' && 
-      s.enabled !== false
-    );
-    const now = Date.now();
+      // Process any expired CAPTCHA sessions
+      try {
+        await ModerationService.processExpiredCaptchaSessions();
+      } catch (err) {
+        console.warn('Error processing expired captcha sessions in scheduler:', err);
+      }
 
-    for (const schedule of schedules) {
-      if (!schedule.nextRun) continue;
-      const nextRunTime = new Date(schedule.nextRun).getTime();
-      if (isNaN(nextRunTime) || now >= nextRunTime) {
-        try {
-          // If auto-delete is enabled for this schedule, delete its previous message
-          if (schedule.autoDeletePrevious && schedule.lastSentMessageId) {
-            try {
-              const delRes = await telegramApi.deleteMessage(schedule.chatId, schedule.lastSentMessageId);
-              if (!delRes.ok && delRes.description) {
-                console.error(`[ERROR] Failed to delete previous scheduled message scheduleId=${schedule.id} messageId=${schedule.lastSentMessageId} error=${delRes.description}`);
+      const allSchedules = db.getAllSchedules();
+      const schedules = allSchedules.filter(s => 
+        s.chatId && 
+        s.chatId !== -100111222333 && 
+        String(s.chatId) !== '-100111222333' && 
+        s.enabled !== false
+      );
+      const now = Date.now();
+
+      for (const schedule of schedules) {
+        if (!schedule.nextRun) continue;
+        const nextRunTime = new Date(schedule.nextRun).getTime();
+        if (isNaN(nextRunTime) || now >= nextRunTime) {
+          if (this.executingScheduleIds.has(schedule.id)) {
+            continue;
+          }
+          this.executingScheduleIds.add(schedule.id);
+
+          try {
+            // Read fresh schedule state to avoid stale closure state
+            const freshSchedule = db.getScheduleById(schedule.id) || schedule;
+            if (freshSchedule.enabled === false) continue;
+
+            // Immediately advance nextRun in memory/storage so any concurrent check cannot pick it up
+            const hasInterval = freshSchedule.intervalMs && freshSchedule.intervalMs > 0 && freshSchedule.scheduleType !== 'one_time';
+            const intermediateNextRun = hasInterval ? new Date(now + freshSchedule.intervalMs!).toISOString() : '';
+            db.updateSchedule(freshSchedule.id, { nextRun: intermediateNextRun });
+
+            // If auto-delete is enabled for this schedule, delete its previous message
+            if (freshSchedule.autoDeletePrevious && freshSchedule.lastSentMessageId) {
+              try {
+                const delRes = await telegramApi.deleteMessage(freshSchedule.chatId, freshSchedule.lastSentMessageId);
+                if (!delRes.ok && delRes.description) {
+                  console.error(`[ERROR] Failed to delete previous scheduled message scheduleId=${freshSchedule.id} messageId=${freshSchedule.lastSentMessageId} error=${delRes.description}`);
+                }
+              } catch (delErr: any) {
+                console.error(`[ERROR] Failed to delete previous scheduled message scheduleId=${freshSchedule.id} messageId=${freshSchedule.lastSentMessageId} error=${delErr?.message || delErr}`);
               }
-            } catch (delErr: any) {
-              console.error(`[ERROR] Failed to delete previous scheduled message scheduleId=${schedule.id} messageId=${schedule.lastSentMessageId} error=${delErr?.message || delErr}`);
             }
-          }
 
-          const textContent = schedule.messageText || schedule.message || '';
-          const sendOptions: any = {};
-          if (schedule.replyToMessageId) {
-            sendOptions.reply_to_message_id = schedule.replyToMessageId;
-          }
-
-          let sendRes: any;
-          if (schedule.contentType === 'photo' && schedule.mediaFileId) {
-            sendRes = await telegramApi.sendPhoto(schedule.chatId, schedule.mediaFileId, {
-              caption: textContent,
-              parse_mode: 'HTML',
-              ...sendOptions
-            });
-          } else if (schedule.contentType === 'video' && schedule.mediaFileId) {
-            sendRes = await telegramApi.sendVideo(schedule.chatId, schedule.mediaFileId, {
-              caption: textContent,
-              parse_mode: 'HTML',
-              ...sendOptions
-            });
-          } else if (schedule.contentType === 'document' && schedule.mediaFileId) {
-            sendRes = await telegramApi.sendDocument(schedule.chatId, schedule.mediaFileId, {
-              caption: textContent,
-              parse_mode: 'HTML',
-              ...sendOptions
-            });
-          } else if (schedule.contentType === 'animation' && schedule.mediaFileId) {
-            sendRes = await telegramApi.sendAnimation(schedule.chatId, schedule.mediaFileId, {
-              caption: textContent,
-              parse_mode: 'HTML',
-              ...sendOptions
-            });
-          } else if (schedule.contentType === 'sticker' && schedule.mediaFileId) {
-            sendRes = await telegramApi.sendSticker(schedule.chatId, schedule.mediaFileId, sendOptions);
-            if (textContent) {
-              sendRes = await telegramApi.sendMessage(schedule.chatId, textContent, sendOptions);
+            const textContent = freshSchedule.messageText || freshSchedule.message || '';
+            const sendOptions: any = {};
+            if (freshSchedule.replyToMessageId) {
+              sendOptions.reply_to_message_id = freshSchedule.replyToMessageId;
             }
-          } else {
-            sendRes = await telegramApi.sendMessage(schedule.chatId, textContent, sendOptions);
-          }
 
-          const newSentMessageId = sendRes?.result?.message_id;
-          
-          db.addLog({
-            chatId: schedule.chatId,
-            chatTitle: schedule.chatTitle,
-            adminUserId: schedule.adminId,
-            adminUsername: schedule.adminUsername,
-            action: 'schedule_sent',
-            details: `Executed scheduled broadcast [${schedule.id}]: "${textContent.slice(0, 30)}..."`
-          });
+            let sendRes: any;
+            if (freshSchedule.contentType === 'photo' && freshSchedule.mediaFileId) {
+              sendRes = await telegramApi.sendPhoto(freshSchedule.chatId, freshSchedule.mediaFileId, {
+                caption: textContent,
+                parse_mode: 'HTML',
+                ...sendOptions
+              });
+            } else if (freshSchedule.contentType === 'video' && freshSchedule.mediaFileId) {
+              sendRes = await telegramApi.sendVideo(freshSchedule.chatId, freshSchedule.mediaFileId, {
+                caption: textContent,
+                parse_mode: 'HTML',
+                ...sendOptions
+              });
+            } else if (freshSchedule.contentType === 'document' && freshSchedule.mediaFileId) {
+              sendRes = await telegramApi.sendDocument(freshSchedule.chatId, freshSchedule.mediaFileId, {
+                caption: textContent,
+                parse_mode: 'HTML',
+                ...sendOptions
+              });
+            } else if (freshSchedule.contentType === 'animation' && freshSchedule.mediaFileId) {
+              sendRes = await telegramApi.sendAnimation(freshSchedule.chatId, freshSchedule.mediaFileId, {
+                caption: textContent,
+                parse_mode: 'HTML',
+                ...sendOptions
+              });
+            } else if (freshSchedule.contentType === 'sticker' && freshSchedule.mediaFileId) {
+              sendRes = await telegramApi.sendSticker(freshSchedule.chatId, freshSchedule.mediaFileId, sendOptions);
+            } else {
+              sendRes = await telegramApi.sendMessage(freshSchedule.chatId, textContent, sendOptions);
+            }
 
-          this.executions++;
-          metricsTracker.increment('scheduler_runs');
+            if (sendRes && sendRes.ok && sendRes.result) {
+              const newSentMessageId = sendRes.result.message_id;
+              
+              db.addLog({
+                chatId: freshSchedule.chatId,
+                chatTitle: freshSchedule.chatTitle,
+                adminUserId: freshSchedule.adminId,
+                adminUsername: freshSchedule.adminUsername,
+                action: 'schedule_sent',
+                details: `Executed scheduled broadcast [${freshSchedule.id}]: "${textContent.slice(0, 30)}..."`
+              });
 
-          // Calculate next run time and update lastSentMessageId
-          if (schedule.intervalMs && schedule.intervalMs > 0 && schedule.scheduleType !== 'one_time') {
-            const nextDate = new Date(now + schedule.intervalMs).toISOString();
-            db.updateScheduleNextRun(schedule.id, nextDate, 'success', undefined, newSentMessageId);
-          } else {
-            db.updateScheduleNextRun(schedule.id, '', 'success', undefined, newSentMessageId);
-            db.toggleSchedule(schedule.id, false);
+              this.executions++;
+              metricsTracker.increment('scheduler_runs');
+
+              // Calculate next run time and update lastSentMessageId
+              if (hasInterval) {
+                const nextDate = new Date(now + freshSchedule.intervalMs!).toISOString();
+                db.updateScheduleNextRun(freshSchedule.id, nextDate, 'success', undefined, newSentMessageId);
+              } else {
+                db.updateScheduleNextRun(freshSchedule.id, '', 'success', undefined, newSentMessageId);
+                db.toggleSchedule(freshSchedule.id, false);
+              }
+            } else {
+              const errMsg = sendRes?.description || 'Telegram send failed';
+              throw new Error(errMsg);
+            }
+          } catch (err: any) {
+            this.failures++;
+            metricsTracker.increment('scheduler_failures');
+            const isDeadChat = err.message?.includes('chat not found') || err.message?.includes('chat was deleted') || err.message?.includes('PEER_ID_INVALID') || err.message?.includes('bot was kicked') || err.message?.includes('bot is not a member');
+            if (isDeadChat) {
+              console.warn(`[SCHEDULER] Automatically removing obsolete schedule ${schedule.id} for nonexistent chat ${schedule.chatId}: ${err.message}`);
+              db.deleteSchedule(schedule.chatId, schedule.id);
+            } else {
+              console.error(`Error executing schedule ${schedule.id}:`, err.message);
+              db.updateScheduleNextRun(schedule.id, schedule.nextRun || '', 'failure', err.message);
+            }
+            errorTracker.recordError({
+              source: 'SCHEDULER',
+              severity: 'ERROR',
+              message: `Failed to execute schedule ${schedule.id}: ${err.message}`,
+              chatId: schedule.chatId
+            });
+          } finally {
+            this.executingScheduleIds.delete(schedule.id);
           }
-        } catch (err: any) {
-          this.failures++;
-          metricsTracker.increment('scheduler_failures');
-          const isDeadChat = err.message?.includes('chat not found') || err.message?.includes('chat was deleted') || err.message?.includes('PEER_ID_INVALID') || err.message?.includes('bot was kicked') || err.message?.includes('bot is not a member');
-          if (isDeadChat) {
-            console.warn(`[SCHEDULER] Automatically removing obsolete schedule ${schedule.id} for nonexistent chat ${schedule.chatId}: ${err.message}`);
-            db.deleteSchedule(schedule.chatId, schedule.id);
-          } else {
-            console.error(`Error executing schedule ${schedule.id}:`, err.message);
-            db.updateScheduleNextRun(schedule.id, schedule.nextRun || '', 'failure', err.message);
-          }
-          errorTracker.recordError({
-            source: 'SCHEDULER',
-            severity: 'ERROR',
-            message: `Failed to execute schedule ${schedule.id}: ${err.message}`,
-            chatId: schedule.chatId
-          });
         }
       }
+    } finally {
+      this.isChecking = false;
     }
   }
 

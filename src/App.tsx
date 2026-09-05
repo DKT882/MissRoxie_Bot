@@ -2607,7 +2607,13 @@ export default function App() {
                             </div>
                           )}
 
-                          <p className="text-xs leading-relaxed break-words">{msg.content}</p>
+                          {msg.mediaType === 'sticker' || msg.content?.startsWith('🎨 Sticker') ? (
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-pink-500/10 text-pink-400 border border-pink-500/20 text-xs font-medium">
+                              <span>{msg.content || '🎨 Sticker'}</span>
+                            </div>
+                          ) : (
+                            <p className="text-xs leading-relaxed break-words">{msg.content}</p>
+                          )}
 
                           {/* Reply Action Button */}
                           <div className="pt-1 flex items-center justify-end gap-2">
@@ -4576,7 +4582,13 @@ export default function App() {
                                 <span>{isOut ? 'Roxie' : 'User'}</span>
                                 <span>{new Date(m.timestamp).toLocaleTimeString()}</span>
                               </div>
-                              <p className="whitespace-pre-wrap">{m.content}</p>
+                              {m.mediaType === 'sticker' || m.content?.startsWith('🎨 Sticker') ? (
+                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-pink-500/10 text-pink-300 border border-pink-500/20 text-xs font-medium">
+                                  <span>{m.content || '🎨 Sticker'}</span>
+                                </div>
+                              ) : (
+                                <p className="whitespace-pre-wrap">{m.content}</p>
+                              )}
                             </div>
                           </div>
                         );

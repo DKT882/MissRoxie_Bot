@@ -170,6 +170,15 @@ export interface TelegramCallbackQuery {
   game_short_name?: string;
 }
 
+export interface TelegramChatJoinRequest {
+  chat: TelegramChat;
+  from: TelegramUser;
+  user_chat_id: number;
+  date: number;
+  bio?: string;
+  invite_link?: any;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
@@ -177,6 +186,7 @@ export interface TelegramUpdate {
   channel_post?: TelegramMessage;
   edited_channel_post?: TelegramMessage;
   callback_query?: TelegramCallbackQuery;
+  chat_join_request?: TelegramChatJoinRequest;
 }
 
 export interface BotCommand {

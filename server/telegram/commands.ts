@@ -308,7 +308,7 @@ export class CommandHandler {
     '/adminlog', '/modlog', '/logs',
     '/free', '/unfree', '/freelist', '/freed',
     '/stopspam', '/stopabusive', '/addabuse', '/removeabuse', '/listabuse', '/clearabuse', '/stoppromotion', '/file',
-    '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/automation', '/setrules', '/clearrules', '/chatbot',
+    '/automod', '/warnsettings', '/security', '/captcha', '/antiraid', '/joinmode', '/autoaccept', '/autoacceptjoin', '/automation', '/setrules', '/clearrules', '/chatbot',
     '/protection', '/roxie', '/roxiemode', '/roxiereaction', '/reaction',
     '/lust', '/lustmod', '/lustmode',
     '/clearmemory',
@@ -328,7 +328,7 @@ export class CommandHandler {
     '/warn', '/warnings', '/resetwarns', '/setwarnlimit',
     '/promote', '/demote', '/permissions', '/permission',
     '/setmod', '/delmod',
-    '/security', '/antiraid', '/captcha', '/autoaccept', '/chatbot',
+    '/security', '/antiraid', '/captcha', '/autoaccept', '/autoacceptjoin', '/chatbot',
     '/protection', '/roxie', '/roxiemode', '/roxiereaction', '/reaction',
     '/lust', '/lustmod', '/lustmode',
     '/clearmemory',
@@ -745,6 +745,7 @@ export class CommandHandler {
         await this.handleJoinMode(ctx);
         return true;
       case '/autoaccept':
+      case '/autoacceptjoin':
         await this.handleAutoAccept(ctx);
         return true;
       case '/automation':
@@ -1345,7 +1346,7 @@ export class CommandHandler {
     const actor = await TelegramMiddleware.resolveActor(ctx);
     if (action === 'on') {
       settings.autoAcceptEnabled = true;
-      db.scheduleSave();
+      db.updateGroupSettings(ctx.chatId, { autoAcceptEnabled: true });
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,
@@ -1358,7 +1359,7 @@ export class CommandHandler {
       await telegramApi.sendMessage(ctx.chatId, '✅ <b>Auto Accept Join Requests</b> enabled.');
     } else if (action === 'off') {
       settings.autoAcceptEnabled = false;
-      db.scheduleSave();
+      db.updateGroupSettings(ctx.chatId, { autoAcceptEnabled: false });
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,
@@ -1370,7 +1371,7 @@ export class CommandHandler {
       });
       await telegramApi.sendMessage(ctx.chatId, '❌ <b>Auto Accept Join Requests</b> disabled.');
     } else {
-      await telegramApi.sendMessage(ctx.chatId, `✅ <b>Auto Accept Status</b>: ${settings.autoAcceptEnabled ? 'ON' : 'OFF'}`);
+      await telegramApi.sendMessage(ctx.chatId, `✅ <b>Auto Accept Status</b>: ${settings.autoAcceptEnabled ? 'ON' : 'OFF'}\nUsage: <code>/autoaccept <on|off></code> or <code>/autoacceptjoin <on|off></code>`);
     }
   }
 

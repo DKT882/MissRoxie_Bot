@@ -1,5 +1,5 @@
 import { telegramApi } from './api.js';
-import { TelegramMessage, TelegramUpdate, TelegramUser, TelegramChat, TelegramChatMember, TelegramBotStatus, TelegramRequestContext } from './types.js';
+import { TelegramMessage, TelegramUpdate, TelegramUser, TelegramChat, TelegramChatMember, TelegramBotStatus, TelegramRequestContext, TelegramChatJoinRequest } from './types.js';
 import { db } from '../db/storage.js';
 import { CommandHandler, registerBotCommands } from './commands.js';
 import { ModerationService } from './moderation.js';
@@ -472,6 +472,8 @@ export class TelegramBotManager {
           if (!handledCaptcha) {
             await CommandHandler.handleCallbackQuery(update.callback_query);
           }
+        } else if (update.chat_join_request) {
+          await this.handleChatJoinRequest(update.chat_join_request);
         } else if ((update as any).chat_member) {
           await this.handleChatMemberUpdate((update as any).chat_member);
         } else if ((update as any).my_chat_member) {
@@ -716,8 +718,11 @@ export class TelegramBotManager {
       message.voice ? 'voice' :
       'text';
 
-    const content = textOrCaption || (
-      message.sticker ? (message.sticker.emoji ? `🎨 Sticker (${message.sticker.emoji})` : '🎨 Sticker') :
+    const stickerSummary = message.sticker ? (
+      `🎨 Sticker ${message.sticker.emoji || ''} ${message.sticker.set_name ? `(${message.sticker.set_name})` : ''} ${message.sticker.is_animated ? '[Animated]' : ''} ${message.sticker.is_video ? '[Video]' : ''}`.replace(/\s+/g, ' ').trim()
+    ) : null;
+
+    const content = textOrCaption || stickerSummary || (
       message.photo ? '📷 Photo' :
       message.video ? '📹 Video' :
       message.animation ? '🎬 GIF' :
@@ -773,6 +778,8 @@ export class TelegramBotManager {
         content,
         timestamp: message.date ? message.date * 1000 : Date.now(),
         messageId: message.message_id,
+        mediaType,
+        mediaFileId: message.sticker?.file_id,
         direction: 'in',
         username: message.from?.username,
         name: displayName,
@@ -816,6 +823,45 @@ export class TelegramBotManager {
       message_id: message.message_id,
       is_command: false
     });
+  }
+
+  private async handleChatJoinRequest(joinRequest: TelegramChatJoinRequest) {
+    if (!joinRequest || !joinRequest.chat || !joinRequest.from) return;
+    const chatId = joinRequest.chat.id;
+    const user = joinRequest.from;
+    const chatTitle = joinRequest.chat.title || 'the group';
+
+    db.cacheUser(user, chatId);
+
+    const settings = db.getGroupSettings(chatId, chatTitle);
+    if (settings.autoAcceptEnabled) {
+      try {
+        const res = await telegramApi.approveChatJoinRequest(chatId, user.id);
+        if (res.ok) {
+          db.addLog({
+            chatId,
+            chatTitle,
+            targetUserId: user.id,
+            targetUsername: user.username,
+            action: 'auto_accept',
+            details: `Auto-approved join request for user ${user.first_name || user.id}`
+          });
+
+          // If anti-raid not triggered, process captcha/welcome
+          const raidTriggered = await ModerationService.handleAntiRaid(chatId, [user], chatTitle);
+          if (!raidTriggered) {
+            const captchaSent = await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);
+            if (!captchaSent) {
+              await ModerationService.sendWelcome(chatId, user, chatTitle);
+            }
+          }
+        } else {
+          console.error(`[AutoAccept] Failed to approve join request for user ${user.id} in chat ${chatId}:`, res.description);
+        }
+      } catch (err: any) {
+        console.error(`[AutoAccept] Exception approving join request for user ${user.id}:`, err.message);
+      }
+    }
   }
 
   private async handleChatMemberUpdate(chatMemberUpdate: {
