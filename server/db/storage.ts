@@ -644,6 +644,7 @@ export class StorageManager {
       messageId: m.messageId,
       chatId: m.chatId || chatId,
       mediaType: m.mediaType || 'text',
+      mediaFileId: m.mediaFileId,
       direction: m.direction || (m.role === 'assistant' ? 'outgoing' : 'incoming'),
       source: m.source || (m.role === 'assistant' ? 'dashboard' : 'telegram'),
       sender: m.sender || (m.role === 'assistant' ? 'Roxie' : m.name),

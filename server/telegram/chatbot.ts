@@ -3011,20 +3011,29 @@ Core Rules:
       this.conversations.set(convKey, conv);
     }
 
-    const recordAssistantEntry = (content: string) => {
+    const recordAssistantEntry = (content: string, mediaType?: string, mediaFileId?: string, messageId?: number) => {
       if (isGroup) {
         db.addGroupConversationEntry(decision.chatId, {
           role: 'assistant',
           name: 'Roxie',
           content,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          mediaType: mediaType || 'text',
+          mediaFileId,
+          messageId,
+          direction: 'outgoing',
+          source: 'bot',
+          replyToMessageId: decision.replyToMessageId
         });
       } else {
         db.addPrivateMessage(decision.chatId, decision.userId, {
           role: 'assistant',
           content,
           timestamp: Date.now(),
-          direction: 'out'
+          direction: 'out',
+          mediaType: mediaType || 'text',
+          mediaFileId,
+          messageId
         });
       }
     };
@@ -3046,7 +3055,7 @@ Core Rules:
           console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
           conv.messages.push({ role: 'assistant', content: sanitizedContent });
           this.trimContext(conv);
-          recordAssistantEntry(sanitizedContent);
+          recordAssistantEntry(sanitizedContent, 'text', undefined, textRes.result?.message_id || (textRes as any).message_id);
           db.recordAutoResponseSent(decision.chatId);
           return true;
         }
@@ -3064,7 +3073,9 @@ Core Rules:
         const fullContent = `${sanitizedContent} [Sent sticker]`;
         conv.messages.push({ role: 'assistant', content: fullContent });
         this.trimContext(conv);
-        recordAssistantEntry(fullContent);
+        const stickerFileId = stickerRes.ok ? (stickerRes.result?.sticker?.file_id || decision.mediaFileId) : undefined;
+        const outMsgId = stickerRes.result?.message_id || textRes.result?.message_id;
+        recordAssistantEntry(fullContent, stickerRes.ok ? 'sticker' : 'text', stickerFileId, outMsgId);
         if (textRes.ok || (textRes as any).message_id) {
           db.recordAutoResponseSent(decision.chatId);
         }
@@ -3090,7 +3101,9 @@ Core Rules:
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'sticker', replyToMessageId: decision.replyToMessageId })}`);
         conv.messages.push({ role: 'assistant', content: '[Sent sticker]' });
         this.trimContext(conv);
-        recordAssistantEntry('[Sent sticker]');
+        const stickerFileId = res.result?.sticker?.file_id || decision.mediaFileId;
+        const outMsgId = res.result?.message_id;
+        recordAssistantEntry('[Sent sticker]', 'sticker', stickerFileId, outMsgId);
         db.recordAutoStickerSent(decision.chatId);
         return true;
       }
@@ -3105,7 +3118,9 @@ Core Rules:
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'animation', replyToMessageId: decision.replyToMessageId })}`);
         conv.messages.push({ role: 'assistant', content: '[Sent animation]' });
         this.trimContext(conv);
-        recordAssistantEntry('[Sent animation]');
+        const animFileId = res.result?.animation?.file_id || decision.mediaFileId;
+        const outMsgId = res.result?.message_id;
+        recordAssistantEntry('[Sent animation]', 'animation', animFileId, outMsgId);
         return true;
       }
       return false;
@@ -3121,7 +3136,7 @@ Core Rules:
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
         conv.messages.push({ role: 'assistant', content: sanitizedContent });
         this.trimContext(conv);
-        recordAssistantEntry(sanitizedContent);
+        recordAssistantEntry(sanitizedContent, 'text', undefined, res.result?.message_id || (res as any).message_id);
         db.recordAutoResponseSent(decision.chatId);
         return true;
       }
