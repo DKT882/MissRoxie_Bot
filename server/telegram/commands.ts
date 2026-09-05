@@ -158,14 +158,7 @@ export async function registerBotCommands(): Promise<{
     throw new Error(`Fatal: Unique command count must be 100, got ${uniqueCommandNames.size}`);
   }
 
-  // 1. Clear any stale chat-specific, chat_administrator-specific, or language-specific command overrides for protected production groups
-  const protectedGroups = [-1003901820979, -1004356470022, -1004331070653, -1004494262619];
-  for (const gid of protectedGroups) {
-    await telegramApi.deleteMyCommands({ type: 'chat_administrators', chat_id: gid }).catch(() => {});
-    await telegramApi.deleteMyCommands({ type: 'chat', chat_id: gid }).catch(() => {});
-    await telegramApi.deleteMyCommands({ type: 'chat_administrators', chat_id: gid }, 'en').catch(() => {});
-    await telegramApi.deleteMyCommands({ type: 'chat', chat_id: gid }, 'en').catch(() => {});
-  }
+  // 1. Clear any stale language-specific command overrides
   await telegramApi.deleteMyCommands({ type: 'all_chat_administrators' }, 'en').catch(() => {});
   await telegramApi.deleteMyCommands({ type: 'all_group_chats' }, 'en').catch(() => {});
 
@@ -245,7 +238,6 @@ export async function registerBotCommands(): Promise<{
   if (allSucceeded) {
     console.log('COMMAND_MENU_AUTHORITATIVE: 100 commands confirmed by Telegram');
     console.log(`TELEGRAM_SCOPE_VERIFICATION: all_chat_administrators=${authoritativeCommands.length} all_group_chats=${authoritativeCommands.length} all_private_chats=${authoritativeCommands.length} default=${authoritativeCommands.length}`);
-    console.log('TELEGRAM_PROTECTED_GROUP_OVERRIDES: -1003901820979 chat=0 chat_administrators=0 chat_member=0');
   } else {
     console.error(`COMMAND_REGISTRATION_FAILED: Registration incomplete. Errors: ${errors.join(', ')}`);
   }
