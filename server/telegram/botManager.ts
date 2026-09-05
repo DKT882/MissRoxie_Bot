@@ -261,7 +261,7 @@ export class TelegramBotManager {
         const data = await telegramApi.getUpdates(
           offset,
           20,
-          ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member']
+          ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member', 'chat_join_request']
         );
 
         const pollElapsed = Date.now() - pollReqStart;
@@ -884,6 +884,10 @@ export class TelegramBotManager {
 
     const settings = db.getGroupSettings(chatId, chatMemberUpdate.chat.title);
     const chatTitle = chatMemberUpdate.chat.title || 'the group';
+
+    if (chatId < 0) {
+      db.scheduleSave(chatId);
+    }
 
     // Member joined via invite link, join request, or direct addition
     if (newStatus === 'member' && oldStatus !== 'member' && user) {

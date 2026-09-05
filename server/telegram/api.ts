@@ -302,7 +302,7 @@ export class TelegramApi {
     return this.call('deleteWebhook', { drop_pending_updates: false });
   }
 
-  public async getUpdates(offset?: number, timeout: number = 20, allowed_updates: string[] = ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member']): Promise<any> {
+  public async getUpdates(offset?: number, timeout: number = 20, allowed_updates: string[] = ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member', 'chat_join_request']): Promise<any> {
     const timeoutMs = (timeout * 1000) + 10000;
     return this.call('getUpdates', {
       offset: offset || undefined,

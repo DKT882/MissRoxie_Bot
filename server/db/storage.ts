@@ -1836,7 +1836,7 @@ export class StorageManager {
         stickerPacks: {},
         updatedAt: new Date().toISOString()
       };
-      this.scheduleSave();
+      this.scheduleSave(chatId);
     } else {
       const s = this.data.settings[chatId];
       let needsSave = false;
@@ -1919,7 +1919,7 @@ export class StorageManager {
         needsSave = true;
       }
       if (needsSave) {
-        this.scheduleSave();
+        this.scheduleSave(chatId);
       }
     }
     return this.data.settings[chatId];
