@@ -2661,7 +2661,9 @@ export default function App() {
                             </div>
                           )}
 
-                          {msg.mediaType === 'sticker' || msg.content?.startsWith('🎨 Sticker') ? (
+                          {msg.mediaType === 'sticker' ||
+                          msg.content?.startsWith('🎨 Sticker') ||
+                          msg.content?.includes('[Sent sticker]') ? (
                             <StickerPreview mediaFileId={msg.mediaFileId} content={msg.content} isDark={false} />
                           ) : (
                             <p className="text-xs leading-relaxed break-words">{msg.content}</p>
@@ -4634,7 +4636,9 @@ export default function App() {
                                 <span>{isOut ? 'Roxie' : 'User'}</span>
                                 <span>{new Date(m.timestamp).toLocaleTimeString()}</span>
                               </div>
-                              {m.mediaType === 'sticker' || m.content?.startsWith('🎨 Sticker') ? (
+                              {m.mediaType === 'sticker' ||
+                              m.content?.startsWith('🎨 Sticker') ||
+                              m.content?.includes('[Sent sticker]') ? (
                                 <StickerPreview mediaFileId={m.mediaFileId} content={m.content} isDark={true} />
                               ) : (
                                 <p className="whitespace-pre-wrap">{m.content}</p>
