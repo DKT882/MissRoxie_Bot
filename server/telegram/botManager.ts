@@ -760,6 +760,7 @@ export class TelegramBotManager {
         messageId: message.message_id,
         chatId,
         mediaType,
+        mediaFileId: message.sticker?.file_id,
         direction: 'incoming',
         source: 'telegram',
         replyToMessageId: message.reply_to_message?.message_id

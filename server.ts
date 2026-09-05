@@ -859,6 +859,60 @@ export async function startServer() {
     }
   });
 
+  // 5B. Telegram Media Proxy for Dashboard Previews (Server-Side Token Protected)
+  app.get('/api/telegram/file/:fileId', async (req, res) => {
+    try {
+      const fileId = req.params.fileId;
+      if (!fileId || typeof fileId !== 'string' || fileId.length < 5) {
+        return res.status(400).json({ error: 'Invalid file_id' });
+      }
+
+      const fileRes = await telegramApi.getFile(fileId);
+      if (!fileRes.ok || !fileRes.result?.file_path) {
+        return res.status(fileRes.error_code || 404).json({
+          error: fileRes.description || 'Telegram file not found'
+        });
+      }
+
+      const filePath = fileRes.result.file_path;
+      const downloadUrl = telegramApi.getFileDownloadUrl(filePath);
+      if (!downloadUrl) {
+        return res.status(500).json({ error: 'Telegram Bot Token not configured on server' });
+      }
+
+      const tgRes = await fetch(downloadUrl);
+      if (!tgRes.ok) {
+        return res.status(tgRes.status).json({ error: `Telegram CDN returned ${tgRes.statusText}` });
+      }
+
+      let contentType = 'application/octet-stream';
+      const lower = filePath.toLowerCase();
+      if (lower.endsWith('.webp')) {
+        contentType = 'image/webp';
+      } else if (lower.endsWith('.webm')) {
+        contentType = 'video/webm';
+      } else if (lower.endsWith('.tgs')) {
+        contentType = 'application/gzip';
+      } else if (lower.endsWith('.png')) {
+        contentType = 'image/png';
+      } else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+        contentType = 'image/jpeg';
+      } else if (lower.endsWith('.mp4')) {
+        contentType = 'video/mp4';
+      } else {
+        contentType = tgRes.headers.get('content-type') || 'application/octet-stream';
+      }
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+
+      const arrayBuffer = await tgRes.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Internal proxy error' });
+    }
+  });
+
   // 6. Real Telegram moderators for a group
   app.get('/api/dashboard/groups/:chatId/moderators', async (req, res) => {
     try {

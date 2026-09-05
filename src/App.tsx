@@ -167,6 +167,60 @@ interface PrivateChatSummary {
   lastMessage?: string;
 }
 
+function StickerPreview({
+  mediaFileId,
+  content,
+  isDark = true
+}: {
+  mediaFileId?: string;
+  content?: string;
+  isDark?: boolean;
+}) {
+  const [loadError, setLoadError] = useState(false);
+  const isVideo = content?.includes('[Video]');
+
+  if (!mediaFileId || loadError) {
+    return (
+      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg ${isDark ? 'bg-pink-500/10 text-pink-300 border-pink-500/20' : 'bg-pink-500/10 text-pink-400 border border-pink-500/20'} text-xs font-medium`}>
+        <span>{content || '🎨 Sticker'}</span>
+      </div>
+    );
+  }
+
+  const fileUrl = `/api/telegram/file/${encodeURIComponent(mediaFileId)}`;
+
+  return (
+    <div className="flex flex-col items-start gap-1 pt-0.5">
+      <div className="relative group/sticker rounded-xl overflow-hidden bg-black/5 p-1 border border-white/5">
+        {isVideo ? (
+          <video
+            src={fileUrl}
+            autoPlay
+            loop
+            muted
+            playsInline
+            onError={() => setLoadError(true)}
+            className="w-24 h-24 max-w-[120px] max-h-[120px] object-contain rounded-lg transition-transform duration-200 hover:scale-105"
+          />
+        ) : (
+          <img
+            src={fileUrl}
+            alt={content || 'Sticker'}
+            onError={() => setLoadError(true)}
+            loading="lazy"
+            className="w-24 h-24 max-w-[120px] max-h-[120px] object-contain rounded-lg transition-transform duration-200 hover:scale-105"
+          />
+        )}
+      </div>
+      {content && (
+        <span className="text-[10px] text-pink-400/80 font-mono tracking-wide px-1">
+          {content.replace('🎨 Sticker', '🎨').trim()}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   // Theme state: dark vs light
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -2608,9 +2662,7 @@ export default function App() {
                           )}
 
                           {msg.mediaType === 'sticker' || msg.content?.startsWith('🎨 Sticker') ? (
-                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-pink-500/10 text-pink-400 border border-pink-500/20 text-xs font-medium">
-                              <span>{msg.content || '🎨 Sticker'}</span>
-                            </div>
+                            <StickerPreview mediaFileId={msg.mediaFileId} content={msg.content} isDark={false} />
                           ) : (
                             <p className="text-xs leading-relaxed break-words">{msg.content}</p>
                           )}
@@ -4583,9 +4635,7 @@ export default function App() {
                                 <span>{new Date(m.timestamp).toLocaleTimeString()}</span>
                               </div>
                               {m.mediaType === 'sticker' || m.content?.startsWith('🎨 Sticker') ? (
-                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-pink-500/10 text-pink-300 border border-pink-500/20 text-xs font-medium">
-                                  <span>{m.content || '🎨 Sticker'}</span>
-                                </div>
+                                <StickerPreview mediaFileId={m.mediaFileId} content={m.content} isDark={true} />
                               ) : (
                                 <p className="whitespace-pre-wrap">{m.content}</p>
                               )}

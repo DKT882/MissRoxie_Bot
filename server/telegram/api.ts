@@ -681,6 +681,18 @@ export class TelegramApi {
     });
   }
 
+  public async getFile(
+    fileId: string
+  ): Promise<{ ok: boolean; result?: { file_id: string; file_unique_id: string; file_size?: number; file_path?: string }; description?: string; error_code?: number }> {
+    return this.call('getFile', { file_id: fileId });
+  }
+
+  public getFileDownloadUrl(filePath: string): string {
+    const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+    if (!token) return '';
+    return `https://api.telegram.org/file/bot${token}/${filePath}`;
+  }
+
   public async sendChatAction(
     chatId: number | string,
     action: 'typing' | 'upload_photo' | 'record_video' | 'upload_video' | 'record_voice' | 'upload_voice' | 'upload_document' | 'choose_sticker' | 'find_location' | 'record_video_note' | 'upload_video_note'

@@ -48,6 +48,7 @@ export interface GroupConversationMessage {
   username?: string;
   displayName?: string;
   mediaType?: string;
+  mediaFileId?: string;
   direction?: 'incoming' | 'outgoing';
   source?: 'telegram' | 'dashboard' | 'bot';
   sender?: string;
