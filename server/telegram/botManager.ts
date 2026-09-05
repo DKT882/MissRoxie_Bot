@@ -468,6 +468,12 @@ export class TelegramBotManager {
         } else if (update.edited_message) {
           await this.handleMessage(update.edited_message, true, reqCtx);
         } else if (update.callback_query) {
+          const cbChatId = update.callback_query.message?.chat?.id;
+          const cbChatTitle = update.callback_query.message?.chat?.title;
+          if (cbChatId && cbChatId < 0) {
+            db.getGroupSettings(cbChatId, cbChatTitle);
+            db.scheduleSave(cbChatId);
+          }
           const handledCaptcha = await ModerationService.handleCaptchaCallback(update.callback_query);
           if (!handledCaptcha) {
             await CommandHandler.handleCallbackQuery(update.callback_query);
@@ -527,6 +533,18 @@ export class TelegramBotManager {
 
     const chatId = reqCtx?.chatId ?? message.chat?.id;
     const userId = reqCtx?.userId ?? message.from?.id;
+
+    // Immediately discover & persist group settings with current title on every received group message
+    if (chatId && chatId < 0) {
+      db.getGroupSettings(chatId, message.chat?.title);
+      db.scheduleSave(chatId);
+    }
+
+    if ((message as any).migrate_to_chat_id) {
+      const newChatId = (message as any).migrate_to_chat_id;
+      db.getGroupSettings(newChatId, message.chat?.title);
+      db.scheduleSave(newChatId);
+    }
 
     // Track message for group /clear purge capabilities
     if (chatId && message.message_id) {
@@ -835,6 +853,9 @@ export class TelegramBotManager {
     db.cacheUser(user, chatId);
 
     const settings = db.getGroupSettings(chatId, chatTitle);
+    if (chatId < 0) {
+      db.scheduleSave(chatId);
+    }
     if (settings.autoAcceptEnabled) {
       try {
         const res = await telegramApi.approveChatJoinRequest(chatId, user.id);
