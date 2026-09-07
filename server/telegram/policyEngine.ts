@@ -172,7 +172,7 @@ export class ContentPolicyEngine {
       }
 
       const hasGeneralLink = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9-]+\.[a-zA-Z]{2,}\/[^\s]*)/gi.test(textToCheck);
-      const isLinkLocked = Boolean(locks['links'] || locks['link'] || settings.linksProtection);
+      const isLinkLocked = Boolean(locks['links'] || locks['link']);
       if (hasGeneralLink && isLinkLocked) {
         if (!db.hasContentPermission(chatId, userId, 'links')) {
           // Check whitelist

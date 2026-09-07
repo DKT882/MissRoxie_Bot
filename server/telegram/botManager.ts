@@ -718,15 +718,15 @@ export class TelegramBotManager {
     const filterIntercepted = await ModerationService.handleCustomFilters(message);
     if (filterIntercepted) return;
 
-    // 5. Check Content Locks & Media / Sticker / File / Forward / Poll / Location Protection
-    const mediaIntercepted = await ModerationService.handleMediaAndStickerProtection(message);
-    if (mediaIntercepted) return;
-
-    // 6. Check Link Protection
-    if (textOrCaption) {
+    // 5. Check Link & Contact-Bait Protection (with warning tracking & 5-warn permanent mute)
+    if (textOrCaption || (message.entities && message.entities.length > 0) || (message.caption_entities && message.caption_entities.length > 0)) {
       const linkIntercepted = await ModerationService.handleLinkProtection(message);
       if (linkIntercepted) return;
     }
+
+    // 6. Check Content Locks & Media / Sticker / File / Forward / Poll / Location Protection
+    const mediaIntercepted = await ModerationService.handleMediaAndStickerProtection(message);
+    if (mediaIntercepted) return;
 
     const mediaType = message.sticker ? 'sticker' :
       message.photo ? 'photo' :
