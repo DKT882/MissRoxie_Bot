@@ -601,12 +601,15 @@ export class TelegramApi {
 
   public async getChatMember(
     chatId: number | string,
-    userId: number
+    userId: number,
+    forceFresh: boolean = false
   ): Promise<{ ok: boolean; result?: TelegramChatMember; description?: string; error_code?: number }> {
     const key = `${chatId}_${userId}`;
-    const cached = this.chatMemberCache.get(key);
-    if (cached && Date.now() < cached.expiresAt) {
-      return { ok: true, result: cached.data };
+    if (!forceFresh) {
+      const cached = this.chatMemberCache.get(key);
+      if (cached && Date.now() < cached.expiresAt) {
+        return { ok: true, result: cached.data };
+      }
     }
 
     const res = await this.call<TelegramChatMember>('getChatMember', {
@@ -618,6 +621,23 @@ export class TelegramApi {
       this.chatMemberCache.set(key, { data: res.result, expiresAt: Date.now() + 60000 });
     }
     return res;
+  }
+
+  public clearChatMemberCache(chatId?: number | string, userId?: number): void {
+    if (chatId !== undefined && userId !== undefined) {
+      this.chatMemberCache.delete(`${chatId}_${userId}`);
+    } else if (chatId !== undefined) {
+      const prefix = `${chatId}_`;
+      for (const k of this.chatMemberCache.keys()) {
+        if (k.startsWith(prefix)) {
+          this.chatMemberCache.delete(k);
+        }
+      }
+      this.chatAdminsCache.delete(String(chatId));
+    } else {
+      this.chatMemberCache.clear();
+      this.chatAdminsCache.clear();
+    }
   }
 
   public async getChatAdministrators(

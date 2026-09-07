@@ -2718,8 +2718,9 @@ export class CommandHandler {
     const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
 
     if (res.ok) {
-      // Step 9: Post-promotion verification with getChatMember()
-      const verifyRes = await telegramApi.getChatMember(ctx.chatId, target.targetUserId);
+      // Step 9: Post-promotion verification with fresh getChatMember()
+      TelegramMiddleware.clearMemberCache(ctx.chatId, target.targetUserId);
+      const verifyRes = await telegramApi.getChatMember(ctx.chatId, target.targetUserId, true);
       if (!verifyRes.ok || !verifyRes.result || verifyRes.result.status !== 'administrator') {
         TelegramMiddleware.logAudit({
           chatId: ctx.chatId,

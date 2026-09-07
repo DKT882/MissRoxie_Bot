@@ -88,21 +88,45 @@ export class TelegramMiddleware {
 
   private static memberCache: Map<string, { member: TelegramChatMember; timestamp: number }> = new Map();
 
+  public static clearMemberCache(chatId?: number, userId?: number): void {
+    if (chatId !== undefined && userId !== undefined) {
+      this.memberCache.delete(`${chatId}_${userId}`);
+      telegramApi.clearChatMemberCache(chatId, userId);
+    } else if (chatId !== undefined) {
+      const prefix = `${chatId}_`;
+      for (const k of this.memberCache.keys()) {
+        if (k.startsWith(prefix)) {
+          this.memberCache.delete(k);
+        }
+      }
+      telegramApi.clearChatMemberCache(chatId);
+    } else {
+      this.memberCache.clear();
+      telegramApi.clearChatMemberCache();
+    }
+  }
+
+  public static isOwner(member: TelegramChatMember | null | undefined): boolean {
+    return member?.status === 'creator';
+  }
+
   /**
    * Safe fetcher for a chat member (strictly numeric user ID, never bot/anonymous proxy).
    */
-  public static async getTargetMember(chatId: number, targetUserId: number): Promise<TelegramChatMember | null> {
+  public static async getTargetMember(chatId: number, targetUserId: number, forceFresh: boolean = false): Promise<TelegramChatMember | null> {
     if (!targetUserId || targetUserId === 0 || targetUserId === 1087968824) {
       return null;
     }
     const cacheKey = `${chatId}_${targetUserId}`;
-    const cached = this.memberCache.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp < 5 * 60 * 1000)) {
-      return cached.member;
+    if (!forceFresh) {
+      const cached = this.memberCache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp < 5 * 60 * 1000)) {
+        return cached.member;
+      }
     }
 
     try {
-      const res = await telegramApi.getChatMember(chatId, targetUserId);
+      const res = await telegramApi.getChatMember(chatId, targetUserId, forceFresh);
       if (res.ok && res.result) {
         this.memberCache.set(cacheKey, { member: res.result, timestamp: Date.now() });
         return res.result;
@@ -113,8 +137,8 @@ export class TelegramMiddleware {
     return null;
   }
 
-  public static async getMember(chatId: number, userId: number): Promise<TelegramChatMember | null> {
-    return this.getTargetMember(chatId, userId);
+  public static async getMember(chatId: number, userId: number, forceFresh: boolean = false): Promise<TelegramChatMember | null> {
+    return this.getTargetMember(chatId, userId, forceFresh);
   }
 
   /**
@@ -583,13 +607,17 @@ export class TelegramMiddleware {
     }
 
     const botId = meRes.result.id;
-    const botMember = await this.getTargetMember(chatId, botId);
+    let botMember = await this.getTargetMember(chatId, botId);
     if (!botMember || (botMember.status !== 'administrator' && botMember.status !== 'creator')) {
-      return {
-        allowed: false,
-        reason: '❌ The bot lacks administrator privileges in this group. Please promote the bot to Administrator.',
-        botMember: botMember || undefined
-      };
+      // Retry once with a guaranteed fresh fetch to eliminate stale cache false negatives
+      botMember = await this.getTargetMember(chatId, botId, true);
+      if (!botMember || (botMember.status !== 'administrator' && botMember.status !== 'creator')) {
+        return {
+          allowed: false,
+          reason: '❌ The bot lacks administrator privileges in this group. Please promote the bot to Administrator.',
+          botMember: botMember || undefined
+        };
+      }
     }
 
     if (botMember.status === 'creator') {
@@ -597,6 +625,16 @@ export class TelegramMiddleware {
     }
 
     const normalizedPerm = permission.startsWith('can_') ? permission : `can_${permission}`;
+
+    // If specific permission check fails on cached object, do a fresh fetch to be certain
+    if (
+      (normalizedPerm === 'can_restrict_members' && !botMember.can_restrict_members) ||
+      (normalizedPerm === 'can_delete_messages' && !botMember.can_delete_messages) ||
+      (normalizedPerm === 'can_promote_members' && !botMember.can_promote_members)
+    ) {
+      const freshBot = await this.getTargetMember(chatId, botId, true);
+      if (freshBot) botMember = freshBot;
+    }
 
     if (normalizedPerm === 'can_restrict_members' && !botMember.can_restrict_members) {
       return {

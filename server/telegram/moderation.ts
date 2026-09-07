@@ -110,6 +110,7 @@ export class ModerationService {
   private static filterNoticeCooldowns: Map<string, number> = new Map();
   private static floodTracker: Map<string, number[]> = new Map();
   private static floodActionCooldowns: Map<string, number> = new Map();
+  private static inFlightWelcomes: Set<string> = new Set();
   private static welcomedUsersCache: Map<string, number> = new Map();
 
   public static clearReportCooldowns(): void {
@@ -305,67 +306,95 @@ export class ModerationService {
   }
 
   /**
-   * Automatic Link Protection Handler with Whitelist support.
+   * Automatic Link & Contact-Bait Protection Handler with Whitelist & Owner bypass support.
    * Returns true if message was intercepted and deleted.
    */
   public static async handleLinkProtection(message: TelegramMessage): Promise<boolean> {
     if (!TelegramMiddleware.isGroup(message)) return false;
+    if (!message.from) return false;
 
     const chatId = message.chat.id;
     const settings = db.getGroupSettings(chatId, message.chat.title);
     const linksLocked = db.isLocked(chatId, 'links');
-    if (!settings.linksProtection && !linksLocked) return false;
 
-    // Check if sender is an admin (including anonymous admin)
-    const isAdmin = await TelegramMiddleware.isAdmin(chatId, message.from?.id, message);
-    if (isAdmin) return false;
+    const meRes = await telegramApi.getMe().catch(() => null);
+    const botId = meRes?.result?.id || 0;
 
-    if (!message.from) return false;
+    // Detect links & contact-bait in text, caption, or message entities
+    const textToCheck = `${message.text || ''}\n${message.caption || ''}`.trim();
+    const allEntities = [...(message.entities || []), ...(message.caption_entities || [])];
+    const hasUrlEntity = allEntities.some((e) => e.type === 'url' || e.type === 'text_link');
 
-    // Check if sender has been granted link permission via /free <user> links (or all)
-    if (db.hasContentPermission(chatId, message.from.id, 'links') || db.hasContentPermission(chatId, message.from.id, 'all')) {
+    // Comprehensive link regex (multi-line, bare domains with any TLD, www., https?://, ftp://, tg://, t.me/)
+    const linkRegex = /(?:https?:\/\/|ftp:\/\/|tg:\/\/|www\.|t\.me\/|telegram\.me\/|telegram\.dog\/|\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:[a-zA-Z]{2,24}|co\.[a-zA-Z]{2}|com\.[a-zA-Z]{2}|org\.[a-zA-Z]{2}|net\.[a-zA-Z]{2}|edu\.[a-zA-Z]{2}|gov\.[a-zA-Z]{2})(?::\d+)?(?:\/[^\s]*)?)/i;
+    const hasLink = hasUrlEntity || (textToCheck.length > 0 && linkRegex.test(textToCheck));
+
+    // Contact-bait regex with repeated/elongated character collapsing (e.g., "dmmmm", "meeee", "biioo", "check my bio")
+    const collapsedText = textToCheck.toLowerCase().replace(/(.)\1+/g, '$1');
+    const cleanedText = textToCheck.toLowerCase().replace(/[\.\-_~*`]/g, ' ').replace(/(.)\1+/g, '$1');
+    const contactBaitRegex = /\b(?:d+\s*m+|p+\s*m+|msg+|mssg+|message+|txt+|text+|inbox+|write+)\s*(?:me+|us+|privately+|direct+)\b|\b(?:send+|drop+|give+)\s*(?:me+\s*)?(?:a\s*)?(?:d+\s*m+|p+\s*m+|msg+|message+|inbox+|text+)\b|\b(?:check+|see+|look+(?:\s*at)?|visit+|view+|read+|find+)\s*(?:my+|the)?\s*bio+\b|\b(?:in+|on+|at+)\s*(?:my+\s*)?bio+\b|\b(?:bio+\s*link+|link+\s*in+\s*(?:my+\s*)?bio+)\b|\b(?:reach+\s*out+|contact+\s*(?:me+|us+)?)\s*(?:in+|via+|through+|on+)?\s*(?:d+\s*m+|p+\s*m+|inbox+|dm's|dms+|d+m+s+)\b|\b(?:come+|slide+)\s*(?:to+|into+|in+)\s*(?:my+\s*)?(?:d+\s*m+|p+\s*m+|inbox+|dms+|d+m+s+)\b|\b(?:personal+|private+)\s*message+\s*(?:me+|us+)?\b/i;
+    const hasContactBait = textToCheck.length > 0 && (
+      contactBaitRegex.test(textToCheck) ||
+      contactBaitRegex.test(cleanedText) ||
+      contactBaitRegex.test(collapsedText)
+    );
+
+    if (!hasLink && !hasContactBait) {
       return false;
     }
 
-    // Detect links in text, caption, or message entities
-    const textToCheck = `${message.text || ''} ${message.caption || ''}`.trim();
-    const hasUrlEntity = message.entities?.some((e) => e.type === 'url' || e.type === 'text_link') ||
-      message.caption_entities?.some((e) => e.type === 'url' || e.type === 'text_link');
+    let isLinkViolation = false;
+    let isContactViolation = false;
 
-    const linkRegex = /(?:https?:\/\/|www\.|t\.me\/|telegram\.me\/|[a-zA-Z0-9-]+\.(?:com|org|net|io|me|xyz|info|app|cc|co|ru|gg|link|top|site|online|live)\b)/i;
-    const hasLink = hasUrlEntity || linkRegex.test(textToCheck);
+    if (hasLink && (settings.linksProtection || linksLocked)) {
+      // LINK PERMISSIONS: Group Owner and Roxie/Bot ONLY (Regular admins/mods do NOT bypass link protection).
+      const isBot = message.from.id === botId;
+      const member = await TelegramMiddleware.getTargetMember(chatId, message.from.id);
+      const isOwner = member?.status === 'creator';
 
-    if (!hasLink) return false;
+      let isWhitelisted = false;
+      if (settings.linksWhitelist && settings.linksWhitelist.length > 0) {
+        const lowerText = textToCheck.toLowerCase();
+        isWhitelisted = settings.linksWhitelist.some((domain) => {
+          const d = domain.toLowerCase().trim();
+          return d && lowerText.includes(d);
+        });
+      }
 
-    // Check Whitelist: If URL matches an allowed domain, allow it through
-    if (settings.linksWhitelist && settings.linksWhitelist.length > 0) {
-      const lowerText = textToCheck.toLowerCase();
-      const isWhitelisted = settings.linksWhitelist.some((domain) => {
-        const d = domain.toLowerCase().trim();
-        return d && lowerText.includes(d);
-      });
-      if (isWhitelisted) {
-        return false;
+      if (!isBot && !isOwner && !isWhitelisted) {
+        isLinkViolation = true;
       }
     }
 
+    if (!isLinkViolation && hasContactBait) {
+      // CONTACT-BAIT PERMISSIONS: Admins, Owner, and Roxie are allowed
+      const isAdmin = await TelegramMiddleware.isAdmin(chatId, message.from.id, message);
+      const isBot = message.from.id === botId;
+      if (!isAdmin && !isBot) {
+        isContactViolation = true;
+      }
+    }
+
+    if (!isLinkViolation && !isContactViolation) {
+      return false;
+    }
+
     // Delete the forbidden message
-    await telegramApi.deleteMessage(chatId, message.message_id);
+    await telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
     db.untrackMessages(chatId, [message.message_id]);
 
-    // Issue a warning to the user
-    const username = message.from.username ? `@${message.from.username}` : message.from.first_name;
-    const meRes = await telegramApi.getMe();
-    const botId = meRes.result?.id || 0;
+    const username = message.from.username ? `@${message.from.username}` : (message.from.first_name || `User ${message.from.id}`);
+    const reason = isLinkViolation ? 'Posting unauthorized links' : 'Posting contact-bait / DM requests';
 
+    // Issue a warning to the user using standard storage
     const { totalWarnings } = db.addWarning({
       chatId,
       userId: message.from.id,
       userUsername: message.from.username,
       userFirstName: message.from.first_name,
       adminId: botId,
-      adminUsername: meRes.result?.username || 'System',
-      reason: 'Posting unwanted links'
+      adminUsername: meRes?.result?.username || 'System',
+      reason
     });
 
     db.addLog({
@@ -375,19 +404,46 @@ export class ModerationService {
       targetUsername: message.from.username,
       adminUserId: botId,
       adminUsername: 'Bot/AutoMod',
-      action: 'delete_link',
-      reason: 'Posting unauthorized links in group'
+      action: isLinkViolation ? 'delete_link' : 'warn',
+      reason: `${reason} in group`
     });
 
-    const warnLimit = settings.warnLimit || 3;
+    // 5th warning threshold -> Permanent Mute
+    if (totalWarnings >= 5) {
+      const muteRes = await this.executeMute(chatId, message.from.id);
+      db.resetUserWarnings(chatId, message.from.id);
+      db.addLog({
+        chatId,
+        chatTitle: message.chat.title,
+        targetUserId: message.from.id,
+        targetUsername: message.from.username,
+        adminUserId: botId,
+        adminUsername: 'Bot/AutoMod',
+        action: 'mute',
+        reason: `Warning limit reached (5/5): ${reason}`
+      });
 
-    if (totalWarnings >= warnLimit) {
-      await this.executeWarningThresholdAction(chatId, message.from, message.chat.title, 'Repeated rule violations (Links Limit Reached)');
+      if (muteRes.ok) {
+        await telegramApi.sendMessage(
+          chatId,
+          `🚨 <b>Warning limit reached (${totalWarnings}/5).</b>\n\n` +
+          `👤 <b>${username}</b> has been <b>permanently muted</b>.\n\n` +
+          `<b>Reason:</b> ${reason}`
+        );
+      } else {
+        await telegramApi.sendMessage(
+          chatId,
+          `⚠️ <b>Failed to mute ${username}:</b> ${muteRes.description || 'Permission issue'}`
+        );
+      }
     } else {
+      const header = isLinkViolation
+        ? 'Links are not allowed in this group.'
+        : 'Contact-bait and DM requests are not allowed in this group.';
       await telegramApi.sendMessage(
         chatId,
-        `🚫 <b>Links are not allowed in this group.</b>\n\n` +
-        `👤 ${username} received warning <b>${totalWarnings}/${warnLimit}</b>.`
+        `🚫 <b>${header}</b>\n\n` +
+        `👤 ${username} received warning <b>${totalWarnings}/5</b>.`
       );
     }
 
@@ -899,34 +955,50 @@ export class ModerationService {
     }
 
     const cacheKey = `${chatId}:${member.id}`;
+    if (ModerationService.inFlightWelcomes.has(cacheKey)) {
+      return false; // deduplicate concurrent in-flight welcome requests for same user
+    }
+
     const now = Date.now();
     const lastWelcomed = ModerationService.welcomedUsersCache.get(cacheKey) || 0;
     if (now - lastWelcomed < 15000) {
       return false; // deduplicate within 15 seconds
     }
+    ModerationService.inFlightWelcomes.add(cacheKey);
     ModerationService.welcomedUsersCache.set(cacheKey, now);
 
-    const title = chatTitle || settings.chatTitle || 'the group';
-    const firstName = member.first_name || 'Member';
-    const lastName = member.last_name || '';
-    const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
-    const username = member.username ? `@${member.username}` : displayName;
-    const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
-    const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
+    try {
+      const title = chatTitle || settings.chatTitle || 'the group';
+      const firstName = member.first_name || 'Member';
+      const lastName = member.last_name || '';
+      const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
+      const username = member.username ? `@${member.username}` : displayName;
+      const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
+      const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
 
-    const text = template
-      .replace(/{first_name}/gi, firstName)
-      .replace(/{last_name}/gi, lastName)
-      .replace(/{user}/gi, displayName)
-      .replace(/{name}/gi, displayName)
-      .replace(/{username}/gi, username)
-      .replace(/{mention}/gi, mention)
-      .replace(/{chat_title}/gi, title)
-      .replace(/{chat}/gi, title)
-      .replace(/{id}/gi, String(member.id));
+      const text = template
+        .replace(/{first_name}/gi, firstName)
+        .replace(/{last_name}/gi, lastName)
+        .replace(/{user}/gi, displayName)
+        .replace(/{name}/gi, displayName)
+        .replace(/{username}/gi, username)
+        .replace(/{mention}/gi, mention)
+        .replace(/{chat_title}/gi, title)
+        .replace(/{chat}/gi, title)
+        .replace(/{id}/gi, String(member.id));
 
-    await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' }).catch(() => {});
-    return true;
+      const sendRes = await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' }).catch(() => null);
+      if (sendRes?.ok && sendRes.result?.message_id) {
+        const sentMsgId = sendRes.result.message_id;
+        setTimeout(() => {
+          telegramApi.deleteMessage(chatId, sentMsgId).catch(() => {});
+          db.untrackMessages(chatId, [sentMsgId]);
+        }, 10000); // exactly 10,000ms auto-delete
+      }
+      return true;
+    } finally {
+      ModerationService.inFlightWelcomes.delete(cacheKey);
+    }
   }
 
   /**
