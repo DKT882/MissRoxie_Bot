@@ -454,6 +454,9 @@ export class TelegramBotManager {
         queue_wait_ms: queueWaitMs
       });
 
+      let shouldTriggerAi = false;
+      let aiMessage: TelegramMessage | null = null;
+
       await TelegramBotManager.acquireGlobalSlot();
       try {
         logDebug({
@@ -464,7 +467,11 @@ export class TelegramBotManager {
         });
 
         if (update.message) {
-          await this.handleMessage(update.message, false, reqCtx);
+          const res = await this.handleMessage(update.message, false, reqCtx);
+          if (res?.shouldTriggerAi) {
+            shouldTriggerAi = true;
+            aiMessage = update.message;
+          }
         } else if (update.edited_message) {
           await this.handleMessage(update.edited_message, true, reqCtx);
         } else if (update.callback_query) {
@@ -506,6 +513,14 @@ export class TelegramBotManager {
         });
       } finally {
         TelegramBotManager.releaseGlobalSlot();
+      }
+
+      if (shouldTriggerAi && aiMessage) {
+        ChatbotService.enqueueChatAiMessage(aiMessage, this.botUser, reqCtx, () => {
+          this.recordResponseSent();
+        }).catch((aiErr: any) => {
+          console.error('[CHATBOT] Error in async AI processing:', aiErr);
+        });
       }
     };
 
@@ -830,18 +845,15 @@ export class TelegramBotManager {
       console.error('[ReactionService] Error handling message reaction:', err);
     });
 
-    // 8. Check Roxie AI Chatbot triggers
-    const chatbotHandled = await ChatbotService.handleMessage(message, this.botUser, reqCtx);
-    if (chatbotHandled) {
-      this.recordResponseSent();
-    }
-
+    // 8. Roxie AI Chatbot triggers: delegate to executeTask to run outside global slot
     logDebug({
       event: 'TELEGRAM_MESSAGE_PROCESSED',
       chat_id: chatId,
       message_id: message.message_id,
       is_command: false
     });
+
+    return { handled: true, shouldTriggerAi: true };
   }
 
   private async handleChatJoinRequest(joinRequest: TelegramChatJoinRequest) {

@@ -508,6 +508,7 @@ export class ChatbotService {
   private static chatRandomCooldowns: Map<number, number> = new Map();
   private static recentStickers: Set<string> = new Set();
   private static recentAnimations: Set<string> = new Set();
+  public static chatAiQueues: Map<number, Promise<void>> = new Map();
 
   private static TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes inactivity timeout
   public static MAX_CONTEXT_MESSAGES = 15; // 15-message rolling context window
@@ -526,6 +527,47 @@ export class ChatbotService {
     this.recentAnimations.clear();
     this.processedMessageKeys.clear();
     this.activeProcessingKeys.clear();
+    this.chatAiQueues.clear();
+    this.activeAiRequests = 0;
+    this.aiSlotWaiters = [];
+  }
+
+  public static enqueueChatAiMessage(
+    message: TelegramMessage,
+    botUser: TelegramUser | null,
+    reqCtx?: TelegramRequestContext,
+    onResponseSent?: () => void
+  ): Promise<boolean> {
+    const chatId = reqCtx?.chatId ?? message.chat?.id;
+    if (!chatId) return Promise.resolve(false);
+
+    let result = false;
+    const executeAi = async (): Promise<void> => {
+      try {
+        const handled = await this.handleMessage(message, botUser, reqCtx);
+        if (handled) {
+          result = true;
+          if (onResponseSent) {
+            onResponseSent();
+          }
+        }
+      } catch (err) {
+        console.error('[CHATBOT] Error in async AI processing:', err);
+      }
+    };
+
+    const previous = this.chatAiQueues.get(chatId) ?? Promise.resolve();
+    const current: Promise<void> = previous
+      .catch(() => {})
+      .then(() => executeAi())
+      .finally(() => {
+        if (this.chatAiQueues.get(chatId) === current) {
+          this.chatAiQueues.delete(chatId);
+        }
+      });
+
+    this.chatAiQueues.set(chatId, current);
+    return current.then(() => result);
   }
 
   public static acquireGate(chatId: number, messageId: number): boolean {
@@ -2917,6 +2959,7 @@ Core Rules:
 - No unsolicited advice or lecture. No asterisks actions like *laughs*.
 - If you have nothing interesting or natural to add, reply with exactly the single word: SKIP`;
 
+    await this.acquireAiSlot();
     try {
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -2986,6 +3029,8 @@ Core Rules:
     } catch (err) {
       console.error('[CHATBOT] Error in random natural chat decision:', err);
       return null;
+    } finally {
+      this.releaseAiSlot();
     }
   }
 
