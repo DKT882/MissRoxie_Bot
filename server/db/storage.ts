@@ -102,6 +102,7 @@ export interface PrivateConversationRecord {
   username?: string;
   name?: string;
   language?: string;
+  autoDelete?: boolean;
   lastUpdated: number;
   messages: PrivateConversationMessage[];
 }
@@ -1068,6 +1069,7 @@ export class StorageManager {
       username: conv.username || null,
       name: conv.name || null,
       language: conv.language || 'English',
+      autoDelete: Boolean(conv.autoDelete),
       lastUpdated: conv.lastUpdated,
       messages: conv.messages || [],
       lustLevel: this.getLustLevel(chatId, Number(chatId)),
@@ -1154,6 +1156,7 @@ export class StorageManager {
       username: data.username || existing.username,
       name: data.name || existing.name,
       language: data.language || existing.language || 'English',
+      autoDelete: data.autoDelete !== undefined ? Boolean(data.autoDelete) : (existing.autoDelete || false),
       lastUpdated: data.lastUpdated || existing.lastUpdated || Date.now(),
       messages: mergedMessages
     };
@@ -4669,6 +4672,32 @@ export class StorageManager {
     if (!this.data.privateConversations) return [];
     const key = String(chatId);
     return this.data.privateConversations[key]?.messages || [];
+  }
+
+  public getPrivateAutoDelete(chatId: number | string): boolean {
+    const key = String(chatId);
+    return Boolean(this.data.privateConversations?.[key]?.autoDelete);
+  }
+
+  public setPrivateAutoDelete(chatId: number | string, enabled: boolean): void {
+    if (!this.data.privateConversations) this.data.privateConversations = {};
+    const key = String(chatId);
+    let record = this.data.privateConversations[key];
+    if (!record) {
+      record = {
+        chatId,
+        userId: Number(chatId),
+        autoDelete: enabled,
+        lastUpdated: Date.now(),
+        messages: []
+      };
+      this.data.privateConversations[key] = record;
+    } else {
+      record.autoDelete = enabled;
+      record.lastUpdated = Date.now();
+    }
+    this.savePrivateJson(chatId);
+    this.persist();
   }
 
   public markBotLeftGroup(chatId: number | string): void {

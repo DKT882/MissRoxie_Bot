@@ -475,8 +475,23 @@ export class ModerationService {
     await telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
     db.untrackMessages(chatId, [message.message_id]);
 
+    // For contact-bait / DM solicitation: DELETE ONLY (no warning, no notification, no mute escalation)
+    if (isContactViolation && !isLinkViolation) {
+      db.addLog({
+        chatId,
+        chatTitle: message.chat.title,
+        targetUserId: message.from.id,
+        targetUsername: message.from.username,
+        adminUserId: botId,
+        adminUsername: 'Bot/AutoMod',
+        action: 'delete_link',
+        reason: 'Posting contact-bait / DM requests in group'
+      });
+      return true;
+    }
+
     const username = message.from.username ? `@${message.from.username}` : (message.from.first_name || `User ${message.from.id}`);
-    const reason = isLinkViolation ? 'Posting unauthorized links' : 'Posting contact-bait / DM requests';
+    const reason = 'Posting unauthorized links';
 
     // Issue a warning to the user using standard storage
     const { totalWarnings } = db.addWarning({
@@ -496,13 +511,14 @@ export class ModerationService {
       targetUsername: message.from.username,
       adminUserId: botId,
       adminUsername: 'Bot/AutoMod',
-      action: isLinkViolation ? 'delete_link' : 'warn',
+      action: 'delete_link',
       reason: `${reason} in group`
     });
 
-    // 5th warning threshold -> Permanent Mute
+    // 5th warning threshold -> 1-Hour Mute (3600 seconds)
     if (totalWarnings >= 5) {
-      const muteRes = await this.executeMute(chatId, message.from.id);
+      const untilDate = Math.floor(Date.now() / 1000) + 3600;
+      const muteRes = await this.executeMute(chatId, message.from.id, untilDate);
       db.resetUserWarnings(chatId, message.from.id);
       db.addLog({
         chatId,
@@ -512,15 +528,15 @@ export class ModerationService {
         adminUserId: botId,
         adminUsername: 'Bot/AutoMod',
         action: 'mute',
-        reason: `Warning limit reached (5/5): ${reason}`
+        reason: `Warning limit reached (5/5): 1-hour mute for ${reason}`
       });
 
       if (muteRes.ok) {
         const sentNotice = await telegramApi.sendMessage(
           chatId,
-          `🚨 <b>Warning limit reached (${totalWarnings}/5).</b>\n\n` +
-          `👤 <b>${username}</b> has been <b>permanently muted</b>.\n\n` +
-          `<b>Reason:</b> ${reason}`
+          `🚫 <b>Warning limit reached (5/5).</b>\n\n` +
+          `👤 ${username} has been muted for <b>1 hour</b>.\n` +
+          `<i>5 warnings = 1 hour mute.</i>`
         ).catch(() => null);
         if (sentNotice?.ok && sentNotice.result?.message_id) {
           const noticeId = sentNotice.result.message_id;
@@ -543,12 +559,9 @@ export class ModerationService {
         }
       }
     } else {
-      const header = isLinkViolation
-        ? 'Links are not allowed in this group.'
-        : 'Contact-bait and DM requests are not allowed in this group.';
       const sentWarn = await telegramApi.sendMessage(
         chatId,
-        `🚫 <b>${header}</b>\n\n` +
+        `🚫 <b>Links are not allowed in this group.</b>\n\n` +
         `👤 ${username} received warning <b>${totalWarnings}/5</b>.`
       ).catch(() => null);
       if (sentWarn?.ok && sentWarn.result?.message_id) {

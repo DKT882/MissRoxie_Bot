@@ -47,10 +47,8 @@ export const TELEGRAM_SUGGESTED_COMMANDS: readonly BotCommand[] = Object.freeze(
   { command: "addsticker", description: "Add sticker" },
   { command: "addgif", description: "Add GIF" },
   { command: "liststickers", description: "List stickers" },
-  { command: "removesticker", description: "Remove sticker" },
   { command: "stickerpackremove", description: "Remove pack" },
   { command: "clearstickers", description: "Clear stickers" },
-  { command: "teststicker", description: "Test sticker" },
   { command: "free", description: "Exempt member" },
   { command: "unfree", description: "Revoke exemption" },
   { command: "freelist", description: "Exempted members" },
@@ -91,8 +89,6 @@ export const TELEGRAM_SUGGESTED_COMMANDS: readonly BotCommand[] = Object.freeze(
   { command: "setrules", description: "Set rules" },
   { command: "rules", description: "Group rules" },
   { command: "clearrules", description: "Clear rules" },
-  { command: "pin", description: "Pin message" },
-  { command: "unpin", description: "Unpin message" },
   { command: "unpinall", description: "Unpin all" },
   { command: "slowmode", description: "Slowmode delay" },
   { command: "promote", description: "Promote admin" },
@@ -118,9 +114,9 @@ export const TELEGRAM_SUGGESTED_COMMANDS: readonly BotCommand[] = Object.freeze(
   { command: "tban", description: "Temp ban member" },
 ]);
 
-// Structural assertion verifying exact 100 suggestion commands and zero duplicates
-if (TELEGRAM_SUGGESTED_COMMANDS.length !== 100) {
-  throw new Error(`TELEGRAM_SUGGESTED_COMMANDS count must be exactly 100, got ${TELEGRAM_SUGGESTED_COMMANDS.length}`);
+// Structural assertion verifying <= 100 suggestion commands and zero duplicates
+if (TELEGRAM_SUGGESTED_COMMANDS.length > 100) {
+  throw new Error(`TELEGRAM_SUGGESTED_COMMANDS count must not exceed 100, got ${TELEGRAM_SUGGESTED_COMMANDS.length}`);
 }
 const seenSuggestionNames = new Set<string>();
 for (const cmd of TELEGRAM_SUGGESTED_COMMANDS) {
@@ -146,16 +142,16 @@ export async function registerBotCommands(): Promise<{
 }> {
   const errors: string[] = [];
 
-  // Authoritative 100-command list independent of permission/execution structures
+  // Authoritative command list (<= 100 per Telegram API constraint)
   const authoritativeCommands = [...TELEGRAM_SUGGESTED_COMMANDS];
 
-  if (authoritativeCommands.length !== 100) {
-    throw new Error(`Fatal: Authoritative Telegram suggestion list must contain exactly 100 commands, got ${authoritativeCommands.length}`);
+  if (authoritativeCommands.length > 100) {
+    throw new Error(`Fatal: Authoritative Telegram suggestion list must contain at most 100 commands, got ${authoritativeCommands.length}`);
   }
 
   const uniqueCommandNames = new Set(authoritativeCommands.map(c => c.command));
-  if (uniqueCommandNames.size !== 100) {
-    throw new Error(`Fatal: Unique command count must be 100, got ${uniqueCommandNames.size}`);
+  if (uniqueCommandNames.size !== authoritativeCommands.length) {
+    throw new Error(`Fatal: Unique command count mismatch, got ${uniqueCommandNames.size} vs ${authoritativeCommands.length}`);
   }
 
   // 1. Clear any stale language-specific command overrides
@@ -236,7 +232,7 @@ export async function registerBotCommands(): Promise<{
 
   const allSucceeded = adminRes.ok && groupRes.ok && privateRes.ok && defaultRes.ok;
   if (allSucceeded) {
-    console.log('COMMAND_MENU_AUTHORITATIVE: 100 commands confirmed by Telegram');
+    console.log(`COMMAND_MENU_AUTHORITATIVE: ${authoritativeCommands.length} commands confirmed by Telegram`);
     console.log(`TELEGRAM_SCOPE_VERIFICATION: all_chat_administrators=${authoritativeCommands.length} all_group_chats=${authoritativeCommands.length} all_private_chats=${authoritativeCommands.length} default=${authoritativeCommands.length}`);
   } else {
     console.error(`COMMAND_REGISTRATION_FAILED: Registration incomplete. Errors: ${errors.join(', ')}`);
@@ -720,6 +716,9 @@ export class CommandHandler {
         return true;
       case '/forgetme':
         await this.handleForgetMe(ctx);
+        return true;
+      case '/dm':
+        await this.handleDm(ctx);
         return true;
       case '/chatbot':
         await this.handleChatbot(ctx);
@@ -1294,6 +1293,64 @@ export class CommandHandler {
         : `ℹ️ No stored memory found for you in this chat.`,
       { reply_to_message_id: ctx.message.message_id }
     );
+  }
+
+  private static async handleDm(ctx: CommandContext) {
+    if (TelegramMiddleware.isGroup(ctx.message)) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        'ℹ️ The <code>/dm</code> command is only available in private chat (Direct Messages).',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    const arg = (ctx.args[0] || '').toLowerCase().trim();
+    if (arg === 'delon' || arg === 'on' || arg === 'enable' || arg === 'true' || arg === '1') {
+      db.setPrivateAutoDelete(ctx.chatId, true);
+      const res = await telegramApi.sendMessage(
+        ctx.chatId,
+        '✅ <b>Auto-delete for DM responses enabled (10 seconds).</b>\n\n' +
+        'Roxie\'s outgoing messages in this chat will be automatically deleted after <b>10 seconds</b>.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      if (res.ok && res.result?.message_id) {
+        const msgId = res.result.message_id;
+        setTimeout(() => {
+          telegramApi.deleteMessage(ctx.chatId, msgId).catch(() => {});
+        }, 10000);
+      }
+      return;
+    }
+
+    if (arg === 'deloff' || arg === 'off' || arg === 'disable' || arg === 'false' || arg === '0') {
+      db.setPrivateAutoDelete(ctx.chatId, false);
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '❌ <b>Auto-delete for DM responses disabled.</b>\n\n' +
+        'Roxie\'s messages in this chat will not be automatically deleted.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    const isDel = db.getPrivateAutoDelete(ctx.chatId);
+    const res = await telegramApi.sendMessage(
+      ctx.chatId,
+      `⚙️ <b>DM Auto-Delete Settings</b>\n\n` +
+      `<b>Current Status:</b> ${isDel ? '🟢 Enabled (10 seconds)' : '🔴 Disabled'}\n\n` +
+      `<b>Usage:</b>\n` +
+      `• <code>/dm delOn</code> - Enable 10s auto-deletion for Roxie's responses\n` +
+      `• <code>/dm delOff</code> - Disable auto-deletion\n` +
+      `• <code>/dm status</code> - View current setting`,
+      { reply_to_message_id: ctx.message.message_id }
+    );
+    if (isDel && res.ok && res.result?.message_id) {
+      const msgId = res.result.message_id;
+      setTimeout(() => {
+        telegramApi.deleteMessage(ctx.chatId, msgId).catch(() => {});
+      }, 10000);
+    }
   }
 
   private static async handleJoinMode(ctx: CommandContext) {

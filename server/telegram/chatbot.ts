@@ -2435,14 +2435,26 @@ export class ChatbotService {
       };
     }
 
-    const configuredModels = process.env.OPENROUTER_MODELS
+    const defaultFallbackModels = [
+      process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
+      process.env.OPENROUTER_FALLBACK_1?.trim(),
+      process.env.OPENROUTER_FALLBACK_2?.trim(),
+      process.env.OPENROUTER_FALLBACK_3?.trim(),
+      'google/gemini-2.0-flash-001',
+      'meta-llama/llama-3.3-70b-instruct',
+      'mistralai/mistral-small-24b-instruct-2501'
+    ].filter(Boolean) as string[];
+
+    const rawConfigured = process.env.OPENROUTER_MODELS
       ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim()).filter(Boolean)
-      : [
-          process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
-          process.env.OPENROUTER_FALLBACK_1?.trim(),
-          process.env.OPENROUTER_FALLBACK_2?.trim(),
-          process.env.OPENROUTER_FALLBACK_3?.trim()
-        ].filter(Boolean) as string[];
+      : defaultFallbackModels;
+
+    const configuredModels: string[] = [];
+    for (const m of rawConfigured) {
+      if (m && !configuredModels.includes(m)) {
+        configuredModels.push(m);
+      }
+    }
 
     const userMemories = userId ? db.getUserMemory(chatId, userId) : [];
     const memoryContext = userMemories.length > 0 
@@ -2653,7 +2665,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     try {
       for (const modelToTry of configuredModels) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
         try {
           const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -2676,7 +2688,17 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
 
           if (response.ok) {
             const data = await response.json();
-            const content = data.choices?.[0]?.message?.content?.trim();
+            const rawMsg = data.choices?.[0]?.message;
+            let content = '';
+            if (typeof rawMsg?.content === 'string') {
+              content = rawMsg.content.trim();
+            } else if (Array.isArray(rawMsg?.content)) {
+              content = rawMsg.content
+                .map((c: any) => (typeof c === 'string' ? c : (c?.text || '')))
+                .join('')
+                .trim();
+            }
+
             if (content) {
               replyContent = content;
               modelUsed = modelToTry;
@@ -2690,6 +2712,8 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
                 model: modelUsed
               }));
               break;
+            } else {
+              console.warn(`CHATBOT_MODEL_FALLBACK { fromModel: "${modelToTry}", error: "Empty completion content returned" }`);
             }
           } else {
             const errText = await response.text();
@@ -2918,7 +2942,27 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) return null;
 
-    const model = process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat';
+    const defaultFallbackModels = [
+      process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
+      process.env.OPENROUTER_FALLBACK_1?.trim(),
+      process.env.OPENROUTER_FALLBACK_2?.trim(),
+      process.env.OPENROUTER_FALLBACK_3?.trim(),
+      'google/gemini-2.0-flash-001',
+      'meta-llama/llama-3.3-70b-instruct',
+      'mistralai/mistral-small-24b-instruct-2501'
+    ].filter(Boolean) as string[];
+
+    const rawConfigured = process.env.OPENROUTER_MODELS
+      ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim()).filter(Boolean)
+      : defaultFallbackModels;
+
+    const configuredModels: string[] = [];
+    for (const m of rawConfigured) {
+      if (m && !configuredModels.includes(m)) {
+        configuredModels.push(m);
+      }
+    }
+
     const userText = message.text || message.caption || '';
     if (!userText) return null;
 
@@ -2947,7 +2991,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
       }
     }
 
-    await telegramApi.sendChatAction(chatId, 'typing');
+    await telegramApi.sendChatAction(chatId, 'typing').catch(() => {});
 
     const systemPrompt = `You are Roxie, a sharp, confident, psychologically observant female friend in a Telegram group chat.
 Users are chatting casually.
@@ -2959,79 +3003,105 @@ Core Rules:
 - No unsolicited advice or lecture. No asterisks actions like *laughs*.
 - If you have nothing interesting or natural to add, reply with exactly the single word: SKIP`;
 
+    let replyContent: string | null = null;
+    let modelUsed = configuredModels[0] || 'deepseek/deepseek-chat';
+
     await this.acquireAiSlot();
     try {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'HTTP-Referer': 'https://ai.studio',
-          'X-Title': 'Roxie Telegram Bot',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: `${contextPrefix}[LATEST MESSAGE TO REPLY TO]:\n${userName}: "${userText}"` }
-          ],
-          max_tokens: 100,
-          temperature: 0.7
-        })
-      });
+      for (const modelToTry of configuredModels) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-      if (!response.ok) return null;
+        try {
+          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'HTTP-Referer': 'https://ai.studio',
+              'X-Title': 'Roxie Telegram Bot',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: modelToTry,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `${contextPrefix}[LATEST MESSAGE TO REPLY TO]:\n${userName}: "${userText}"` }
+              ],
+              max_tokens: 100,
+              temperature: 0.7
+            }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
 
-      const data = await response.json();
-      const replyContent = data.choices?.[0]?.message?.content?.trim();
+          if (response.ok) {
+            const data = await response.json();
+            const rawMsg = data.choices?.[0]?.message;
+            let content = '';
+            if (typeof rawMsg?.content === 'string') {
+              content = rawMsg.content.trim();
+            } else if (Array.isArray(rawMsg?.content)) {
+              content = rawMsg.content
+                .map((c: any) => (typeof c === 'string' ? c : (c?.text || '')))
+                .join('')
+                .trim();
+            }
 
-      if (!replyContent || replyContent === 'SKIP' || replyContent.toUpperCase() === 'SKIP.') {
-        return null;
-      }
-
-      const cleaned = this.cleanAiText(replyContent, userText, userName);
-      if (!cleaned) return null;
-
-      const settings = db.getGroupSettings(chatId);
-      const isLustMode = Boolean(settings?.lustMode);
-      if (isLustMode) {
-        const customSticker = this.selectCustomStickerForLustMode('playful', chatId);
-        if (customSticker) {
-          return {
-            requestId,
-            chatId,
-            messageId: msgId,
-            userId,
-            personality: 'LustMode-Couple',
-            mood: 'playful',
-            responseType: 'text_plus_sticker',
-            content: this.sanitizeLustModeText(cleaned, userText),
-            mediaFileId: customSticker,
-            replyToMessageId: msgId,
-            modelUsed: model
-          };
+            if (content && content !== 'SKIP' && content.toUpperCase() !== 'SKIP.') {
+              replyContent = content;
+              modelUsed = modelToTry;
+              break;
+            }
+          }
+        } catch {
+          clearTimeout(timeoutId);
         }
-        return null;
       }
-
-      return {
-        requestId,
-        chatId,
-        messageId: msgId,
-        userId,
-        personality: 'Psychologist-style',
-        mood: 'normal',
-        responseType: 'text',
-        content: cleaned,
-        replyToMessageId: msgId,
-        modelUsed: model
-      };
-    } catch (err) {
-      console.error('[CHATBOT] Error in random natural chat decision:', err);
-      return null;
     } finally {
       this.releaseAiSlot();
     }
+
+    if (!replyContent || replyContent === 'SKIP' || replyContent.toUpperCase() === 'SKIP.') {
+      return null;
+    }
+
+    const cleaned = this.cleanAiText(replyContent, userText, userName);
+    if (!cleaned) return null;
+
+    const settings = db.getGroupSettings(chatId);
+    const isLustMode = Boolean(settings?.lustMode);
+    if (isLustMode) {
+      const customSticker = this.selectCustomStickerForLustMode('playful', chatId);
+      if (customSticker) {
+        return {
+          requestId,
+          chatId,
+          messageId: msgId,
+          userId,
+          personality: 'LustMode-Couple',
+          mood: 'playful',
+          responseType: 'text_plus_sticker',
+          content: this.sanitizeLustModeText(cleaned, userText),
+          mediaFileId: customSticker,
+          replyToMessageId: msgId,
+          modelUsed
+        };
+      }
+      return null;
+    }
+
+    return {
+      requestId,
+      chatId,
+      messageId: msgId,
+      userId,
+      personality: 'Psychologist-style',
+      mood: 'normal',
+      responseType: 'text',
+      content: cleaned,
+      replyToMessageId: msgId,
+      modelUsed
+    };
   }
 
   private static async dispatchResponse(decision: ChatbotDecision, reqCtx?: TelegramRequestContext): Promise<boolean> {
@@ -3083,6 +3153,14 @@ Core Rules:
       }
     };
 
+    const scheduleDmAutoDelete = (chatId: number, msgId?: number) => {
+      if (chatId > 0 && msgId && db.getPrivateAutoDelete(chatId)) {
+        setTimeout(() => {
+          telegramApi.deleteMessage(chatId, msgId).catch(() => {});
+        }, 10000);
+      }
+    };
+
     const settings = db.getGroupSettings(decision.chatId);
     const isLustMode = Boolean(settings?.lustMode);
 
@@ -3100,7 +3178,9 @@ Core Rules:
           console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
           conv.messages.push({ role: 'assistant', content: sanitizedContent });
           this.trimContext(conv);
-          recordAssistantEntry(sanitizedContent, 'text', undefined, textRes.result?.message_id || (textRes as any).message_id);
+          const outMsgId = textRes.result?.message_id || (textRes as any).message_id;
+          recordAssistantEntry(sanitizedContent, 'text', undefined, outMsgId);
+          scheduleDmAutoDelete(decision.chatId, outMsgId);
           db.recordAutoResponseSent(decision.chatId);
           return true;
         }
@@ -3121,6 +3201,13 @@ Core Rules:
         const stickerFileId = stickerRes.ok ? (stickerRes.result?.sticker?.file_id || decision.mediaFileId) : undefined;
         const outMsgId = stickerRes.result?.message_id || textRes.result?.message_id;
         recordAssistantEntry(fullContent, stickerRes.ok ? 'sticker' : 'text', stickerFileId, outMsgId);
+        const textMsgId = textRes.result?.message_id || (textRes as any).message_id;
+        if (textMsgId) {
+          scheduleDmAutoDelete(decision.chatId, textMsgId);
+        }
+        if (stickerRes.result?.message_id) {
+          scheduleDmAutoDelete(decision.chatId, stickerRes.result.message_id);
+        }
         if (textRes.ok || (textRes as any).message_id) {
           db.recordAutoResponseSent(decision.chatId);
         }
@@ -3149,6 +3236,7 @@ Core Rules:
         const stickerFileId = res.result?.sticker?.file_id || decision.mediaFileId;
         const outMsgId = res.result?.message_id;
         recordAssistantEntry('[Sent sticker]', 'sticker', stickerFileId, outMsgId);
+        scheduleDmAutoDelete(decision.chatId, outMsgId);
         db.recordAutoStickerSent(decision.chatId);
         return true;
       }
@@ -3166,6 +3254,7 @@ Core Rules:
         const animFileId = res.result?.animation?.file_id || decision.mediaFileId;
         const outMsgId = res.result?.message_id;
         recordAssistantEntry('[Sent animation]', 'animation', animFileId, outMsgId);
+        scheduleDmAutoDelete(decision.chatId, outMsgId);
         return true;
       }
       return false;
@@ -3181,7 +3270,9 @@ Core Rules:
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
         conv.messages.push({ role: 'assistant', content: sanitizedContent });
         this.trimContext(conv);
-        recordAssistantEntry(sanitizedContent, 'text', undefined, res.result?.message_id || (res as any).message_id);
+        const outMsgId = res.result?.message_id || (res as any).message_id;
+        recordAssistantEntry(sanitizedContent, 'text', undefined, outMsgId);
+        scheduleDmAutoDelete(decision.chatId, outMsgId);
         db.recordAutoResponseSent(decision.chatId);
         return true;
       }

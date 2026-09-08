@@ -540,7 +540,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     modifiesState: true,
     auditLogged: true,
     aliases: ['/removegif'],
-    scopes: ['group', 'admin']
+    scopes: ['group', 'admin'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/stickerpackremove',
@@ -581,7 +582,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: false,
     modifiesState: false,
     auditLogged: true,
-    scopes: ['group', 'admin']
+    scopes: ['group', 'admin'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/free',
@@ -1142,7 +1144,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: false,
     modifiesState: true,
     auditLogged: true,
-    scopes: ['group', 'admin']
+    scopes: ['group', 'admin'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/unpin',
@@ -1156,7 +1159,8 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     isPublic: false,
     modifiesState: true,
     auditLogged: true,
-    scopes: ['group', 'admin']
+    scopes: ['group', 'admin'],
+    suggestInTelegramMenu: false
   },
   {
     command: '/unpinall',
@@ -1570,6 +1574,20 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     modifiesState: true,
     auditLogged: true,
     scopes: ['group', 'admin']
+  },
+  {
+    command: '/dm',
+    category: 'Configuration',
+    description: 'Toggle auto-deletion of Roxie outgoing responses in private chat (delOn/delOff).',
+    syntax: '/dm <delOn|delOff|status>',
+    example: '/dm delOn',
+    permission: 'Everyone',
+    targetType: 'Config',
+    isPublic: true,
+    modifiesState: true,
+    auditLogged: false,
+    scopes: ['private'],
+    suggestInTelegramMenu: false
   }
 ];
 
