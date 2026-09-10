@@ -2766,11 +2766,17 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         messageId: msgId,
         reason: 'All OpenRouter models failed'
       }));
-      // Provide conversational fallback so bot never goes completely mute
-      replyContent = isLustMode 
-        ? 'Acha jaan, thoda connection slow hai, par main yahin hoon! 💕'
-        : 'Acha! Network thoda slow hai, ek baar firse bolo? 🙂';
-      modelUsed = 'fallback/internal';
+      return {
+        requestId,
+        chatId,
+        messageId: msgId,
+        userId,
+        personality: personalityLabel,
+        mood,
+        responseType: 'none',
+        replyToMessageId: msgId,
+        reason: 'All OpenRouter models failed'
+      };
     }
 
     // Add user message to conversation history
