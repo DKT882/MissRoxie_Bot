@@ -460,19 +460,115 @@ export default function App() {
   const settingsSaveStatusTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSettingsSentTimestampRef = useRef<number>(0);
 
+  // Enterprise Operator Authentication State
+  const [session, setSession] = useState<{ sessionId: string; username: string; role: string; expiresAt?: number } | null>(null);
+  const [operator, setOperator] = useState<{ id?: string; username: string; name?: string; role: string } | null>(null);
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [loginUsername, setLoginUsername] = useState<string>('');
+  const [loginPassword, setLoginPassword] = useState<string>('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loggingIn, setLoggingIn] = useState<boolean>(false);
+
+  useEffect(() => {
+    const savedSessionId = localStorage.getItem('roxie_session_id');
+    if (savedSessionId) {
+      fetch('/api/auth/session', {
+        headers: {
+          'x-session-id': savedSessionId,
+          'Authorization': `Bearer ${savedSessionId}`
+        }
+      })
+        .then(res => {
+          if (res.ok) return res.json();
+          localStorage.removeItem('roxie_session_id');
+          return null;
+        })
+        .then(data => {
+          if (data?.session) {
+            setSession(data.session);
+            setOperator({ username: data.session.username, role: data.session.role });
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginUsername.trim() || !loginPassword) {
+      setLoginError('Username and password are required');
+      return;
+    }
+    setLoggingIn(true);
+    setLoginError(null);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginUsername.trim(), password: loginPassword })
+      });
+      const data = await res.json();
+      if (res.ok && data.session) {
+        localStorage.setItem('roxie_session_id', data.session.sessionId);
+        setSession(data.session);
+        setOperator(data.operator || { username: data.session.username, role: data.session.role });
+        setShowLoginModal(false);
+        setLoginPassword('');
+        fetchData();
+      } else {
+        setLoginError(data.error || 'Invalid credentials');
+      }
+    } catch (err: any) {
+      setLoginError(err.message || 'Login request failed');
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const handleAdminLogout = async () => {
+    const savedSessionId = localStorage.getItem('roxie_session_id') || session?.sessionId;
+    if (savedSessionId) {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-session-id': savedSessionId,
+          'Authorization': `Bearer ${savedSessionId}`
+        },
+        body: JSON.stringify({ sessionId: savedSessionId })
+      }).catch(() => {});
+    }
+    localStorage.removeItem('roxie_session_id');
+    setSession(null);
+    setOperator(null);
+  };
+
   // In-flight GET request deduplication cache
   const inFlightGetMap = useRef<Map<string, Promise<any>>>(new Map());
 
   const deduplicatedFetch = async (url: string, options?: RequestInit): Promise<Response> => {
-    if (options && options.method && options.method !== 'GET') {
-      return fetch(url, options);
+    const sessionToken = localStorage.getItem('roxie_session_id') || session?.sessionId;
+    const authHeaders: Record<string, string> = {};
+    if (sessionToken) {
+      authHeaders['x-session-id'] = sessionToken;
+      authHeaders['Authorization'] = `Bearer ${sessionToken}`;
+    }
+    const mergedOptions: RequestInit = {
+      ...options,
+      headers: {
+        ...authHeaders,
+        ...(options?.headers || {})
+      }
+    };
+    if (mergedOptions && mergedOptions.method && mergedOptions.method !== 'GET') {
+      return fetch(url, mergedOptions);
     }
     if (inFlightGetMap.current.has(url)) {
       return inFlightGetMap.current.get(url)!;
     }
     const promise = (async () => {
       try {
-        return await fetch(url, options);
+        return await fetch(url, mergedOptions);
       } finally {
         inFlightGetMap.current.delete(url);
       }
@@ -1712,6 +1808,33 @@ export default function App() {
 
         {/* Status Indicators, Theme Toggle & Test Button */}
         <div className="flex items-center gap-3 flex-wrap">
+          {session ? (
+            <div className={`flex items-center gap-2 ${themeInnerCardBg} px-3 py-1.5 rounded-xl border ${themeBorder} text-xs`}>
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span className="font-semibold text-xs">{operator?.username || session.username}</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-400 font-mono font-bold">
+                {session.role}
+              </span>
+              <button
+                onClick={handleAdminLogout}
+                className="ml-1 text-[11px] text-rose-400 hover:text-rose-300 font-medium hover:underline flex items-center gap-1"
+                title="Log out of Admin session"
+              >
+                <LogOut className="w-3 h-3" />
+                <span className="hidden sm:inline">Logout</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => { setLoginError(null); setShowLoginModal(true); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm"
+              title="Operator / Admin Login"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Admin Login</span>
+            </button>
+          )}
+
           <div className={`flex items-center gap-2 ${themeInnerCardBg} px-3 py-1.5 rounded-xl border ${themeBorder} text-xs`}>
             <span className={`w-2.5 h-2.5 rounded-full ${isPolling ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
             <span className="font-medium text-xs">
@@ -6347,6 +6470,96 @@ export default function App() {
                 >
                   {automationsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                   Save Rule
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Login Modal */}
+      {showLoginModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md ${themeCardBg} border ${themeBorder} rounded-2xl p-6 shadow-2xl space-y-4`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">Admin Operator Login</h3>
+                  <p className={`text-[11px] ${themeMutedText}`}>Authenticate to access protected administrative controls</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowLoginModal(false)}
+                className={`p-1.5 rounded-lg hover:bg-white/10 ${themeMutedText} transition-colors`}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {loginError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleAdminLogin} className="space-y-3.5">
+              <div>
+                <label className={`block text-[11px] font-semibold uppercase tracking-wider ${themeMutedText} mb-1`}>
+                  Username
+                </label>
+                <input
+                  type="text"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  placeholder="admin"
+                  required
+                  autoFocus
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-purple-500 transition-colors`}
+                />
+              </div>
+
+              <div>
+                <label className={`block text-[11px] font-semibold uppercase tracking-wider ${themeMutedText} mb-1`}>
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  required
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-purple-500 transition-colors`}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowLoginModal(false)}
+                  className={`px-3 py-2 rounded-xl text-xs font-semibold ${themeInnerCardBg} border ${themeBorder} hover:opacity-80 transition-opacity`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loggingIn}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+                >
+                  {loggingIn ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Authenticating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Log In</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

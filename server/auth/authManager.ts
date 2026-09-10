@@ -36,9 +36,10 @@ class AuthManager {
   private initDefaultOperator() {
     // Create default superadmin if none exist
     const defaultId = 'op-super-1';
-    const username = 'admin';
+    const username = process.env.ADMIN_USERNAME?.trim() || 'admin';
     if (!this.operators.has(defaultId)) {
-      const passwordHash = this.hashPassword('RoxieAdmin2026!');
+      const defaultPassword = process.env.ADMIN_PASSWORD?.trim() || 'RoxieAdmin2026!';
+      const passwordHash = this.hashPassword(defaultPassword);
       this.operators.set(defaultId, {
         id: defaultId,
         username,

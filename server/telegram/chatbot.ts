@@ -2437,9 +2437,9 @@ export class ChatbotService {
 
     const defaultFallbackModels = [
       process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
-      process.env.OPENROUTER_FALLBACK_1?.trim(),
-      process.env.OPENROUTER_FALLBACK_2?.trim(),
-      process.env.OPENROUTER_FALLBACK_3?.trim(),
+      process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
+      process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
+      process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
       'google/gemini-2.0-flash-001',
       'meta-llama/llama-3.3-70b-instruct',
       'mistralai/mistral-small-24b-instruct-2501'
@@ -2453,6 +2453,11 @@ export class ChatbotService {
     for (const m of rawConfigured) {
       if (m && !configuredModels.includes(m)) {
         configuredModels.push(m);
+      }
+    }
+    for (const fb of ['google/gemini-2.0-flash-001', 'meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
+      if (!configuredModels.includes(fb)) {
+        configuredModels.push(fb);
       }
     }
 
@@ -2944,9 +2949,9 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
 
     const defaultFallbackModels = [
       process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
-      process.env.OPENROUTER_FALLBACK_1?.trim(),
-      process.env.OPENROUTER_FALLBACK_2?.trim(),
-      process.env.OPENROUTER_FALLBACK_3?.trim(),
+      process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
+      process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
+      process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
       'google/gemini-2.0-flash-001',
       'meta-llama/llama-3.3-70b-instruct',
       'mistralai/mistral-small-24b-instruct-2501'
@@ -2960,6 +2965,11 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     for (const m of rawConfigured) {
       if (m && !configuredModels.includes(m)) {
         configuredModels.push(m);
+      }
+    }
+    for (const fb of ['google/gemini-2.0-flash-001', 'meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
+      if (!configuredModels.includes(fb)) {
+        configuredModels.push(fb);
       }
     }
 
