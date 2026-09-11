@@ -270,16 +270,19 @@ export class TelegramBotManager {
         metricsTracker.increment('telegram_api_requests');
         const offset = this.lastUpdateId ? this.lastUpdateId + 1 : undefined;
         const pollReqStart = Date.now();
-        logDebug({
-          event: 'POLLING_REQUEST_START',
-          offset,
+
+        console.log(JSON.stringify({
+          event: 'TELEGRAM_GETUPDATES_START',
+          instanceId,
+          offset: offset ?? null,
           timeout: 20
-        });
+        }));
 
         const data = await telegramApi.getUpdates(
           offset,
           20,
-          ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member', 'chat_join_request']
+          ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member', 'chat_join_request'],
+          this.abortController?.signal
         );
 
         const pollElapsed = Date.now() - pollReqStart;
@@ -423,6 +426,11 @@ export class TelegramBotManager {
           error: err.message || 'Error during update polling'
         }));
 
+        console.log(JSON.stringify({
+          event: 'TELEGRAM_POLLING_RESTART',
+          instanceId
+        }));
+
         errorTracker.recordError({
           source: 'TELEGRAM',
           severity: 'WARN',
@@ -432,6 +440,12 @@ export class TelegramBotManager {
         await new Promise((r) => setTimeout(r, 3000));
       }
     }
+
+    console.warn(JSON.stringify({
+      event: 'TELEGRAM_POLLING_EXIT',
+      instanceId,
+      reason: this.shouldStop ? 'shouldStop_flag' : (TelegramBotManager.activeInstanceId !== instanceId ? 'instance_superseded' : 'loop_ended')
+    }));
 
     if (TelegramBotManager.activeInstanceId === instanceId) {
       this.isRunning = false;

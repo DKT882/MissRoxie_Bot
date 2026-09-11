@@ -5,6 +5,7 @@ export interface TelegramApiCallOptions {
   maxRetries?: number;
   skipRateLimiter?: boolean;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export class TelegramApi {
@@ -160,13 +161,23 @@ export class TelegramApi {
         }
 
         const url = `https://api.telegram.org/bot${token}/${method}`;
-        const signal = AbortSignal.timeout(timeoutMs);
+        const timeoutSignal = AbortSignal.timeout(timeoutMs);
+        let reqSignal: AbortSignal;
+        if (options?.signal) {
+          if (typeof (AbortSignal as any).any === 'function') {
+            reqSignal = (AbortSignal as any).any([timeoutSignal, options.signal]);
+          } else {
+            reqSignal = options.signal;
+          }
+        } else {
+          reqSignal = timeoutSignal;
+        }
 
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: body ? JSON.stringify(body) : undefined,
-          signal
+          signal: reqSignal
         });
 
         const elapsedMs = Date.now() - startedAt;
@@ -306,13 +317,18 @@ export class TelegramApi {
     return this.call('deleteWebhook', { drop_pending_updates: false });
   }
 
-  public async getUpdates(offset?: number, timeout: number = 20, allowed_updates: string[] = ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member', 'chat_join_request']): Promise<any> {
+  public async getUpdates(
+    offset?: number,
+    timeout: number = 20,
+    allowed_updates: string[] = ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member', 'chat_join_request'],
+    signal?: AbortSignal
+  ): Promise<any> {
     const timeoutMs = (timeout * 1000) + 10000;
     return this.call('getUpdates', {
       offset: offset || undefined,
       timeout,
       allowed_updates
-    }, { timeoutMs, skipRateLimiter: true });
+    }, { timeoutMs, maxRetries: 0, skipRateLimiter: true, signal });
   }
 
   public async sendMessage(
