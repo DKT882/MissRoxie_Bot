@@ -210,26 +210,8 @@ export class TelegramBotManager {
         return;
       }
 
-      // Inspect webhook state before deleting
-      const webhookInfo = await telegramApi.getWebhookInfo().catch(() => null);
-      if (webhookInfo && webhookInfo.ok && webhookInfo.result) {
-        console.log(JSON.stringify({
-          event: 'TELEGRAM_WEBHOOK_STATUS',
-          hasWebhook: Boolean(webhookInfo.result.url),
-          url: webhookInfo.result.url || '',
-          pendingUpdateCount: webhookInfo.result.pending_update_count || 0,
-          lastErrorDate: webhookInfo.result.last_error_date,
-          lastErrorMessage: webhookInfo.result.last_error_message
-        }));
-      }
-
       // Delete webhook to allow long polling
-      const deleteRes = await telegramApi.deleteWebhook();
-      console.log(JSON.stringify({
-        event: 'TELEGRAM_DELETE_WEBHOOK_RESULT',
-        ok: deleteRes.ok,
-        description: deleteRes.description
-      }));
+      await telegramApi.deleteWebhook();
 
       // Register admin-only command visibility with Telegram
       await registerBotCommands().catch((err) => {
@@ -271,13 +253,6 @@ export class TelegramBotManager {
         const offset = this.lastUpdateId ? this.lastUpdateId + 1 : undefined;
         const pollReqStart = Date.now();
 
-        console.log(JSON.stringify({
-          event: 'TELEGRAM_GETUPDATES_START',
-          instanceId,
-          offset: offset ?? null,
-          timeout: 20
-        }));
-
         const data = await telegramApi.getUpdates(
           offset,
           20,
@@ -288,14 +263,6 @@ export class TelegramBotManager {
         const pollElapsed = Date.now() - pollReqStart;
 
         if (!data.ok) {
-          console.error(JSON.stringify({
-            event: 'TELEGRAM_GETUPDATES_RESULT',
-            ok: false,
-            error_code: data.error_code,
-            description: data.description,
-            elapsedMs: pollElapsed
-          }));
-
           metricsTracker.increment('telegram_api_errors');
           if (data.error_code === 409) {
             this.pollingError = 'Conflict 409: Another bot session is active.';
@@ -313,27 +280,6 @@ export class TelegramBotManager {
           throw new Error(data.description || `Telegram API Error`);
         }
 
-        const updateCount = Array.isArray(data.result) ? data.result.length : 0;
-        if (updateCount === 0) {
-          console.log(JSON.stringify({
-            event: 'TELEGRAM_GETUPDATES_RESULT',
-            ok: true,
-            updateCount: 0,
-            elapsedMs: pollElapsed
-          }));
-        } else {
-          const firstUpdateId = data.result[0]?.update_id;
-          const lastUpdateId = data.result[data.result.length - 1]?.update_id;
-          console.log(JSON.stringify({
-            event: 'TELEGRAM_GETUPDATES_RESULT',
-            ok: true,
-            updateCount,
-            firstUpdateId,
-            lastUpdateId,
-            elapsedMs: pollElapsed
-          }));
-        }
-
         if (hadError) {
           this.reconnectCount++;
           this.lastReconnectAt = new Date().toISOString();
@@ -345,28 +291,6 @@ export class TelegramBotManager {
           const updatesToProcess: TelegramUpdate[] = [];
 
           for (const update of data.result as TelegramUpdate[]) {
-            console.log(JSON.stringify({
-              event: 'TELEGRAM_UPDATE_RECEIVED',
-              updateId: update.update_id,
-              hasMessage: Boolean(update.message),
-              hasEditedMessage: Boolean(update.edited_message),
-              hasCallbackQuery: Boolean(update.callback_query),
-              hasChatMember: Boolean((update as any).chat_member),
-              hasMyChatMember: Boolean((update as any).my_chat_member),
-              hasChatJoinRequest: Boolean(update.chat_join_request)
-            }));
-
-            const rawMsg = update.message || update.edited_message;
-            if (rawMsg) {
-              console.log(JSON.stringify({
-                event: 'TELEGRAM_MESSAGE_RECEIVED',
-                updateId: update.update_id,
-                chatId: rawMsg.chat?.id,
-                messageId: rawMsg.message_id,
-                chatType: rawMsg.chat?.type || 'unknown'
-              }));
-            }
-
             if (update.update_id) {
               if (TelegramBotManager.processedUpdateIds.has(update.update_id)) {
                 continue;
@@ -441,12 +365,6 @@ export class TelegramBotManager {
       }
     }
 
-    console.warn(JSON.stringify({
-      event: 'TELEGRAM_POLLING_EXIT',
-      instanceId,
-      reason: this.shouldStop ? 'shouldStop_flag' : (TelegramBotManager.activeInstanceId !== instanceId ? 'instance_superseded' : 'loop_ended')
-    }));
-
     if (TelegramBotManager.activeInstanceId === instanceId) {
       this.isRunning = false;
     }
@@ -459,13 +377,6 @@ export class TelegramBotManager {
     const textOrCap = msg ? (msg.text || msg.caption || '') : '';
     const isCmd = Boolean(textOrCap.trim().startsWith('/') || textOrCap.trim().startsWith('!'));
     const hasMedia = Boolean(msg && (msg.photo || msg.video || msg.sticker || msg.animation || msg.document || msg.voice || msg.audio));
-
-    console.log(JSON.stringify({
-      event: 'TELEGRAM_PROCESS_UPDATE_START',
-      updateId: update.update_id,
-      hasMessage: Boolean(update.message),
-      chatId: msg?.chat?.id || 0
-    }));
 
     const traceId = `tr_${update.update_id || '0'}_${msg?.chat?.id || '0'}_${msg?.message_id || '0'}_${Date.now()}`;
     const telegramReceiveDelayMs = msg?.date ? Math.max(0, receivedAt - msg.date * 1000) : 0;
@@ -482,15 +393,6 @@ export class TelegramBotManager {
     });
 
     if (msg) {
-      console.log(JSON.stringify({
-        event: 'CHATBOT_UPDATE_RECEIVED',
-        requestId: traceId,
-        traceId,
-        chatId: msg.chat?.id,
-        messageId: msg.message_id,
-        chatType: msg.chat?.type || 'unknown'
-      }));
-
       logDebug({
         event: 'TELEGRAM_UPDATE_RECEIVED',
         update_id: update.update_id,
@@ -588,11 +490,6 @@ export class TelegramBotManager {
 
         const totalPipelineMs = Date.now() - pipelineStart;
         metricsTracker.increment('telegram_updates_processed');
-        console.log(JSON.stringify({
-          event: 'TELEGRAM_PROCESS_UPDATE_END',
-          updateId: update.update_id,
-          success: true
-        }));
         logDebug({
           event: 'MESSAGE_PIPELINE_END',
           update_id: update.update_id,
@@ -604,12 +501,6 @@ export class TelegramBotManager {
         });
       } catch (updateErr: any) {
         metricsTracker.increment('telegram_updates_failed');
-        console.error(JSON.stringify({
-          event: 'TELEGRAM_PROCESS_UPDATE_END',
-          updateId: update.update_id,
-          success: false,
-          error: updateErr.message || 'Error processing update'
-        }));
         errorTracker.recordError({
           source: 'TELEGRAM',
           severity: 'ERROR',
@@ -951,13 +842,6 @@ export class TelegramBotManager {
 
     // 8. Roxie AI Chatbot triggers: delegate to executeTask to run outside global slot
     const isPrivateChat = message.chat?.type === 'private';
-    console.log(JSON.stringify({
-      event: 'CHATBOT_AI_ELIGIBLE',
-      traceId: reqCtx?.traceId,
-      chatId,
-      eligible: true,
-      reason: isPrivateChat ? 'private_dm' : 'group_message_eval'
-    }));
 
     logDebug({
       event: 'TELEGRAM_MESSAGE_PROCESSED',
