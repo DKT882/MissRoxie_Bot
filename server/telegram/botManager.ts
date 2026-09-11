@@ -398,6 +398,15 @@ export class TelegramBotManager {
     });
 
     if (msg) {
+      console.log(JSON.stringify({
+        event: 'CHATBOT_UPDATE_RECEIVED',
+        requestId: traceId,
+        traceId,
+        chatId: msg.chat?.id,
+        messageId: msg.message_id,
+        chatType: msg.chat?.type || 'unknown'
+      }));
+
       logDebug({
         event: 'TELEGRAM_UPDATE_RECEIVED',
         update_id: update.update_id,
@@ -846,6 +855,15 @@ export class TelegramBotManager {
     });
 
     // 8. Roxie AI Chatbot triggers: delegate to executeTask to run outside global slot
+    const isPrivateChat = message.chat?.type === 'private';
+    console.log(JSON.stringify({
+      event: 'CHATBOT_AI_ELIGIBLE',
+      traceId: reqCtx?.traceId,
+      chatId,
+      eligible: true,
+      reason: isPrivateChat ? 'private_dm' : 'group_message_eval'
+    }));
+
     logDebug({
       event: 'TELEGRAM_MESSAGE_PROCESSED',
       chat_id: chatId,

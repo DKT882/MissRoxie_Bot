@@ -12,10 +12,6 @@ export const getEffectiveLogLevel = (): LogLevel => {
   if (envLevel && envLevel in LOG_LEVELS) {
     return envLevel;
   }
-  // In production (e.g. Render), default strictly to 'error'
-  if (process.env.NODE_ENV === 'production' || process.env.RENDER === 'true') {
-    return 'error';
-  }
   return 'info';
 };
 
