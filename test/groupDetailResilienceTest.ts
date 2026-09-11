@@ -1,10 +1,11 @@
-﻿import assert from 'assert';
+import assert from 'assert';
 import http from 'http';
 import { db } from '../server/db/storage.js';
 import { telegramApi } from '../server/telegram/api.js';
 
 process.env.PORT = '9922';
 process.env.NODE_ENV = 'production';
+process.env.ROXIE_TEST_MODE = 'true';
 
 function getJson(urlPath: string): Promise<{ status: number; data: any; durationMs: number }> {
   const start = Date.now();

@@ -461,36 +461,48 @@ export default function App() {
   const lastSettingsSentTimestampRef = useRef<number>(0);
 
   // Enterprise Operator Authentication State
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [session, setSession] = useState<{ sessionId: string; username: string; role: string; expiresAt?: number } | null>(null);
   const [operator, setOperator] = useState<{ id?: string; username: string; name?: string; role: string } | null>(null);
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [loginUsername, setLoginUsername] = useState<string>('');
   const [loginPassword, setLoginPassword] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState<boolean>(false);
 
   useEffect(() => {
     const savedSessionId = localStorage.getItem('roxie_session_id');
+    const authHeaders: Record<string, string> = {};
     if (savedSessionId) {
-      fetch('/api/auth/session', {
-        headers: {
-          'x-session-id': savedSessionId,
-          'Authorization': `Bearer ${savedSessionId}`
+      authHeaders['x-session-id'] = savedSessionId;
+      authHeaders['Authorization'] = `Bearer ${savedSessionId}`;
+    }
+
+    fetch('/api/auth/session', {
+      credentials: 'same-origin',
+      headers: authHeaders
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data?.authenticated && data?.session) {
+          setSession(data.session);
+          setOperator(data.operator || { username: data.session.username, role: data.session.role });
+          localStorage.setItem('roxie_session_id', data.session.sessionId);
+        } else {
+          localStorage.removeItem('roxie_session_id');
+          setSession(null);
+          setOperator(null);
         }
       })
-        .then(res => {
-          if (res.ok) return res.json();
-          localStorage.removeItem('roxie_session_id');
-          return null;
-        })
-        .then(data => {
-          if (data?.session) {
-            setSession(data.session);
-            setOperator({ username: data.session.username, role: data.session.role });
-          }
-        })
-        .catch(() => {});
-    }
+      .catch(() => {
+        localStorage.removeItem('roxie_session_id');
+        setSession(null);
+        setOperator(null);
+      })
+      .finally(() => {
+        setAuthLoading(false);
+      });
   }, []);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
@@ -504,6 +516,7 @@ export default function App() {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: loginUsername.trim(), password: loginPassword })
       });
@@ -514,12 +527,12 @@ export default function App() {
         setOperator(data.operator || { username: data.session.username, role: data.session.role });
         setShowLoginModal(false);
         setLoginPassword('');
-        fetchData();
+        setLoginError(null);
       } else {
         setLoginError(data.error || 'Invalid credentials');
       }
     } catch (err: any) {
-      setLoginError(err.message || 'Login request failed');
+      setLoginError(err.message || 'Login request failed. Server unreachable.');
     } finally {
       setLoggingIn(false);
     }
@@ -527,17 +540,18 @@ export default function App() {
 
   const handleAdminLogout = async () => {
     const savedSessionId = localStorage.getItem('roxie_session_id') || session?.sessionId;
-    if (savedSessionId) {
-      fetch('/api/auth/logout', {
+    try {
+      await fetch('/api/auth/logout', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
-          'x-session-id': savedSessionId,
-          'Authorization': `Bearer ${savedSessionId}`
+          'x-session-id': savedSessionId || '',
+          'Authorization': `Bearer ${savedSessionId || ''}`
         },
         body: JSON.stringify({ sessionId: savedSessionId })
-      }).catch(() => {});
-    }
+      });
+    } catch {}
     localStorage.removeItem('roxie_session_id');
     setSession(null);
     setOperator(null);
@@ -554,6 +568,7 @@ export default function App() {
       authHeaders['Authorization'] = `Bearer ${sessionToken}`;
     }
     const mergedOptions: RequestInit = {
+      credentials: 'same-origin',
       ...options,
       headers: {
         ...authHeaders,
@@ -561,14 +576,26 @@ export default function App() {
       }
     };
     if (mergedOptions && mergedOptions.method && mergedOptions.method !== 'GET') {
-      return fetch(url, mergedOptions);
+      const res = await fetch(url, mergedOptions);
+      if (res.status === 401 && !url.includes('/api/auth/')) {
+        localStorage.removeItem('roxie_session_id');
+        setSession(null);
+        setOperator(null);
+      }
+      return res;
     }
     if (inFlightGetMap.current.has(url)) {
       return inFlightGetMap.current.get(url)!;
     }
     const promise = (async () => {
       try {
-        return await fetch(url, mergedOptions);
+        const res = await fetch(url, mergedOptions);
+        if (res.status === 401 && !url.includes('/api/auth/')) {
+          localStorage.removeItem('roxie_session_id');
+          setSession(null);
+          setOperator(null);
+        }
+        return res;
       } finally {
         inFlightGetMap.current.delete(url);
       }
@@ -744,6 +771,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!session) return;
     fetchData();
     const interval = setInterval(fetchData, 5000);
     return () => {
@@ -752,7 +780,7 @@ export default function App() {
         clearTimeout(settingsDebounceTimerRef.current);
       }
     };
-  }, [selectedChatId, activeGroupDetailId, activePrivateChatId]);
+  }, [session, selectedChatId, activeGroupDetailId, activePrivateChatId]);
 
   // Handle connection test
   const handleTestConnection = async () => {
@@ -771,28 +799,30 @@ export default function App() {
 
   // Export logs
   const exportData = (format: 'json' | 'csv') => {
-    const logs = selectedChatId === 'all' 
-      ? overview?.recentLogs || [] 
-      : groupDetails?.logs || [];
-
+    const logsToExport = selectedChatId === 'all' ? (overview?.recentLogs || []) : (groupDetails?.logs || []);
     if (format === 'json') {
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(logs, null, 2));
-      const dlAnchor = document.createElement('a');
-      dlAnchor.setAttribute("href", dataStr);
-      dlAnchor.setAttribute("download", `roxie_control_center_logs_${selectedChatId}.json`);
-      dlAnchor.click();
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(logsToExport, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `roxie_logs_${selectedChatId}_${new Date().toISOString().slice(0,10)}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
     } else {
-      let csv = "ID,Timestamp,Group,Action,Actor,Target,Reason\n";
-      logs.forEach((l: any) => {
-        csv += `"${l.id}","${l.timestamp}","${l.chatTitle || l.chatId}","${l.action}","${l.adminUsername || l.adminUserId || ''}","${l.targetUsername || l.targetUserId || ''}","${(l.reason || '').replace(/"/g, '""')}"\n`;
-      });
-      const dataStr = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
-      const dlAnchor = document.createElement('a');
-      dlAnchor.setAttribute("href", dataStr);
-      dlAnchor.setAttribute("download", `roxie_control_center_logs_${selectedChatId}.csv`);
-      dlAnchor.click();
+      const headers = ['id', 'action', 'targetUsername', 'adminUsername', 'reason', 'timestamp'];
+      const rows = logsToExport.map((l: any) => [l.id, l.action, l.targetUsername || '', l.adminUsername || '', l.reason || '', l.timestamp]);
+      const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map((e: any) => e.join(','))].join('\n');
+      const encodedUri = encodeURI(csvContent);
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", encodedUri);
+      downloadAnchor.setAttribute("download", `roxie_logs_${selectedChatId}_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
     }
   };
+
+
 
   // Add Sticker Pack
   const handleAddStickerPack = async (e: React.FormEvent) => {
@@ -1785,6 +1815,126 @@ export default function App() {
     minSeconds: 60,
     maxSeconds: 300
   };
+
+  // Auth Guard: While checking operator session
+  if (authLoading) {
+    return (
+      <div className="h-screen w-screen bg-stone-950 text-stone-100 flex flex-col items-center justify-center font-sans select-none">
+        <div className="flex flex-col items-center gap-4 p-8 rounded-3xl bg-stone-900/60 border border-stone-800/80 shadow-2xl backdrop-blur-xl">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-pink-600 via-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-xl shadow-purple-500/25 animate-pulse">
+            <Bot className="w-7 h-7" />
+          </div>
+          <div className="text-center">
+            <h2 className="text-sm font-bold tracking-tight text-white flex items-center justify-center gap-2">
+              ROXIE CONTROL CENTER
+            </h2>
+            <p className="text-xs text-stone-400 mt-1">Verifying operator session...</p>
+          </div>
+          <Loader2 className="w-5 h-5 text-purple-400 animate-spin mt-2" />
+        </div>
+      </div>
+    );
+  }
+
+  // Auth Guard: Fullscreen Dark-Themed Login Screen
+  if (!session) {
+    return (
+      <div className="min-h-screen w-full bg-stone-950 text-stone-100 flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden select-none">
+        {/* Ambient Glow Background Effects */}
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-purple-600/15 rounded-full blur-[128px] pointer-events-none" />
+        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-pink-600/15 rounded-full blur-[128px] pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[160px] pointer-events-none" />
+
+        <div className="w-full max-w-md bg-stone-900/80 border border-stone-800 rounded-3xl p-8 shadow-2xl backdrop-blur-2xl space-y-6 relative z-10 animate-in fade-in zoom-in-95 duration-300">
+          <div className="text-center space-y-2.5">
+            <div className="inline-flex p-3.5 rounded-2xl bg-gradient-to-tr from-pink-600 via-purple-600 to-indigo-600 text-white shadow-xl shadow-purple-500/30 mb-1">
+              <Bot className="w-8 h-8" />
+            </div>
+            <h1 className="text-xl font-black tracking-tight text-white flex items-center justify-center gap-2">
+              ROXIE CONTROL CENTER
+            </h1>
+            <p className="text-xs text-stone-400 max-w-xs mx-auto">
+              Authenticate operator credentials to access group moderation, direct chats, and system security controls.
+            </p>
+          </div>
+
+          {loginError && (
+            <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2.5 animate-in fade-in duration-200">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span className="font-medium">{loginError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleAdminLogin} className="space-y-4">
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-1.5">
+                Operator Username
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  placeholder="admin"
+                  required
+                  autoFocus
+                  className="w-full bg-stone-950/70 border border-stone-800 rounded-2xl px-4 py-3 text-xs text-white placeholder-stone-600 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-mono"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-1.5">
+                Operator Password
+              </label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  required
+                  className="w-full bg-stone-950/70 border border-stone-800 rounded-2xl px-4 py-3 text-xs text-white placeholder-stone-600 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all pr-10 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-300 p-1 transition-colors"
+                >
+                  <Eye className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loggingIn}
+              className="w-full py-3.5 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-bold transition-all shadow-lg shadow-purple-600/30 disabled:opacity-50 flex items-center justify-center gap-2 mt-2 cursor-pointer active:scale-[0.99]"
+            >
+              {loggingIn ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Authenticating Operator...</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-4 h-4" />
+                  <span>Authenticate Operator</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="pt-3 border-t border-stone-800/80 text-center">
+            <p className="text-[11px] text-stone-500 flex items-center justify-center gap-1.5 font-medium">
+              <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
+              <span>Restricted Access • Authorized Operators Only</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`h-screen overflow-hidden ${themeBg} flex flex-col font-sans transition-colors duration-200`}>

@@ -173,10 +173,13 @@ async function runDirectMessageReplyTests() {
     assert.strictEqual(res9a.body.code, 'UNAUTHORIZED');
 
     // 9b. VIEWER role lacks permission to send
-    const viewerOp = authManager.createOperator({ username: 'test_viewer', name: 'Test Viewer', role: 'VIEWER' });
-    const authViewer = authManager.authenticate('test_viewer', 'temp_pwd');
+    process.env.DASHBOARD_ADMIN_PASSWORD = 'TEST_DASHBOARD_PASSWORD';
+    process.env.DASHBOARD_SESSION_SECRET = 'TEST_DASHBOARD_SESSION_SECRET';
+    authManager.reloadConfig();
+    const viewerOp = authManager.createOperator({ username: 'test_viewer', name: 'Test Viewer', password: 'temp_password', role: 'VIEWER' });
+    const authViewer = authManager.authenticate('test_viewer', 'temp_password');
     // Set a session manually with VIEWER role
-    const testSession = authManager.authenticate('admin', 'RoxieAdmin2026!');
+    const testSession = authManager.authenticate('admin', 'TEST_DASHBOARD_PASSWORD');
     const sessionId = testSession.session?.sessionId || '';
     // Temporarily set role to VIEWER
     const sessionObj = authManager.getSession(sessionId);

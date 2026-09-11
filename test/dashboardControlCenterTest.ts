@@ -297,7 +297,10 @@ async function runDashboardControlCenterTests() {
   pass('Test 18: Group conversation memory strict isolation');
 
   // 19. Authentication manager verification
-  const testAuth = authManager.authenticate('admin', 'RoxieAdmin2026!');
+  process.env.DASHBOARD_ADMIN_PASSWORD = 'TEST_DASHBOARD_PASSWORD';
+  process.env.DASHBOARD_SESSION_SECRET = 'TEST_DASHBOARD_SESSION_SECRET';
+  authManager.reloadConfig();
+  const testAuth = authManager.authenticate('admin', 'TEST_DASHBOARD_PASSWORD');
   assert(testAuth.operator, 'Auth manager should authenticate admin');
   assert.strictEqual(testAuth.operator?.role, 'SUPER_ADMIN');
   pass('Test 19: Operator authentication');

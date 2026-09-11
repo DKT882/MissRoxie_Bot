@@ -6,8 +6,13 @@ import { db } from '../server/db/storage.js';
 export async function runPhase7EnterpriseTests() {
   console.log('🧪 Starting Roxie Bot Phase 7 Enterprise Admin Platform Test Suite...');
 
+  // Configure test credentials
+  process.env.DASHBOARD_ADMIN_PASSWORD = 'TEST_DASHBOARD_PASSWORD';
+  process.env.DASHBOARD_SESSION_SECRET = 'TEST_DASHBOARD_SESSION_SECRET';
+  authManager.reloadConfig();
+
   // PHASE7-01 & PHASE7-02: Authentication & Invalid Credentials
-  const authValid = authManager.authenticate('admin', 'RoxieAdmin2026!');
+  const authValid = authManager.authenticate('admin', 'TEST_DASHBOARD_PASSWORD');
   if (!authValid.operator || !authValid.session) {
     throw new Error('PHASE7-01 Failed: Valid authentication failed');
   }

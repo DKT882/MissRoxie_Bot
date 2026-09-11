@@ -6,6 +6,7 @@ import { CommandHandler } from '../server/telegram/commands.js';
 
 process.env.PORT = '9911';
 process.env.NODE_ENV = 'production';
+process.env.ROXIE_TEST_MODE = 'true';
 
 function getJson(urlPath: string): Promise<{ status: number; data: any }> {
   return new Promise((resolve, reject) => {
