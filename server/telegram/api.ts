@@ -298,6 +298,10 @@ export class TelegramApi {
     return res;
   }
 
+  public async getWebhookInfo(): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
+    return this.call('getWebhookInfo', undefined, { timeoutMs: 15000, maxRetries: 2, skipRateLimiter: true });
+  }
+
   public async deleteWebhook(): Promise<{ ok: boolean; description?: string; error_code?: number }> {
     return this.call('deleteWebhook', { drop_pending_updates: false });
   }
