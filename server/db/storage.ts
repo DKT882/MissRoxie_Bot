@@ -3,6 +3,8 @@ import path from 'path';
 import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig } from '../telegram/types.js';
 import { getDefaultStickersStats } from '../telegram/defaultStickers.js';
 import { logDebug } from '../observability/logger.js';
+import { mongoManager } from './mongodb.js';
+import { MongoStorageService } from './mongoStorage.js';
 
 interface RaidStateRecord {
   recentJoins: number[];
@@ -658,7 +660,7 @@ export class StorageManager {
       .filter((l: any) => l.groupId === chatId || l.chatId === chatId || l.targetChatId === chatId)
       .slice(-50);
 
-    const abuseWordsList = settings.abuseWords || settings.customAbusiveWords || [];
+    const abuseWordsList = (settings.abuseWords || settings.customAbusiveWords || []).slice(0, 500);
 
     return {
       schemaVersion: 1,
@@ -687,8 +689,8 @@ export class StorageManager {
         linksWhitelist: this.getLinkWhitelist(chatId),
         approvedUsers: this.getApprovedUsers(chatId),
         freedUsers: this.getFreedUsers(chatId),
-        warnings: (this.data.warnings || []).filter((w: any) => w.groupId === chatId),
-        tempActions: (this.data.tempActions || []).filter((t: any) => t.groupId === chatId),
+        warnings: (this.data.warnings || []).filter((w: any) => w.groupId === chatId).slice(-200),
+        tempActions: (this.data.tempActions || []).filter((t: any) => t.groupId === chatId).slice(-200),
         abuseWords: abuseWordsList
       },
       ai: {
@@ -722,20 +724,20 @@ export class StorageManager {
         mediaLibrary: mediaLib,
         stickerProtection: Boolean(settings.stickerProtection)
       },
-      stickerPacks: stickerPacksList,
+      stickerPacks: stickerPacksList.slice(0, 100),
       abuseWords: abuseWordsList,
-      members: this.data.groupMembers?.[key] || [],
-      moderators: (settings as any).admins || [],
+      members: this.getGroupMembers(chatId).slice(0, 500),
+      moderators: ((settings as any).admins || []).slice(0, 100),
       messages,
       statistics: {
-        schedules: this.getGroupSchedules(chatId),
+        schedules: this.getGroupSchedules(chatId).slice(-50),
         notes: this.getAllNotes(chatId),
         userMemories: Object.entries(this.data.userMemories || {})
           .filter(([k]) => k.startsWith(`${chatId}_`))
           .map(([_, v]) => v)
       },
       activity: groupLogs,
-      updatedAt: new Date().toISOString()
+      updatedAt: settings.updatedAt || new Date().toISOString()
     };
   }
 
@@ -770,6 +772,13 @@ export class StorageManager {
       this.lastSaveSuccessful = true;
       this.lastStorageError = null;
       this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
+
+      // Async write to MongoDB Atlas if connected (non-blocking, never fails local save)
+      if (mongoManager.getStatus().isConnected) {
+        MongoStorageService.saveGroup(safeData).catch((mongoErr) => {
+          console.warn(`[Storage] Background MongoDB sync failed for group ${numChatId}: ${mongoErr?.message}`);
+        });
+      }
 
       const writeElapsed = Date.now() - writeStart;
       logDebug({
@@ -872,7 +881,7 @@ export class StorageManager {
     const mergedSettings: GroupSettings = {
       ...existingSettings,
       ...incomingSettings,
-      chatTitle: data.chat?.title || incomingSettings.chatTitle || existingSettings.chatTitle || `Group ${chatId}`,
+      chatTitle: data.title || data.chat?.title || incomingSettings.chatTitle || existingSettings.chatTitle || `Group ${chatId}`,
       botLeft: data.status?.botLeft !== undefined ? Boolean(data.status.botLeft) : incomingSettings.botLeft,
       leftAt: data.status?.leftAt || incomingSettings.leftAt,
       unavailable: data.status?.unavailable !== undefined ? Boolean(data.status.unavailable) : incomingSettings.unavailable,
@@ -909,6 +918,11 @@ export class StorageManager {
     if (Array.isArray(data.abuseWords)) {
       mergedSettings.abuseWords = data.abuseWords;
       mergedSettings.customAbusiveWords = data.abuseWords;
+    }
+
+    // Restore moderators/admins
+    if (Array.isArray(data.moderators) && data.moderators.length > 0) {
+      (mergedSettings as any).admins = data.moderators;
     }
 
     this.data.settings[chatId] = mergedSettings;
@@ -973,14 +987,16 @@ export class StorageManager {
     }
 
     // 6. Notes & Schedules
-    if (data.statistics?.notes) {
+    const rawNotes = data.notes || data.statistics?.notes;
+    if (rawNotes && typeof rawNotes === 'object') {
       if (!this.data.notes) this.data.notes = {};
-      this.data.notes[key] = data.statistics.notes;
+      this.data.notes[key] = rawNotes;
     }
-    if (Array.isArray(data.statistics?.schedules) && data.statistics.schedules.length > 0) {
+    const rawSchedules = data.schedules || data.statistics?.schedules;
+    if (Array.isArray(rawSchedules) && rawSchedules.length > 0) {
       if (!this.data.schedules) this.data.schedules = [];
       const existingScheduleIds = new Set(this.data.schedules.map((s: any) => s.id));
-      const incomingSchedules = data.statistics.schedules.slice(-100);
+      const incomingSchedules = rawSchedules.slice(-50);
       for (const s of incomingSchedules) {
         if (s?.id && !existingScheduleIds.has(s.id)) {
           this.data.schedules.push(s);
@@ -990,10 +1006,11 @@ export class StorageManager {
     }
 
     // 7. Activity logs
-    if (Array.isArray(data.activity) && data.activity.length > 0) {
+    const rawLogs = data.activity || data.logs;
+    if (Array.isArray(rawLogs) && rawLogs.length > 0) {
       if (!this.data.logs) this.data.logs = [];
       const existingLogIds = new Set(this.data.logs.map((l: any) => l.id));
-      const incomingLogs = data.activity.slice(-50);
+      const incomingLogs = rawLogs.slice(-50);
       for (const log of incomingLogs) {
         if (log?.id && !existingLogIds.has(log.id)) {
           this.data.logs.push(log);
@@ -1002,7 +1019,13 @@ export class StorageManager {
       }
     }
 
-    // 8. User lust levels
+    // 8. Members restoration
+    if (Array.isArray(data.members) && data.members.length > 0) {
+      if (!this.data.groupMembers) this.data.groupMembers = {};
+      this.data.groupMembers[key] = data.members.slice(0, 500);
+    }
+
+    // 9. User lust levels
     if (Array.isArray(data.lustMode?.userLustLevels) && data.lustMode.userLustLevels.length > 0) {
       if (!this.data.userLustLevels) this.data.userLustLevels = {};
       for (const ul of data.lustMode.userLustLevels) {
@@ -1011,6 +1034,86 @@ export class StorageManager {
         }
       }
     }
+  }
+
+  public async hydrateGroupsFromMongo(): Promise<{ hydratedCount: number; syncedToMongoCount: number; errorsCount: number }> {
+    if (!mongoManager.getStatus().isConnected) {
+      return { hydratedCount: 0, syncedToMongoCount: 0, errorsCount: 0 };
+    }
+
+    let hydratedCount = 0;
+    let syncedToMongoCount = 0;
+    let errorsCount = 0;
+
+    try {
+      const mongoGroups = await MongoStorageService.getAllGroups();
+      console.log(`[Storage] Found ${mongoGroups.length} group(s) in MongoDB Atlas during startup hydration check.`);
+
+      const mongoChatIds = new Set<string>();
+
+      for (const doc of mongoGroups) {
+        try {
+          const rawChatId = doc.chatId || doc.numChatId;
+          const numChatId = Number(rawChatId);
+          if (isNaN(numChatId) || numChatId >= 0) continue;
+          const chatIdStr = String(numChatId);
+          mongoChatIds.add(chatIdStr);
+
+          const existingSettings = this.data.settings?.[numChatId];
+          const localUpdated = existingSettings?.updatedAt ? new Date(existingSettings.updatedAt).getTime() : 0;
+          const mongoUpdated = doc.updatedAt ? new Date(doc.updatedAt).getTime() : (doc.createdAt ? new Date(doc.createdAt).getTime() : 0);
+
+          // Merge / conflict resolution rule:
+          // If group not in RAM or MongoDB is newer/equal -> MongoDB is persistent source of truth
+          if (!existingSettings || mongoUpdated >= localUpdated) {
+            this.restoreGroupData(numChatId, doc);
+            if (this.isDataDirWritable) {
+              const targetFile = path.join(this.groupsDir, `${numChatId}.json`);
+              const rawData = this.buildGroupDataObject(numChatId);
+              const safeData = this.sanitizeGroupData(rawData);
+              const jsonContent = JSON.stringify(safeData, null, 2);
+              this.atomicWriteJsonSync(targetFile, jsonContent);
+              this.lastSaveTimestamps.set(chatIdStr, new Date().toISOString());
+            }
+            hydratedCount++;
+          } else {
+            // Local is strictly newer (e.g. offline file edits) -> push local to MongoDB
+            const rawData = this.buildGroupDataObject(numChatId);
+            const safeData = this.sanitizeGroupData(rawData);
+            await MongoStorageService.saveGroup(safeData);
+            syncedToMongoCount++;
+          }
+        } catch (groupErr: any) {
+          console.error(`[Storage] Failed to hydrate group ${doc?.chatId} from MongoDB:`, groupErr?.message);
+          errorsCount++;
+        }
+      }
+
+      // Check for any groups currently in RAM that do NOT exist in MongoDB at all -> replicate to Mongo
+      if (this.data.settings) {
+        for (const idStr of Object.keys(this.data.settings)) {
+          const numChatId = Number(idStr);
+          if (isNaN(numChatId) || numChatId >= 0) continue;
+          if (!mongoChatIds.has(String(numChatId))) {
+            try {
+              const rawData = this.buildGroupDataObject(numChatId);
+              const safeData = this.sanitizeGroupData(rawData);
+              await MongoStorageService.saveGroup(safeData);
+              syncedToMongoCount++;
+            } catch (syncErr: any) {
+              console.warn(`[Storage] Failed to replicate local group ${numChatId} to MongoDB:`, syncErr?.message);
+            }
+          }
+        }
+      }
+
+      console.log(`[Storage] MongoDB hydration completed: ${hydratedCount} loaded into RAM & disk cache, ${syncedToMongoCount} synced to MongoDB, ${errorsCount} errors.`);
+    } catch (err: any) {
+      console.error('[Storage] Error during MongoDB startup hydration:', err?.message);
+      errorsCount++;
+    }
+
+    return { hydratedCount, syncedToMongoCount, errorsCount };
   }
 
   public scheduleSave(chatId?: number | string) {
@@ -1993,6 +2096,7 @@ export class StorageManager {
       updatedAt: new Date().toISOString()
     };
     this.data.settings[chatId] = updated;
+    this.saveGroupJsonSync(chatId);
     this.scheduleSave(chatId);
     return updated;
   }
@@ -2014,6 +2118,7 @@ export class StorageManager {
     if (clean && !settings.abuseWords.includes(clean)) {
       settings.abuseWords.push(clean);
       settings.customAbusiveWords = settings.abuseWords;
+      this.saveGroupJsonSync(numId);
       this.scheduleSave(numId);
     }
     return settings.abuseWords;
@@ -2028,6 +2133,7 @@ export class StorageManager {
     const clean = word.toLowerCase().trim();
     settings.abuseWords = settings.abuseWords.filter(w => w.toLowerCase() !== clean);
     settings.customAbusiveWords = settings.abuseWords;
+    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
     return settings.abuseWords;
   }
@@ -2037,6 +2143,7 @@ export class StorageManager {
     const settings = this.getGroupSettings(numId);
     settings.abuseWords = [];
     settings.customAbusiveWords = [];
+    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
   }
 
@@ -2168,6 +2275,7 @@ export class StorageManager {
       ...record
     };
     this.data.warnings.push(newRecord);
+    this.saveGroupJsonSync(record.chatId);
     this.scheduleSave(record.chatId);
 
     const totalWarnings = this.getUserWarnings(record.chatId, record.userId).length;
@@ -2183,6 +2291,7 @@ export class StorageManager {
     // Sort by timestamp or index and remove latest
     const latest = userWarnings[userWarnings.length - 1];
     this.data.warnings = this.data.warnings.filter((w) => w.id !== latest.id);
+    this.saveGroupJsonSync(chatId);
     this.scheduleSave(chatId);
 
     const remaining = this.getUserWarnings(chatId, userId).length;
@@ -2207,6 +2316,7 @@ export class StorageManager {
     const initialCount = this.data.warnings.length;
     this.data.warnings = this.data.warnings.filter((w) => !(w.chatId === chatId && w.userId === userId));
     const removed = initialCount - this.data.warnings.length;
+    this.saveGroupJsonSync(chatId);
     this.scheduleSave(chatId);
     return removed;
   }
@@ -2237,6 +2347,7 @@ export class StorageManager {
       fileType
     };
     this.data.notes[key] = record;
+    this.saveGroupJsonSync(chatId);
     this.scheduleSave(chatId);
     return record;
   }
@@ -2263,6 +2374,7 @@ export class StorageManager {
     const key = `${chatId}_${cleanName}`;
     if (this.data.notes[key]) {
       delete this.data.notes[key];
+      this.saveGroupJsonSync(chatId);
       this.scheduleSave(chatId);
       return true;
     }
@@ -2280,6 +2392,7 @@ export class StorageManager {
       }
     }
     if (count > 0) {
+      this.saveGroupJsonSync(chatId);
       this.scheduleSave(chatId);
     }
     return count;
@@ -2306,6 +2419,7 @@ export class StorageManager {
       approvedAt: new Date().toISOString()
     };
     this.data.approvedUsers[key] = record;
+    this.saveGroupJsonSync(chatId);
     this.scheduleSave(chatId);
     return record;
   }
@@ -2315,6 +2429,7 @@ export class StorageManager {
     const key = `${chatId}_${userId}`;
     if (this.data.approvedUsers[key]) {
       delete this.data.approvedUsers[key];
+      this.saveGroupJsonSync(chatId);
       this.scheduleSave(chatId);
       return true;
     }
@@ -4544,6 +4659,7 @@ export class StorageManager {
     if (this.data.groupMemories) {
       this.data.groupMemories[key] = record;
     }
+    this.saveGroupJsonSync(chatId);
     this.scheduleSave(chatId);
   }
 
@@ -4706,6 +4822,7 @@ export class StorageManager {
     settings.botLeft = true;
     settings.leftAt = new Date().toISOString();
     settings.unavailable = false;
+    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
   }
 
@@ -4715,6 +4832,7 @@ export class StorageManager {
     settings.unavailable = true;
     settings.unavailableAt = new Date().toISOString();
     if (reason) settings.unavailableReason = reason;
+    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
   }
 
@@ -4777,6 +4895,7 @@ export class StorageManager {
       ...pack,
       addedAt: pack.addedAt || new Date().toISOString()
     };
+    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
     return settings.stickerPacks[cleanKey];
   }
@@ -4796,6 +4915,7 @@ export class StorageManager {
       ...settings.stickerPacks[cleanKey],
       ...updates
     };
+    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
     return settings.stickerPacks[cleanKey];
   }
@@ -4806,6 +4926,7 @@ export class StorageManager {
     const cleanKey = packName.toLowerCase().trim();
     if (settings.stickerPacks && settings.stickerPacks[cleanKey]) {
       delete settings.stickerPacks[cleanKey];
+      this.saveGroupJsonSync(numId);
       this.scheduleSave(numId);
     }
     return this.removeStickerPackFromLibrary(packName, numId);
@@ -4924,6 +5045,7 @@ export class StorageManager {
       settings.autoResponse.nextAllowedAt = 0;
     }
 
+    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
   }
 
@@ -5017,6 +5139,7 @@ export class StorageManager {
       settings.autoSticker.nextAllowedAt = 0;
     }
 
+    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
   }
 

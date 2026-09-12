@@ -13,6 +13,8 @@ import { HealthDiagnosticsService } from './server/observability/healthService.j
 import { telegramApi } from './server/telegram/api.js';
 import { authManager } from './server/auth/authManager.js';
 import { runDummyDataCleanup } from './server/operations/cleanupDummyData.js';
+import { mongoManager } from './server/db/mongodb.js';
+import { MongoStorageService } from './server/db/mongoStorage.js';
 
 dotenv.config();
 
@@ -2536,6 +2538,21 @@ export async function startServer() {
     }
   }
 
+  // Connect to MongoDB Atlas if configured
+  if (process.env.MONGODB_URI?.trim()) {
+    try {
+      console.log('[Roxie Database] Connecting to MongoDB Atlas...');
+      const dbInstance = await mongoManager.connect();
+      if (dbInstance) {
+        await MongoStorageService.ensureIndexes();
+        console.log('[Roxie Database] Hydrating group data from MongoDB Atlas...');
+        await db.hydrateGroupsFromMongo();
+      }
+    } catch (mongoErr: any) {
+      console.warn('[Roxie Database] MongoDB Atlas initial connection failed (continuing with local storage):', mongoErr?.message);
+    }
+  }
+
   console.log(`[Roxie Server] Starting HTTP server on port ${PORT}...`);
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Roxie Server] Listening on port ${PORT}`);
@@ -2559,6 +2576,9 @@ export async function startServer() {
     } catch (err) {
       console.error('Error flushing pending storage writes:', err);
     }
+    try {
+      await mongoManager.close();
+    } catch {}
     server.close(() => {
       console.log('HTTP server closed. Exiting cleanly.');
       process.exit(0);

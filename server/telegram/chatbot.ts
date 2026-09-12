@@ -546,6 +546,7 @@ export class ChatbotService {
 
     let result = false;
     const executeAi = async (): Promise<void> => {
+      const waitMs = Date.now() - queueStartTime;
       try {
         const handled = await this.handleMessage(message, botUser, reqCtx);
         if (handled) {
@@ -2772,6 +2773,12 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
 
     if (!replyContent) {
       metricsTracker.increment('ai_failures');
+      const isEnglish = langInfo.language === 'english';
+      const fallbackReply = isLustMode
+        ? (isEnglish ? "Just a moment babe, my connection had a tiny hiccup! Say that again? 😉" : "Acha suno, thoda network slow ho gaya jaan, ek baar fir se bolo na! 😉")
+        : (isEnglish ? "Had a quick network glitch! Say that again? 🙂" : "Ek second, thoda network glitch ho gaya! Fir se bolna zara? 🙂");
+
+      conv.messages.push({ role: 'user', content: userText, timestamp: Date.now() });
       return {
         requestId,
         chatId,
@@ -2779,9 +2786,11 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         userId,
         personality: personalityLabel,
         mood,
-        responseType: 'none',
+        responseType: 'text',
+        content: fallbackReply,
         replyToMessageId: msgId,
-        reason: 'All OpenRouter models failed'
+        reason: 'All OpenRouter models failed (graceful terminal fallback delivered)',
+        modelUsed: 'fallback'
       };
     }
 
@@ -3030,14 +3039,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
       }
     }
 
-    telegramApi.sendChatAction(chatId, 'typing').catch((err) => {
-      console.warn(JSON.stringify({
-        event: 'CHATBOT_TYPING_ERROR',
-        requestId,
-        chatId,
-        error: err?.message || 'Failed to send typing indicator'
-      }));
-    });
+    // Note: Do not send typing indicator before generation for spontaneous chat to prevent ghost typing on SKIP/error.
 
     const systemPrompt = `You are Roxie, a sharp, confident, psychologically observant female friend in a Telegram group chat.
 Users are chatting casually.
@@ -3227,11 +3229,9 @@ Core Rules:
       if (isLustMode && !this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true)) {
         console.warn(`[LUST] BLOCKED DEFAULT STICKER\nchatId: ${decision.chatId}\nfileId: ${decision.mediaFileId}\nsource: default`);
         // Fallback: send text only, blocking default sticker from Telegram
-        const sendStart = Date.now();
         const textRes = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
           reply_to_message_id: decision.replyToMessageId
         });
-        const sendElapsed = Date.now() - sendStart;
         if (textRes.ok || (textRes as any).message_id) {
           const outMsgId = textRes.result?.message_id || (textRes as any).message_id;
           console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
@@ -3242,17 +3242,23 @@ Core Rules:
           db.recordAutoResponseSent(decision.chatId);
           return true;
         }
+        console.error(JSON.stringify({
+          event: 'TELEGRAM_SEND_FAILURE',
+          requestId: decision.requestId,
+          chatId: decision.chatId,
+          replyToMessageId: decision.replyToMessageId,
+          responseType: 'text',
+          error: (textRes as any)?.description || 'Telegram sendMessage failed'
+        }));
         return false;
       }
 
-      const sendStart = Date.now();
       const textRes = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
         reply_to_message_id: decision.replyToMessageId
       });
       const stickerRes = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
         reply_to_message_id: decision.replyToMessageId
       });
-      const sendElapsed = Date.now() - sendStart;
       if (textRes.ok || (textRes as any).message_id || stickerRes.ok) {
         const outMsgId = stickerRes.result?.message_id || textRes.result?.message_id || (textRes as any).message_id;
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text_plus_sticker', replyToMessageId: decision.replyToMessageId })}`);
@@ -3276,6 +3282,15 @@ Core Rules:
         }
         return true;
       }
+      console.error(JSON.stringify({
+        event: 'TELEGRAM_SEND_FAILURE',
+        requestId: decision.requestId,
+        chatId: decision.chatId,
+        replyToMessageId: decision.replyToMessageId,
+        responseType: 'text_plus_sticker',
+        textError: (textRes as any)?.description,
+        stickerError: (stickerRes as any)?.description || 'Telegram send text/sticker failed'
+      }));
       return false;
     }
 
@@ -3286,11 +3301,9 @@ Core Rules:
         return false;
       }
 
-      const sendStart = Date.now();
       const res = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
         reply_to_message_id: decision.replyToMessageId
       });
-      const sendElapsed = Date.now() - sendStart;
       if (res.ok) {
         const outMsgId = res.result?.message_id;
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'sticker', replyToMessageId: decision.replyToMessageId })}`);
@@ -3302,15 +3315,21 @@ Core Rules:
         db.recordAutoStickerSent(decision.chatId);
         return true;
       }
+      console.error(JSON.stringify({
+        event: 'TELEGRAM_SEND_FAILURE',
+        requestId: decision.requestId,
+        chatId: decision.chatId,
+        replyToMessageId: decision.replyToMessageId,
+        responseType: 'sticker',
+        error: (res as any)?.description || 'Telegram sendSticker failed'
+      }));
       return false;
     }
 
     if (decision.responseType === 'animation' && decision.mediaFileId) {
-      const sendStart = Date.now();
       const res = await telegramApi.sendAnimation(decision.chatId, decision.mediaFileId, {
         reply_to_message_id: decision.replyToMessageId
       });
-      const sendElapsed = Date.now() - sendStart;
       if (res.ok) {
         const outMsgId = res.result?.message_id;
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'animation', replyToMessageId: decision.replyToMessageId })}`);
@@ -3321,17 +3340,23 @@ Core Rules:
         scheduleDmAutoDelete(decision.chatId, outMsgId);
         return true;
       }
+      console.error(JSON.stringify({
+        event: 'TELEGRAM_SEND_FAILURE',
+        requestId: decision.requestId,
+        chatId: decision.chatId,
+        replyToMessageId: decision.replyToMessageId,
+        responseType: 'animation',
+        error: (res as any)?.description || 'Telegram sendAnimation failed'
+      }));
       return false;
     }
 
     if (decision.responseType === 'text' && decision.content) {
       const sanitizedContent = this.cleanAiText(decision.content);
       decision.content = sanitizedContent;
-      const sendStart = Date.now();
       const res = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
         reply_to_message_id: decision.replyToMessageId
       });
-      const sendElapsed = Date.now() - sendStart;
       if (res.ok || (res as any).message_id) {
         const outMsgId = res.result?.message_id || (res as any).message_id;
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
@@ -3342,11 +3367,19 @@ Core Rules:
         db.recordAutoResponseSent(decision.chatId);
         return true;
       }
+      console.error(JSON.stringify({
+        event: 'TELEGRAM_SEND_FAILURE',
+        requestId: decision.requestId,
+        chatId: decision.chatId,
+        replyToMessageId: decision.replyToMessageId,
+        responseType: 'text',
+        error: (res as any)?.description || 'Telegram sendMessage failed'
+      }));
       return false;
     }
 
     console.error(JSON.stringify({
-      event: 'CHATBOT_ERROR',
+      event: 'TELEGRAM_SEND_FAILURE',
       requestId: decision.requestId,
       chatId: decision.chatId,
       stage: 'dispatch_response',

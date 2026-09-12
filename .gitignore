@@ -7,3 +7,5 @@ coverage/
 .env*
 !.env.example
 data/backups/
+data/backup/
+data_test_*
