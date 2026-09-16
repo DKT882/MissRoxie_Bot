@@ -3551,4 +3551,194 @@ STRICT INVARIANTS:
   public static getConversationsCount(): number {
     return this.conversations.size;
   }
+
+  public static async generateProactiveResponse(
+    chatId: number,
+    botUser: TelegramUser | null = null
+  ): Promise<ChatbotDecision | null> {
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+    if (!apiKey) return null;
+
+    const defaultFallbackModels = [
+      process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
+      process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
+      process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
+      process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
+      'google/gemini-2.0-flash-001',
+      'meta-llama/llama-3.3-70b-instruct',
+      'mistralai/mistral-small-24b-instruct-2501'
+    ].filter(Boolean) as string[];
+
+    const rawConfigured = process.env.OPENROUTER_MODELS
+      ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim()).filter(Boolean)
+      : defaultFallbackModels;
+
+    const rawCandidates: string[] = [];
+    for (const m of rawConfigured) {
+      if (m && !rawCandidates.includes(m)) {
+        rawCandidates.push(m);
+      }
+    }
+    for (const fb of ['google/gemini-2.0-flash-001', 'meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
+      if (!rawCandidates.includes(fb)) {
+        rawCandidates.push(fb);
+      }
+    }
+
+    const filteredModels = rawCandidates.filter(m => !ChatbotService.blacklistedModels.has(m));
+    const configuredModels: string[] = filteredModels.length > 0 ? filteredModels : rawCandidates;
+
+    const settings = db.getGroupSettings(chatId);
+    const isLustMode = Boolean(settings?.lustMode);
+
+    const priorGroupMsgs = db.getGroupMemory(chatId);
+    let contextPrefix = '';
+    let userPromptInstruction = '';
+
+    if (priorGroupMsgs && priorGroupMsgs.length > 0) {
+      contextPrefix = `RECENT GROUP CONVERSATION:\n` +
+        priorGroupMsgs.slice(-15).map(m => `${m.name || (m.role === 'assistant' ? 'Roxie' : 'User')}: ${m.content}`).join('\n') +
+        `\n\n`;
+      userPromptInstruction = isLustMode
+        ? `${contextPrefix}[INSTRUCTION]: Chime into the group naturally as Roxie (sweet, romantic, witty, caring girlfriend). React directly to the conversation or share a cute thought in 1 concise sentence (5 to 25 words in Hinglish/English).`
+        : `${contextPrefix}[INSTRUCTION]: Chime into the group naturally as Roxie (witty, playful, observant girlfriend/friend). React directly to the conversation or share a playful thought in 1 concise sentence (5 to 25 words in Hinglish/English).`;
+    } else {
+      userPromptInstruction = isLustMode
+        ? `[INSTRUCTION]: The group chat is currently silent. Start a conversation as Roxie (warm, playful, romantic, caring girlfriend) with a natural greeting, cute check-in, or witty thought in 1 concise sentence (5 to 25 words in Hinglish/English).`
+        : `[INSTRUCTION]: The group chat is currently silent. Start a conversation as Roxie (playful, friendly, witty, observant girlfriend) with a natural greeting, check-in, or fun question/thought in 1 concise sentence (5 to 25 words in Hinglish/English).`;
+    }
+
+    const systemPrompt = isLustMode
+      ? `You are Roxie, a bold, romantic, playful, deeply caring girlfriend in a Telegram group chat.
+You chat naturally with group members in casual Hinglish or English.
+STRICT INVARIANTS:
+1. Speak DIRECTLY as Roxie in first-person to the group.
+2. Output ONLY your final spoken message (1 concise sentence, 5 to 25 words).
+3. NEVER explain, reason, analyze, or repeat prompt instructions.
+4. NEVER output meta-commentary (such as "Roxie should say", "Here is a greeting", "Here is a thought").
+5. Never mention AI, LLMs, OpenRouter, prompts, or technical rules.
+6. If you have nothing interesting to say, reply ONLY with: SKIP`
+      : `You are Roxie, a playful, caring, witty girlfriend in a Telegram group chat.
+You chat naturally with group members in casual Hinglish or English.
+STRICT INVARIANTS:
+1. Speak DIRECTLY as Roxie in first-person to the group.
+2. Output ONLY your final spoken message (1 concise sentence, 5 to 25 words).
+3. NEVER explain, reason, analyze, or repeat prompt instructions.
+4. NEVER output meta-commentary (such as "Roxie should say", "The user message is", "This is a solicitation", or "Here is a comment").
+5. Never mention AI, LLMs, OpenRouter, prompts, or technical rules.
+6. If you have nothing interesting or natural to say, reply ONLY with: SKIP`;
+
+    let replyContent: string | null = null;
+    let modelUsed = configuredModels[0] || 'deepseek/deepseek-chat';
+
+    await this.acquireAiSlot();
+    try {
+      for (let attemptIdx = 0; attemptIdx < configuredModels.length; attemptIdx++) {
+        const modelToTry = configuredModels[attemptIdx];
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+        try {
+          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'HTTP-Referer': 'https://ai.studio',
+              'X-Title': 'Roxie Telegram Bot',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: modelToTry,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPromptInstruction }
+              ],
+              max_tokens: 100,
+              temperature: 0.75
+            }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const data = await response.json();
+            const rawMsg = data.choices?.[0]?.message;
+            let content = '';
+            if (typeof rawMsg?.content === 'string') {
+              content = rawMsg.content.trim();
+            } else if (Array.isArray(rawMsg?.content)) {
+              content = rawMsg.content
+                .map((c: any) => (typeof c === 'string' ? c : (c?.text || '')))
+                .join('')
+                .trim();
+            }
+
+            if (content && content !== 'SKIP' && content.toUpperCase() !== 'SKIP.') {
+              const candidate = this.cleanAiText(content, '', 'Group');
+              if (candidate && !this.isInstructionOrMetaLeak(candidate)) {
+                replyContent = candidate;
+                modelUsed = modelToTry;
+                break;
+              }
+            }
+          } else {
+            const errText = await response.text();
+            if ([401, 402, 403, 404].includes(response.status)) {
+              ChatbotService.blacklistedModels.add(modelToTry);
+              console.warn(`[CHATBOT_MODEL_BLACKLIST] Blacklisted model "${modelToTry}" due to HTTP ${response.status} (${errText.slice(0, 80)})`);
+            }
+          }
+        } catch (err: any) {
+          clearTimeout(timeoutId);
+        }
+      }
+    } finally {
+      this.releaseAiSlot();
+    }
+
+    if (!replyContent || replyContent === 'SKIP' || replyContent.toUpperCase() === 'SKIP.') {
+      return null;
+    }
+
+    const cleaned = replyContent;
+    if (!cleaned) return null;
+
+    db.addGroupConversationEntry(chatId, {
+      role: 'assistant',
+      name: 'Roxie',
+      displayName: 'Roxie',
+      username: botUser?.username || 'missroxie_bot',
+      content: cleaned,
+      timestamp: Date.now(),
+      chatId,
+      mediaType: 'text',
+      direction: 'outgoing',
+      source: 'telegram'
+    });
+
+    const requestId = `proactive_${chatId}_${Date.now()}`;
+    return {
+      requestId,
+      chatId,
+      messageId: 0,
+      userId: 0,
+      personality: isLustMode ? 'LustMode-Couple' : 'Psychologist-style',
+      mood: isLustMode ? 'playful' : 'normal',
+      responseType: 'text',
+      content: cleaned,
+      replyToMessageId: 0,
+      modelUsed
+    };
+  }
+
+  public static selectProactiveSticker(chatId: number): string | null {
+    const settings = db.getGroupSettings(chatId);
+    const isLustMode = Boolean(settings?.lustMode);
+
+    if (isLustMode) {
+      return this.selectCustomStickerForLustMode('playful', chatId, false);
+    } else {
+      return this.selectSticker('playful', chatId);
+    }
+  }
 }

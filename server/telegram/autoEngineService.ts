@@ -1,0 +1,425 @@
+import { db } from '../db/storage.js';
+import { telegramApi } from './api.js';
+import { ChatbotService } from './chatbot.js';
+import { GroupSettings, AutoResponseConfig, AutoStickerConfig } from './types.js';
+
+export interface ScheduledAutoJob {
+  key: string;
+  botId: number;
+  chatId: number;
+  engineType: 'response' | 'sticker';
+  targetRunAt: number;
+  timeoutHandle: NodeJS.Timeout | null;
+  isExecuting: boolean;
+  consecutiveFailures: number;
+}
+
+export class AutoEngineService {
+  private jobs: Map<string, ScheduledAutoJob> = new Map();
+  private isRunning: boolean = false;
+  private currentBotId: number | null = null;
+  private unregisterSettingsListener: (() => void) | null = null;
+  private unregisterRemovalListener: (() => void) | null = null;
+
+  // Injectable hooks for fast, deterministic unit testing
+  private customSetTimeout: typeof setTimeout = setTimeout;
+  private customClearTimeout: typeof clearTimeout = clearTimeout;
+  private customNow: () => number = () => Date.now();
+
+  public makeJobKey(botId: number, chatId: number, engineType: 'response' | 'sticker'): string {
+    return `${botId}:${chatId}:${engineType}`;
+  }
+
+  public getStatus() {
+    let responseCount = 0;
+    let stickerCount = 0;
+    for (const job of this.jobs.values()) {
+      if (job.engineType === 'response') responseCount++;
+      if (job.engineType === 'sticker') stickerCount++;
+    }
+    return {
+      running: this.isRunning,
+      currentBotId: this.currentBotId,
+      totalActiveJobs: this.jobs.size,
+      activeResponseTimers: responseCount,
+      activeStickerTimers: stickerCount
+    };
+  }
+
+  public start(botId?: number | null): void {
+    const targetBotId = botId !== undefined ? botId : db.getCurrentBotId();
+    if (this.isRunning && this.currentBotId === (targetBotId ?? null)) {
+      return;
+    }
+
+    this.stop();
+    this.isRunning = true;
+    this.currentBotId = targetBotId ?? null;
+
+    // Register storage change listeners to automatically sync timers
+    this.unregisterSettingsListener = db.onSettingsChanged((chatId, settings, scopedBotId) => {
+      const activeBotId = scopedBotId ?? this.currentBotId ?? 0;
+      this.syncGroup(activeBotId, chatId, settings, false);
+    });
+
+    this.unregisterRemovalListener = db.onGroupRemoved((chatId, scopedBotId) => {
+      const activeBotId = scopedBotId ?? this.currentBotId ?? 0;
+      this.cancelAllForGroup(activeBotId, chatId);
+    });
+
+    // Staggered startup initialization: discover all active groups for current bot
+    const activeBotId = this.currentBotId ?? 0;
+    const scopedSettings = db.getAllGroupSettings(activeBotId);
+    for (const [idStr, group] of Object.entries(scopedSettings)) {
+      const chatId = Number(idStr);
+      if (chatId < 0 && !group.botLeft) {
+        if (this.currentBotId === null || group.botId === undefined || group.botId === null || group.botId === this.currentBotId) {
+          this.syncGroup(activeBotId, chatId, group, true);
+        }
+      }
+    }
+  }
+
+  public stop(): void {
+    this.isRunning = false;
+    if (this.unregisterSettingsListener) {
+      this.unregisterSettingsListener();
+      this.unregisterSettingsListener = null;
+    }
+    if (this.unregisterRemovalListener) {
+      this.unregisterRemovalListener();
+      this.unregisterRemovalListener = null;
+    }
+    for (const job of this.jobs.values()) {
+      if (job.timeoutHandle) {
+        this.customClearTimeout(job.timeoutHandle);
+        job.timeoutHandle = null;
+      }
+    }
+    this.jobs.clear();
+    this.currentBotId = null;
+  }
+
+  public calculateDelayMs(
+    config: AutoResponseConfig | AutoStickerConfig | undefined,
+    defaultMin: number,
+    defaultMax: number,
+    defaultCooldown: number
+  ): number {
+    if (!config) return defaultCooldown * 1000;
+
+    const mode = config.mode || (config.randomize ? 'random' : 'cooldown');
+
+    if (mode === 'random' || config.randomize) {
+      const rawMin = Number(config.minSeconds ?? defaultMin);
+      const rawMax = Number(config.maxSeconds ?? defaultMax);
+      const safeMin = Math.max(10, Math.min(86400, isNaN(rawMin) ? defaultMin : rawMin));
+      const safeMax = Math.max(safeMin, Math.min(86400, isNaN(rawMax) ? defaultMax : rawMax));
+      const seconds = Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
+      return seconds * 1000;
+    }
+
+    if (mode === 'cooldown') {
+      const rawCd = Number(config.cooldownSeconds ?? defaultCooldown);
+      const safeCd = Math.max(10, Math.min(86400, isNaN(rawCd) ? defaultCooldown : rawCd));
+      return safeCd * 1000;
+    }
+
+    if (mode === 'every_message') {
+      // In proactive autonomous mode, there are no discrete incoming user messages to count.
+      // Maps safely to configured cooldown (or default) to prevent uncontrolled burst spam.
+      const rawCd = Number(config.cooldownSeconds ?? defaultCooldown);
+      const safeCd = Math.max(10, Math.min(86400, isNaN(rawCd) ? defaultCooldown : rawCd));
+      return safeCd * 1000;
+    }
+
+    return defaultCooldown * 1000;
+  }
+
+  public calculateStartupJitterMs(delayMs: number): number {
+    const minJitter = 5000;
+    const maxJitter = Math.min(60000, Math.max(minJitter, delayMs));
+    return Math.floor(Math.random() * (maxJitter - minJitter + 1)) + minJitter;
+  }
+
+  public scheduleJob(
+    botId: number,
+    chatId: number,
+    engineType: 'response' | 'sticker',
+    delayMs: number,
+    reason?: string
+  ): void {
+    if (!this.isRunning) return;
+    if (this.currentBotId !== null && this.currentBotId !== botId) return;
+
+    const key = this.makeJobKey(botId, chatId, engineType);
+    const existing = this.jobs.get(key);
+
+    // Cancel existing timer if any to guarantee exactly one active timer per (botId, chatId, type)
+    if (existing?.timeoutHandle) {
+      this.customClearTimeout(existing.timeoutHandle);
+    }
+
+    const consecutiveFailures = existing?.consecutiveFailures || 0;
+    const targetRunAt = this.customNow() + delayMs;
+
+    const job: ScheduledAutoJob = {
+      key,
+      botId,
+      chatId,
+      engineType,
+      targetRunAt,
+      timeoutHandle: null,
+      isExecuting: false,
+      consecutiveFailures
+    };
+
+    job.timeoutHandle = this.customSetTimeout(async () => {
+      await this.executeJob(botId, chatId, engineType);
+    }, delayMs);
+
+    this.jobs.set(key, job);
+  }
+
+  public cancelJob(botId: number, chatId: number, engineType: 'response' | 'sticker'): void {
+    const key = this.makeJobKey(botId, chatId, engineType);
+    const existing = this.jobs.get(key);
+    if (existing) {
+      if (existing.timeoutHandle) {
+        this.customClearTimeout(existing.timeoutHandle);
+      }
+      this.jobs.delete(key);
+    }
+  }
+
+  public cancelAllForGroup(botId: number, chatId: number): void {
+    this.cancelJob(botId, chatId, 'response');
+    this.cancelJob(botId, chatId, 'sticker');
+  }
+
+  public syncGroup(
+    botId: number,
+    chatId: number,
+    settings?: GroupSettings,
+    isStartup: boolean = false
+  ): void {
+    if (!this.isRunning) return;
+    if (this.currentBotId !== null && this.currentBotId !== botId) return;
+
+    const currentSettings = settings || db.getGroupSettings(chatId);
+    if (!currentSettings || currentSettings.botLeft) {
+      this.cancelAllForGroup(botId, chatId);
+      return;
+    }
+
+    // Multi-bot isolation: ensure group belongs to this botId
+    if (currentSettings.botId !== undefined && currentSettings.botId !== null && currentSettings.botId !== botId) {
+      this.cancelAllForGroup(botId, chatId);
+      return;
+    }
+
+    // Auto Response Synchronization
+    const arConfig = currentSettings.autoResponse;
+    const arEnabled = Boolean(arConfig?.enabled && arConfig.mode !== 'disabled');
+    if (arEnabled) {
+      const fullDelay = this.calculateDelayMs(arConfig, 30, 120, 30);
+      const delay = isStartup ? this.calculateStartupJitterMs(fullDelay) : fullDelay;
+      this.scheduleJob(botId, chatId, 'response', delay, isStartup ? 'startup_jitter' : 'settings_sync');
+    } else {
+      this.cancelJob(botId, chatId, 'response');
+    }
+
+    // Auto Sticker Synchronization
+    const asConfig = currentSettings.autoSticker;
+    const asEnabled = Boolean(asConfig?.enabled && asConfig.mode !== 'disabled');
+    if (asEnabled) {
+      const fullDelay = this.calculateDelayMs(asConfig, 60, 300, 60);
+      const delay = isStartup ? this.calculateStartupJitterMs(fullDelay) : fullDelay;
+      this.scheduleJob(botId, chatId, 'sticker', delay, isStartup ? 'startup_jitter' : 'settings_sync');
+    } else {
+      this.cancelJob(botId, chatId, 'sticker');
+    }
+  }
+
+  private async executeJob(botId: number, chatId: number, engineType: 'response' | 'sticker'): Promise<void> {
+    const key = this.makeJobKey(botId, chatId, engineType);
+    const job = this.jobs.get(key);
+    if (!job || !this.isRunning) return;
+    if (this.currentBotId !== null && this.currentBotId !== botId) return;
+
+    if (job.isExecuting) {
+      return; // Avoid overlapping runs
+    }
+
+    job.isExecuting = true;
+    job.timeoutHandle = null;
+
+    try {
+      const settings = db.getGroupSettings(chatId);
+      if (!settings || settings.botLeft) {
+        this.cancelAllForGroup(botId, chatId);
+        return;
+      }
+
+      if (settings.botId !== undefined && settings.botId !== null && settings.botId !== botId) {
+        this.cancelAllForGroup(botId, chatId);
+        return;
+      }
+
+      if (engineType === 'response') {
+        await this.executeAutoResponse(botId, chatId, settings);
+      } else {
+        await this.executeAutoSticker(botId, chatId, settings);
+      }
+    } catch (err: any) {
+      console.error(`[AUTO_ENGINE] Error executing ${engineType} for chat ${chatId}:`, err?.message || err);
+      this.handleFailure(botId, chatId, engineType, err);
+    } finally {
+      const currentJob = this.jobs.get(key);
+      if (currentJob) {
+        currentJob.isExecuting = false;
+      }
+    }
+  }
+
+  private async executeAutoResponse(botId: number, chatId: number, settings: GroupSettings): Promise<void> {
+    if (!settings.autoResponse?.enabled || settings.autoResponse.mode === 'disabled') {
+      this.cancelJob(botId, chatId, 'response');
+      return;
+    }
+
+    if (settings.chatbotEnabled === false) {
+      const nextDelay = this.calculateDelayMs(settings.autoResponse, 30, 120, 30);
+      this.scheduleJob(botId, chatId, 'response', nextDelay, 'chatbot_disabled');
+      return;
+    }
+
+    const decision = await ChatbotService.generateProactiveResponse(chatId, null);
+    if (!decision || decision.responseType === 'none' || !decision.content) {
+      this.handleFailure(botId, chatId, 'response', new Error('OpenRouter proactive generation produced no response'));
+      return;
+    }
+
+    const sendRes = await telegramApi.sendMessage(chatId, decision.content);
+    if (sendRes.ok || (sendRes as any).message_id) {
+      db.recordAutoResponseSent(chatId);
+      const job = this.jobs.get(this.makeJobKey(botId, chatId, 'response'));
+      if (job) job.consecutiveFailures = 0;
+    } else {
+      const desc = (sendRes as any)?.description || 'Telegram send failed';
+      if (this.isBotRemovedError(desc)) {
+        this.handleBotRemoved(botId, chatId);
+        return;
+      }
+      throw new Error(desc);
+    }
+
+    const nextDelay = this.calculateDelayMs(settings.autoResponse, 30, 120, 30);
+    this.scheduleJob(botId, chatId, 'response', nextDelay, 'next_interval');
+  }
+
+  private async executeAutoSticker(botId: number, chatId: number, settings: GroupSettings): Promise<void> {
+    if (!settings.autoSticker?.enabled || settings.autoSticker.mode === 'disabled') {
+      this.cancelJob(botId, chatId, 'sticker');
+      return;
+    }
+
+    const stickerFileId = ChatbotService.selectProactiveSticker(chatId);
+    if (stickerFileId) {
+      const sendRes = await telegramApi.sendSticker(chatId, stickerFileId);
+      if (sendRes.ok || (sendRes as any).message_id) {
+        db.recordAutoStickerSent(chatId);
+        const job = this.jobs.get(this.makeJobKey(botId, chatId, 'sticker'));
+        if (job) job.consecutiveFailures = 0;
+      } else {
+        const desc = (sendRes as any)?.description || 'Telegram sendSticker failed';
+        if (this.isBotRemovedError(desc)) {
+          this.handleBotRemoved(botId, chatId);
+          return;
+        }
+        throw new Error(desc);
+      }
+    }
+
+    const nextDelay = this.calculateDelayMs(settings.autoSticker, 60, 300, 60);
+    this.scheduleJob(botId, chatId, 'sticker', nextDelay, 'next_interval');
+  }
+
+  private handleFailure(botId: number, chatId: number, engineType: 'response' | 'sticker', err: any): void {
+    const key = this.makeJobKey(botId, chatId, engineType);
+    const job = this.jobs.get(key);
+    if (!job) return;
+
+    job.consecutiveFailures++;
+    const errMsg = err?.message || String(err);
+
+    if (this.isBotRemovedError(errMsg)) {
+      this.handleBotRemoved(botId, chatId);
+      return;
+    }
+
+    let backoffMs = 60000;
+    if (errMsg.includes('retry after') || errMsg.includes('429')) {
+      const match = errMsg.match(/retry after (\d+)/i);
+      const retrySec = match ? parseInt(match[1], 10) : 30;
+      backoffMs = (retrySec + 5) * 1000;
+    } else {
+      backoffMs = Math.min(600000, 60000 * Math.pow(2, Math.min(3, job.consecutiveFailures - 1)));
+    }
+
+    this.scheduleJob(botId, chatId, engineType, backoffMs, 'failure_backoff');
+  }
+
+  private isBotRemovedError(msg: string): boolean {
+    const lower = (msg || '').toLowerCase();
+    return (
+      lower.includes('bot was kicked') ||
+      lower.includes('bot is not a member') ||
+      lower.includes('chat not found') ||
+      lower.includes('chat was deleted') ||
+      lower.includes('peer_id_invalid') ||
+      lower.includes('group chat was deactivated')
+    );
+  }
+
+  private handleBotRemoved(botId: number, chatId: number): void {
+    console.warn(`[AUTO_ENGINE] Bot removed from chat ${chatId}. Canceling all auto engine jobs.`);
+    this.cancelAllForGroup(botId, chatId);
+    try {
+      db.updateGroupSettings(chatId, { botLeft: true });
+    } catch {}
+  }
+
+  // --- Test & Inspection Helpers ---
+  public getActiveJobCount(): { response: number; sticker: number; total: number } {
+    let response = 0;
+    let sticker = 0;
+    for (const job of this.jobs.values()) {
+      if (job.engineType === 'response') response++;
+      if (job.engineType === 'sticker') sticker++;
+    }
+    return { response, sticker, total: this.jobs.size };
+  }
+
+  public getJob(botId: number, chatId: number, engineType: 'response' | 'sticker'): ScheduledAutoJob | undefined {
+    return this.jobs.get(this.makeJobKey(botId, chatId, engineType));
+  }
+
+  public setTestHooks(hooks: {
+    setTimeout?: typeof setTimeout;
+    clearTimeout?: typeof clearTimeout;
+    now?: () => number;
+  }): void {
+    if (hooks.setTimeout) this.customSetTimeout = hooks.setTimeout;
+    if (hooks.clearTimeout) this.customClearTimeout = hooks.clearTimeout;
+    if (hooks.now) this.customNow = hooks.now;
+  }
+
+  public resetTestHooks(): void {
+    this.customSetTimeout = setTimeout;
+    this.customClearTimeout = clearTimeout;
+    this.customNow = () => Date.now();
+  }
+}
+
+export const autoEngineService = new AutoEngineService();

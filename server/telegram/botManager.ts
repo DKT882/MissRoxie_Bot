@@ -4,6 +4,7 @@ import { db } from '../db/storage.js';
 import { CommandHandler, registerBotCommands } from './commands.js';
 import { ModerationService } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
+import { autoEngineService } from './autoEngineService.js';
 import { TelegramMiddleware, CommandContext } from './middleware.js';
 import { RateLimiterService } from './rateLimiter.js';
 import { ChatbotService } from './chatbot.js';
@@ -221,6 +222,9 @@ export class TelegramBotManager {
 
       // Start message scheduler
       messageScheduler.start();
+
+      // Start autonomous proactive auto response & auto sticker service
+      autoEngineService.start(this.botUser?.id);
     } catch (err: any) {
       this.pollingError = err.message;
       this.isRunning = false;
@@ -945,6 +949,7 @@ export class TelegramBotManager {
       this.abortController.abort();
     }
     messageScheduler.stop();
+    autoEngineService.stop();
     this.isRunning = false;
     this.isStarting = false;
   }

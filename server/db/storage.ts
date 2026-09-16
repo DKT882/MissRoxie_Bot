@@ -202,6 +202,23 @@ export class StorageManager {
   private currentBotUsername: string | null = null;
   private currentBotFirstName: string | null = null;
 
+  private settingsChangeListeners: Array<(chatId: number, settings: GroupSettings, botId: number | null) => void> = [];
+  private groupRemovalListeners: Array<(chatId: number, botId: number | null) => void> = [];
+
+  public onSettingsChanged(cb: (chatId: number, settings: GroupSettings, botId: number | null) => void): () => void {
+    this.settingsChangeListeners.push(cb);
+    return () => {
+      this.settingsChangeListeners = this.settingsChangeListeners.filter(l => l !== cb);
+    };
+  }
+
+  public onGroupRemoved(cb: (chatId: number, botId: number | null) => void): () => void {
+    this.groupRemovalListeners.push(cb);
+    return () => {
+      this.groupRemovalListeners = this.groupRemovalListeners.filter(l => l !== cb);
+    };
+  }
+
   public setBotIdentity(bot: { id: number; username?: string; first_name?: string }): void {
     this.currentBotId = bot.id;
     this.currentBotUsername = bot.username || null;
@@ -2284,6 +2301,15 @@ export class StorageManager {
     this.data.settings[chatId] = updated;
     this.saveGroupJsonSync(chatId);
     this.scheduleSave(chatId);
+
+    for (const listener of this.settingsChangeListeners) {
+      try {
+        listener(chatId, updated, this.currentBotId);
+      } catch (err) {
+        console.error('[STORAGE] Error in settings change listener:', err);
+      }
+    }
+
     return updated;
   }
 
@@ -5382,6 +5408,15 @@ export class StorageManager {
     } catch (err: any) {
       console.warn(`[Storage] Failed to delete group file ${chatId}:`, err.message);
     }
+
+    for (const listener of this.groupRemovalListeners) {
+      try {
+        listener(idNum, this.currentBotId);
+      } catch (err) {
+        console.error('[STORAGE] Error in group removal listener:', err);
+      }
+    }
+
     return true;
   }
 
