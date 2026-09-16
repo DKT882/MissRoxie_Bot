@@ -2139,6 +2139,85 @@ export class StorageManager {
     return Object.keys(scopedSettings).filter(k => Number(k) < 0).length;
   }
 
+  public removeGroupFromDashboard(chatId: number | string, targetBotId?: number): boolean {
+    const numChatId = Number(chatId);
+    if (isNaN(numChatId) || numChatId >= 0) return false;
+
+    const resolvedBotId = targetBotId !== undefined ? targetBotId : (this.currentBotId !== null ? this.currentBotId : undefined);
+    if (!resolvedBotId) {
+      console.warn(`[Storage] removeGroupFromDashboard rejected: No botId provided or active for group ${numChatId}`);
+      return false;
+    }
+
+    // 1. Verify in-memory settings record if present
+    const settings = this.data.settings?.[numChatId];
+    if (settings) {
+      // If group exists in memory and does not belong to this bot (different botId or legacy without botId), reject removal
+      if (settings.botId !== resolvedBotId) {
+        console.warn(`[Storage] removeGroupFromDashboard rejected: Group ${numChatId} has botId ${settings.botId ?? 'LEGACY/NONE'}, expected ${resolvedBotId}`);
+        return false;
+      }
+      // Remove only this connected-group settings record from RAM
+      delete this.data.settings[numChatId];
+    }
+
+    // 2. Remove persisted group JSON file if present and owned by targetBotId
+    const targetFile = path.join(this.groupsDir, `${numChatId}.json`);
+    let fileRemoved = false;
+    if (fs.existsSync(targetFile)) {
+      try {
+        const raw = fs.readFileSync(targetFile, 'utf-8');
+        if (raw.trim()) {
+          const parsed = JSON.parse(raw);
+          const fileBotId = parsed.botId !== undefined ? parsed.botId : parsed.settings?.botId;
+          // Only remove if file strictly belongs to resolvedBotId
+          if (fileBotId === resolvedBotId) {
+            fs.unlinkSync(targetFile);
+            fileRemoved = true;
+          }
+        }
+      } catch (err: any) {
+        console.error(`[Storage] Error inspecting/removing group file ${targetFile}:`, err.message);
+      }
+    }
+
+    if (!settings && !fileRemoved) {
+      return false;
+    }
+
+    // 3. Clean up backup file if present and owned by targetBotId
+    const bakFile = path.join(this.groupsBackupDir, `${numChatId}.json.bak`);
+    if (fs.existsSync(bakFile)) {
+      try {
+        const rawBak = fs.readFileSync(bakFile, 'utf-8');
+        if (rawBak.trim()) {
+          const parsedBak = JSON.parse(rawBak);
+          const bakBotId = parsedBak.botId !== undefined ? parsedBak.botId : parsedBak.settings?.botId;
+          if (bakBotId === resolvedBotId) {
+            fs.unlinkSync(bakFile);
+          }
+        }
+      } catch {}
+    }
+
+    // 4. Clean up pending write queues / save timestamps for this group
+    this.groupWriteQueues.delete(String(numChatId));
+    this.lastSaveTimestamps.delete(String(numChatId));
+    this.pendingSaves.delete(numChatId);
+
+    // 5. Persist bot_storage.json atomically to save the updated settings map
+    this.persist();
+
+    // 6. Trigger MongoDB delete if connected
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.deleteGroup(numChatId, resolvedBotId).catch((mongoErr) => {
+        console.warn(`[Storage] Background MongoDB deleteGroup failed for group ${numChatId}: ${mongoErr?.message}`);
+      });
+    }
+
+    return settings !== undefined || fileRemoved;
+  }
+
   public isStaleSettingsUpdate(chatId: number | string, clientTimestamp: number): boolean {
     const numId = Number(chatId);
     const last = this.lastSettingsTimestamps.get(numId) || 0;

@@ -227,4 +227,27 @@ export class MongoStorageService {
       return 0;
     }
   }
+
+  public static async deleteGroup(chatId: string | number, botId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
+      if (!collection) return false;
+
+      const normChatId = String(chatId);
+      const numChatId = Number(chatId);
+
+      const query: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (botId !== undefined && botId !== null) {
+        query.botId = botId;
+      }
+
+      const result = await collection.deleteOne(query);
+      return result.deletedCount > 0;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to delete group ${chatId} for botId ${botId}: ${err?.message}`);
+      return false;
+    }
+  }
 }

@@ -432,6 +432,10 @@ export default function App() {
   const [leaveConfirmInput, setLeaveConfirmInput] = useState<string>('');
   const [leavingGroup, setLeavingGroup] = useState<boolean>(false);
 
+  // Remove from Dashboard Modal
+  const [removeDashboardModalGroup, setRemoveDashboardModalGroup] = useState<GroupInfo | null>(null);
+  const [removingFromDashboard, setRemovingFromDashboard] = useState<boolean>(false);
+
   // Search & Filters (Debounced 400ms)
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
@@ -919,6 +923,36 @@ export default function App() {
       alert(`❌ Error: ${err.message}`);
     } finally {
       setLeavingGroup(false);
+    }
+  };
+
+  // Remove Group from Dashboard Listing
+  const handleRemoveFromDashboard = async () => {
+    if (!removeDashboardModalGroup) return;
+    const targetChatId = removeDashboardModalGroup.chatId;
+    setRemovingFromDashboard(true);
+    try {
+      const res = await deduplicatedFetch(`/api/dashboard/groups/${targetChatId}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setGroups(prev => prev.filter(g => g.chatId !== targetChatId));
+        if (activeGroupDetailId === targetChatId) {
+          setActiveGroupDetailId(null);
+        }
+        if (selectedChatId === targetChatId) {
+          setSelectedChatId('all');
+        }
+        setRemoveDashboardModalGroup(null);
+        fetchData();
+      } else {
+        alert(`❌ Failed to remove group from dashboard: ${data.error || 'Request failed'}`);
+      }
+    } catch (err: any) {
+      alert(`❌ Error: ${err.message}`);
+    } finally {
+      setRemovingFromDashboard(false);
     }
   };
 
@@ -2717,6 +2751,14 @@ export default function App() {
                         className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
                       >
                         <span>[ OPEN ]</span>
+                      </button>
+                      <button
+                        onClick={() => setRemoveDashboardModalGroup(g)}
+                        className="px-2.5 py-2 bg-rose-600/10 hover:bg-rose-600/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1"
+                        title="Remove from Dashboard"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Remove</span>
                       </button>
                       {g.status === 'Bot Left' ? (
                         <span className="px-3 py-2 bg-stone-500/10 text-stone-400 border border-stone-500/20 rounded-xl text-xs font-semibold flex items-center gap-1">
@@ -4591,6 +4633,26 @@ export default function App() {
                         Leave Group
                       </button>
                     </div>
+
+                    {/* Remove from Dashboard */}
+                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-3`}>
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-rose-400 block">Remove from Dashboard</span>
+                        <p className={`text-[11px] ${themeMutedText}`}>Remove this group from the dashboard view. Roxie will remain in the Telegram group.</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const gInfo = groups.find(g => g.chatId === activeGroupDetailId) || ({
+                            chatId: activeGroupDetailId,
+                            chatTitle: groupDetails?.chatTitle || `Group ${activeGroupDetailId}`
+                          } as GroupInfo);
+                          setRemoveDashboardModalGroup(gInfo);
+                        }}
+                        className="px-3 py-1.5 bg-rose-600/10 hover:bg-rose-600/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-semibold"
+                      >
+                        Remove from Dashboard
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -6097,6 +6159,50 @@ export default function App() {
                 className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition-colors"
               >
                 {leavingGroup ? 'Leaving...' : 'Confirm & Leave'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove from Dashboard Confirmation Modal */}
+      {removeDashboardModalGroup && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${themeCardBg} border border-rose-500/30 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl`}>
+            <div className="flex items-center gap-3 text-rose-400">
+              <Trash2 className="w-6 h-6 shrink-0" />
+              <h3 className="text-base font-bold">Remove from Dashboard?</h3>
+            </div>
+
+            <p className="text-xs leading-relaxed">
+              Remove <strong>"{removeDashboardModalGroup.chatTitle}"</strong> (Chat ID: {removeDashboardModalGroup.chatId}) from the dashboard?
+            </p>
+            <p className={`text-[11px] ${themeMutedText}`}>
+              Roxie will remain a member of the Telegram group. Only this bot's dashboard record will be removed.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRemoveDashboardModalGroup(null)}
+                className={`px-4 py-2 ${themeInnerCardBg} border ${themeBorder} rounded-xl text-xs font-semibold`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRemoveFromDashboard}
+                disabled={removingFromDashboard}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition-colors flex items-center gap-1.5"
+              >
+                {removingFromDashboard ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Removing...</span>
+                  </>
+                ) : (
+                  <span>Remove from Dashboard</span>
+                )}
               </button>
             </div>
           </div>

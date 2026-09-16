@@ -1416,6 +1416,64 @@ export async function startServer() {
     }
   });
 
+  // 10-remove. Remove Group from Dashboard Listing (Scoped to Current Bot)
+  const handleDeleteGroupFromDashboard = async (req: express.Request, res: express.Response) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (isNaN(chatId) || chatId >= 0) {
+        return res.status(400).json({ error: 'Invalid group chatId', code: 'INVALID_CHAT_ID' });
+      }
+
+      const currentBotId = db.getCurrentBotId();
+      if (!currentBotId) {
+        return res.status(503).json({ error: 'No active bot identity configured', code: 'NO_ACTIVE_BOT' });
+      }
+
+      const existingSettings = db.getGroupSettings(chatId);
+      if (existingSettings && existingSettings.botId !== undefined && existingSettings.botId !== currentBotId) {
+        return res.status(403).json({
+          error: 'Cannot remove group: Group belongs to another bot instance',
+          code: 'FORBIDDEN'
+        });
+      }
+
+      const removed = db.removeGroupFromDashboard(chatId, currentBotId);
+
+      if (mongoManager.getStatus().isConnected) {
+        await MongoStorageService.deleteGroup(chatId, currentBotId);
+      }
+
+      if (!removed) {
+        return res.status(404).json({
+          error: 'Group not found for the active bot',
+          code: 'NOT_FOUND'
+        });
+      }
+
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        groupId: chatId,
+        actorRole: 'DASHBOARD_ADMIN',
+        adminUsername: (req as any).operator?.username || 'dashboard_admin',
+        command: 'remove_group_from_dashboard',
+        action: 'remove_group_from_dashboard',
+        result: 'success',
+        details: `Removed group ${chatId} from dashboard listing for bot ${currentBotId}`
+      });
+
+      return res.json({
+        success: true,
+        message: 'Group successfully removed from dashboard',
+        chatId
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message, code: 'INTERNAL_ERROR' });
+    }
+  };
+  app.delete('/api/dashboard/groups/:chatId', handleDeleteGroupFromDashboard);
+
   // 10a. Group Data Export
   app.get('/api/dashboard/groups/:chatId/export', (req, res) => {
     try {
