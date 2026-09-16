@@ -1982,11 +1982,6 @@ export class StorageManager {
       const s = this.data.settings[chatId];
       let needsSave = false;
 
-      if (this.currentBotId !== null && s.botId === undefined) {
-        s.botId = this.currentBotId;
-        s.botUsername = this.currentBotUsername || s.botUsername;
-        needsSave = true;
-      }
       // Ensure all phase 2 & 3 fields are populated if loaded from older format
       if (s.warnAction === undefined) { s.warnAction = 'ban'; needsSave = true; }
       if (s.warnExpireSeconds === undefined) { s.warnExpireSeconds = 0; needsSave = true; }
@@ -2075,15 +2070,11 @@ export class StorageManager {
   public getAllGroupSettings(botId?: number): Record<number, GroupSettings> {
     const targetBotId = botId !== undefined ? botId : (this.currentBotId !== null ? this.currentBotId : undefined);
     const result: Record<number, GroupSettings> = {};
-    if (!this.data.settings) return result;
+    if (!this.data.settings || !targetBotId) return result;
     for (const [idStr, s] of Object.entries(this.data.settings)) {
       const numId = Number(idStr);
       if (isNaN(numId) || numId >= 0) continue;
-      if (targetBotId !== undefined) {
-        if (s.botId === targetBotId) {
-          result[numId] = s;
-        }
-      } else {
+      if (s.botId === targetBotId) {
         result[numId] = s;
       }
     }
