@@ -183,7 +183,9 @@ export class MongoStorageService {
         updatedAt: now
       };
 
-      const filter: any = { chatId: normChatId };
+      const filter: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
       if (botId !== undefined && botId !== null) {
         filter.botId = botId;
       }

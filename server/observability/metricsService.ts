@@ -35,12 +35,23 @@ class MetricsTrackerService {
   private currentCounters: MetricCounters = this.getEmptyCounters();
   private hourlyHistory: Array<{ timestamp: string; counters: MetricCounters }> = [];
   private lastResetTime: number = Date.now();
+  private timer: NodeJS.Timeout | null = null;
 
   constructor() {
     // Periodically record hourly snapshots
-    setInterval(() => {
+    this.timer = setInterval(() => {
       this.snapshotHourly();
     }, 3600000);
+    if (this.timer && typeof this.timer.unref === 'function') {
+      this.timer.unref();
+    }
+  }
+
+  public stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
   }
 
   private getEmptyCounters(): MetricCounters {

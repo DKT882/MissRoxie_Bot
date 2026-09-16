@@ -112,6 +112,9 @@ async function runProactiveAutoEngineTestSuite() {
     const initialGroups = db.getAllGroupSettings(botIdA);
     for (const [idStr] of Object.entries(initialGroups)) {
       db.updateGroupSettings(Number(idStr), {
+        botLeft: false,
+        unavailable: false,
+        unavailableReason: undefined,
         autoResponse: { enabled: false, mode: 'disabled', cooldownSeconds: 30 },
         autoSticker: { enabled: false, mode: 'disabled', cooldownSeconds: 60 }
       });
@@ -124,6 +127,8 @@ async function runProactiveAutoEngineTestSuite() {
     db.updateGroupSettings(testGroup1, {
       botId: botIdA,
       botLeft: false,
+      unavailable: false,
+      unavailableReason: undefined,
       chatbotEnabled: true,
       autoResponse: {
         enabled: true,
@@ -511,6 +516,8 @@ async function runProactiveAutoEngineTestSuite() {
     // TEST 24: Group Deletion / Removal Cancels All Timers
     // --------------------------------------------------------------------------------------
     db.updateGroupSettings(testGroup3, {
+      botLeft: false,
+      unavailable: false,
       autoResponse: { enabled: true, mode: 'random', minSeconds: 30, maxSeconds: 120, cooldownSeconds: 30 },
       autoSticker: { enabled: true, mode: 'random', minSeconds: 50, maxSeconds: 200, cooldownSeconds: 60 }
     });

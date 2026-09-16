@@ -72,8 +72,8 @@ export class AutoEngineService {
     const scopedSettings = db.getAllGroupSettings(activeBotId);
     for (const [idStr, group] of Object.entries(scopedSettings)) {
       const chatId = Number(idStr);
-      if (chatId < 0 && !group.botLeft) {
-        if (this.currentBotId === null || group.botId === undefined || group.botId === null || group.botId === this.currentBotId) {
+      if (chatId < 0 && !group.botLeft && !group.unavailable) {
+        if (group.botId === activeBotId) {
           this.syncGroup(activeBotId, chatId, group, true);
         }
       }
@@ -206,14 +206,14 @@ export class AutoEngineService {
     if (!this.isRunning) return;
     if (this.currentBotId !== null && this.currentBotId !== botId) return;
 
-    const currentSettings = settings || db.getGroupSettings(chatId);
-    if (!currentSettings || currentSettings.botLeft) {
+    const currentSettings = settings || db.getGroupSettingsIfExists(chatId);
+    if (!currentSettings || currentSettings.botLeft || currentSettings.unavailable) {
       this.cancelAllForGroup(botId, chatId);
       return;
     }
 
-    // Multi-bot isolation: ensure group belongs to this botId
-    if (currentSettings.botId !== undefined && currentSettings.botId !== null && currentSettings.botId !== botId) {
+    // Multi-bot isolation: ensure group strictly belongs to this botId
+    if (currentSettings.botId !== botId) {
       this.cancelAllForGroup(botId, chatId);
       return;
     }
@@ -255,13 +255,13 @@ export class AutoEngineService {
     job.timeoutHandle = null;
 
     try {
-      const settings = db.getGroupSettings(chatId);
-      if (!settings || settings.botLeft) {
+      const settings = db.getGroupSettingsIfExists(chatId);
+      if (!settings || settings.botLeft || settings.unavailable) {
         this.cancelAllForGroup(botId, chatId);
         return;
       }
 
-      if (settings.botId !== undefined && settings.botId !== null && settings.botId !== botId) {
+      if (settings.botId !== botId) {
         this.cancelAllForGroup(botId, chatId);
         return;
       }
@@ -307,8 +307,8 @@ export class AutoEngineService {
       if (job) job.consecutiveFailures = 0;
     } else {
       const desc = (sendRes as any)?.description || 'Telegram send failed';
-      if (this.isBotRemovedError(desc)) {
-        this.handleBotRemoved(botId, chatId);
+      if (this.isPermanentInvalidTargetError(desc)) {
+        this.handlePermanentInvalidTarget(botId, chatId, desc);
         return;
       }
       throw new Error(desc);
@@ -333,8 +333,8 @@ export class AutoEngineService {
         if (job) job.consecutiveFailures = 0;
       } else {
         const desc = (sendRes as any)?.description || 'Telegram sendSticker failed';
-        if (this.isBotRemovedError(desc)) {
-          this.handleBotRemoved(botId, chatId);
+        if (this.isPermanentInvalidTargetError(desc)) {
+          this.handlePermanentInvalidTarget(botId, chatId, desc);
           return;
         }
         throw new Error(desc);
@@ -353,8 +353,8 @@ export class AutoEngineService {
     job.consecutiveFailures++;
     const errMsg = err?.message || String(err);
 
-    if (this.isBotRemovedError(errMsg)) {
-      this.handleBotRemoved(botId, chatId);
+    if (this.isPermanentInvalidTargetError(errMsg)) {
+      this.handlePermanentInvalidTarget(botId, chatId, errMsg);
       return;
     }
 
@@ -370,24 +370,38 @@ export class AutoEngineService {
     this.scheduleJob(botId, chatId, engineType, backoffMs, 'failure_backoff');
   }
 
-  private isBotRemovedError(msg: string): boolean {
+  public isPermanentInvalidTargetError(msg: string): boolean {
     const lower = (msg || '').toLowerCase();
     return (
-      lower.includes('bot was kicked') ||
-      lower.includes('bot is not a member') ||
       lower.includes('chat not found') ||
-      lower.includes('chat was deleted') ||
+      lower.includes('bot was kicked') ||
+      lower.includes('bot was removed') ||
+      lower.includes('bot is not a member') ||
+      lower.includes('upgraded to a supergroup') ||
+      lower.includes('group chat was upgraded') ||
+      lower.includes('legacy dummy') ||
+      lower.includes('blocked call to legacy dummy') ||
+      lower.includes('telegram_invalid_legacy_target') ||
       lower.includes('peer_id_invalid') ||
-      lower.includes('group chat was deactivated')
+      lower.includes('group chat was deactivated') ||
+      lower.includes('chat was deleted') ||
+      lower.includes('bot was blocked by') ||
+      lower.includes('user is deactivated')
     );
   }
 
-  private handleBotRemoved(botId: number, chatId: number): void {
-    console.warn(`[AUTO_ENGINE] Bot removed from chat ${chatId}. Canceling all auto engine jobs.`);
+  public handlePermanentInvalidTarget(botId: number, chatId: number, reason: string): void {
+    console.warn(`[AUTO_ENGINE] Permanent invalid target detected for chat ${chatId} (${reason}). Canceling all auto engine jobs.`);
     this.cancelAllForGroup(botId, chatId);
     try {
-      db.updateGroupSettings(chatId, { botLeft: true });
-    } catch {}
+      db.updateGroupSettings(chatId, {
+        botLeft: true,
+        unavailable: true,
+        unavailableReason: reason
+      });
+    } catch (err: any) {
+      console.error(`[AUTO_ENGINE] Failed to mark group ${chatId} as unavailable in storage:`, err?.message);
+    }
   }
 
   // --- Test & Inspection Helpers ---

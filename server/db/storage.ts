@@ -916,20 +916,89 @@ export class StorageManager {
     const key = String(chatId);
 
     // 1. Settings restoration
-    const incomingSettings = data.settings || {};
-    const existingSettings = this.getGroupSettings(chatId);
+    const incomingSettings: Partial<GroupSettings> = data.settings || {};
+    const existingSettings: Partial<GroupSettings> = this.data.settings[chatId] || {};
+
+    const resolvedBotId = data.botId !== undefined
+      ? data.botId
+      : (incomingSettings.botId !== undefined
+        ? incomingSettings.botId
+        : (existingSettings.botId !== undefined ? existingSettings.botId : undefined));
+
+    const isLegacyRecord = resolvedBotId === undefined || resolvedBotId === null;
 
     const mergedSettings: GroupSettings = {
+      chatId,
+      warnLimit: 3,
+      warnAction: 'ban',
+      warnExpireSeconds: 0,
+      floodEnabled: false,
+      floodCount: 8,
+      floodWindow: 5,
+      floodAction: 'mute',
+      raidEnabled: false,
+      raidLimit: 8,
+      raidWindow: 30,
+      raidAction: 'kick',
+      raidDuration: 300,
+      captchaEnabled: false,
+      captchaMode: 'button',
+      captchaTimeout: 120,
+      captchaAction: 'kick',
+      linksProtection: true,
+      linksWhitelist: [],
+      mediaProtection: true,
+      stickerProtection: true,
+      gifsProtection: false,
+      videosProtection: false,
+      photosProtection: false,
+      voiceProtection: false,
+      audioProtection: false,
+      locks: {},
+      filters: {},
+      welcomeEnabled: false,
+      welcomeMessage: 'Welcome {user} to {chat}!',
+      goodbyeEnabled: false,
+      goodbyeMessage: 'Goodbye {user}!',
+      autoDeleteJoinLeave: false,
+      slowModeSeconds: 0,
+      reportsEnabled: true,
+      chatbotEnabled: true,
+      chatbotMode: 'auto',
+      reactionEnabled: true,
+      reactionProbability: 0.15,
+      stopSpamEnabled: false,
+      stopAbusiveEnabled: false,
+      stopPromotionEnabled: false,
+      gifProtection: false,
+      linkProtection: true,
+      imageProtection: false,
+      fileProtection: false,
+      customAbusiveWords: [],
+      automodEnabled: false,
+      mediaAction: 'delete',
+      warnEscalation: [],
+      securityEnabled: false,
+      joinmode: 'normal',
+      autoAcceptEnabled: false,
+      automations: [],
+      rules: '',
+      lastAllTimestamp: 0,
+      protectionEnabled: true,
+      protectionFloodCount: 5,
+      protectionFloodWindow: 5,
+      protectionDuplicateLimit: 3,
+      protectionLinkBurstLimit: 3,
       ...existingSettings,
       ...incomingSettings,
-      botId: data.botId !== undefined ? data.botId : (incomingSettings.botId !== undefined ? incomingSettings.botId : existingSettings.botId),
+      botId: resolvedBotId,
       botUsername: data.botUsername || incomingSettings.botUsername || existingSettings.botUsername || null,
       chatTitle: data.title || data.chat?.title || incomingSettings.chatTitle || existingSettings.chatTitle || `Group ${chatId}`,
-      botLeft: data.status?.botLeft !== undefined ? Boolean(data.status.botLeft) : incomingSettings.botLeft,
-      leftAt: data.status?.leftAt || incomingSettings.leftAt,
-      unavailable: data.status?.unavailable !== undefined ? Boolean(data.status.unavailable) : incomingSettings.unavailable,
-      unavailableAt: data.status?.unavailableAt || incomingSettings.unavailableAt,
-      unavailableReason: data.status?.unavailableReason || incomingSettings.unavailableReason,
+      botLeft: data.status?.botLeft !== undefined ? Boolean(data.status.botLeft) : (incomingSettings.botLeft !== undefined ? Boolean(incomingSettings.botLeft) : Boolean(existingSettings.botLeft)),
+      leftAt: data.status?.leftAt || incomingSettings.leftAt || existingSettings.leftAt,
+      unavailable: data.status?.unavailable !== undefined ? Boolean(data.status.unavailable) : (incomingSettings.unavailable !== undefined ? Boolean(incomingSettings.unavailable) : Boolean(existingSettings.unavailable)),
+      unavailableAt: data.status?.unavailableAt || incomingSettings.unavailableAt || existingSettings.unavailableAt,
+      unavailableReason: data.status?.unavailableReason || incomingSettings.unavailableReason || existingSettings.unavailableReason,
       updatedAt: data.updatedAt || new Date().toISOString()
     };
 
@@ -944,16 +1013,60 @@ export class StorageManager {
     }
 
     // Restore autoResponse & autoSticker (with runtime timestamps)
-    if (data.autoResponse) {
+    // For legacy unassigned records missing explicit configs, default them to disabled
+    if (data.autoResponse || incomingSettings.autoResponse) {
       mergedSettings.autoResponse = {
         ...(mergedSettings.autoResponse || {}),
-        ...data.autoResponse
+        ...(incomingSettings.autoResponse || {}),
+        ...(data.autoResponse || {})
+      };
+    } else if (isLegacyRecord) {
+      mergedSettings.autoResponse = {
+        enabled: false,
+        mode: 'disabled',
+        cooldownSeconds: 30,
+        randomize: false,
+        minSeconds: 30,
+        maxSeconds: 120,
+        lastResponseTimestamp: 0
+      };
+    } else if (!mergedSettings.autoResponse) {
+      mergedSettings.autoResponse = {
+        enabled: true,
+        mode: 'every_message',
+        cooldownSeconds: 30,
+        randomize: false,
+        minSeconds: 30,
+        maxSeconds: 120,
+        lastResponseTimestamp: 0
       };
     }
-    if (data.autoSticker) {
+
+    if (data.autoSticker || incomingSettings.autoSticker) {
       mergedSettings.autoSticker = {
         ...(mergedSettings.autoSticker || {}),
-        ...data.autoSticker
+        ...(incomingSettings.autoSticker || {}),
+        ...(data.autoSticker || {})
+      };
+    } else if (isLegacyRecord) {
+      mergedSettings.autoSticker = {
+        enabled: false,
+        mode: 'disabled',
+        cooldownSeconds: 60,
+        randomize: false,
+        minSeconds: 60,
+        maxSeconds: 300,
+        lastStickerTimestamp: 0
+      };
+    } else if (!mergedSettings.autoSticker) {
+      mergedSettings.autoSticker = {
+        enabled: true,
+        mode: 'cooldown',
+        cooldownSeconds: 60,
+        randomize: false,
+        minSeconds: 60,
+        maxSeconds: 300,
+        lastStickerTimestamp: 0
       };
     }
 
@@ -1906,6 +2019,10 @@ export class StorageManager {
   }
 
   // --- Group Settings ---
+  public getGroupSettingsIfExists(chatId: number): GroupSettings | undefined {
+    return this.data.settings?.[chatId];
+  }
+
   public getGroupSettings(chatId: number, chatTitle?: string): GroupSettings {
     if (!this.data.settings[chatId]) {
       this.data.settings[chatId] = {
@@ -2232,6 +2349,15 @@ export class StorageManager {
       });
     }
 
+    // 7. Notify groupRemovalListeners to immediately cancel active AutoEngine timers
+    for (const listener of this.groupRemovalListeners) {
+      try {
+        listener(numChatId, resolvedBotId);
+      } catch (err) {
+        console.error('[STORAGE] Error in group removal listener:', err);
+      }
+    }
+
     return settings !== undefined || fileRemoved;
   }
 
@@ -2301,6 +2427,18 @@ export class StorageManager {
     this.data.settings[chatId] = updated;
     this.saveGroupJsonSync(chatId);
     this.scheduleSave(chatId);
+
+    // Replicate botLeft / unavailable / settings updates to MongoDB Atlas if connected
+    if (mongoManager.getStatus().isConnected) {
+      const targetBotId = this.currentBotId ?? updated.botId;
+      if (targetBotId !== undefined && targetBotId !== null) {
+        const rawData = this.buildGroupDataObject(chatId);
+        const safeData = this.sanitizeGroupData(rawData);
+        MongoStorageService.saveGroup(safeData, targetBotId, this.currentBotUsername ?? undefined).catch((err) => {
+          console.warn(`[Storage] Background Mongo replication failed for group ${chatId}:`, err?.message);
+        });
+      }
+    }
 
     for (const listener of this.settingsChangeListeners) {
       try {
