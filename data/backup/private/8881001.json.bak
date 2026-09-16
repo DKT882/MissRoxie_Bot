@@ -3,27 +3,11 @@
   "chatId": "8881001",
   "userId": 8881001,
   "username": null,
-  "name": "Tester",
-  "language": "english",
-  "lastUpdated": 1788183064626,
-  "messages": [
-    {
-      "role": "user",
-      "content": "hi roxie private talk",
-      "timestamp": 1788183064359,
-      "messageId": 103,
-      "direction": "in",
-      "language": "english"
-    },
-    {
-      "role": "user",
-      "content": "direct private message to roxie",
-      "timestamp": 1788183064626,
-      "messageId": 205,
-      "direction": "in",
-      "language": "english"
-    }
-  ],
+  "name": null,
+  "language": "English",
+  "autoDelete": false,
+  "lastUpdated": 1789323549533,
+  "messages": [],
   "lustLevel": 0,
-  "updatedAt": "2026-09-01T17:03:56.447Z"
+  "updatedAt": "2026-09-16T05:53:04.891Z"
 }

@@ -1,6 +1,8 @@
 import { mongoManager } from './mongodb.js';
 
 export interface MongoGroupDocument {
+  botId?: number;
+  botUsername?: string | null;
   chatId: string; // Stored as normalized string e.g. "-1004331070653"
   numChatId: number;
   title: string;
@@ -42,8 +44,63 @@ export class MongoStorageService {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
       if (!collection) return false;
 
-      await collection.createIndex({ chatId: 1 }, { unique: true });
-      await collection.createIndex({ numChatId: 1 });
+      // 1. Inspect existing indexes and document statistics safely
+      const existingIndexes = await collection.indexes().catch(() => []);
+      const indexNames = existingIndexes.map(i => i.name || JSON.stringify(i.key));
+      console.log(`[MongoStorage] Current indexes on groups collection: ${indexNames.join(', ')}`);
+
+      try {
+        const totalDocs = await collection.countDocuments({});
+        const docsWithBotId = await collection.countDocuments({ botId: { $exists: true, $ne: null } });
+        const docsWithoutBotId = totalDocs - docsWithBotId;
+        console.log(`[MongoStorage] Group collection inventory: ${totalDocs} total docs (${docsWithBotId} with botId, ${docsWithoutBotId} legacy without botId).`);
+      } catch {}
+
+      // 2. Create compound unique index { botId: 1, chatId: 1 } if not already present
+      const hasCompoundUnique = existingIndexes.some(
+        idx => idx.key && idx.key.botId === 1 && idx.key.chatId === 1 && idx.unique === true
+      );
+
+      if (!hasCompoundUnique) {
+        await collection.createIndex({ botId: 1, chatId: 1 }, { unique: true, name: 'botId_1_chatId_1' });
+        console.log('[MongoStorage] Created compound unique index: { botId: 1, chatId: 1 }');
+      }
+
+      // 3. Create helper non-unique index { botId: 1 } for bot-scoped queries
+      const hasBotIdIndex = existingIndexes.some(
+        idx => idx.key && idx.key.botId === 1 && !idx.key.chatId
+      );
+      if (!hasBotIdIndex) {
+        await collection.createIndex({ botId: 1 }, { name: 'botId_1' });
+      }
+
+      // 4. Safely inspect single-field unique index on chatId
+      const legacyUniqueChatIdIndex = existingIndexes.find(
+        idx => idx.key && idx.key.chatId === 1 && !idx.key.botId && idx.unique === true
+      );
+
+      if (legacyUniqueChatIdIndex) {
+        // Safe replacement: Only replace the single-field UNIQUE index AFTER compound unique index is active,
+        // and create non-unique chatId_1 index so multi-bot coexistence is supported with ZERO data loss.
+        const legacyName = legacyUniqueChatIdIndex.name || 'chatId_1';
+        try {
+          await collection.dropIndex(legacyName);
+          console.log(`[MongoStorage] Safely dropped legacy single-field unique index "${legacyName}" in favor of compound { botId, chatId } uniqueness.`);
+        } catch (dropErr: any) {
+          console.warn(`[MongoStorage] Notice when dropping legacy index ${legacyName}: ${dropErr?.message}`);
+        }
+      }
+
+      // Ensure non-unique chatId_1 index exists for fast lookups
+      const hasChatIdIndex = existingIndexes.some(
+        idx => idx.key && idx.key.chatId === 1 && !idx.key.botId
+      );
+      if (!hasChatIdIndex || legacyUniqueChatIdIndex) {
+        await collection.createIndex({ chatId: 1 }, { name: 'chatId_1' }).catch(() => {});
+      }
+
+      await collection.createIndex({ numChatId: 1 }).catch(() => {});
+
       this.indexEnsured = true;
       return true;
     } catch (err: any) {
@@ -52,7 +109,7 @@ export class MongoStorageService {
     }
   }
 
-  public static async getGroup(chatId: string | number): Promise<MongoGroupDocument | null> {
+  public static async getGroup(chatId: string | number, botId?: number): Promise<MongoGroupDocument | null> {
     try {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
       if (!collection) return null;
@@ -60,10 +117,14 @@ export class MongoStorageService {
       const normChatId = String(chatId);
       const numChatId = Number(chatId);
 
-      const doc = await collection.findOne({
+      const query: any = {
         $or: [{ chatId: normChatId }, { numChatId }]
-      });
+      };
+      if (botId !== undefined && botId !== null) {
+        query.botId = botId;
+      }
 
+      const doc = await collection.findOne(query);
       return doc;
     } catch (err: any) {
       console.warn(`[MongoStorage] Failed to get group ${chatId}: ${err?.message}`);
@@ -71,7 +132,7 @@ export class MongoStorageService {
     }
   }
 
-  public static async saveGroup(groupData: any): Promise<boolean> {
+  public static async saveGroup(groupData: any, targetBotId?: number, targetBotUsername?: string): Promise<boolean> {
     try {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
       if (!collection) return false;
@@ -85,9 +146,19 @@ export class MongoStorageService {
       const numChatId = Number(rawChatId);
       const title = groupData.chat?.title || groupData.settings?.chatTitle || groupData.title || 'Group';
 
+      const botId = targetBotId !== undefined
+        ? targetBotId
+        : (groupData.botId !== undefined ? groupData.botId : groupData.settings?.botId);
+
+      const botUsername = targetBotUsername !== undefined
+        ? targetBotUsername
+        : (groupData.botUsername || groupData.settings?.botUsername || null);
+
       const now = new Date();
 
       const doc: Partial<MongoGroupDocument> = {
+        botId,
+        botUsername,
         chatId: normChatId,
         numChatId,
         title,
@@ -112,8 +183,13 @@ export class MongoStorageService {
         updatedAt: now
       };
 
+      const filter: any = { chatId: normChatId };
+      if (botId !== undefined && botId !== null) {
+        filter.botId = botId;
+      }
+
       await collection.updateOne(
-        { chatId: normChatId },
+        filter,
         {
           $set: doc,
           $setOnInsert: { createdAt: now }
@@ -128,23 +204,25 @@ export class MongoStorageService {
     }
   }
 
-  public static async getAllGroups(): Promise<MongoGroupDocument[]> {
+  public static async getAllGroups(botId?: number): Promise<MongoGroupDocument[]> {
     try {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
       if (!collection) return [];
 
-      return await collection.find({}).toArray();
+      const query: any = botId !== undefined && botId !== null ? { botId } : {};
+      return await collection.find(query).toArray();
     } catch (err: any) {
       console.warn(`[MongoStorage] Failed to get all groups: ${err?.message}`);
       return [];
     }
   }
 
-  public static async countGroups(): Promise<number> {
+  public static async countGroups(botId?: number): Promise<number> {
     try {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
       if (!collection) return 0;
-      return await collection.countDocuments({});
+      const query: any = botId !== undefined && botId !== null ? { botId } : {};
+      return await collection.countDocuments(query);
     } catch {
       return 0;
     }

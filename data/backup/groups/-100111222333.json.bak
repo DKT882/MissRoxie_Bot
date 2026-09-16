@@ -437,6 +437,18 @@
     "notes": [],
     "userMemories": []
   },
-  "activity": [],
-  "updatedAt": "2026-09-01T07:31:05.608Z"
+  "activity": [
+    {
+      "id": "h7upsw4",
+      "timestamp": "2026-09-01T07:31:05.613Z",
+      "chatId": -100111222333,
+      "groupId": -100111222333,
+      "adminUsername": "admin_operator_roxie",
+      "command": "CONFIG_IMPORTED",
+      "action": "setting_change",
+      "result": "success",
+      "details": "Imported sections: settings, welcome, moderation, contentProtection, abuseWords, stickers, lustMode, autoResponse, autoSticker, slowmode, personality, schedules, notes (Backup: backup_2026-09-01T07-31-05-591Z.json)"
+    }
+  ],
+  "updatedAt": "2026-09-01T07:31:05.615Z"
 }

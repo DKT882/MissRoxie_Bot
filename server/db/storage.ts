@@ -198,6 +198,28 @@ export class StorageManager {
   private lastLoggedErrorTime: number = 0;
   private lastLoggedErrorMessage: string = '';
 
+  private currentBotId: number | null = null;
+  private currentBotUsername: string | null = null;
+  private currentBotFirstName: string | null = null;
+
+  public setBotIdentity(bot: { id: number; username?: string; first_name?: string }): void {
+    this.currentBotId = bot.id;
+    this.currentBotUsername = bot.username || null;
+    this.currentBotFirstName = bot.first_name || null;
+  }
+
+  public getCurrentBotId(): number | null {
+    return this.currentBotId;
+  }
+
+  public getCurrentBotUsername(): string | null {
+    return this.currentBotUsername;
+  }
+
+  public getCurrentBotFirstName(): string | null {
+    return this.currentBotFirstName;
+  }
+
   public get dataDir(): string {
     return this.activeDataDir;
   }
@@ -663,6 +685,8 @@ export class StorageManager {
     const abuseWordsList = (settings.abuseWords || settings.customAbusiveWords || []).slice(0, 500);
 
     return {
+      botId: settings.botId !== undefined ? settings.botId : (this.currentBotId !== null ? this.currentBotId : undefined),
+      botUsername: settings.botUsername || this.currentBotUsername || null,
       schemaVersion: 1,
       chat: {
         chatId: String(chatId),
@@ -775,7 +799,7 @@ export class StorageManager {
 
       // Async write to MongoDB Atlas if connected (non-blocking, never fails local save)
       if (mongoManager.getStatus().isConnected) {
-        MongoStorageService.saveGroup(safeData).catch((mongoErr) => {
+        MongoStorageService.saveGroup(safeData, this.currentBotId ?? undefined, this.currentBotUsername ?? undefined).catch((mongoErr) => {
           console.warn(`[Storage] Background MongoDB sync failed for group ${numChatId}: ${mongoErr?.message}`);
         });
       }
@@ -881,6 +905,8 @@ export class StorageManager {
     const mergedSettings: GroupSettings = {
       ...existingSettings,
       ...incomingSettings,
+      botId: data.botId !== undefined ? data.botId : (incomingSettings.botId !== undefined ? incomingSettings.botId : existingSettings.botId),
+      botUsername: data.botUsername || incomingSettings.botUsername || existingSettings.botUsername || null,
       chatTitle: data.title || data.chat?.title || incomingSettings.chatTitle || existingSettings.chatTitle || `Group ${chatId}`,
       botLeft: data.status?.botLeft !== undefined ? Boolean(data.status.botLeft) : incomingSettings.botLeft,
       leftAt: data.status?.leftAt || incomingSettings.leftAt,
@@ -1036,7 +1062,7 @@ export class StorageManager {
     }
   }
 
-  public async hydrateGroupsFromMongo(): Promise<{ hydratedCount: number; syncedToMongoCount: number; errorsCount: number }> {
+  public async hydrateGroupsFromMongo(botIdToHydrate?: number): Promise<{ hydratedCount: number; syncedToMongoCount: number; errorsCount: number }> {
     if (!mongoManager.getStatus().isConnected) {
       return { hydratedCount: 0, syncedToMongoCount: 0, errorsCount: 0 };
     }
@@ -1045,9 +1071,11 @@ export class StorageManager {
     let syncedToMongoCount = 0;
     let errorsCount = 0;
 
+    const targetBotId = botIdToHydrate !== undefined ? botIdToHydrate : (this.currentBotId !== null ? this.currentBotId : undefined);
+
     try {
-      const mongoGroups = await MongoStorageService.getAllGroups();
-      console.log(`[Storage] Found ${mongoGroups.length} group(s) in MongoDB Atlas during startup hydration check.`);
+      const mongoGroups = await MongoStorageService.getAllGroups(targetBotId);
+      console.log(`[Storage] Found ${mongoGroups.length} group(s) in MongoDB Atlas for botId=${targetBotId ?? 'ALL'} during startup hydration check.`);
 
       const mongoChatIds = new Set<string>();
 
@@ -1080,7 +1108,7 @@ export class StorageManager {
             // Local is strictly newer (e.g. offline file edits) -> push local to MongoDB
             const rawData = this.buildGroupDataObject(numChatId);
             const safeData = this.sanitizeGroupData(rawData);
-            await MongoStorageService.saveGroup(safeData);
+            await MongoStorageService.saveGroup(safeData, targetBotId, this.currentBotUsername ?? undefined);
             syncedToMongoCount++;
           }
         } catch (groupErr: any) {
@@ -1089,16 +1117,20 @@ export class StorageManager {
         }
       }
 
-      // Check for any groups currently in RAM that do NOT exist in MongoDB at all -> replicate to Mongo
+      // Check for any groups currently in RAM that match targetBotId and do NOT exist in MongoDB at all -> replicate to Mongo
       if (this.data.settings) {
         for (const idStr of Object.keys(this.data.settings)) {
           const numChatId = Number(idStr);
           if (isNaN(numChatId) || numChatId >= 0) continue;
+          const s = this.data.settings[numChatId];
+          if (targetBotId !== undefined && s.botId !== undefined && s.botId !== targetBotId) {
+            continue; // Do not push groups belonging to other bots
+          }
           if (!mongoChatIds.has(String(numChatId))) {
             try {
               const rawData = this.buildGroupDataObject(numChatId);
               const safeData = this.sanitizeGroupData(rawData);
-              await MongoStorageService.saveGroup(safeData);
+              await MongoStorageService.saveGroup(safeData, targetBotId, this.currentBotUsername ?? undefined);
               syncedToMongoCount++;
             } catch (syncErr: any) {
               console.warn(`[Storage] Failed to replicate local group ${numChatId} to MongoDB:`, syncErr?.message);
@@ -1861,6 +1893,8 @@ export class StorageManager {
     if (!this.data.settings[chatId]) {
       this.data.settings[chatId] = {
         chatId,
+        botId: this.currentBotId !== null ? this.currentBotId : undefined,
+        botUsername: this.currentBotUsername || undefined,
         chatTitle: chatTitle || undefined,
         warnLimit: 3,
         warnAction: 'ban',
@@ -1947,6 +1981,12 @@ export class StorageManager {
     } else {
       const s = this.data.settings[chatId];
       let needsSave = false;
+
+      if (this.currentBotId !== null && s.botId === undefined) {
+        s.botId = this.currentBotId;
+        s.botUsername = this.currentBotUsername || s.botUsername;
+        needsSave = true;
+      }
       // Ensure all phase 2 & 3 fields are populated if loaded from older format
       if (s.warnAction === undefined) { s.warnAction = 'ban'; needsSave = true; }
       if (s.warnExpireSeconds === undefined) { s.warnExpireSeconds = 0; needsSave = true; }
@@ -2030,6 +2070,82 @@ export class StorageManager {
       }
     }
     return this.data.settings[chatId];
+  }
+
+  public getAllGroupSettings(botId?: number): Record<number, GroupSettings> {
+    const targetBotId = botId !== undefined ? botId : (this.currentBotId !== null ? this.currentBotId : undefined);
+    const result: Record<number, GroupSettings> = {};
+    if (!this.data.settings) return result;
+    for (const [idStr, s] of Object.entries(this.data.settings)) {
+      const numId = Number(idStr);
+      if (isNaN(numId) || numId >= 0) continue;
+      if (targetBotId !== undefined) {
+        if (s.botId === targetBotId) {
+          result[numId] = s;
+        }
+      } else {
+        result[numId] = s;
+      }
+    }
+    return result;
+  }
+
+  public getConnectedGroups(botId?: number): Array<any> {
+    const scopedSettings = this.getAllGroupSettings(botId);
+    return Object.entries(scopedSettings)
+      .filter(([chatIdStr]) => Number(chatIdStr) < 0)
+      .map(([chatIdStr, s]: [string, any]) => {
+        const chatId = Number(chatIdStr);
+        const groupLogs = this.getGroupLogs(chatId, 100);
+        const bans = groupLogs.filter(l => l.action === 'ban' || l.action === 'auto_ban').length;
+        const kicks = groupLogs.filter(l => l.action === 'kick').length;
+        const mutes = groupLogs.filter(l => l.action === 'mute').length;
+        const reports = groupLogs.filter(l => l.action === 'report').length;
+        const schedules = this.getGroupSchedules(chatId).length;
+
+        const isLeft = Boolean(s.botLeft);
+        const isUnavailable = Boolean(s.unavailable);
+        let status = 'Active';
+        let botRole = 'Administrator';
+
+        if (isUnavailable) {
+          status = 'Unavailable';
+          botRole = 'Unavailable';
+        } else if (isLeft) {
+          status = 'Bot Left';
+          botRole = 'Left';
+        } else if (!(s.linksProtection && s.stickerProtection)) {
+          status = 'Limited Permissions';
+        }
+
+        return {
+          chatId,
+          chatTitle: s.chatTitle || `Group ${chatId}`,
+          chatType: chatId < 0 ? 'supergroup' : 'private',
+          username: s.username || undefined,
+          memberCount: s.memberCount || 1,
+          status,
+          botRole,
+          protectionStatus: Boolean(s.protectionEnabled || s.stickerProtection || s.linksProtection),
+          lustMode: Boolean(s.lustMode),
+          botLeft: isLeft,
+          unavailable: isUnavailable,
+          unavailableReason: s.unavailableReason,
+          stats: {
+            bans,
+            kicks,
+            mutes,
+            reports,
+            schedules
+          },
+          settings: s
+        };
+      });
+  }
+
+  public getConnectedGroupCount(botId?: number): number {
+    const scopedSettings = this.getAllGroupSettings(botId);
+    return Object.keys(scopedSettings).filter(k => Number(k) < 0).length;
   }
 
   public isStaleSettingsUpdate(chatId: number | string, clientTimestamp: number): boolean {

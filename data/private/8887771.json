@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "chatId": "8887771",
+  "userId": 8887771,
+  "username": null,
+  "name": "Kamlesh",
+  "language": "english",
+  "autoDelete": false,
+  "lastUpdated": 1789324099973,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello Roxie in private",
+      "timestamp": 1789323548000,
+      "messageId": 203,
+      "direction": "in",
+      "language": "english"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello in DM! [Sent sticker]",
+      "timestamp": 1789323548898,
+      "messageId": 77307,
+      "mediaType": "sticker",
+      "mediaFileId": "CAACAgIAAxUAAWqUbAdnoOSUGXw9rEZDiRbrokefAAJBAQAC9HsZAAFRWXXF49fe9z0E",
+      "direction": "out"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello in DM!",
+      "timestamp": 1789324099973,
+      "messageId": 42142,
+      "mediaType": "text",
+      "direction": "out"
+    }
+  ],
+  "lustLevel": 0,
+  "updatedAt": "2026-09-16T05:53:32.420Z"
+}

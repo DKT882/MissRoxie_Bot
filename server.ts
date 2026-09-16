@@ -747,8 +747,7 @@ export async function startServer() {
     try {
       const stats = db.getStats();
       const recentLogs = db.getRecentLogs(50);
-      const settings = (db as any).data?.settings || {};
-      const groupsCount = Object.keys(settings).length;
+      const groupsCount = db.getConnectedGroupCount(db.getCurrentBotId() ?? undefined);
       const privateChats = db.getPrivateChatsList();
       const totalMessagesCount = db.getTotalStoredMessagesCount();
       const activeUsersCount = Object.keys((db as any).data?.knownUsersById || {}).length;
@@ -776,56 +775,7 @@ export async function startServer() {
   // 3. Get all connected groups
   const handleGetGroups = (req: express.Request, res: express.Response) => {
     try {
-      const settings = (db as any).data?.settings || {};
-      const groups = Object.entries(settings)
-        .filter(([chatIdStr]) => Number(chatIdStr) < 0)
-        .map(([chatIdStr, s]: [string, any]) => {
-          const chatId = Number(chatIdStr);
-        const groupLogs = db.getGroupLogs(chatId, 100);
-        const bans = groupLogs.filter(l => l.action === 'ban' || l.action === 'auto_ban').length;
-        const kicks = groupLogs.filter(l => l.action === 'kick').length;
-        const mutes = groupLogs.filter(l => l.action === 'mute').length;
-        const reports = groupLogs.filter(l => l.action === 'report').length;
-        const schedules = db.getGroupSchedules(chatId).length;
-
-        const isLeft = Boolean(s.botLeft);
-        const isUnavailable = Boolean(s.unavailable);
-        let status = 'Active';
-        let botRole = 'Administrator';
-
-        if (isUnavailable) {
-          status = 'Unavailable';
-          botRole = 'Unavailable';
-        } else if (isLeft) {
-          status = 'Bot Left';
-          botRole = 'Left';
-        } else if (!(s.linksProtection && s.stickerProtection)) {
-          status = 'Limited Permissions';
-        }
-
-        return {
-          chatId,
-          chatTitle: s.chatTitle || `Group ${chatId}`,
-          chatType: chatId < 0 ? 'supergroup' : 'private',
-          username: s.username || undefined,
-          memberCount: s.memberCount || 1,
-          status,
-          botRole,
-          protectionStatus: Boolean(s.protectionEnabled || s.stickerProtection || s.linksProtection),
-          lustMode: Boolean(s.lustMode),
-          botLeft: isLeft,
-          unavailable: isUnavailable,
-          unavailableReason: s.unavailableReason,
-          stats: {
-            bans,
-            kicks,
-            mutes,
-            reports,
-            schedules
-          },
-          settings: s
-        };
-      });
+      const groups = db.getConnectedGroups(db.getCurrentBotId() ?? undefined);
       res.json(groups);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2538,15 +2488,30 @@ export async function startServer() {
     }
   }
 
-  // Connect to MongoDB Atlas if configured
+  // 1. Authenticate / Verify Telegram Bot Identity first if token is available
+  if (process.env.TELEGRAM_BOT_TOKEN?.trim()) {
+    try {
+      console.log('[Roxie Telegram] Verifying Telegram bot identity on startup...');
+      const conn = await telegramBot.testConnection(3);
+      if (conn.success && conn.bot) {
+        db.setBotIdentity(conn.bot);
+        console.log(`[Roxie Telegram] Bot authenticated: @${conn.bot.username || conn.bot.first_name} (ID: ${conn.bot.id})`);
+      }
+    } catch (botErr: any) {
+      console.warn('[Roxie Telegram] Initial bot identity check notice:', botErr?.message);
+    }
+  }
+
+  // 2. Connect to MongoDB Atlas if configured and hydrate bot-scoped group data
   if (process.env.MONGODB_URI?.trim()) {
     try {
       console.log('[Roxie Database] Connecting to MongoDB Atlas...');
       const dbInstance = await mongoManager.connect();
       if (dbInstance) {
         await MongoStorageService.ensureIndexes();
-        console.log('[Roxie Database] Hydrating group data from MongoDB Atlas...');
-        await db.hydrateGroupsFromMongo();
+        const currentBotId = db.getCurrentBotId() ?? undefined;
+        console.log(`[Roxie Database] Hydrating group data from MongoDB Atlas (scoped to botId=${currentBotId ?? 'ALL'})...`);
+        await db.hydrateGroupsFromMongo(currentBotId);
       }
     } catch (mongoErr: any) {
       console.warn('[Roxie Database] MongoDB Atlas initial connection failed (continuing with local storage):', mongoErr?.message);

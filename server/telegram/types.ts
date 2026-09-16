@@ -278,6 +278,8 @@ export interface CaptchaSession {
 export type PolicyDecision = 'ALLOW' | 'BLOCK' | 'EXEMPT' | 'ADMIN_BYPASS';
 
 export interface GroupSettings {
+  botId?: number;
+  botUsername?: string;
   chatId: number;
   chatTitle?: string;
   // Warnings

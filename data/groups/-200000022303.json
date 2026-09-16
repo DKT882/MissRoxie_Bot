@@ -1,0 +1,340 @@
+{
+  "botId": 7022296,
+  "botUsername": "LegacyRoxieBot",
+  "schemaVersion": 1,
+  "chat": {
+    "chatId": "-200000022303",
+    "title": "Bot A Group 7",
+    "type": "supergroup",
+    "username": null
+  },
+  "status": {
+    "botLeft": false,
+    "leftAt": null,
+    "unavailable": false,
+    "unavailableAt": null,
+    "unavailableReason": null
+  },
+  "settings": {
+    "chatId": -200000022303,
+    "botId": 7022296,
+    "botUsername": "LegacyRoxieBot",
+    "chatTitle": "Bot A Group 7",
+    "warnLimit": 3,
+    "warnAction": "ban",
+    "warnExpireSeconds": 0,
+    "floodEnabled": false,
+    "floodCount": 8,
+    "floodWindow": 5,
+    "floodAction": "mute",
+    "raidEnabled": false,
+    "raidLimit": 8,
+    "raidWindow": 30,
+    "raidAction": "kick",
+    "raidDuration": 300,
+    "captchaEnabled": false,
+    "captchaMode": "button",
+    "captchaTimeout": 120,
+    "captchaAction": "kick",
+    "linksProtection": true,
+    "linksWhitelist": [],
+    "mediaProtection": true,
+    "stickerProtection": true,
+    "gifsProtection": false,
+    "videosProtection": false,
+    "photosProtection": false,
+    "voiceProtection": false,
+    "audioProtection": false,
+    "locks": {},
+    "filters": {},
+    "welcomeEnabled": false,
+    "welcomeMessage": "Welcome {user} to {chat}!",
+    "goodbyeEnabled": false,
+    "goodbyeMessage": "Goodbye {user}!",
+    "autoDeleteJoinLeave": false,
+    "slowModeSeconds": 0,
+    "reportsEnabled": true,
+    "chatbotEnabled": true,
+    "chatbotMode": "auto",
+    "reactionEnabled": true,
+    "reactionProbability": 0.15,
+    "stopSpamEnabled": false,
+    "stopAbusiveEnabled": false,
+    "stopPromotionEnabled": false,
+    "gifProtection": false,
+    "linkProtection": true,
+    "imageProtection": false,
+    "fileProtection": false,
+    "customAbusiveWords": [],
+    "automodEnabled": false,
+    "mediaAction": "delete",
+    "warnEscalation": [],
+    "securityEnabled": false,
+    "joinmode": "normal",
+    "autoAcceptEnabled": false,
+    "automations": [],
+    "rules": "",
+    "lastAllTimestamp": 0,
+    "protectionEnabled": true,
+    "protectionFloodCount": 5,
+    "protectionFloodWindow": 5,
+    "protectionDuplicateLimit": 3,
+    "protectionLinkBurstLimit": 3,
+    "autoResponse": {
+      "enabled": true,
+      "mode": "every_message",
+      "cooldownSeconds": 30,
+      "randomize": false,
+      "minSeconds": 30,
+      "maxSeconds": 120,
+      "lastResponseTimestamp": 0
+    },
+    "autoSticker": {
+      "enabled": true,
+      "mode": "cooldown",
+      "cooldownSeconds": 60,
+      "randomize": false,
+      "minSeconds": 60,
+      "maxSeconds": 300,
+      "lastStickerTimestamp": 0
+    },
+    "stickerPacks": {},
+    "updatedAt": "2026-09-16T05:53:03.554Z"
+  },
+  "permissions": {
+    "contentPermissions": null,
+    "customRoles": {},
+    "stickerFreeUsers": []
+  },
+  "moderation": {
+    "locks": {},
+    "filters": {},
+    "linksWhitelist": [],
+    "approvedUsers": [],
+    "freedUsers": [],
+    "warnings": [],
+    "tempActions": [],
+    "abuseWords": []
+  },
+  "ai": {
+    "personality": "normal",
+    "language": "hinglish",
+    "brotherZoneEnabled": true,
+    "coupleFilter": true,
+    "welcomeEnabled": false
+  },
+  "lustMode": {
+    "enabled": false,
+    "level": 1,
+    "lustStickers": {},
+    "userLustLevels": []
+  },
+  "autoResponse": {
+    "enabled": true,
+    "mode": "every_message",
+    "cooldownSeconds": 30,
+    "randomize": false,
+    "minSeconds": 30,
+    "maxSeconds": 120,
+    "lastResponseTimestamp": 0
+  },
+  "autoSticker": {
+    "enabled": true,
+    "mode": "cooldown",
+    "cooldownSeconds": 60,
+    "randomize": false,
+    "minSeconds": 60,
+    "maxSeconds": 300,
+    "lastStickerTimestamp": 0
+  },
+  "stickers": {
+    "mediaLibrary": {
+      "stickers": {},
+      "animations": {},
+      "stickerMetadata": {}
+    },
+    "stickerProtection": true
+  },
+  "stickerPacks": [],
+  "abuseWords": [],
+  "members": [
+    {
+      "userId": 111,
+      "username": "alice",
+      "firstName": "Alice",
+      "role": "member",
+      "lastActive": "2026-08-27T18:36:16.460Z"
+    },
+    {
+      "userId": 222,
+      "username": "bob",
+      "firstName": "Bob",
+      "role": "member",
+      "lastActive": "2026-08-27T18:36:16.461Z"
+    },
+    {
+      "userId": 333,
+      "firstName": "Bot",
+      "role": "member",
+      "lastActive": "2026-08-27T18:36:16.462Z"
+    },
+    {
+      "userId": 1001,
+      "username": "owner_user",
+      "firstName": "OwnerUser",
+      "role": "member",
+      "lastActive": "2026-08-31T11:34:05.620Z"
+    },
+    {
+      "userId": 2001,
+      "username": "admin_promote",
+      "firstName": "AdminWithPromote",
+      "role": "member",
+      "lastActive": "2026-08-31T11:34:05.618Z"
+    },
+    {
+      "userId": 2002,
+      "username": "admin_nopromote",
+      "firstName": "AdminNoPromote",
+      "role": "member",
+      "lastActive": "2026-08-31T11:34:05.628Z"
+    },
+    {
+      "userId": 2003,
+      "username": "target_editable",
+      "firstName": "TargetEditable",
+      "role": "member",
+      "lastActive": "2026-08-31T11:34:05.621Z"
+    },
+    {
+      "userId": 2004,
+      "username": "target_uneditable",
+      "firstName": "TargetUneditable",
+      "role": "member",
+      "lastActive": "2026-08-31T11:34:05.616Z"
+    },
+    {
+      "userId": 3001,
+      "username": "mod_user",
+      "firstName": "ModUser",
+      "role": "MODERATOR",
+      "lastActive": "2026-08-31T11:34:05.612Z"
+    },
+    {
+      "userId": 4001,
+      "username": "member1_user",
+      "firstName": "Member1",
+      "role": "member",
+      "lastActive": "2026-08-31T11:34:05.628Z"
+    },
+    {
+      "userId": 4002,
+      "firstName": "NoUser",
+      "role": "member",
+      "lastActive": "2026-08-31T11:34:05.613Z"
+    },
+    {
+      "userId": 5001,
+      "username": "left_user",
+      "firstName": "LeftUser",
+      "role": "member",
+      "lastActive": "2026-08-31T11:34:05.613Z"
+    },
+    {
+      "userId": 8001,
+      "firstName": "OldUser",
+      "role": "member",
+      "lastActive": "2026-08-24T20:19:21.479Z"
+    },
+    {
+      "userId": 8002,
+      "username": "recycled_handle",
+      "firstName": "NewUser",
+      "role": "member",
+      "lastActive": "2026-08-24T20:19:21.489Z"
+    },
+    {
+      "userId": 9999,
+      "username": "TestBot",
+      "firstName": "TestBot",
+      "role": "member",
+      "lastActive": "2026-08-31T11:34:05.626Z"
+    },
+    {
+      "userId": 12345,
+      "firstName": "Owner",
+      "role": "member",
+      "lastActive": "2026-09-16T05:53:03.709Z"
+    },
+    {
+      "userId": 55551,
+      "firstName": "User A",
+      "role": "member",
+      "lastActive": "2026-08-24T20:20:34.329Z"
+    },
+    {
+      "userId": 55552,
+      "username": "old_handle",
+      "firstName": "User B (New Owner)",
+      "role": "member",
+      "lastActive": "2026-08-24T20:20:34.329Z"
+    },
+    {
+      "userId": 444001,
+      "username": "alice_crypto",
+      "firstName": "Alice",
+      "role": "member",
+      "lastActive": "2026-09-01T07:31:38.257Z"
+    },
+    {
+      "userId": 444002,
+      "username": "bob_moderator",
+      "firstName": "Bob",
+      "role": "member",
+      "lastActive": "2026-09-01T07:31:38.258Z"
+    },
+    {
+      "userId": 77770001,
+      "username": "test_member_alpha",
+      "firstName": "Member Alpha",
+      "role": "member",
+      "lastActive": "2026-08-24T20:20:35.499Z"
+    },
+    {
+      "userId": 77770002,
+      "firstName": "NoUser Member",
+      "role": "member",
+      "lastActive": "2026-08-24T20:20:33.865Z"
+    },
+    {
+      "userId": 77770003,
+      "username": "test_mod_user",
+      "firstName": "Mod User",
+      "role": "MODERATOR",
+      "lastActive": "2026-08-24T20:20:27.330Z"
+    },
+    {
+      "userId": 762446082,
+      "username": "Sss_00911",
+      "firstName": "Sss",
+      "role": "member",
+      "lastActive": "2026-08-30T17:19:02.147Z"
+    },
+    {
+      "userId": 862765503,
+      "username": "Shrey_18x",
+      "firstName": "shrey",
+      "role": "member",
+      "lastActive": "2026-08-30T18:02:16.047Z"
+    }
+  ],
+  "moderators": [],
+  "messages": [],
+  "statistics": {
+    "schedules": [],
+    "notes": [],
+    "userMemories": []
+  },
+  "activity": [],
+  "updatedAt": "2026-09-16T05:53:03.554Z"
+}

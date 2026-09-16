@@ -145,6 +145,7 @@ export class TelegramBotManager {
 
         if (res.ok && res.result) {
           this.botUser = res.result;
+          db.setBotIdentity(res.result);
           console.log(JSON.stringify({
             event: 'TELEGRAM_GETME_SUCCESS',
             username: res.result.username || res.result.first_name,

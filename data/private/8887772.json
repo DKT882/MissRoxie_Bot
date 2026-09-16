@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "chatId": "8887772",
+  "userId": 8887772,
+  "username": null,
+  "name": "Kamlesh",
+  "language": "english",
+  "autoDelete": false,
+  "lastUpdated": 1789324099975,
+  "messages": [
+    {
+      "role": "user",
+      "content": "My name is Kamlesh and I am a software engineer",
+      "timestamp": 1789323548000,
+      "messageId": 204,
+      "direction": "in",
+      "language": "english"
+    },
+    {
+      "role": "assistant",
+      "content": "[Sent sticker]",
+      "timestamp": 1789323548901,
+      "messageId": 30566,
+      "mediaType": "sticker",
+      "mediaFileId": "CAACAgIAAxUAAWqUbAdvERu1X9l428mfCkQuOAQFAAJJAQAC9HsZAAEOsNjpiID-Lz0E",
+      "direction": "out"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello in DM!",
+      "timestamp": 1789324099975,
+      "messageId": 13455,
+      "mediaType": "text",
+      "direction": "out"
+    }
+  ],
+  "lustLevel": 0,
+  "updatedAt": "2026-09-16T05:53:32.425Z"
+}
