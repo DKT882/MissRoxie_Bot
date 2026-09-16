@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   ShieldCheck, 
   AlertCircle, 
@@ -626,8 +626,104 @@ export default function App() {
     } catch {}
   };
 
-  // Primary Data Fetcher (Optimized with in-flight deduplication)
-  const fetchData = async () => {
+  // Group Details On-Demand Data Fetcher
+  const fetchGroupDetailsData = useCallback(async (targetDetailId: number | string) => {
+    try {
+      const numChatId = Number(targetDetailId);
+      const [detailResult, modsResult, permsResult, groupStickersResult, abuseResult, membersResult, lustUsersResult, historyResult, autoResult] = await Promise.allSettled([
+        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}`),
+        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/moderators`),
+        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/permissions`),
+        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/stickers`),
+        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/abuse-words`),
+        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/members`),
+        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/lust/users`),
+        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/backup/history`),
+        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/automations`)
+      ]);
+
+      if (autoResult.status === 'fulfilled' && autoResult.value.ok) {
+        try {
+          const aData = await autoResult.value.json();
+          setGroupAutomationsList(aData.automations || []);
+        } catch {}
+      }
+
+      if (detailResult.status === 'fulfilled' && detailResult.value.ok) {
+        try {
+          const dData = await detailResult.value.json();
+          setGroupDetails(dData);
+          if (dData.settings?.slowModeSeconds !== undefined) {
+            setSlowmodeInput(dData.settings.slowModeSeconds);
+          }
+        } catch {}
+      } else {
+        // If the group detail endpoint returned an error or is missing, synthesize a safe default object from existing groups
+        setGroupDetails(prev => (prev && prev.chatId === numChatId) ? prev : {
+          chatId: numChatId,
+          chatTitle: `Group ${targetDetailId}`,
+          settings: {},
+          locks: {},
+          filters: {},
+          linksWhitelist: [],
+          bans: [],
+          kicks: [],
+          mutes: [],
+          reports: [],
+          schedules: [],
+          notes: [],
+          approvedUsers: [],
+          freedUsers: [],
+          storedMessages: [],
+          logs: [],
+          status: 'Active',
+          botRole: 'Administrator'
+        });
+      }
+
+      if (modsResult.status === 'fulfilled' && modsResult.value.ok) {
+        try {
+          setGroupModerators(await modsResult.value.json());
+        } catch {}
+      }
+      if (permsResult.status === 'fulfilled' && permsResult.value.ok) {
+        try {
+          setGroupPermissionsData(await permsResult.value.json());
+        } catch {}
+      }
+      if (groupStickersResult.status === 'fulfilled' && groupStickersResult.value.ok) {
+        try {
+          setGroupStickersData(await groupStickersResult.value.json());
+        } catch {}
+      }
+      if (abuseResult.status === 'fulfilled' && abuseResult.value.ok) {
+        try {
+          const aData = await abuseResult.value.json();
+          setGroupAbuseWords(aData.words || []);
+        } catch {}
+      }
+      if (membersResult.status === 'fulfilled' && membersResult.value.ok) {
+        try {
+          setGroupMembersList(await membersResult.value.json());
+        } catch {}
+      }
+      if (lustUsersResult.status === 'fulfilled' && lustUsersResult.value.ok) {
+        try {
+          setGroupLustUsers(await lustUsersResult.value.json());
+        } catch {}
+      }
+      if (historyResult.status === 'fulfilled' && historyResult.value.ok) {
+        try {
+          setBackupHistoryList(await historyResult.value.json());
+        } catch {}
+      }
+    } catch (err) {
+      console.warn('Group details fetch error:', err);
+    }
+  }, []);
+
+  // Primary Data Fetcher (Global Summary Resources ONLY)
+  const fetchData = useCallback(async () => {
     try {
       const [overviewRes, groupsRes, cmdsRes, statusRes, healthRes, dmsRes, stickersRes, schedulesRes] = await Promise.all([
         deduplicatedFetch('/api/dashboard/overview'),
@@ -657,134 +753,75 @@ export default function App() {
         const gRes = await deduplicatedFetch('/api/dashboard/control-center/global');
         if (gRes.ok) setGlobalSettings(await gRes.json());
       } catch {}
-
-      // Fetch group details if a group is open or selected
-      const targetDetailId = activeGroupDetailId || (selectedChatId !== 'all' ? selectedChatId : null);
-      if (targetDetailId) {
-        // Fetch all group sub-resources with Promise.allSettled so no single slow or failing sub-resource blocks the others
-        const [detailResult, modsResult, permsResult, groupStickersResult, abuseResult, membersResult, lustUsersResult, historyResult, autoResult] = await Promise.allSettled([
-          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}`),
-          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/moderators`),
-          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/permissions`),
-          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/stickers`),
-          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/abuse-words`),
-          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/members`),
-          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/lust/users`),
-          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/backup/history`),
-          deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/automations`)
-        ]);
-
-        if (autoResult.status === 'fulfilled' && autoResult.value.ok) {
-          try {
-            const aData = await autoResult.value.json();
-            setGroupAutomationsList(aData.automations || []);
-          } catch {}
-        }
-
-        if (detailResult.status === 'fulfilled' && detailResult.value.ok) {
-          try {
-            const dData = await detailResult.value.json();
-            setGroupDetails(dData);
-            if (dData.settings?.slowModeSeconds !== undefined) {
-              setSlowmodeInput(dData.settings.slowModeSeconds);
-            }
-          } catch {}
-        } else {
-          // If the group detail endpoint returned an error or is missing, synthesize a safe default object from existing groups
-          const matchedGroup = groups.find(g => g.chatId === targetDetailId);
-          setGroupDetails(prev => prev && prev.chatId === targetDetailId ? prev : {
-            chatId: targetDetailId,
-            chatTitle: matchedGroup?.chatTitle || `Group ${targetDetailId}`,
-            settings: matchedGroup?.settings || {},
-            locks: {},
-            filters: {},
-            linksWhitelist: [],
-            bans: [],
-            kicks: [],
-            mutes: [],
-            reports: [],
-            schedules: [],
-            notes: [],
-            approvedUsers: [],
-            freedUsers: [],
-            storedMessages: [],
-            logs: [],
-            status: matchedGroup?.status || 'Active',
-            botRole: matchedGroup?.botRole || 'Administrator'
-          });
-        }
-
-        if (modsResult.status === 'fulfilled' && modsResult.value.ok) {
-          try {
-            setGroupModerators(await modsResult.value.json());
-          } catch {}
-        }
-        if (permsResult.status === 'fulfilled' && permsResult.value.ok) {
-          try {
-            setGroupPermissionsData(await permsResult.value.json());
-          } catch {}
-        }
-        if (groupStickersResult.status === 'fulfilled' && groupStickersResult.value.ok) {
-          try {
-            setGroupStickersData(await groupStickersResult.value.json());
-          } catch {}
-        }
-        if (abuseResult.status === 'fulfilled' && abuseResult.value.ok) {
-          try {
-            const aData = await abuseResult.value.json();
-            setGroupAbuseWords(aData.words || []);
-          } catch {}
-        }
-        if (membersResult.status === 'fulfilled' && membersResult.value.ok) {
-          try {
-            setGroupMembersList(await membersResult.value.json());
-          } catch {}
-        }
-        if (lustUsersResult.status === 'fulfilled' && lustUsersResult.value.ok) {
-          try {
-            setGroupLustUsers(await lustUsersResult.value.json());
-          } catch {}
-        }
-        if (historyResult.status === 'fulfilled' && historyResult.value.ok) {
-          try {
-            setBackupHistoryList(await historyResult.value.json());
-          } catch {}
-        }
-      } else {
-        setGroupDetails(null);
-        setGroupModerators(null);
-        setGroupPermissionsData(null);
-        setGroupStickersData(null);
-        setGroupAbuseWords([]);
-        setGroupMembersList([]);
-        setGroupLustUsers([]);
-        setBackupHistoryList([]);
-      }
-
-      // Fetch active private chat conversation
-      if (activePrivateChatId) {
-        const pRes = await deduplicatedFetch(`/api/dashboard/private-chats/${activePrivateChatId}/messages`);
-        if (pRes.ok) {
-          const pData = await pRes.json();
-          setPrivateChatMessages(pData.messages || []);
-        }
-      }
     } catch (err) {
       console.warn('Dashboard fetch error:', err);
     }
-  };
+  }, []);
 
+  // Refresh current active view (both global and active group details if open)
+  const refreshCurrentView = useCallback(() => {
+    fetchData();
+    const targetDetailId = activeGroupDetailId || (selectedChatId !== 'all' ? selectedChatId : null);
+    if (targetDetailId) {
+      fetchGroupDetailsData(targetDetailId);
+    }
+  }, [fetchData, fetchGroupDetailsData, activeGroupDetailId, selectedChatId]);
+
+  // Global Dashboard Polling (15,000 ms)
   useEffect(() => {
     if (!session) return;
     fetchData();
-    const interval = setInterval(fetchData, 5000);
+    const interval = setInterval(fetchData, 15000);
     return () => {
       clearInterval(interval);
       if (settingsDebounceTimerRef.current) {
         clearTimeout(settingsDebounceTimerRef.current);
       }
     };
-  }, [session, selectedChatId, activeGroupDetailId, activePrivateChatId]);
+  }, [session, fetchData]);
+
+  // Group Details On-Demand Fetch & Gentle Refresh (30,000 ms while group is active)
+  useEffect(() => {
+    if (!session) return;
+    const targetDetailId = activeGroupDetailId || (selectedChatId !== 'all' ? selectedChatId : null);
+    if (targetDetailId) {
+      fetchGroupDetailsData(targetDetailId);
+      const groupInterval = setInterval(() => {
+        fetchGroupDetailsData(targetDetailId);
+      }, 30000);
+      return () => clearInterval(groupInterval);
+    } else {
+      setGroupDetails(null);
+      setGroupModerators(null);
+      setGroupPermissionsData(null);
+      setGroupStickersData(null);
+      setGroupAbuseWords([]);
+      setGroupMembersList([]);
+      setGroupLustUsers([]);
+      setBackupHistoryList([]);
+      setGroupAutomationsList([]);
+    }
+  }, [session, activeGroupDetailId, selectedChatId, fetchGroupDetailsData]);
+
+  // Private Chat Messages On-Demand Fetch & Refresh (15,000 ms while active)
+  useEffect(() => {
+    if (!session || !activePrivateChatId) {
+      setPrivateChatMessages([]);
+      return;
+    }
+    const fetchPrivateChat = async () => {
+      try {
+        const pRes = await deduplicatedFetch(`/api/dashboard/private-chats/${activePrivateChatId}/messages`);
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          setPrivateChatMessages(pData.messages || []);
+        }
+      } catch {}
+    };
+    fetchPrivateChat();
+    const pInterval = setInterval(fetchPrivateChat, 15000);
+    return () => clearInterval(pInterval);
+  }, [session, activePrivateChatId]);
 
   // Handle connection test
   const handleTestConnection = async () => {
@@ -2932,7 +2969,7 @@ export default function App() {
                       <p className={`text-xs ${themeMutedText}`}>Real messages received & recorded in group memory by Roxie.</p>
                     </div>
                     <button
-                      onClick={() => fetchData()}
+                      onClick={refreshCurrentView}
                       className={`px-3 py-1.5 ${themeInnerCardBg} border ${themeBorder} hover:opacity-80 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors`}
                     >
                       <RefreshCw className="w-3.5 h-3.5" /> Refresh
@@ -4004,7 +4041,7 @@ export default function App() {
                       <p className={`text-xs ${themeMutedText}`}>Real-time member actions executed against the authoritative Telegram API.</p>
                     </div>
                     <button
-                      onClick={fetchData}
+                      onClick={refreshCurrentView}
                       className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5"
                     >
                       <RefreshCw className="w-3.5 h-3.5" /> Refresh Members
@@ -4505,7 +4542,7 @@ export default function App() {
                         </p>
                       </div>
                       <button
-                        onClick={() => fetchData()}
+                        onClick={refreshCurrentView}
                         className="p-1.5 rounded-lg bg-stone-800/40 hover:bg-stone-800 text-stone-300 text-xs flex items-center gap-1"
                       >
                         <RefreshCw className="w-3.5 h-3.5" /> Refresh Snapshots

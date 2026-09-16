@@ -19,7 +19,7 @@ export class TelegramApi {
   // In-Memory Metadata TTL Caches (60 seconds TTL)
   private chatCache: Map<string, { data: any; expiresAt: number }> = new Map();
   private chatMemberCache: Map<string, { data: TelegramChatMember; expiresAt: number }> = new Map();
-  private chatAdminsCache: Map<string, { data: TelegramChatMember[]; expiresAt: number }> = new Map();
+  private chatAdminsCache: Map<string, { data?: TelegramChatMember[]; description?: string; error_code?: number; expiresAt: number }> = new Map();
   private chatMemberCountCache: Map<string, { data: number; expiresAt: number }> = new Map();
   // Outbound rate limit scheduler state
   private lastRequestTimestamp: number = 0;
@@ -666,7 +666,14 @@ export class TelegramApi {
     const key = String(chatId);
     const cached = this.chatAdminsCache.get(key);
     if (cached && Date.now() < cached.expiresAt) {
-      return { ok: true, result: cached.data };
+      if (cached.data) {
+        return { ok: true, result: cached.data };
+      }
+      return {
+        ok: false,
+        description: cached.description || 'Cached negative response',
+        error_code: cached.error_code || 400
+      };
     }
 
     const res = await this.call<TelegramChatMember[]>('getChatAdministrators', {
@@ -675,6 +682,13 @@ export class TelegramApi {
 
     if (res.ok && res.result) {
       this.chatAdminsCache.set(key, { data: res.result, expiresAt: Date.now() + 60000 });
+    } else {
+      // 30-second negative/error cache to prevent repeated failing requests to Telegram
+      this.chatAdminsCache.set(key, {
+        description: res.description,
+        error_code: res.error_code,
+        expiresAt: Date.now() + 30000
+      });
     }
     return res;
   }
