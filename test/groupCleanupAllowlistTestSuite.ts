@@ -79,8 +79,8 @@ async function runTestSuite() {
     }
   });
 
-  // 2. Setup 85 Synthetic Groups (6 authoritative + 79 stale/test/dummy groups)
-  runTest('Test 2: Setup 85 synthetic groups in storage & disk, including private chats and global settings', () => {
+  // 2. Setup 206 Synthetic Groups (6 authoritative + 200 stale/test/dummy groups)
+  runTest('Test 2: Setup 206 synthetic groups in storage & disk, including private chats and global settings', () => {
     // A. Setup 6 Authoritative Groups
     for (const [idStr, meta] of Object.entries(AUTHORITATIVE_GROUP_METADATA)) {
       const numId = Number(idStr);
@@ -100,8 +100,8 @@ async function runTestSuite() {
       testDb.saveGroupJsonSync(numId);
     }
 
-    // B. Setup 79 Stale/Legacy/Test Groups
-    for (let i = 1; i <= 79; i++) {
+    // B. Setup 200 Stale/Legacy/Test Groups
+    for (let i = 1; i <= 200; i++) {
       const staleId = -1009000000000 - i;
       const s = testDb.getGroupSettings(staleId, `Stale Test Group ${i}`);
       s.botId = botId;
@@ -134,24 +134,25 @@ async function runTestSuite() {
     });
     testDb.savePrivateJsonSync(privateUserChatId);
 
-    // Verify initial counts: 85 groups total in settings
+    // Verify initial counts: 206 groups total in settings
     const initialGroups = testDb.getAllGroupSettings();
     const groupCount = Object.keys(initialGroups).filter(k => Number(k) < 0).length;
-    assert.strictEqual(groupCount, 85, `Expected 85 initial groups, found ${groupCount}`);
+    assert.strictEqual(groupCount, 206, `Expected 206 initial groups, found ${groupCount}`);
 
     const filesCount = fs.readdirSync(testGroupsDir).filter(f => f.endsWith('.json')).length;
-    assert.strictEqual(filesCount, 85, `Expected 85 initial group files, found ${filesCount}`);
+    assert.strictEqual(filesCount, 206, `Expected 206 initial group files, found ${filesCount}`);
   });
 
-  // 3. Purge Execution (RAM & Disk)
-  await runTest('Test 3: Purge execution removes all 79 non-authoritative groups and preserves 6 allowed', async () => {
-    const report = await testDb.purgeNonAuthoritativeGroups({ force: true });
+  // 3. Purge Execution via ensureAuthoritativeMigrationApplied (RAM & Disk)
+  await runTest('Test 3: ensureAuthoritativeMigrationApplied removes 200 non-authoritative groups and preserves 6 allowed', async () => {
+    const report = await testDb.ensureAuthoritativeMigrationApplied({ force: true });
     
-    assert.strictEqual(report.isMigration, true);
-    assert.strictEqual(report.existingGroupsCount, 85);
-    assert.strictEqual(report.removedGroupsCount, 79);
-    assert.strictEqual(report.finalGroupsCount, 6);
-    assert.strictEqual(report.allowedGroupsCount, 6);
+    assert.strictEqual(report.applied, true);
+    assert.strictEqual(report.details.isMigration, true);
+    assert.strictEqual(report.details.existingGroupsCount, 206);
+    assert.strictEqual(report.details.removedGroupsCount, 200);
+    assert.strictEqual(report.details.finalGroupsCount, 6);
+    assert.strictEqual(report.details.allowedGroupsCount, 6);
   });
 
   // 4. In-Memory Group Verification
@@ -169,7 +170,7 @@ async function runTestSuite() {
   });
 
   // 5. Disk Files Verification
-  runTest('Test 5: Disk files for all 79 stale groups are deleted, 6 allowed group files remain', () => {
+  runTest('Test 5: Disk files for all 200 stale groups are deleted, 6 allowed group files remain', () => {
     const remainingFiles = fs.readdirSync(testGroupsDir).filter(f => f.endsWith('.json'));
     assert.strictEqual(remainingFiles.length, 6, `Expected 6 files on disk, found ${remainingFiles.length}`);
 
@@ -187,8 +188,7 @@ async function runTestSuite() {
   });
 
   // 6. AutoEngine Timer & Job Isolation
-  runTest('Test 6: AutoEngine timer cancellation on deleted groups', () => {
-    // Start AutoEngine on testDb
+  runTest('Test 6: AutoEngine schedules exactly 6 allowed groups and rejects scheduling deleted groups', () => {
     autoEngineService.start(botId);
 
     // Verify allowed group timers can be synced
@@ -197,11 +197,16 @@ async function runTestSuite() {
       autoEngineService.syncGroup(botId, numId, s, false);
     }
 
-    // For any non-authoritative group, cancelAllForGroup ensures no timer/job remains
+    // Non-authoritative group attempts to schedule -> rejected by defensive gate
     for (let i = 1; i <= 5; i++) {
       const staleId = -1009000000000 - i;
-      autoEngineService.cancelAllForGroup(botId, staleId);
+      autoEngineService.scheduleJob(botId, staleId, 'sticker', 60000, 'test');
     }
+
+    const status = autoEngineService.getStatus();
+    assert.strictEqual(status.totalActiveJobs, 12, `Expected exactly 12 active jobs (6 response + 6 sticker) in AutoEngine, got ${status.totalActiveJobs}`);
+    assert.strictEqual(status.activeResponseTimers, 6);
+    assert.strictEqual(status.activeStickerTimers, 6);
 
     autoEngineService.stop();
   });
@@ -225,19 +230,25 @@ async function runTestSuite() {
     assert.strictEqual(testDb.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE), true);
   });
 
-  // 9. Idempotency on Second Run
-  await runTest('Test 9: Second purge run is idempotent and does not delete remaining groups', async () => {
-    const secondReport = await testDb.purgeNonAuthoritativeGroups();
-    assert.strictEqual(secondReport.isMigration, false);
-    assert.strictEqual(secondReport.removedGroupsCount, 0);
-    assert.strictEqual(secondReport.finalGroupsCount, 6);
+  // 9. Idempotency on Second Startup / Restart Simulation
+  await runTest('Test 9: Simulated restart recognizes migration marker and skips destructive purge', async () => {
+    const restartDb = new StorageManager(testTempDir);
+    restartDb.setBotIdentity({ id: botId, username: 'TestBot' });
+
+    assert.strictEqual(restartDb.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE), true);
+
+    const restartCheck = await restartDb.ensureAuthoritativeMigrationApplied();
+    assert.strictEqual(restartCheck.applied, false, 'Should skip purge on restart when migration is already applied');
+    assert.strictEqual(restartDb.getConnectedGroupCount(), 6);
   });
 
   // 10. Future Group Onboarding
-  await runTest('Test 10: Dynamically onboarding a genuinely new group in the future works without being purged', async () => {
+  await runTest('Test 10: Dynamically onboarding a genuinely new 7th group persists and is NOT purged', async () => {
     const newChatId = -100888999111;
     const newSettings = testDb.getGroupSettings(newChatId, 'Genuinely New Future Group');
     newSettings.botId = botId;
+    newSettings.botLeft = false;
+    newSettings.unavailable = false;
     testDb.saveGroupJsonSync(newChatId);
 
     // Now group count is 7
@@ -246,14 +257,25 @@ async function runTestSuite() {
     assert.strictEqual(groups.length, 7);
     assert.ok(groups.some(g => g.chatId === newChatId));
 
-    // Calling purgeNonAuthoritativeGroups (non-force) does NOT purge the new group because migration is applied
-    const report = await testDb.purgeNonAuthoritativeGroups();
-    assert.strictEqual(report.isMigration, false);
+    // Calling ensureAuthoritativeMigrationApplied (non-force) does NOT purge the new group
+    const check = await testDb.ensureAuthoritativeMigrationApplied();
+    assert.strictEqual(check.applied, false);
     assert.strictEqual(testDb.getConnectedGroupCount(), 7);
   });
 
-  // 11. Private Chats and Global Settings Untouched
-  runTest('Test 11: Private chats and global settings remain untouched and uncorrupted', () => {
+  // 11. Third Restart Simulation with 7 Groups
+  await runTest('Test 11: Third restart loads and preserves all 7 groups', async () => {
+    const thirdDb = new StorageManager(testTempDir);
+    thirdDb.setBotIdentity({ id: botId, username: 'TestBot' });
+
+    assert.strictEqual(thirdDb.getConnectedGroupCount(), 7);
+    const groups = thirdDb.getConnectedGroups();
+    assert.strictEqual(groups.length, 7);
+    assert.ok(groups.some(g => g.chatId === -100888999111));
+  });
+
+  // 12. Private Chats and Global Settings Untouched
+  runTest('Test 12: Private chats and global settings remain untouched and uncorrupted', () => {
     const privateUserChatId = 987654321;
     const privateMessages = testDb.getPrivateChatMessages(privateUserChatId);
     assert.ok(privateMessages.length > 0, 'Private messages should not be purged');

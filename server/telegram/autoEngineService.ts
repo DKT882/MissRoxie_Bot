@@ -154,6 +154,13 @@ export class AutoEngineService {
     if (!this.isRunning) return;
     if (this.currentBotId !== null && this.currentBotId !== botId) return;
 
+    // Defensive gate: Ensure the group exists in storage and is active/connected
+    const currentSettings = db.getGroupSettingsIfExists(chatId);
+    if (!currentSettings || currentSettings.botLeft || currentSettings.unavailable) {
+      this.cancelAllForGroup(botId, chatId);
+      return;
+    }
+
     const key = this.makeJobKey(botId, chatId, engineType);
     const existing = this.jobs.get(key);
 

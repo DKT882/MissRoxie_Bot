@@ -253,6 +253,35 @@ export class MongoStorageService {
     }
   }
 
+  public static async isMigrationApplied(migrationName: string): Promise<boolean> {
+    try {
+      const db = mongoManager.getDb();
+      if (!db) return false;
+      const collection = db.collection('migrations');
+      const doc = await collection.findOne({ name: migrationName });
+      return Boolean(doc);
+    } catch (err: any) {
+      console.warn(`[MongoStorage] Failed to check migration '${migrationName}' in MongoDB Atlas:`, err?.message);
+      return false;
+    }
+  }
+
+  public static async markMigrationApplied(migrationName: string): Promise<void> {
+    try {
+      const db = mongoManager.getDb();
+      if (!db) return;
+      const collection = db.collection('migrations');
+      await collection.updateOne(
+        { name: migrationName },
+        { $set: { name: migrationName, appliedAt: new Date() } },
+        { upsert: true }
+      );
+      console.log(`[MongoStorage] Migration '${migrationName}' marked as applied in MongoDB Atlas.`);
+    } catch (err: any) {
+      console.warn(`[MongoStorage] Failed to mark migration in MongoDB Atlas:`, err?.message);
+    }
+  }
+
   public static async purgeNonAuthoritativeGroups(allowedIds: Set<string>, allowedNumIds: Set<number>): Promise<number> {
     try {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
@@ -260,18 +289,32 @@ export class MongoStorageService {
 
       const allowedStrArray = Array.from(allowedIds);
       const allowedNumArray = Array.from(allowedNumIds);
+      const combinedAllowed = [...allowedStrArray, ...allowedNumArray];
 
-      // Delete all group documents that are NOT in the allowlist
-      const query: any = {
+      // Pass 1: Bulk delete matching non-authoritative documents
+      const deleteResult = await collection.deleteMany({
         $and: [
           { chatId: { $nin: allowedStrArray } },
           { numChatId: { $nin: allowedNumArray } }
-        ]
-      };
+        ] as any
+      });
 
-      const result = await collection.deleteMany(query);
-      console.log(`[MongoStorage] Purged ${result.deletedCount} non-authoritative group documents from MongoDB Atlas.`);
-      return result.deletedCount;
+      // Pass 2: Exhaustive verification on all remaining documents
+      const remainingDocs = await collection.find({}).toArray();
+      let extraDeleted = 0;
+      for (const doc of remainingDocs) {
+        const rawId = String(doc.chatId || doc.numChatId || (doc as any).chat?.chatId || (doc as any).settings?.chatId || '');
+        const numId = Number(rawId);
+        const isAllowed = allowedIds.has(rawId) || (!isNaN(numId) && allowedNumIds.has(numId));
+        if (!isAllowed) {
+          await collection.deleteOne({ _id: (doc as any)._id });
+          extraDeleted++;
+        }
+      }
+
+      const totalDeleted = (deleteResult?.deletedCount || 0) + extraDeleted;
+      console.log(`[MongoStorage] Purged ${totalDeleted} non-authoritative group documents from MongoDB Atlas.`);
+      return totalDeleted;
     } catch (err: any) {
       console.error(`[MongoStorage] Failed to purge non-authoritative groups from MongoDB Atlas: ${err?.message}`);
       return 0;

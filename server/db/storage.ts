@@ -641,14 +641,6 @@ export class StorageManager {
       console.log(`Directory writable: ${this.isDataDirWritable ? 'Yes' : 'No'}`);
       console.log(`Schema version: 1`);
 
-      // Safe Startup One-time Migration: Authoritative 6-group purge
-      if (!this.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE)) {
-        console.log(`[Storage] One-time migration '${MIGRATION_V1_6_GROUP_PURGE}' pending. Executing authoritative 6-group purge...`);
-        this.purgeNonAuthoritativeGroups().catch((purgeErr: any) => {
-          console.warn(`[Storage] Error during startup authoritative group purge:`, purgeErr?.message);
-        });
-      }
-
       // 6. Safe Startup Migration: For any groups/private in memory without a file, generate one
       if (this.isDataDirWritable) {
         if (this.data.settings) {
@@ -1243,10 +1235,7 @@ export class StorageManager {
     const targetBotId = botIdToHydrate !== undefined ? botIdToHydrate : (this.currentBotId !== null ? this.currentBotId : undefined);
 
     try {
-      if (!this.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE)) {
-        console.log(`[Storage] One-time migration '${MIGRATION_V1_6_GROUP_PURGE}' pending before MongoDB hydration. Purging non-authoritative groups...`);
-        await this.purgeNonAuthoritativeGroups();
-      }
+      await this.ensureAuthoritativeMigrationApplied();
 
       const mongoGroups = await MongoStorageService.getAllGroups(targetBotId);
       console.log(`[Storage] Found ${mongoGroups.length} group(s) in MongoDB Atlas for botId=${targetBotId ?? 'ALL'} during startup hydration check.`);
@@ -5665,6 +5654,32 @@ export class StorageManager {
     return true;
   }
 
+  public async ensureAuthoritativeMigrationApplied(options: {
+    allowedIds?: Set<string>;
+    force?: boolean;
+    botId?: number;
+  } = {}): Promise<{ applied: boolean; details?: any }> {
+    const isLocalApplied = this.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE);
+    let isMongoApplied = false;
+    if (mongoManager.getStatus().isConnected) {
+      isMongoApplied = await MongoStorageService.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE);
+    } else {
+      isMongoApplied = isLocalApplied;
+    }
+
+    if (!options.force && isLocalApplied && isMongoApplied) {
+      return { applied: false };
+    }
+
+    console.log(`[Storage] Authoritative 6-group migration pending check (LocalApplied=${isLocalApplied}, MongoApplied=${isMongoApplied}). Executing dual-store purge...`);
+    const details = await this.purgeNonAuthoritativeGroups({
+      allowedIds: options.allowedIds,
+      force: true,
+      botId: options.botId
+    });
+    return { applied: true, details };
+  }
+
   public async purgeNonAuthoritativeGroups(options: {
     allowedIds?: Set<string>;
     force?: boolean;
@@ -5684,7 +5699,13 @@ export class StorageManager {
     const allowedNumIds = new Set(Array.from(allowedIds).map(Number));
     const isForce = options.force === true;
 
-    if (!isForce && this.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE)) {
+    const isLocalApplied = this.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE);
+    let isMongoApplied = true;
+    if (mongoManager.getStatus().isConnected) {
+      isMongoApplied = await MongoStorageService.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE);
+    }
+
+    if (!isForce && isLocalApplied && isMongoApplied) {
       const currentSurviving = Object.keys(this.data.settings || {})
         .map(Number)
         .filter(id => id < 0);
@@ -5701,7 +5722,17 @@ export class StorageManager {
       };
     }
 
-    // 1. Discover all existing group IDs across RAM and disk
+    // 1. Purge MongoDB Atlas if connected
+    if (mongoManager.getStatus().isConnected) {
+      try {
+        await MongoStorageService.purgeNonAuthoritativeGroups(allowedIds, allowedNumIds);
+        await MongoStorageService.markMigrationApplied(MIGRATION_V1_6_GROUP_PURGE);
+      } catch (mongoErr: any) {
+        console.warn(`[GROUP_CLEANUP] MongoDB purge error: ${mongoErr?.message}`);
+      }
+    }
+
+    // 2. Discover all existing group IDs across RAM and disk
     const allFoundGroupIds = new Set<number>();
     if (this.data.settings) {
       for (const idStr of Object.keys(this.data.settings)) {
@@ -5743,7 +5774,7 @@ export class StorageManager {
       }
     }
 
-    // 2. Also ensure any stray backup files for non-allowed groups are purged
+    // 3. Also ensure any stray backup files for non-allowed groups are purged
     for (const dir of [this.groupsBackupDir, path.join(this.groupsDir, 'backups')]) {
       if (fs.existsSync(dir)) {
         try {
@@ -5758,15 +5789,6 @@ export class StorageManager {
       }
     }
 
-    // 3. Purge MongoDB Atlas if connected
-    if (mongoManager.getStatus().isConnected) {
-      try {
-        await MongoStorageService.purgeNonAuthoritativeGroups(allowedIds, allowedNumIds);
-      } catch (mongoErr: any) {
-        console.warn(`[GROUP_CLEANUP] MongoDB purge error: ${mongoErr?.message}`);
-      }
-    }
-
     // 4. Ensure default settings records exist for the 6 allowed groups if missing
     for (const [idStr, meta] of Object.entries(AUTHORITATIVE_GROUP_METADATA)) {
       if (allowedIds.has(idStr)) {
@@ -5776,6 +5798,13 @@ export class StorageManager {
           s.botLeft = false;
           s.unavailable = false;
           this.saveGroupJsonSync(numId);
+        }
+        if (mongoManager.getStatus().isConnected) {
+          try {
+            const rawData = this.buildGroupDataObject(numId);
+            const safeData = this.sanitizeGroupData(rawData);
+            await MongoStorageService.saveGroup(safeData, this.currentBotId ?? undefined, this.currentBotUsername ?? undefined);
+          } catch {}
         }
       }
     }

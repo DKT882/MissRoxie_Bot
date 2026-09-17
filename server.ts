@@ -2560,28 +2560,49 @@ export async function startServer() {
     }
   }
 
-  // 2. Connect to MongoDB Atlas if configured and hydrate bot-scoped group data
+  // 2. Connect to MongoDB Atlas if configured
   if (process.env.MONGODB_URI?.trim()) {
     try {
       console.log('[Roxie Database] Connecting to MongoDB Atlas...');
       const dbInstance = await mongoManager.connect();
       if (dbInstance) {
         await MongoStorageService.ensureIndexes();
-        const currentBotId = db.getCurrentBotId() ?? undefined;
-        console.log(`[Roxie Database] Hydrating group data from MongoDB Atlas (scoped to botId=${currentBotId ?? 'ALL'})...`);
-        await db.hydrateGroupsFromMongo(currentBotId);
       }
     } catch (mongoErr: any) {
       console.warn('[Roxie Database] MongoDB Atlas initial connection failed (continuing with local storage):', mongoErr?.message);
     }
   }
 
+  // 3. Ensure one-time authoritative 6-group migration is executed across MongoDB and local storage
+  try {
+    await db.ensureAuthoritativeMigrationApplied();
+  } catch (migErr: any) {
+    console.error('[Roxie Database] Migration check error during startup:', migErr?.message);
+  }
+
+  // 4. Hydrate groups from MongoDB Atlas (now guaranteed clean)
+  if (mongoManager.getStatus().isConnected) {
+    try {
+      const currentBotId = db.getCurrentBotId() ?? undefined;
+      console.log(`[Roxie Database] Hydrating group data from MongoDB Atlas (scoped to botId=${currentBotId ?? 'ALL'})...`);
+      await db.hydrateGroupsFromMongo(currentBotId);
+    } catch (hydrateErr: any) {
+      console.error('[Roxie Database] MongoDB Atlas hydration failed:', hydrateErr?.message);
+    }
+  }
+
+  // 5. Verify final group state established
+  const finalGroups = db.getAllGroupSettings();
+  const finalGroupCount = Object.keys(finalGroups).filter(k => Number(k) < 0).length;
+  console.log(`[Roxie Startup] Final group state established: ${finalGroupCount} active group(s) in storage.`);
+
+  // 6. Start HTTP server
   console.log(`[Roxie Server] Starting HTTP server on port ${PORT}...`);
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Roxie Server] Listening on port ${PORT}`);
   });
 
-  // Automatically initiate bot polling in background AFTER HTTP server is listening
+  // 7. Automatically initiate bot polling and AutoEngine in background AFTER HTTP server is listening
   if (process.env.TELEGRAM_BOT_TOKEN?.trim()) {
     console.log('[Roxie Telegram] Initializing Telegram bot subsystem...');
     telegramBot.startPolling().catch((err) => {
