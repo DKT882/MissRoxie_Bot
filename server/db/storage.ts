@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig } from '../telegram/types.js';
+import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoEngineConfig, AutoEngineMode, AutoEnginePreset, AutoEngineChannelConfig, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig } from '../telegram/types.js';
 import { getDefaultStickersStats } from '../telegram/defaultStickers.js';
 import { logDebug } from '../observability/logger.js';
 import { mongoManager } from './mongodb.js';
@@ -2140,6 +2140,24 @@ export class StorageManager {
         protectionFloodWindow: 5,
         protectionDuplicateLimit: 3,
         protectionLinkBurstLimit: 3,
+        autoEngine: {
+          enabled: true,
+          mode: 'messages_and_stickers',
+          messages: {
+            preset: 'normal',
+            minSeconds: 480,
+            maxSeconds: 900,
+            cooldownSeconds: 480,
+            randomize: true
+          },
+          stickers: {
+            preset: 'normal',
+            minSeconds: 600,
+            maxSeconds: 1200,
+            cooldownSeconds: 600,
+            randomize: true
+          }
+        },
         autoResponse: {
           enabled: true,
           mode: 'every_message',
@@ -2211,6 +2229,34 @@ export class StorageManager {
       if (s.protectionFloodWindow === undefined) { s.protectionFloodWindow = 5; needsSave = true; }
       if (s.protectionDuplicateLimit === undefined) { s.protectionDuplicateLimit = 3; needsSave = true; }
       if (s.protectionLinkBurstLimit === undefined) { s.protectionLinkBurstLimit = 3; needsSave = true; }
+      if (!s.autoEngine) {
+        const arEnabled = Boolean(s.autoResponse?.enabled && s.autoResponse.mode !== 'disabled');
+        const asEnabled = Boolean(s.autoSticker?.enabled && s.autoSticker.mode !== 'disabled');
+        let initialMode: AutoEngineMode = 'messages_and_stickers';
+        if (!arEnabled && !asEnabled) initialMode = 'off';
+        else if (arEnabled && !asEnabled) initialMode = 'messages_only';
+        else if (!arEnabled && asEnabled) initialMode = 'stickers_only';
+
+        s.autoEngine = {
+          enabled: initialMode !== 'off',
+          mode: initialMode,
+          messages: {
+            preset: 'normal',
+            minSeconds: Math.max(120, s.autoResponse?.minSeconds || 480),
+            maxSeconds: Math.max(120, s.autoResponse?.maxSeconds || 900),
+            cooldownSeconds: Math.max(120, s.autoResponse?.cooldownSeconds || 480),
+            randomize: true
+          },
+          stickers: {
+            preset: 'normal',
+            minSeconds: Math.max(120, s.autoSticker?.minSeconds || 600),
+            maxSeconds: Math.max(120, s.autoSticker?.maxSeconds || 1200),
+            cooldownSeconds: Math.max(120, s.autoSticker?.cooldownSeconds || 600),
+            randomize: true
+          }
+        };
+        needsSave = true;
+      }
       if (!s.autoResponse) {
         s.autoResponse = {
           enabled: true,
@@ -2449,27 +2495,106 @@ export class StorageManager {
       }
     }
 
-    if (!hasActualChanges && !updates.autoResponse && !updates.autoSticker) {
+    if (!hasActualChanges && !updates.autoResponse && !updates.autoSticker && !updates.autoEngine) {
       return current; // Avoid redundant disk writes and memory object re-allocation
     }
 
-    const mergedAutoResponse = updates.autoResponse
+    let mergedAutoEngine: AutoEngineConfig = updates.autoEngine
+      ? {
+          ...(current.autoEngine || {
+            enabled: true,
+            mode: 'messages_and_stickers',
+            messages: { preset: 'normal', minSeconds: 480, maxSeconds: 900, cooldownSeconds: 480, randomize: true },
+            stickers: { preset: 'normal', minSeconds: 600, maxSeconds: 1200, cooldownSeconds: 600, randomize: true }
+          }),
+          ...updates.autoEngine,
+          messages: {
+            ...(current.autoEngine?.messages || { preset: 'normal', minSeconds: 480, maxSeconds: 900, cooldownSeconds: 480, randomize: true }),
+            ...(updates.autoEngine.messages || {})
+          },
+          stickers: {
+            ...(current.autoEngine?.stickers || { preset: 'normal', minSeconds: 600, maxSeconds: 1200, cooldownSeconds: 600, randomize: true }),
+            ...(updates.autoEngine.stickers || {})
+          }
+        }
+      : (current.autoEngine || {
+          enabled: true,
+          mode: 'messages_and_stickers',
+          messages: { preset: 'normal', minSeconds: 480, maxSeconds: 900, cooldownSeconds: 480, randomize: true },
+          stickers: { preset: 'normal', minSeconds: 600, maxSeconds: 1200, cooldownSeconds: 600, randomize: true }
+        });
+
+    let mergedAutoResponse = updates.autoResponse
       ? { ...(current.autoResponse || {}), ...updates.autoResponse }
       : current.autoResponse;
     if (mergedAutoResponse && updates.autoResponse?.lastResponseTimestamp === 0 && !updates.autoResponse.nextAllowedAt) {
       mergedAutoResponse.nextAllowedAt = 0;
     }
 
-    const mergedAutoSticker = updates.autoSticker
+    let mergedAutoSticker = updates.autoSticker
       ? { ...(current.autoSticker || {}), ...updates.autoSticker }
       : current.autoSticker;
     if (mergedAutoSticker && updates.autoSticker?.lastStickerTimestamp === 0 && !updates.autoSticker.nextAllowedAt) {
       mergedAutoSticker.nextAllowedAt = 0;
     }
 
+    // Bidirectional synchronization
+    if (updates.autoEngine) {
+      const mode = mergedAutoEngine.mode;
+      const isEnabled = Boolean(mergedAutoEngine.enabled && mode !== 'off');
+      if (mergedAutoResponse) {
+        mergedAutoResponse.enabled = isEnabled && (mode === 'messages_only' || mode === 'messages_and_stickers');
+        mergedAutoResponse.mode = mergedAutoResponse.enabled ? 'random' : 'disabled';
+        if (mergedAutoEngine.messages) {
+          if (mergedAutoEngine.messages.minSeconds !== undefined) mergedAutoResponse.minSeconds = mergedAutoEngine.messages.minSeconds;
+          if (mergedAutoEngine.messages.maxSeconds !== undefined) mergedAutoResponse.maxSeconds = mergedAutoEngine.messages.maxSeconds;
+          if (mergedAutoEngine.messages.cooldownSeconds !== undefined) mergedAutoResponse.cooldownSeconds = mergedAutoEngine.messages.cooldownSeconds;
+          if (mergedAutoEngine.messages.randomize !== undefined) mergedAutoResponse.randomize = mergedAutoEngine.messages.randomize;
+        }
+      }
+      if (mergedAutoSticker) {
+        mergedAutoSticker.enabled = isEnabled && (mode === 'stickers_only' || mode === 'messages_and_stickers');
+        mergedAutoSticker.mode = mergedAutoSticker.enabled ? 'cooldown' : 'disabled';
+        if (mergedAutoEngine.stickers) {
+          if (mergedAutoEngine.stickers.minSeconds !== undefined) mergedAutoSticker.minSeconds = mergedAutoEngine.stickers.minSeconds;
+          if (mergedAutoEngine.stickers.maxSeconds !== undefined) mergedAutoSticker.maxSeconds = mergedAutoEngine.stickers.maxSeconds;
+          if (mergedAutoEngine.stickers.cooldownSeconds !== undefined) mergedAutoSticker.cooldownSeconds = mergedAutoEngine.stickers.cooldownSeconds;
+          if (mergedAutoEngine.stickers.randomize !== undefined) mergedAutoSticker.randomize = mergedAutoEngine.stickers.randomize;
+        }
+      }
+    } else if (updates.autoResponse || updates.autoSticker) {
+      const arEnabled = Boolean(mergedAutoResponse?.enabled && mergedAutoResponse.mode !== 'disabled');
+      const asEnabled = Boolean(mergedAutoSticker?.enabled && mergedAutoSticker.mode !== 'disabled');
+      let derivedMode: AutoEngineMode = 'off';
+      if (arEnabled && asEnabled) derivedMode = 'messages_and_stickers';
+      else if (arEnabled && !asEnabled) derivedMode = 'messages_only';
+      else if (!arEnabled && asEnabled) derivedMode = 'stickers_only';
+      mergedAutoEngine.mode = derivedMode;
+      mergedAutoEngine.enabled = derivedMode !== 'off';
+      if (updates.autoResponse) {
+        mergedAutoEngine.messages = {
+          preset: 'custom',
+          minSeconds: updates.autoResponse.minSeconds ?? mergedAutoEngine.messages?.minSeconds ?? 120,
+          maxSeconds: updates.autoResponse.maxSeconds ?? mergedAutoEngine.messages?.maxSeconds ?? 300,
+          cooldownSeconds: updates.autoResponse.cooldownSeconds ?? mergedAutoEngine.messages?.cooldownSeconds ?? 120,
+          randomize: updates.autoResponse.randomize ?? (updates.autoResponse.mode === 'random') ?? mergedAutoEngine.messages?.randomize ?? true
+        };
+      }
+      if (updates.autoSticker) {
+        mergedAutoEngine.stickers = {
+          preset: 'custom',
+          minSeconds: updates.autoSticker.minSeconds ?? mergedAutoEngine.stickers?.minSeconds ?? 120,
+          maxSeconds: updates.autoSticker.maxSeconds ?? mergedAutoEngine.stickers?.maxSeconds ?? 300,
+          cooldownSeconds: updates.autoSticker.cooldownSeconds ?? mergedAutoEngine.stickers?.cooldownSeconds ?? 120,
+          randomize: updates.autoSticker.randomize ?? (updates.autoSticker.mode === 'random') ?? mergedAutoEngine.stickers?.randomize ?? true
+        };
+      }
+    }
+
     const updated = {
       ...current,
       ...updates,
+      autoEngine: mergedAutoEngine,
       autoResponse: mergedAutoResponse,
       autoSticker: mergedAutoSticker,
       updatedAt: new Date().toISOString()
@@ -5445,6 +5570,16 @@ export class StorageManager {
       settings.autoResponse.nextAllowedAt = 0;
     }
 
+    if (settings.autoEngine) {
+      settings.autoEngine.lastMessageTimestamp = now;
+      settings.autoEngine.lastSentTimestamp = now;
+      if (settings.autoEngine.messages) {
+        settings.autoEngine.messages.lastSentTimestamp = now;
+        settings.autoEngine.messages.nextAllowedAt = settings.autoResponse.nextAllowedAt;
+        settings.autoEngine.messages.nextIntervalSeconds = settings.autoResponse.nextIntervalSeconds;
+      }
+    }
+
     this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
   }
@@ -5539,8 +5674,30 @@ export class StorageManager {
       settings.autoSticker.nextAllowedAt = 0;
     }
 
+    if (settings.autoEngine) {
+      settings.autoEngine.lastStickerTimestamp = now;
+      settings.autoEngine.lastSentTimestamp = now;
+      if (settings.autoEngine.stickers) {
+        settings.autoEngine.stickers.lastSentTimestamp = now;
+        settings.autoEngine.stickers.nextAllowedAt = settings.autoSticker.nextAllowedAt;
+        settings.autoEngine.stickers.nextIntervalSeconds = settings.autoSticker.nextIntervalSeconds;
+      }
+    }
+
     this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
+  }
+
+  public checkAutoEngineEligibility(chatId: number | string, type: 'messages' | 'stickers'): { allowed: boolean; remainingSeconds?: number; reason?: string } {
+    return type === 'messages' ? this.checkAutoResponseEligibility(chatId) : this.checkAutoStickerEligibility(chatId);
+  }
+
+  public recordAutoEngineSent(chatId: number | string, type: 'messages' | 'stickers'): void {
+    if (type === 'messages') {
+      this.recordAutoResponseSent(chatId);
+    } else {
+      this.recordAutoStickerSent(chatId);
+    }
   }
 
   public getDataDir(): string {

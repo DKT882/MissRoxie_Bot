@@ -253,6 +253,7 @@ export default function App() {
     | 'ai_conversation'
     | 'lust_mode'
     | 'stickers'
+    | 'auto_engine'
     | 'auto_response'
     | 'auto_sticker'
     | 'slowmode'
@@ -1869,7 +1870,25 @@ export default function App() {
   const themeMutedText = isDark ? 'text-stone-400' : 'text-slate-500';
   const themeBorder = isDark ? 'border-stone-800' : 'border-slate-200';
 
-  // Group Auto Response and Auto Sticker settings extraction
+  // Group Auto Engine settings extraction
+  const curAutoEngine = groupDetails?.settings?.autoEngine || {
+    enabled: true,
+    mode: 'messages_and_stickers',
+    messages: {
+      preset: 'normal',
+      minSeconds: 480,
+      maxSeconds: 900,
+      cooldownSeconds: 480,
+      randomize: true
+    },
+    stickers: {
+      preset: 'normal',
+      minSeconds: 600,
+      maxSeconds: 1200,
+      cooldownSeconds: 600,
+      randomize: true
+    }
+  };
   const curAutoResponse = groupDetails?.settings?.autoResponse || {
     enabled: true,
     mode: 'every_message',
@@ -2884,8 +2903,7 @@ export default function App() {
                     { id: 'ai_conversation', label: '🤖 AI / Chat' },
                     { id: 'lust_mode', label: '❤️ Lust Mode' },
                     { id: 'stickers', label: `🎨 Stickers (${groupStickersData?.packs?.length || 0})` },
-                    { id: 'auto_response', label: '🤖 Auto Response' },
-                    { id: 'auto_sticker', label: '🎭 Auto Sticker' },
+                    { id: 'auto_engine', label: '⚡ Auto Engine' },
                     { id: 'slowmode', label: '⏱️ Slowmode' },
                     { id: 'abuse_words', label: `🤬 Abuse Words (${groupAbuseWords.length})` },
                     { id: 'members', label: `👥 Members (${groupMembersList.length})` },
@@ -3702,176 +3720,242 @@ export default function App() {
                 </div>
               )}
 
-              {/* INNER TAB: AUTO RESPONSE */}
-              {groupDetailTab === 'auto_response' && (
+              {/* INNER TAB: UNIFIED AUTO ENGINE */}
+              {(groupDetailTab === 'auto_engine' || groupDetailTab === 'auto_response' || groupDetailTab === 'auto_sticker') && (
                 <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
                   <div className="flex items-center justify-between border-b pb-4">
                     <div>
-                      <h3 className="text-sm font-bold flex items-center gap-2 text-blue-500">
-                        <Bot className="w-4 h-4" /> Auto Response Engine
+                      <h3 className="text-sm font-bold flex items-center gap-2 text-indigo-500">
+                        <Zap className="w-4 h-4" /> Unified Auto Engine
                       </h3>
-                      <p className={`text-xs ${themeMutedText}`}>Configure automatic AI conversational reply frequency for this group.</p>
+                      <p className={`text-xs ${themeMutedText}`}>Autonomous proactive AI message and sticker participation system.</p>
                     </div>
-                    {savingSettings && <span className="text-xs text-blue-500 animate-pulse font-semibold">Saving changes...</span>}
+                    {savingSettings && <span className="text-xs text-indigo-500 animate-pulse font-semibold">Saving changes...</span>}
                   </div>
 
-                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-5 space-y-4`}>
-                    <div className="flex items-center justify-between">
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-5 space-y-5`}>
+                    {/* Master Switch and Status */}
+                    <div className="flex items-center justify-between border-b border-stone-800/40 pb-4">
                       <div className="space-y-0.5">
-                        <span className="text-xs font-bold block">Engine Switch</span>
-                        <p className={`text-[11px] ${themeMutedText}`}>Enable or disable AI auto-responses in this group</p>
+                        <span className="text-xs font-bold block">Engine Master Switch</span>
+                        <p className={`text-[11px] ${themeMutedText}`}>Toggle autonomous proactive engagement for this group</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
-                          groupDetails.autoResponseNextAvailableSeconds > 0 ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500'
+                        <span className={`text-[10px] font-mono px-2.5 py-1 rounded-full font-bold ${
+                          curAutoEngine.enabled && curAutoEngine.mode !== 'off'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-stone-500/10 text-stone-400 border border-stone-500/20'
                         }`}>
-                          {groupDetails.autoResponseNextAvailableSeconds > 0 ? `⏳ Cooldown: ~${groupDetails.autoResponseNextAvailableSeconds}s` : '🟢 Ready'}
+                          {curAutoEngine.enabled && curAutoEngine.mode !== 'off' ? '🟢 Active' : '⚪ Disabled'}
                         </span>
                         <input
                           type="checkbox"
-                          checked={Boolean(curAutoResponse.enabled)}
-                          onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, enabled: e.target.checked })}
-                          className="w-4 h-4 rounded text-blue-600"
+                          checked={Boolean(curAutoEngine.enabled && curAutoEngine.mode !== 'off')}
+                          onChange={(e) => {
+                            const enabled = e.target.checked;
+                            const newMode = enabled ? (curAutoEngine.mode === 'off' ? 'messages_and_stickers' : curAutoEngine.mode) : 'off';
+                            updateSetting('autoEngine', { ...curAutoEngine, enabled, mode: newMode });
+                          }}
+                          className="w-4 h-4 rounded text-indigo-600 cursor-pointer"
                         />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                      <div className="space-y-1">
-                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Response Mode</label>
-                        <select
-                          value={curAutoResponse.mode || 'every_message'}
-                          onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, mode: e.target.value })}
-                          className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
-                        >
-                          <option value="every_message">Every Eligible Message</option>
-                          <option value="cooldown">Cooldown Interval</option>
-                          <option value="random">Randomized Interval</option>
-                          <option value="disabled">Disabled</option>
-                        </select>
+                    {/* Unified Mode Selection */}
+                    <div className="space-y-2">
+                      <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Operating Mode</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        {[
+                          { id: 'off', label: 'Off', desc: 'Disabled' },
+                          { id: 'messages_only', label: 'Messages Only', desc: 'Text only' },
+                          { id: 'stickers_only', label: 'Stickers Only', desc: 'Stickers only' },
+                          { id: 'messages_and_stickers', label: 'Messages & Stickers', desc: 'Full participation' }
+                        ].map((m) => {
+                          const isActive = curAutoEngine.mode === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => {
+                                updateSetting('autoEngine', {
+                                  ...curAutoEngine,
+                                  enabled: m.id !== 'off',
+                                  mode: m.id
+                                });
+                              }}
+                              className={`p-3 rounded-xl border text-left transition-all ${
+                                isActive
+                                  ? 'bg-indigo-600/15 border-indigo-500/50 text-indigo-300 font-bold shadow-sm'
+                                  : `${themeCardBg} ${themeBorder} ${themeMutedText} hover:border-indigo-500/30`
+                              }`}
+                            >
+                              <div className="text-xs">{m.label}</div>
+                              <div className="text-[10px] opacity-75 font-normal mt-0.5">{m.desc}</div>
+                            </button>
+                          );
+                        })}
                       </div>
+                    </div>
 
-                      <div className="space-y-1">
-                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Cooldown (Seconds)</label>
-                        <input
-                          type="number"
-                          min="10"
-                          max="86400"
-                          value={curAutoResponse.cooldownSeconds || 30}
-                          onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, cooldownSeconds: Number(e.target.value) })}
-                          className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-mono`}
-                        />
+                    {/* Frequency Presets */}
+                    <div className="space-y-2 pt-2">
+                      <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Frequency Preset</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                        {[
+                          { id: 'very_low', label: 'Very Low', timing: '30 – 60 min' },
+                          { id: 'low', label: 'Low', timing: '15 – 30 min' },
+                          { id: 'normal', label: 'Normal', timing: '8 – 15 min' },
+                          { id: 'high', label: 'High', timing: '3 – 8 min' },
+                          { id: 'custom', label: 'Custom', timing: 'User defined' }
+                        ].map((p) => {
+                          const isSelected = curAutoEngine.messages?.preset === p.id || (!curAutoEngine.messages?.preset && p.id === 'normal');
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                updateSetting('autoEngine', {
+                                  ...curAutoEngine,
+                                  messages: {
+                                    ...(curAutoEngine.messages || {}),
+                                    preset: p.id
+                                  },
+                                  stickers: {
+                                    ...(curAutoEngine.stickers || {}),
+                                    preset: p.id
+                                  }
+                                });
+                              }}
+                              className={`p-2.5 rounded-xl border text-center transition-all ${
+                                isSelected
+                                  ? 'bg-blue-600 text-white border-blue-500 font-bold shadow-sm'
+                                  : `${themeCardBg} ${themeBorder} ${themeMutedText} hover:border-blue-500/30`
+                              }`}
+                            >
+                              <div className="text-xs">{p.label}</div>
+                              <div className="text-[9px] opacity-80 mt-0.5">{p.timing}</div>
+                            </button>
+                          );
+                        })}
                       </div>
+                    </div>
 
-                      <div className="space-y-1">
-                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Random Interval (Min – Max)</label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            placeholder="Min"
-                            min="10"
-                            value={curAutoResponse.minSeconds || 30}
-                            onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, minSeconds: Number(e.target.value) })}
-                            className={`w-1/2 ${themeCardBg} border ${themeBorder} rounded-xl px-2.5 py-2 text-xs font-mono`}
-                          />
-                          <span className="text-xs text-stone-400">-</span>
-                          <input
-                            type="number"
-                            placeholder="Max"
-                            max="86400"
-                            value={curAutoResponse.maxSeconds || 120}
-                            onChange={(e) => updateSetting('autoResponse', { ...curAutoResponse, maxSeconds: Number(e.target.value) })}
-                            className={`w-1/2 ${themeCardBg} border ${themeBorder} rounded-xl px-2.5 py-2 text-xs font-mono`}
-                          />
+                    {/* Custom Intervals (visible when custom preset selected) */}
+                    {curAutoEngine.messages?.preset === 'custom' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-stone-800/40">
+                        <div className="space-y-1.5 p-3 rounded-xl bg-stone-900/40 border border-stone-800">
+                          <span className="text-xs font-bold text-blue-400 block">💬 Messages Interval (Seconds)</span>
+                          <p className={`text-[10px] ${themeMutedText}`}>Server minimum limit: 120 seconds (2 minutes)</p>
+                          <div className="flex items-center gap-2 pt-1">
+                            <input
+                              type="number"
+                              min="120"
+                              max="86400"
+                              placeholder="Min (120s)"
+                              value={curAutoEngine.messages?.minSeconds || 120}
+                              onChange={(e) => {
+                                const min = Math.max(120, Number(e.target.value));
+                                updateSetting('autoEngine', {
+                                  ...curAutoEngine,
+                                  messages: {
+                                    ...(curAutoEngine.messages || {}),
+                                    preset: 'custom',
+                                    minSeconds: min,
+                                    maxSeconds: Math.max(min, curAutoEngine.messages?.maxSeconds || 300)
+                                  }
+                                });
+                              }}
+                              className={`w-1/2 ${themeCardBg} border ${themeBorder} rounded-xl px-2.5 py-1.5 text-xs font-mono`}
+                            />
+                            <span className="text-xs text-stone-400">-</span>
+                            <input
+                              type="number"
+                              min="120"
+                              max="86400"
+                              placeholder="Max (300s)"
+                              value={curAutoEngine.messages?.maxSeconds || 300}
+                              onChange={(e) => {
+                                const max = Math.max(120, Number(e.target.value));
+                                updateSetting('autoEngine', {
+                                  ...curAutoEngine,
+                                  messages: {
+                                    ...(curAutoEngine.messages || {}),
+                                    preset: 'custom',
+                                    maxSeconds: max
+                                  }
+                                });
+                              }}
+                              className={`w-1/2 ${themeCardBg} border ${themeBorder} rounded-xl px-2.5 py-1.5 text-xs font-mono`}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 p-3 rounded-xl bg-stone-900/40 border border-stone-800">
+                          <span className="text-xs font-bold text-amber-400 block">🎭 Stickers Interval (Seconds)</span>
+                          <p className={`text-[10px] ${themeMutedText}`}>Server minimum limit: 120 seconds (2 minutes)</p>
+                          <div className="flex items-center gap-2 pt-1">
+                            <input
+                              type="number"
+                              min="120"
+                              max="86400"
+                              placeholder="Min (120s)"
+                              value={curAutoEngine.stickers?.minSeconds || 120}
+                              onChange={(e) => {
+                                const min = Math.max(120, Number(e.target.value));
+                                updateSetting('autoEngine', {
+                                  ...curAutoEngine,
+                                  stickers: {
+                                    ...(curAutoEngine.stickers || {}),
+                                    preset: 'custom',
+                                    minSeconds: min,
+                                    maxSeconds: Math.max(min, curAutoEngine.stickers?.maxSeconds || 300)
+                                  }
+                                });
+                              }}
+                              className={`w-1/2 ${themeCardBg} border ${themeBorder} rounded-xl px-2.5 py-1.5 text-xs font-mono`}
+                            />
+                            <span className="text-xs text-stone-400">-</span>
+                            <input
+                              type="number"
+                              min="120"
+                              max="86400"
+                              placeholder="Max (300s)"
+                              value={curAutoEngine.stickers?.maxSeconds || 300}
+                              onChange={(e) => {
+                                const max = Math.max(120, Number(e.target.value));
+                                updateSetting('autoEngine', {
+                                  ...curAutoEngine,
+                                  stickers: {
+                                    ...(curAutoEngine.stickers || {}),
+                                    preset: 'custom',
+                                    maxSeconds: max
+                                  }
+                                });
+                              }}
+                              className={`w-1/2 ${themeCardBg} border ${themeBorder} rounded-xl px-2.5 py-1.5 text-xs font-mono`}
+                            />
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+                    )}
 
-              {/* INNER TAB: AUTO STICKER */}
-              {groupDetailTab === 'auto_sticker' && (
-                <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
-                  <div className="flex items-center justify-between border-b pb-4">
-                    <div>
-                      <h3 className="text-sm font-bold flex items-center gap-2 text-amber-500">
-                        <Smile className="w-4 h-4" /> Auto Sticker Engine
-                      </h3>
-                      <p className={`text-xs ${themeMutedText}`}>Configure automatic animated and custom sticker response frequencies.</p>
-                    </div>
-                    {savingSettings && <span className="text-xs text-amber-500 animate-pulse font-semibold">Saving changes...</span>}
-                  </div>
-
-                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-5 space-y-4`}>
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <span className="text-xs font-bold block">Sticker Engine Switch</span>
-                        <p className={`text-[11px] ${themeMutedText}`}>Independent from text auto-response cooldown</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
-                          groupDetails.autoStickerNextAvailableSeconds > 0 ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500'
-                        }`}>
-                          {groupDetails.autoStickerNextAvailableSeconds > 0 ? `⏳ Cooldown: ~${groupDetails.autoStickerNextAvailableSeconds}s` : '🟢 Ready'}
+                    {/* Live Telemetry & Cooldown Status */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-stone-800/40">
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-blue-500/5 border border-blue-500/15 text-xs">
+                        <span className="text-stone-300 flex items-center gap-1.5 font-medium">💬 Message Status</span>
+                        <span className="font-mono font-bold text-blue-400">
+                          {groupDetails.autoEngineMessageNextSeconds > 0 || groupDetails.autoResponseNextAvailableSeconds > 0
+                            ? `⏳ in ~${groupDetails.autoEngineMessageNextSeconds || groupDetails.autoResponseNextAvailableSeconds}s`
+                            : '🟢 Ready'}
                         </span>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(curAutoSticker.enabled)}
-                          onChange={(e) => updateSetting('autoSticker', { ...curAutoSticker, enabled: e.target.checked })}
-                          className="w-4 h-4 rounded text-amber-600"
-                        />
                       </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                      <div className="space-y-1">
-                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Sticker Mode</label>
-                        <select
-                          value={curAutoSticker.mode || 'cooldown'}
-                          onChange={(e) => updateSetting('autoSticker', { ...curAutoSticker, mode: e.target.value })}
-                          className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
-                        >
-                          <option value="cooldown">Cooldown Interval</option>
-                          <option value="random">Randomized Interval</option>
-                          <option value="every_message">Every Eligible Message</option>
-                          <option value="disabled">Disabled</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Cooldown (Seconds)</label>
-                        <input
-                          type="number"
-                          min="10"
-                          max="86400"
-                          value={curAutoSticker.cooldownSeconds || 60}
-                          onChange={(e) => updateSetting('autoSticker', { ...curAutoSticker, cooldownSeconds: Number(e.target.value) })}
-                          className={`w-full ${themeCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-mono`}
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className={`text-[11px] ${themeMutedText} font-semibold block`}>Random Interval (Min – Max)</label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            placeholder="Min"
-                            min="10"
-                            value={curAutoSticker.minSeconds || 60}
-                            onChange={(e) => updateSetting('autoSticker', { ...curAutoSticker, minSeconds: Number(e.target.value) })}
-                            className={`w-1/2 ${themeCardBg} border ${themeBorder} rounded-xl px-2.5 py-2 text-xs font-mono`}
-                          />
-                          <span className="text-xs text-stone-400">-</span>
-                          <input
-                            type="number"
-                            placeholder="Max"
-                            max="86400"
-                            value={curAutoSticker.maxSeconds || 300}
-                            onChange={(e) => updateSetting('autoSticker', { ...curAutoSticker, maxSeconds: Number(e.target.value) })}
-                            className={`w-1/2 ${themeCardBg} border ${themeBorder} rounded-xl px-2.5 py-2 text-xs font-mono`}
-                          />
-                        </div>
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/5 border border-amber-500/15 text-xs">
+                        <span className="text-stone-300 flex items-center gap-1.5 font-medium">🎭 Sticker Status</span>
+                        <span className="font-mono font-bold text-amber-400">
+                          {groupDetails.autoEngineStickerNextSeconds > 0 || groupDetails.autoStickerNextAvailableSeconds > 0
+                            ? `⏳ in ~${groupDetails.autoEngineStickerNextSeconds || groupDetails.autoStickerNextAvailableSeconds}s`
+                            : '🟢 Ready'}
+                        </span>
                       </div>
                     </div>
                   </div>

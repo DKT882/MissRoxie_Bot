@@ -364,6 +364,7 @@ export interface GroupSettings {
   automations?: Array<{ id: string; trigger: string; action: string; parameters?: string; enabled: boolean; createdBy: number; createdAt: string }>;
   rules?: string;
   lastAllTimestamp?: number;
+  autoEngine?: AutoEngineConfig;
   autoResponse?: AutoResponseConfig;
   autoSticker?: AutoStickerConfig;
   stickerPacks?: Record<string, GroupStickerPackConfig>;
@@ -375,10 +376,35 @@ export interface GroupSettings {
   updatedAt: string;
 }
 
+export type AutoEngineMode = 'off' | 'messages_only' | 'stickers_only' | 'messages_and_stickers';
+export type AutoEnginePreset = 'very_low' | 'low' | 'normal' | 'high' | 'custom';
+
+export interface AutoEngineChannelConfig {
+  preset: AutoEnginePreset;
+  minSeconds?: number; // Server-side enforced: >= 120s
+  maxSeconds?: number;
+  cooldownSeconds?: number;
+  randomize?: boolean;
+  lastSentTimestamp?: number;
+  nextScheduledTimestamp?: number;
+  nextAllowedAt?: number;
+  nextIntervalSeconds?: number;
+}
+
+export interface AutoEngineConfig {
+  enabled: boolean;
+  mode: AutoEngineMode;
+  messages?: AutoEngineChannelConfig;
+  stickers?: AutoEngineChannelConfig;
+  lastMessageTimestamp?: number;
+  lastStickerTimestamp?: number;
+  lastSentTimestamp?: number;
+}
+
 export interface AutoResponseConfig {
   enabled: boolean;
   mode: 'every_message' | 'cooldown' | 'random' | 'disabled';
-  cooldownSeconds: number;
+  cooldownSeconds?: number;
   randomize?: boolean;
   minSeconds?: number;
   maxSeconds?: number;
@@ -390,7 +416,7 @@ export interface AutoResponseConfig {
 export interface AutoStickerConfig {
   enabled: boolean;
   mode: 'every_message' | 'cooldown' | 'random' | 'disabled';
-  cooldownSeconds: number;
+  cooldownSeconds?: number;
   randomize?: boolean;
   minSeconds?: number;
   maxSeconds?: number;

@@ -614,6 +614,35 @@ export class ChatbotService {
     console.warn(`[CHATBOT_MODEL_BLACKLIST] Blacklisted model "${model}" (${reason || 'Permanent error'})`);
   }
 
+  public static getCandidateModels(): string[] {
+    const primary = process.env.OPENROUTER_MODEL?.trim() || 'openrouter/free';
+    const fallbacks = [
+      primary,
+      process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
+      process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
+      process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'mistralai/mistral-small-24b-instruct-2501:free',
+      'google/gemini-2.0-flash-exp:free',
+      'qwen/qwen-2.5-72b-instruct:free'
+    ].filter(Boolean) as string[];
+
+    const rawConfigured = process.env.OPENROUTER_MODELS
+      ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim()).filter(Boolean)
+      : fallbacks;
+
+    const rawCandidates: string[] = [];
+    for (const m of rawConfigured) {
+      if (m && !rawCandidates.includes(m)) rawCandidates.push(m);
+    }
+    for (const fb of fallbacks) {
+      if (fb && !rawCandidates.includes(fb)) rawCandidates.push(fb);
+    }
+
+    const filtered = rawCandidates.filter(m => !ChatbotService.blacklistedModels.has(m));
+    return filtered.length > 0 ? filtered : rawCandidates;
+  }
+
   // Global bounded concurrency for AI calls (max 4 simultaneous OpenRouter requests)
   public static activeAiRequests: number = 0;
   public static readonly MAX_CONCURRENT_AI_REQUESTS = 4;
@@ -2566,33 +2595,7 @@ export class ChatbotService {
       };
     }
 
-    const defaultFallbackModels = [
-      process.env.OPENROUTER_MODEL?.trim() || 'openai/gpt-oss-120b',
-      process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
-      process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
-      process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
-      'meta-llama/llama-3.3-70b-instruct',
-      'mistralai/mistral-small-24b-instruct-2501'
-    ].filter(Boolean) as string[];
-
-    const rawConfigured = process.env.OPENROUTER_MODELS
-      ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim()).filter(Boolean)
-      : defaultFallbackModels;
-
-    const rawCandidates: string[] = [];
-    for (const m of rawConfigured) {
-      if (m && !rawCandidates.includes(m)) {
-        rawCandidates.push(m);
-      }
-    }
-    for (const fb of ['meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
-      if (!rawCandidates.includes(fb)) {
-        rawCandidates.push(fb);
-      }
-    }
-
-    const filteredModels = rawCandidates.filter(m => !ChatbotService.blacklistedModels.has(m));
-    const configuredModels: string[] = filteredModels.length > 0 ? filteredModels : rawCandidates;
+    const configuredModels = ChatbotService.getCandidateModels();
 
     const userMemories = userId ? db.getUserMemory(chatId, userId) : [];
     const memoryContext = userMemories.length > 0 
@@ -2772,21 +2775,6 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
       personality: isLustMode ? 'LustMode-Couple' : 'psychologist-style'
     })}`);
 
-    // Fire-and-forget non-blocking typing status (never blocks AI or message response)
-    console.log(JSON.stringify({
-      event: 'CHATBOT_TYPING_START',
-      requestId,
-      traceId: reqCtx?.traceId,
-      chatId
-    }));
-    telegramApi.sendChatAction(chatId, 'typing').catch((err) => {
-      console.warn(JSON.stringify({
-        event: 'CHATBOT_TYPING_ERROR',
-        requestId,
-        chatId,
-        error: err?.message || 'Failed to send typing indicator'
-      }));
-    });
     metricsTracker.increment('ai_requests');
 
     if (reqCtx) {
@@ -2796,13 +2784,13 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         updateId: reqCtx.updateId,
         chatId,
         messageId: msgId,
-        primaryModel: configuredModels[0] || 'openai/gpt-oss-120b',
+        primaryModel: configuredModels[0] || 'openrouter/free',
         elapsedMs: Date.now() - reqCtx.receivedAt
       });
     }
 
     let replyContent: string | null = null;
-    let modelUsed: string = configuredModels[0] || 'openai/gpt-oss-120b';
+    let modelUsed: string = configuredModels[0] || 'openrouter/free';
     let lastHttpStatus: number | undefined;
     const aiStartTime = Date.now();
 
@@ -2817,7 +2805,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         const timeoutId = setTimeout(() => controller.abort(), 15000);
 
         try {
-          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          let response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${apiKey}`,
@@ -2837,6 +2825,38 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
 
           const modelElapsedMs = Date.now() - modelStartTime;
           lastHttpStatus = response.status;
+
+          // HTTP 400 Handling (oversized prompt): compact context and retry once
+          if (response.status === 400 && apiMessages.length > 2) {
+            console.warn(`[CHATBOT_BAD_REQUEST] HTTP 400 for model "${modelToTry}". Retrying once with compacted context.`);
+            const compactedMessages = [apiMessages[0], apiMessages[apiMessages.length - 1]];
+            const retryController = new AbortController();
+            const retryTimeoutId = setTimeout(() => retryController.abort(), 10000);
+            try {
+              const retryResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${apiKey}`,
+                  'HTTP-Referer': 'https://ai.studio',
+                  'X-Title': 'Roxie Telegram Bot',
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  model: modelToTry,
+                  messages: compactedMessages,
+                  max_tokens: 120,
+                  temperature: 0.8
+                }),
+                signal: retryController.signal
+              });
+              clearTimeout(retryTimeoutId);
+              if (retryResponse.ok) {
+                response = retryResponse;
+              }
+            } catch {
+              clearTimeout(retryTimeoutId);
+            }
+          }
 
           if (response.ok) {
             const data = await response.json();
@@ -2865,9 +2885,13 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
             }
           } else {
             const errText = await response.text();
-            if ([401, 402, 403, 404].includes(response.status)) {
+            if ([401, 403, 404].includes(response.status)) {
               ChatbotService.blacklistedModels.add(modelToTry);
               console.warn(`[CHATBOT_MODEL_BLACKLIST] Blacklisted model "${modelToTry}" due to HTTP ${response.status} (${errText.slice(0, 80)})`);
+            } else if (response.status === 402) {
+              console.warn(`[CHATBOT_MODEL_LIMIT] HTTP 402 payment/budget required for "${modelToTry}". Falling back to free route (${errText.slice(0, 80)})`);
+            } else if (response.status === 429) {
+              console.warn(`[CHATBOT_RATE_LIMIT] HTTP 429 rate limited for "${modelToTry}". Backing off to next candidate (${errText.slice(0, 80)})`);
             }
             console.warn(`CHATBOT_MODEL_FALLBACK { fromModel: "${modelToTry}", status: ${response.status}, error: "${errText.slice(0, 80)}" }`);
           }
@@ -2967,6 +2991,16 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
       requestId,
       length: cleanedText.length,
       modelUsed
+    });
+
+    // Fire-and-forget typing status only when AI has successfully produced a response
+    telegramApi.sendChatAction(chatId, 'typing').catch((err) => {
+      console.warn(JSON.stringify({
+        event: 'CHATBOT_TYPING_ERROR',
+        requestId,
+        chatId,
+        error: err?.message || 'Failed to send typing indicator'
+      }));
     });
 
     let decision: ChatbotDecision;
@@ -3127,33 +3161,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) return null;
 
-    const defaultFallbackModels = [
-      process.env.OPENROUTER_MODEL?.trim() || 'openai/gpt-oss-120b',
-      process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
-      process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
-      process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
-      'meta-llama/llama-3.3-70b-instruct',
-      'mistralai/mistral-small-24b-instruct-2501'
-    ].filter(Boolean) as string[];
-
-    const rawConfigured = process.env.OPENROUTER_MODELS
-      ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim()).filter(Boolean)
-      : defaultFallbackModels;
-
-    const rawCandidates: string[] = [];
-    for (const m of rawConfigured) {
-      if (m && !rawCandidates.includes(m)) {
-        rawCandidates.push(m);
-      }
-    }
-    for (const fb of ['meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
-      if (!rawCandidates.includes(fb)) {
-        rawCandidates.push(fb);
-      }
-    }
-
-    const filteredModels = rawCandidates.filter(m => !ChatbotService.blacklistedModels.has(m));
-    const configuredModels: string[] = filteredModels.length > 0 ? filteredModels : rawCandidates;
+    const configuredModels = ChatbotService.getCandidateModels();
 
     const userText = message.text || message.caption || '';
     if (!userText) return null;
@@ -3196,7 +3204,7 @@ STRICT INVARIANTS:
 6. If you have nothing interesting or natural to say, reply ONLY with: SKIP`;
 
     let replyContent: string | null = null;
-    let modelUsed = configuredModels[0] || 'openai/gpt-oss-120b';
+    let modelUsed = configuredModels[0] || 'openrouter/free';
     let lastHttpStatus: number | undefined;
 
     await this.acquireAiSlot();
@@ -3257,9 +3265,13 @@ STRICT INVARIANTS:
             }
           } else {
             const errText = await response.text();
-            if ([401, 402, 403, 404].includes(response.status)) {
+            if ([401, 403, 404].includes(response.status)) {
               ChatbotService.blacklistedModels.add(modelToTry);
               console.warn(`[CHATBOT_MODEL_BLACKLIST] Blacklisted model "${modelToTry}" due to HTTP ${response.status} (${errText.slice(0, 80)})`);
+            } else if (response.status === 402) {
+              console.warn(`[CHATBOT_MODEL_LIMIT] HTTP 402 payment/budget required for "${modelToTry}". Falling back to free route (${errText.slice(0, 80)})`);
+            } else if (response.status === 429) {
+              console.warn(`[CHATBOT_RATE_LIMIT] HTTP 429 rate limited for "${modelToTry}". Backing off to next candidate (${errText.slice(0, 80)})`);
             }
           }
         } catch (err: any) {
@@ -3567,33 +3579,7 @@ STRICT INVARIANTS:
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) return null;
 
-    const defaultFallbackModels = [
-      process.env.OPENROUTER_MODEL?.trim() || 'openai/gpt-oss-120b',
-      process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
-      process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
-      process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
-      'meta-llama/llama-3.3-70b-instruct',
-      'mistralai/mistral-small-24b-instruct-2501'
-    ].filter(Boolean) as string[];
-
-    const rawConfigured = process.env.OPENROUTER_MODELS
-      ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim()).filter(Boolean)
-      : defaultFallbackModels;
-
-    const rawCandidates: string[] = [];
-    for (const m of rawConfigured) {
-      if (m && !rawCandidates.includes(m)) {
-        rawCandidates.push(m);
-      }
-    }
-    for (const fb of ['meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
-      if (!rawCandidates.includes(fb)) {
-        rawCandidates.push(fb);
-      }
-    }
-
-    const filteredModels = rawCandidates.filter(m => !ChatbotService.blacklistedModels.has(m));
-    const configuredModels: string[] = filteredModels.length > 0 ? filteredModels : rawCandidates;
+    const configuredModels = ChatbotService.getCandidateModels();
 
     const settings = db.getGroupSettings(chatId);
     const isLustMode = Boolean(settings?.lustMode);
@@ -3636,7 +3622,7 @@ STRICT INVARIANTS:
 6. If you have nothing interesting or natural to say, reply ONLY with: SKIP`;
 
     let replyContent: string | null = null;
-    let modelUsed = configuredModels[0] || 'openai/gpt-oss-120b';
+    let modelUsed = configuredModels[0] || 'openrouter/free';
 
     await this.acquireAiSlot();
     try {
@@ -3690,9 +3676,13 @@ STRICT INVARIANTS:
             }
           } else {
             const errText = await response.text();
-            if ([401, 402, 403, 404].includes(response.status)) {
+            if ([401, 403, 404].includes(response.status)) {
               ChatbotService.blacklistedModels.add(modelToTry);
               console.warn(`[CHATBOT_MODEL_BLACKLIST] Blacklisted model "${modelToTry}" due to HTTP ${response.status} (${errText.slice(0, 80)})`);
+            } else if (response.status === 402) {
+              console.warn(`[CHATBOT_MODEL_LIMIT] HTTP 402 payment/budget required for "${modelToTry}". Falling back to free route (${errText.slice(0, 80)})`);
+            } else if (response.status === 429) {
+              console.warn(`[CHATBOT_RATE_LIMIT] HTTP 429 rate limited for "${modelToTry}". Backing off to next candidate (${errText.slice(0, 80)})`);
             }
           }
         } catch (err: any) {

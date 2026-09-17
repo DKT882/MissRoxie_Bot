@@ -1,7 +1,46 @@
 import { db } from '../db/storage.js';
 import { telegramApi } from './api.js';
 import { ChatbotService } from './chatbot.js';
-import { GroupSettings, AutoResponseConfig, AutoStickerConfig } from './types.js';
+import {
+  GroupSettings,
+  AutoEngineConfig,
+  AutoEngineMode,
+  AutoEnginePreset,
+  AutoEngineChannelConfig,
+  AutoResponseConfig,
+  AutoStickerConfig
+} from './types.js';
+
+export const MIN_AUTO_ENGINE_INTERVAL_SECONDS = 120; // 2 minutes hard server-side limit
+
+export const AUTO_ENGINE_PRESETS: Record<
+  AutoEnginePreset,
+  {
+    messages: { minSeconds: number; maxSeconds: number; cooldownSeconds: number };
+    stickers: { minSeconds: number; maxSeconds: number; cooldownSeconds: number };
+  }
+> = {
+  very_low: {
+    messages: { minSeconds: 1800, maxSeconds: 3600, cooldownSeconds: 1800 },
+    stickers: { minSeconds: 1800, maxSeconds: 3600, cooldownSeconds: 1800 }
+  },
+  low: {
+    messages: { minSeconds: 900, maxSeconds: 1800, cooldownSeconds: 900 },
+    stickers: { minSeconds: 1200, maxSeconds: 2400, cooldownSeconds: 1200 }
+  },
+  normal: {
+    messages: { minSeconds: 480, maxSeconds: 900, cooldownSeconds: 480 },
+    stickers: { minSeconds: 600, maxSeconds: 1200, cooldownSeconds: 600 }
+  },
+  high: {
+    messages: { minSeconds: 180, maxSeconds: 480, cooldownSeconds: 180 },
+    stickers: { minSeconds: 300, maxSeconds: 600, cooldownSeconds: 300 }
+  },
+  custom: {
+    messages: { minSeconds: 120, maxSeconds: 300, cooldownSeconds: 120 },
+    stickers: { minSeconds: 120, maxSeconds: 300, cooldownSeconds: 120 }
+  }
+};
 
 export interface ScheduledAutoJob {
   key: string;
@@ -26,6 +65,7 @@ export class AutoEngineService {
   private customSetTimeout: typeof setTimeout = setTimeout;
   private customClearTimeout: typeof clearTimeout = clearTimeout;
   private customNow: () => number = () => Date.now();
+  private bypassMinimumIntervalForTests: boolean = false;
 
   public makeJobKey(botId: number, chatId: number, engineType: 'response' | 'sticker'): string {
     return `${botId}:${chatId}:${engineType}`;
@@ -103,39 +143,43 @@ export class AutoEngineService {
   }
 
   public calculateDelayMs(
-    config: AutoResponseConfig | AutoStickerConfig | undefined,
-    defaultMin: number,
-    defaultMax: number,
-    defaultCooldown: number
+    config: AutoEngineChannelConfig | AutoResponseConfig | AutoStickerConfig | undefined,
+    defaultMin: number = 120,
+    defaultMax: number = 300,
+    defaultCooldown: number = 120,
+    channel: 'messages' | 'stickers' = 'messages'
   ): number {
-    if (!config) return defaultCooldown * 1000;
+    const minFloor = this.bypassMinimumIntervalForTests ? 1 : MIN_AUTO_ENGINE_INTERVAL_SECONDS;
 
-    const mode = config.mode || (config.randomize ? 'random' : 'cooldown');
+    if (!config) return Math.max(minFloor, defaultCooldown) * 1000;
 
-    if (mode === 'random' || config.randomize) {
-      const rawMin = Number(config.minSeconds ?? defaultMin);
-      const rawMax = Number(config.maxSeconds ?? defaultMax);
-      const safeMin = Math.max(10, Math.min(86400, isNaN(rawMin) ? defaultMin : rawMin));
-      const safeMax = Math.max(safeMin, Math.min(86400, isNaN(rawMax) ? defaultMax : rawMax));
+    // Check if config has unified preset
+    if ('preset' in config && config.preset) {
+      const presetDef = AUTO_ENGINE_PRESETS[config.preset] || AUTO_ENGINE_PRESETS.normal;
+      const channelDef = presetDef[channel];
+      if (config.preset !== 'custom') {
+        const safeMin = Math.max(minFloor, channelDef.minSeconds);
+        const safeMax = Math.max(safeMin, channelDef.maxSeconds);
+        const seconds = Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
+        return seconds * 1000;
+      }
+    }
+
+    // Custom or legacy config calculation
+    const isRandom = ('randomize' in config ? config.randomize : false) || ('mode' in config && (config.mode === 'random' || config.randomize));
+    const rawMin = Number((config as any).minSeconds ?? defaultMin);
+    const rawMax = Number((config as any).maxSeconds ?? defaultMax);
+    const safeMin = Math.max(minFloor, Math.min(86400, isNaN(rawMin) ? defaultMin : rawMin));
+    const safeMax = Math.max(safeMin, Math.min(86400, isNaN(rawMax) ? defaultMax : rawMax));
+
+    if (isRandom) {
       const seconds = Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
       return seconds * 1000;
     }
 
-    if (mode === 'cooldown') {
-      const rawCd = Number(config.cooldownSeconds ?? defaultCooldown);
-      const safeCd = Math.max(10, Math.min(86400, isNaN(rawCd) ? defaultCooldown : rawCd));
-      return safeCd * 1000;
-    }
-
-    if (mode === 'every_message') {
-      // In proactive autonomous mode, there are no discrete incoming user messages to count.
-      // Maps safely to configured cooldown (or default) to prevent uncontrolled burst spam.
-      const rawCd = Number(config.cooldownSeconds ?? defaultCooldown);
-      const safeCd = Math.max(10, Math.min(86400, isNaN(rawCd) ? defaultCooldown : rawCd));
-      return safeCd * 1000;
-    }
-
-    return defaultCooldown * 1000;
+    const rawCd = Number((config as any).cooldownSeconds ?? defaultCooldown);
+    const safeCd = Math.max(minFloor, Math.min(86400, isNaN(rawCd) ? defaultCooldown : rawCd));
+    return safeCd * 1000;
   }
 
   public calculateStartupJitterMs(delayMs: number): number {
@@ -193,6 +237,8 @@ export class AutoEngineService {
 
     if (engineType === 'sticker') {
       console.log(`[AUTO_ENGINE] sticker scheduled for chat ${chatId} (delay: ${delayMs}ms, reason: ${reason || 'unspecified'})`);
+    } else {
+      console.log(`[AUTO_ENGINE] message scheduled for chat ${chatId} (delay: ${delayMs}ms, reason: ${reason || 'unspecified'})`);
     }
   }
 
@@ -235,27 +281,69 @@ export class AutoEngineService {
       return;
     }
 
-    // Auto Response Synchronization
-    const arConfig = currentSettings.autoResponse;
-    const arEnabled = Boolean(arConfig?.enabled && arConfig.mode !== 'disabled');
-    if (arEnabled) {
-      const fullDelay = this.calculateDelayMs(arConfig, 30, 120, 30);
+    // Resolve unified autoEngine configuration
+    const engineConfig: AutoEngineConfig = currentSettings.autoEngine || this.resolveLegacyConfig(currentSettings);
+    const isEngineEnabled = Boolean(engineConfig.enabled && engineConfig.mode !== 'off');
+
+    if (!isEngineEnabled) {
+      this.cancelAllForGroup(botId, chatId);
+      return;
+    }
+
+    const mode = engineConfig.mode;
+
+    // Messages sync
+    const shouldRunMessages = (mode === 'messages_only' || mode === 'messages_and_stickers');
+    if (shouldRunMessages) {
+      const msgConfig = engineConfig.messages;
+      const fullDelay = this.calculateDelayMs(msgConfig, 480, 900, 480, 'messages');
       const delay = isStartup ? this.calculateStartupJitterMs(fullDelay) : fullDelay;
       this.scheduleJob(botId, chatId, 'response', delay, isStartup ? 'startup_jitter' : 'settings_sync');
     } else {
       this.cancelJob(botId, chatId, 'response');
     }
 
-    // Auto Sticker Synchronization
-    const asConfig = currentSettings.autoSticker;
-    const asEnabled = Boolean(asConfig?.enabled && asConfig.mode !== 'disabled');
-    if (asEnabled) {
-      const fullDelay = this.calculateDelayMs(asConfig, 60, 300, 60);
+    // Stickers sync
+    const shouldRunStickers = (mode === 'stickers_only' || mode === 'messages_and_stickers');
+    if (shouldRunStickers) {
+      const stkConfig = engineConfig.stickers;
+      const fullDelay = this.calculateDelayMs(stkConfig, 600, 1200, 600, 'stickers');
       const delay = isStartup ? this.calculateStartupJitterMs(fullDelay) : fullDelay;
       this.scheduleJob(botId, chatId, 'sticker', delay, isStartup ? 'startup_jitter' : 'settings_sync');
     } else {
       this.cancelJob(botId, chatId, 'sticker');
     }
+  }
+
+  private resolveLegacyConfig(settings: GroupSettings): AutoEngineConfig {
+    const ar = settings.autoResponse;
+    const as = settings.autoSticker;
+    const arEnabled = Boolean(ar?.enabled && ar.mode !== 'disabled');
+    const asEnabled = Boolean(as?.enabled && as.mode !== 'disabled');
+
+    let mode: AutoEngineMode = 'off';
+    if (arEnabled && asEnabled) mode = 'messages_and_stickers';
+    else if (arEnabled && !asEnabled) mode = 'messages_only';
+    else if (!arEnabled && asEnabled) mode = 'stickers_only';
+
+    return {
+      enabled: mode !== 'off',
+      mode,
+      messages: {
+        preset: 'custom',
+        minSeconds: ar?.minSeconds ?? 480,
+        maxSeconds: ar?.maxSeconds ?? 900,
+        cooldownSeconds: ar?.cooldownSeconds ?? 480,
+        randomize: ar?.randomize ?? (ar?.mode === 'random') ?? true
+      },
+      stickers: {
+        preset: 'custom',
+        minSeconds: as?.minSeconds ?? 600,
+        maxSeconds: as?.maxSeconds ?? 1200,
+        cooldownSeconds: as?.cooldownSeconds ?? 600,
+        randomize: as?.randomize ?? (as?.mode === 'random') ?? true
+      }
+    };
   }
 
   private async executeJob(botId: number, chatId: number, engineType: 'response' | 'sticker'): Promise<void> {
@@ -265,11 +353,7 @@ export class AutoEngineService {
     if (this.currentBotId !== null && this.currentBotId !== botId) return;
 
     if (this.activeExecutions.has(key) || job.isExecuting) {
-      if (engineType === 'sticker') {
-        console.warn(`[AUTO_ENGINE] Duplicate sticker execution suppressed for chat ${chatId}`);
-      } else {
-        console.warn(`[AUTO_ENGINE] Duplicate ${engineType} execution suppressed for chat ${chatId}`);
-      }
+      console.warn(`[AUTO_ENGINE] Duplicate ${engineType} execution suppressed for chat ${chatId}`);
       return; // Avoid overlapping runs
     }
 
@@ -277,9 +361,7 @@ export class AutoEngineService {
     job.isExecuting = true;
     job.timeoutHandle = null;
 
-    if (engineType === 'sticker') {
-      console.log(`[AUTO_ENGINE] sticker executing for chat ${chatId}`);
-    }
+    console.log(`[AUTO_ENGINE] ${engineType} executing for chat ${chatId}`);
 
     try {
       const settings = db.getGroupSettingsIfExists(chatId);
@@ -293,10 +375,24 @@ export class AutoEngineService {
         return;
       }
 
+      const engineConfig: AutoEngineConfig = settings.autoEngine || this.resolveLegacyConfig(settings);
+      if (!engineConfig.enabled || engineConfig.mode === 'off') {
+        this.cancelAllForGroup(botId, chatId);
+        return;
+      }
+
       if (engineType === 'response') {
-        await this.executeAutoResponse(botId, chatId, settings);
+        if (engineConfig.mode !== 'messages_only' && engineConfig.mode !== 'messages_and_stickers') {
+          this.cancelJob(botId, chatId, 'response');
+          return;
+        }
+        await this.executeAutoResponse(botId, chatId, settings, engineConfig);
       } else {
-        await this.executeAutoSticker(botId, chatId, settings);
+        if (engineConfig.mode !== 'stickers_only' && engineConfig.mode !== 'messages_and_stickers') {
+          this.cancelJob(botId, chatId, 'sticker');
+          return;
+        }
+        await this.executeAutoSticker(botId, chatId, settings, engineConfig);
       }
     } catch (err: any) {
       console.error(`[AUTO_ENGINE] Error executing ${engineType} for chat ${chatId}:`, err?.message || err);
@@ -310,14 +406,14 @@ export class AutoEngineService {
     }
   }
 
-  private async executeAutoResponse(botId: number, chatId: number, settings: GroupSettings): Promise<void> {
-    if (!settings.autoResponse?.enabled || settings.autoResponse.mode === 'disabled') {
-      this.cancelJob(botId, chatId, 'response');
-      return;
-    }
-
+  private async executeAutoResponse(
+    botId: number,
+    chatId: number,
+    settings: GroupSettings,
+    engineConfig: AutoEngineConfig
+  ): Promise<void> {
     if (settings.chatbotEnabled === false) {
-      const nextDelay = this.calculateDelayMs(settings.autoResponse, 30, 120, 30);
+      const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
       this.scheduleJob(botId, chatId, 'response', nextDelay, 'chatbot_disabled');
       return;
     }
@@ -342,16 +438,16 @@ export class AutoEngineService {
       throw new Error(desc);
     }
 
-    const nextDelay = this.calculateDelayMs(settings.autoResponse, 30, 120, 30);
+    const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
     this.scheduleJob(botId, chatId, 'response', nextDelay, 'next_interval');
   }
 
-  private async executeAutoSticker(botId: number, chatId: number, settings: GroupSettings): Promise<void> {
-    if (!settings.autoSticker?.enabled || settings.autoSticker.mode === 'disabled') {
-      this.cancelJob(botId, chatId, 'sticker');
-      return;
-    }
-
+  private async executeAutoSticker(
+    botId: number,
+    chatId: number,
+    settings: GroupSettings,
+    engineConfig: AutoEngineConfig
+  ): Promise<void> {
     const stickerFileId = ChatbotService.selectProactiveSticker(chatId);
     if (stickerFileId) {
       const sendRes = await telegramApi.sendSticker(chatId, stickerFileId);
@@ -370,7 +466,7 @@ export class AutoEngineService {
       }
     }
 
-    const nextDelay = this.calculateDelayMs(settings.autoSticker, 60, 300, 60);
+    const nextDelay = this.calculateDelayMs(engineConfig.stickers, 600, 1200, 600, 'stickers');
     console.log(`[AUTO_ENGINE] sticker next run for chat ${chatId} scheduled in ${nextDelay}ms`);
     this.scheduleJob(botId, chatId, 'sticker', nextDelay, 'next_interval');
   }
@@ -421,7 +517,7 @@ export class AutoEngineService {
   }
 
   public handlePermanentInvalidTarget(botId: number, chatId: number, reason: string): void {
-    console.warn(`[AUTO_ENGINE] Permanent invalid target detected for chat ${chatId} (${reason}). Canceling all auto engine jobs.`);
+    console.warn(`[AUTO_ENGINE] Permanent invalid target detected for chat ${chatId} (${reason}). Canceling auto engine jobs for this group only.`);
     this.cancelAllForGroup(botId, chatId);
     try {
       db.updateGroupSettings(chatId, {
@@ -453,16 +549,23 @@ export class AutoEngineService {
     setTimeout?: typeof setTimeout;
     clearTimeout?: typeof clearTimeout;
     now?: () => number;
+    bypassMinimumIntervalForTests?: boolean;
   }): void {
     if (hooks.setTimeout) this.customSetTimeout = hooks.setTimeout;
     if (hooks.clearTimeout) this.customClearTimeout = hooks.clearTimeout;
     if (hooks.now) this.customNow = hooks.now;
+    if (hooks.bypassMinimumIntervalForTests !== undefined) {
+      this.bypassMinimumIntervalForTests = hooks.bypassMinimumIntervalForTests;
+    } else if (hooks.setTimeout) {
+      this.bypassMinimumIntervalForTests = true;
+    }
   }
 
   public resetTestHooks(): void {
     this.customSetTimeout = setTimeout;
     this.customClearTimeout = clearTimeout;
     this.customNow = () => Date.now();
+    this.bypassMinimumIntervalForTests = false;
   }
 }
 
