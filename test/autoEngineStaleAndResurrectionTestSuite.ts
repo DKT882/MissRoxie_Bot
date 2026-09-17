@@ -125,7 +125,8 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
     -100999222009, -100999222010, -100999222011, -100999222012,
     -100999222013, -100999222014, -100999222015, -100999222016,
     -100999222017, -100999222018, -100999222019, -100999222020,
-    -100999222021, -100999222022, -100999222023, -100999222024, -1001
+    -100999222021, -100999222022, -100999222023, -100999222024,
+    -100999222025, -1001
   ];
   for (const cid of allTestChats) {
     try {
@@ -937,6 +938,107 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   assert.ok(autoEngineService.getJob(botIdA, e2eGroup, 'sticker'), 'AutoEngine starts successfully when re-added');
   autoEngineService.cancelAllForGroup(botIdA, e2eGroup);
   pass('Test AF: Complete End-to-End realistic regression lifecycle verified');
+
+  // --- TEST AG: Back-to-Back Auto Sticker Prevention & Invariant Verification ---
+  const stickerChatId = -100999222025;
+  sentStickers = [];
+  delete apiFailureMode[stickerChatId];
+
+  // 1. Initial configuration with Auto Sticker enabled
+  db.updateGroupSettings(stickerChatId, {
+    botId: botIdA,
+    botLeft: false,
+    unavailable: false,
+    autoResponse: {
+      enabled: false,
+      mode: 'disabled',
+      cooldownSeconds: 30
+    },
+    autoSticker: {
+      enabled: true,
+      mode: 'random',
+      randomize: true,
+      minSeconds: 30,
+      maxSeconds: 60,
+      cooldownSeconds: 30
+    }
+  });
+
+  // 2. Rapid repeated syncGroup calls (100 consecutive calls)
+  for (let i = 0; i < 100; i++) {
+    autoEngineService.syncGroup(botIdA, stickerChatId);
+  }
+
+  // Verify invariant: strictly 1 sticker timer exists
+  const statusAfter100Syncs = autoEngineService.getStatus();
+  assert.strictEqual(statusAfter100Syncs.activeStickerTimers, 1, 'Strictly 1 sticker timer must exist after 100 syncGroup calls');
+  const initialJob = autoEngineService.getJob(botIdA, stickerChatId, 'sticker');
+  assert.ok(initialJob, 'Sticker job exists');
+  assert.ok(initialJob.targetRunAt - virtualTime >= 30000, 'Initial delay is >= 30s');
+
+  // 3. Execution 1: advance time to execute 1st sticker
+  const stickerRun1Delay = initialJob.targetRunAt - virtualTime;
+  await advanceTime(stickerRun1Delay + 50);
+
+  // Invariants after run 1:
+  assert.strictEqual(sentStickers.length, 1, 'Exactly 1 sticker sent in run 1');
+  const jobAfterRun1 = autoEngineService.getJob(botIdA, stickerChatId, 'sticker');
+  assert.ok(jobAfterRun1, 'Next sticker job scheduled after run 1');
+  assert.strictEqual(autoEngineService.getStatus().activeStickerTimers, 1, 'Active sticker timers count strictly 1 after run 1');
+  assert.ok(jobAfterRun1.targetRunAt - virtualTime >= 30000, 'Next run scheduled strictly in future (>= 30s, no 0ms tight loop)');
+
+  // 4. Execution 2: advance time to execute 2nd sticker
+  const stickerRun2Delay = jobAfterRun1.targetRunAt - virtualTime;
+  await advanceTime(stickerRun2Delay + 50);
+
+  // Invariants after run 2:
+  assert.strictEqual(sentStickers.length, 2, 'Exactly 2 stickers sent in total after run 2');
+  const jobAfterRun2 = autoEngineService.getJob(botIdA, stickerChatId, 'sticker');
+  assert.ok(jobAfterRun2, 'Next sticker job scheduled after run 2');
+  assert.strictEqual(autoEngineService.getStatus().activeStickerTimers, 1, 'Active sticker timers count strictly 1 after run 2');
+
+  // 5. Dashboard settings update during interval
+  db.updateGroupSettings(stickerChatId, {
+    autoSticker: {
+      enabled: true,
+      mode: 'random',
+      randomize: true,
+      minSeconds: 45,
+      maxSeconds: 90,
+      cooldownSeconds: 45
+    }
+  });
+  assert.strictEqual(autoEngineService.getStatus().activeStickerTimers, 1, 'Timer resynced without duplication');
+
+  // 6. Transient 500 failure handling
+  apiFailureMode[stickerChatId] = 'Internal Server Error (500)';
+  const preFailJob = autoEngineService.getJob(botIdA, stickerChatId, 'sticker')!;
+  await advanceTime((preFailJob.targetRunAt - virtualTime) + 50);
+
+  assert.strictEqual(sentStickers.length, 2, 'Sticker count not increased on 500 failure');
+  const post500Job = autoEngineService.getJob(botIdA, stickerChatId, 'sticker');
+  assert.ok(post500Job, 'Job rescheduled after 500 error');
+  assert.ok(post500Job.targetRunAt - virtualTime >= 60000, '500 error backoff >= 60s');
+  assert.strictEqual(autoEngineService.getStatus().activeStickerTimers, 1, 'Active sticker timers strictly 1 after 500 failure');
+
+  // 7. Transient 429 rate limit backoff handling
+  apiFailureMode[stickerChatId] = 'Too Many Requests: retry after 20';
+  await advanceTime((post500Job.targetRunAt - virtualTime) + 50);
+
+  assert.strictEqual(sentStickers.length, 2, 'Sticker count not increased on 429 failure');
+  const post429Job = autoEngineService.getJob(botIdA, stickerChatId, 'sticker');
+  assert.ok(post429Job, 'Job rescheduled after 429 error');
+  assert.ok(post429Job.targetRunAt - virtualTime >= 25000, '429 error backoff >= retry_after + buffer (25s)');
+  assert.strictEqual(autoEngineService.getStatus().activeStickerTimers, 1, 'Active sticker timers strictly 1 after 429 failure');
+
+  // 8. Recovery after transient failure
+  delete apiFailureMode[stickerChatId];
+  await advanceTime((post429Job.targetRunAt - virtualTime) + 50);
+
+  assert.strictEqual(sentStickers.length, 3, 'Sticker sent successfully after recovery');
+  assert.strictEqual(autoEngineService.getStatus().activeStickerTimers, 1, 'Active sticker timers strictly 1 after recovery');
+  autoEngineService.cancelAllForGroup(botIdA, stickerChatId);
+  pass('Test AG: Back-to-Back Auto Sticker Prevention & Invariant Verification verified');
 
   // --- Clean up test groups from storage ---
   for (const cid of allTestChats) {

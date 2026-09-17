@@ -2567,11 +2567,10 @@ export class ChatbotService {
     }
 
     const defaultFallbackModels = [
-      process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
+      process.env.OPENROUTER_MODEL?.trim() || 'openai/gpt-oss-120b',
       process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
       process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
       process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
-      'google/gemini-2.0-flash-001',
       'meta-llama/llama-3.3-70b-instruct',
       'mistralai/mistral-small-24b-instruct-2501'
     ].filter(Boolean) as string[];
@@ -2586,7 +2585,7 @@ export class ChatbotService {
         rawCandidates.push(m);
       }
     }
-    for (const fb of ['google/gemini-2.0-flash-001', 'meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
+    for (const fb of ['meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
       if (!rawCandidates.includes(fb)) {
         rawCandidates.push(fb);
       }
@@ -2797,13 +2796,13 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         updateId: reqCtx.updateId,
         chatId,
         messageId: msgId,
-        primaryModel: configuredModels[0] || 'deepseek/deepseek-chat',
+        primaryModel: configuredModels[0] || 'openai/gpt-oss-120b',
         elapsedMs: Date.now() - reqCtx.receivedAt
       });
     }
 
     let replyContent: string | null = null;
-    let modelUsed: string = configuredModels[0] || 'deepseek/deepseek-chat';
+    let modelUsed: string = configuredModels[0] || 'openai/gpt-oss-120b';
     let lastHttpStatus: number | undefined;
     const aiStartTime = Date.now();
 
@@ -2906,12 +2905,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
 
     if (!replyContent) {
       metricsTracker.increment('ai_failures');
-      const isEnglish = langInfo.language === 'english';
-      const fallbackReply = isLustMode
-        ? (isEnglish ? "Aww baby, my mind drifted for a sec... what were you saying? 😉" : "Arre jaan, thoda dhyan bhatak gaya tha... kya bol rahe the? 😉")
-        : (isEnglish ? "Hey, I got a little distracted for a second! Tell me again? 😊" : "Arre, ek sec 😅 mera dhyan thoda bhatak gaya tha, phir se bolo na!");
-
-      conv.messages.push({ role: 'user', content: userText, timestamp: Date.now() });
+      console.error(`[CHATBOT_AI_FAILURE] All OpenRouter models failed for chat ${chatId}, message ${msgId}. Suppressing output; zero dummy text sent.`);
       return {
         requestId,
         chatId,
@@ -2919,11 +2913,10 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         userId,
         personality: personalityLabel,
         mood,
-        responseType: 'text',
-        content: fallbackReply,
+        responseType: 'none',
         replyToMessageId: msgId,
-        reason: 'All OpenRouter models failed (graceful terminal fallback delivered)',
-        modelUsed: 'fallback'
+        reason: 'All OpenRouter models failed',
+        modelUsed: 'none'
       };
     }
 
@@ -2951,7 +2944,23 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         }
       }
     }
-    cleanedText = cleanedText || 'Acha!';
+
+    if (!cleanedText || !cleanedText.trim()) {
+      metricsTracker.increment('ai_failures');
+      console.error(`[CHATBOT_AI_FAILURE] Cleaned AI text is empty for chat ${chatId}, message ${msgId}. Suppressing output.`);
+      return {
+        requestId,
+        chatId,
+        messageId: msgId,
+        userId,
+        personality: personalityLabel,
+        mood,
+        responseType: 'none',
+        replyToMessageId: msgId,
+        reason: 'Cleaned AI text was empty',
+        modelUsed
+      };
+    }
 
     logDebug({
       event: 'AI_RESPONSE_SANITIZED',
@@ -3119,11 +3128,10 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     if (!apiKey) return null;
 
     const defaultFallbackModels = [
-      process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
+      process.env.OPENROUTER_MODEL?.trim() || 'openai/gpt-oss-120b',
       process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
       process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
       process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
-      'google/gemini-2.0-flash-001',
       'meta-llama/llama-3.3-70b-instruct',
       'mistralai/mistral-small-24b-instruct-2501'
     ].filter(Boolean) as string[];
@@ -3138,7 +3146,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         rawCandidates.push(m);
       }
     }
-    for (const fb of ['google/gemini-2.0-flash-001', 'meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
+    for (const fb of ['meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
       if (!rawCandidates.includes(fb)) {
         rawCandidates.push(fb);
       }
@@ -3188,7 +3196,7 @@ STRICT INVARIANTS:
 6. If you have nothing interesting or natural to say, reply ONLY with: SKIP`;
 
     let replyContent: string | null = null;
-    let modelUsed = configuredModels[0] || 'deepseek/deepseek-chat';
+    let modelUsed = configuredModels[0] || 'openai/gpt-oss-120b';
     let lastHttpStatus: number | undefined;
 
     await this.acquireAiSlot();
@@ -3560,11 +3568,10 @@ STRICT INVARIANTS:
     if (!apiKey) return null;
 
     const defaultFallbackModels = [
-      process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-chat',
+      process.env.OPENROUTER_MODEL?.trim() || 'openai/gpt-oss-120b',
       process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
       process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
       process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
-      'google/gemini-2.0-flash-001',
       'meta-llama/llama-3.3-70b-instruct',
       'mistralai/mistral-small-24b-instruct-2501'
     ].filter(Boolean) as string[];
@@ -3579,7 +3586,7 @@ STRICT INVARIANTS:
         rawCandidates.push(m);
       }
     }
-    for (const fb of ['google/gemini-2.0-flash-001', 'meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
+    for (const fb of ['meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-small-24b-instruct-2501']) {
       if (!rawCandidates.includes(fb)) {
         rawCandidates.push(fb);
       }
@@ -3629,7 +3636,7 @@ STRICT INVARIANTS:
 6. If you have nothing interesting or natural to say, reply ONLY with: SKIP`;
 
     let replyContent: string | null = null;
-    let modelUsed = configuredModels[0] || 'deepseek/deepseek-chat';
+    let modelUsed = configuredModels[0] || 'openai/gpt-oss-120b';
 
     await this.acquireAiSlot();
     try {

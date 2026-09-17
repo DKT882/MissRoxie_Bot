@@ -16,6 +16,7 @@ export interface ScheduledAutoJob {
 
 export class AutoEngineService {
   private jobs: Map<string, ScheduledAutoJob> = new Map();
+  private activeExecutions: Set<string> = new Set();
   private isRunning: boolean = false;
   private currentBotId: number | null = null;
   private unregisterSettingsListener: (() => void) | null = null;
@@ -97,6 +98,7 @@ export class AutoEngineService {
       }
     }
     this.jobs.clear();
+    this.activeExecutions.clear();
     this.currentBotId = null;
   }
 
@@ -158,9 +160,11 @@ export class AutoEngineService {
     // Cancel existing timer if any to guarantee exactly one active timer per (botId, chatId, type)
     if (existing?.timeoutHandle) {
       this.customClearTimeout(existing.timeoutHandle);
+      existing.timeoutHandle = null;
     }
 
     const consecutiveFailures = existing?.consecutiveFailures || 0;
+    const isExecuting = existing?.isExecuting || false;
     const targetRunAt = this.customNow() + delayMs;
 
     const job: ScheduledAutoJob = {
@@ -170,7 +174,7 @@ export class AutoEngineService {
       engineType,
       targetRunAt,
       timeoutHandle: null,
-      isExecuting: false,
+      isExecuting,
       consecutiveFailures
     };
 
@@ -179,6 +183,10 @@ export class AutoEngineService {
     }, delayMs);
 
     this.jobs.set(key, job);
+
+    if (engineType === 'sticker') {
+      console.log(`[AUTO_ENGINE] sticker scheduled for chat ${chatId} (delay: ${delayMs}ms, reason: ${reason || 'unspecified'})`);
+    }
   }
 
   public cancelJob(botId: number, chatId: number, engineType: 'response' | 'sticker'): void {
@@ -187,9 +195,11 @@ export class AutoEngineService {
     if (existing) {
       if (existing.timeoutHandle) {
         this.customClearTimeout(existing.timeoutHandle);
+        existing.timeoutHandle = null;
       }
       this.jobs.delete(key);
     }
+    this.activeExecutions.delete(key);
   }
 
   public cancelAllForGroup(botId: number, chatId: number): void {
@@ -247,12 +257,22 @@ export class AutoEngineService {
     if (!job || !this.isRunning) return;
     if (this.currentBotId !== null && this.currentBotId !== botId) return;
 
-    if (job.isExecuting) {
+    if (this.activeExecutions.has(key) || job.isExecuting) {
+      if (engineType === 'sticker') {
+        console.warn(`[AUTO_ENGINE] Duplicate sticker execution suppressed for chat ${chatId}`);
+      } else {
+        console.warn(`[AUTO_ENGINE] Duplicate ${engineType} execution suppressed for chat ${chatId}`);
+      }
       return; // Avoid overlapping runs
     }
 
+    this.activeExecutions.add(key);
     job.isExecuting = true;
     job.timeoutHandle = null;
+
+    if (engineType === 'sticker') {
+      console.log(`[AUTO_ENGINE] sticker executing for chat ${chatId}`);
+    }
 
     try {
       const settings = db.getGroupSettingsIfExists(chatId);
@@ -275,6 +295,7 @@ export class AutoEngineService {
       console.error(`[AUTO_ENGINE] Error executing ${engineType} for chat ${chatId}:`, err?.message || err);
       this.handleFailure(botId, chatId, engineType, err);
     } finally {
+      this.activeExecutions.delete(key);
       const currentJob = this.jobs.get(key);
       if (currentJob) {
         currentJob.isExecuting = false;
@@ -329,6 +350,7 @@ export class AutoEngineService {
       const sendRes = await telegramApi.sendSticker(chatId, stickerFileId);
       if (sendRes.ok || (sendRes as any).message_id) {
         db.recordAutoStickerSent(chatId);
+        console.log(`[AUTO_ENGINE] sticker sent for chat ${chatId} (stickerId: ${stickerFileId})`);
         const job = this.jobs.get(this.makeJobKey(botId, chatId, 'sticker'));
         if (job) job.consecutiveFailures = 0;
       } else {
@@ -342,6 +364,7 @@ export class AutoEngineService {
     }
 
     const nextDelay = this.calculateDelayMs(settings.autoSticker, 60, 300, 60);
+    console.log(`[AUTO_ENGINE] sticker next run for chat ${chatId} scheduled in ${nextDelay}ms`);
     this.scheduleJob(botId, chatId, 'sticker', nextDelay, 'next_interval');
   }
 

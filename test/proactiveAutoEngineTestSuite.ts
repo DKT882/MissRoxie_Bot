@@ -419,12 +419,25 @@ async function runProactiveAutoEngineTestSuite() {
     pass('TEST 17: Reactive AI and explicit Roxie mentions continue to work immediately');
 
     // --------------------------------------------------------------------------------------
-    // TEST 18: OpenRouter Failure Does Not Tight Retry (Backs off >= 60s)
+    // TEST 18: OpenRouter Failure Does Not Tight Retry (Backs off >= 60s) and Produces Zero Dummy Text
     // --------------------------------------------------------------------------------------
     const prevFetch = global.fetch;
     global.fetch = async () => {
       return { ok: false, status: 500, text: async () => 'Internal Server Error' } as any;
     };
+
+    // Verify reactive failure returns responseType: 'none' and sends no dummy text
+    const failDecision = await ChatbotService.generateResponseDecision(
+      'req-fail-test',
+      {
+        message_id: 556,
+        chat: { id: testGroup1, type: 'supergroup', title: 'Roxie Alpha Lab' } as any,
+        from: { id: 7771, first_name: 'Tester', is_bot: false } as any,
+        text: 'hello'
+      } as any,
+      null
+    );
+    assert.strictEqual(failDecision.responseType, 'none', 'On AI failure, responseType must be none');
 
     const beforeFailJob = autoEngineService.getJob(botIdA, testGroup1, 'response');
     assert(beforeFailJob);
@@ -435,7 +448,7 @@ async function runProactiveAutoEngineTestSuite() {
     assert(afterFailJob);
     assert(afterFailJob.targetRunAt - virtualTime >= 60000, 'Backoff must be at least 60s on AI failure');
     global.fetch = prevFetch;
-    pass('TEST 18: OpenRouter failure backs off safely without tight retry loop');
+    pass('TEST 18: OpenRouter failure suppresses dummy text (responseType: none) and backs off safely without tight retry loop');
 
     // --------------------------------------------------------------------------------------
     // TEST 19: Telegram 429 Respects retry_after
