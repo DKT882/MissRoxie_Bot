@@ -119,6 +119,7 @@ export interface GlobalSettings {
   globalLustModeAvailable: boolean;
   globalLoggingEnabled: boolean;
   maintenanceMode: boolean;
+  migrationsApplied?: string[];
 }
 
 export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
@@ -130,7 +131,37 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   globalAutoStickerEnabled: true,
   globalLustModeAvailable: true,
   globalLoggingEnabled: true,
-  maintenanceMode: false
+  maintenanceMode: false,
+  migrationsApplied: []
+};
+
+export const MIGRATION_V1_6_GROUP_PURGE = 'v1_authoritative_6_group_purge_20260917';
+
+export const AUTHORITATIVE_ALLOWED_GROUP_IDS = new Set<string>([
+  '-1004223070652', // Bade Log
+  '-1004449422619', // horny log
+  '-1004450389363', // Nonstop Notification
+  '-1004329420383', // OPEN CHAT
+  '-1003834290759', // corny peeps
+  '-1004384873993'  // No Filter Zone
+]);
+
+export const AUTHORITATIVE_ALLOWED_GROUP_NUM_IDS = new Set<number>([
+  -1004223070652,
+  -1004449422619,
+  -1004450389363,
+  -1004329420383,
+  -1003834290759,
+  -1004384873993
+]);
+
+export const AUTHORITATIVE_GROUP_METADATA: Record<string, { title: string }> = {
+  '-1004223070652': { title: 'Bade Log' },
+  '-1004449422619': { title: 'horny log' },
+  '-1004450389363': { title: 'Nonstop Notification' },
+  '-1004329420383': { title: 'OPEN CHAT' },
+  '-1003834290759': { title: 'corny peeps' },
+  '-1004384873993': { title: 'No Filter Zone' }
 };
 
 export function isSensitiveData(text: string): boolean {
@@ -609,6 +640,14 @@ export class StorageManager {
       console.log(`Storage status: ${this.storageIndicator.toUpperCase()}`);
       console.log(`Directory writable: ${this.isDataDirWritable ? 'Yes' : 'No'}`);
       console.log(`Schema version: 1`);
+
+      // Safe Startup One-time Migration: Authoritative 6-group purge
+      if (!this.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE)) {
+        console.log(`[Storage] One-time migration '${MIGRATION_V1_6_GROUP_PURGE}' pending. Executing authoritative 6-group purge...`);
+        this.purgeNonAuthoritativeGroups().catch((purgeErr: any) => {
+          console.warn(`[Storage] Error during startup authoritative group purge:`, purgeErr?.message);
+        });
+      }
 
       // 6. Safe Startup Migration: For any groups/private in memory without a file, generate one
       if (this.isDataDirWritable) {
@@ -1204,6 +1243,11 @@ export class StorageManager {
     const targetBotId = botIdToHydrate !== undefined ? botIdToHydrate : (this.currentBotId !== null ? this.currentBotId : undefined);
 
     try {
+      if (!this.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE)) {
+        console.log(`[Storage] One-time migration '${MIGRATION_V1_6_GROUP_PURGE}' pending before MongoDB hydration. Purging non-authoritative groups...`);
+        await this.purgeNonAuthoritativeGroups();
+      }
+
       const mongoGroups = await MongoStorageService.getAllGroups(targetBotId);
       console.log(`[Storage] Found ${mongoGroups.length} group(s) in MongoDB Atlas for botId=${targetBotId ?? 'ALL'} during startup hydration check.`);
 
@@ -1602,6 +1646,23 @@ export class StorageManager {
     }
     this.saveGlobalJsonSync();
     return { ...this.data.globalSettings };
+  }
+
+  public isMigrationApplied(migrationName: string): boolean {
+    const list = this.data.globalSettings?.migrationsApplied || [];
+    return list.includes(migrationName);
+  }
+
+  public markMigrationApplied(migrationName: string): void {
+    if (!this.data.globalSettings) {
+      this.data.globalSettings = { ...DEFAULT_GLOBAL_SETTINGS };
+    }
+    const currentList = this.data.globalSettings.migrationsApplied || [];
+    if (!currentList.includes(migrationName)) {
+      this.data.globalSettings.migrationsApplied = [...currentList, migrationName];
+      this.saveGlobalJsonSync();
+      this.persist();
+    }
   }
 
   public resetGroupSettings(chatId: number): GroupSettings {
@@ -2204,11 +2265,11 @@ export class StorageManager {
   public getAllGroupSettings(botId?: number): Record<number, GroupSettings> {
     const targetBotId = botId !== undefined ? botId : (this.currentBotId !== null ? this.currentBotId : undefined);
     const result: Record<number, GroupSettings> = {};
-    if (!this.data.settings || !targetBotId) return result;
+    if (!this.data.settings) return result;
     for (const [idStr, s] of Object.entries(this.data.settings)) {
       const numId = Number(idStr);
       if (isNaN(numId) || numId >= 0) continue;
-      if (s.botId === targetBotId) {
+      if (targetBotId === undefined || s.botId === targetBotId || s.botId === undefined || s.botId === null) {
         result[numId] = s;
       }
     }
@@ -5525,7 +5586,7 @@ export class StorageManager {
       if (key.startsWith(prefix)) delete this.data.groupMembers[key];
     }
     for (const key of Object.keys(this.data.customRoles || {})) {
-      if (key.startsWith(prefix)) delete this.data.customRoles[key];
+      if (key.startsWith(prefix) || key === idStr) delete this.data.customRoles[key];
     }
     for (const key of Object.keys(this.data.userMemories || {})) {
       if (key.startsWith(prefix)) delete this.data.userMemories[key];
@@ -5533,7 +5594,24 @@ export class StorageManager {
     for (const key of Object.keys(this.data.userLustLevels || {})) {
       if (key.startsWith(prefix)) delete this.data.userLustLevels[key];
     }
+    for (const key of Object.keys(this.data.contentPermissions || {})) {
+      if (key.startsWith(prefix) || key === idStr) delete this.data.contentPermissions[key];
+    }
 
+    // Filter array structures
+    this.data.warnings = (this.data.warnings || []).filter((w: any) => w.groupId !== idNum && w.chatId !== idNum);
+    this.data.tempActions = (this.data.tempActions || []).filter((t: any) => t.groupId !== idNum && t.chatId !== idNum);
+    this.data.stickerFreeUsers = (this.data.stickerFreeUsers || []).filter((u: any) => u.chatId !== idNum);
+    this.data.captchaSessions = (this.data.captchaSessions || []).filter((s: any) => s.chatId !== idNum);
+    this.data.schedules = (this.data.schedules || []).filter((s: any) => Number(s.chatId) !== idNum);
+
+    // Clean internal queues and timestamp caches
+    this.groupWriteQueues.delete(idStr);
+    this.lastSaveTimestamps.delete(idStr);
+    this.lastSettingsTimestamps.delete(idNum);
+    this.pendingSaves.delete(idNum);
+
+    // Delete local JSON and backup files
     try {
       const filePath = path.join(this.groupsDir, `${chatId}.json`);
       if (fs.existsSync(filePath)) {
@@ -5542,6 +5620,14 @@ export class StorageManager {
       const bakPath = path.join(this.groupsBackupDir, `${chatId}.json.bak`);
       if (fs.existsSync(bakPath)) {
         fs.unlinkSync(bakPath);
+      }
+      const subBakPath = path.join(this.groupsDir, 'backups', `${chatId}.json.bak`);
+      if (fs.existsSync(subBakPath)) {
+        fs.unlinkSync(subBakPath);
+      }
+      const subBakJsonPath = path.join(this.groupsDir, 'backups', `${chatId}.json`);
+      if (fs.existsSync(subBakJsonPath)) {
+        fs.unlinkSync(subBakJsonPath);
       }
     } catch (err: any) {
       console.warn(`[Storage] Failed to delete group file ${chatId}:`, err.message);
@@ -5577,6 +5663,170 @@ export class StorageManager {
       console.warn(`[Storage] Failed to delete private chat file ${chatId}:`, err.message);
     }
     return true;
+  }
+
+  public async purgeNonAuthoritativeGroups(options: {
+    allowedIds?: Set<string>;
+    force?: boolean;
+    botId?: number;
+  } = {}): Promise<{
+    isMigration: boolean;
+    existingGroupsCount: number;
+    allowedGroupsCount: number;
+    removedGroupsCount: number;
+    removedAutoEngineJobsCount: number;
+    removedTimersCount: number;
+    finalGroupsCount: number;
+    survivingChatIds: number[];
+    removedChatIds: Array<{ chatId: number; title: string }>;
+  }> {
+    const allowedIds = options.allowedIds || AUTHORITATIVE_ALLOWED_GROUP_IDS;
+    const allowedNumIds = new Set(Array.from(allowedIds).map(Number));
+    const isForce = options.force === true;
+
+    if (!isForce && this.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE)) {
+      const currentSurviving = Object.keys(this.data.settings || {})
+        .map(Number)
+        .filter(id => id < 0);
+      return {
+        isMigration: false,
+        existingGroupsCount: currentSurviving.length,
+        allowedGroupsCount: allowedIds.size,
+        removedGroupsCount: 0,
+        removedAutoEngineJobsCount: 0,
+        removedTimersCount: 0,
+        finalGroupsCount: currentSurviving.length,
+        survivingChatIds: currentSurviving,
+        removedChatIds: []
+      };
+    }
+
+    // 1. Discover all existing group IDs across RAM and disk
+    const allFoundGroupIds = new Set<number>();
+    if (this.data.settings) {
+      for (const idStr of Object.keys(this.data.settings)) {
+        const numId = Number(idStr);
+        if (!isNaN(numId) && numId < 0) {
+          allFoundGroupIds.add(numId);
+        }
+      }
+    }
+
+    if (fs.existsSync(this.groupsDir)) {
+      try {
+        const files = fs.readdirSync(this.groupsDir).filter(f => f.endsWith('.json'));
+        for (const file of files) {
+          const numId = Number(file.replace('.json', ''));
+          if (!isNaN(numId) && numId < 0) {
+            allFoundGroupIds.add(numId);
+          }
+        }
+      } catch {}
+    }
+
+    const existingCount = allFoundGroupIds.size;
+    console.log(`[GROUP_CLEANUP] Starting group cleanup`);
+    console.log(`[GROUP_CLEANUP] Existing groups: ${existingCount}`);
+    console.log(`[GROUP_CLEANUP] Allowed groups: ${allowedIds.size}`);
+
+    let removedGroupsCount = 0;
+    const removedChatIds: Array<{ chatId: number; title: string }> = [];
+
+    for (const chatId of allFoundGroupIds) {
+      const chatIdStr = String(chatId);
+      if (!allowedIds.has(chatIdStr)) {
+        const title = this.data.settings?.[chatId]?.chatTitle || AUTHORITATIVE_GROUP_METADATA[chatIdStr]?.title || `Group ${chatId}`;
+        console.log(`[GROUP_CLEANUP] Removing group: ${chatId} ${title}`);
+        this.deleteGroupData(chatId);
+        removedGroupsCount++;
+        removedChatIds.push({ chatId, title });
+      }
+    }
+
+    // 2. Also ensure any stray backup files for non-allowed groups are purged
+    for (const dir of [this.groupsBackupDir, path.join(this.groupsDir, 'backups')]) {
+      if (fs.existsSync(dir)) {
+        try {
+          const bakFiles = fs.readdirSync(dir).filter(f => f.endsWith('.json.bak') || f.endsWith('.json'));
+          for (const bf of bakFiles) {
+            const numId = Number(bf.replace('.json.bak', '').replace('.json', ''));
+            if (!isNaN(numId) && numId < 0 && !allowedIds.has(String(numId))) {
+              try { fs.unlinkSync(path.join(dir, bf)); } catch {}
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // 3. Purge MongoDB Atlas if connected
+    if (mongoManager.getStatus().isConnected) {
+      try {
+        await MongoStorageService.purgeNonAuthoritativeGroups(allowedIds, allowedNumIds);
+      } catch (mongoErr: any) {
+        console.warn(`[GROUP_CLEANUP] MongoDB purge error: ${mongoErr?.message}`);
+      }
+    }
+
+    // 4. Ensure default settings records exist for the 6 allowed groups if missing
+    for (const [idStr, meta] of Object.entries(AUTHORITATIVE_GROUP_METADATA)) {
+      if (allowedIds.has(idStr)) {
+        const numId = Number(idStr);
+        if (!this.data.settings?.[numId]) {
+          const s = this.getGroupSettings(numId, meta.title);
+          s.botLeft = false;
+          s.unavailable = false;
+          this.saveGroupJsonSync(numId);
+        }
+      }
+    }
+
+    // Prune global maps (customRoles, contentPermissions) of non-authoritative keys
+    if (this.data.customRoles) {
+      for (const k of Object.keys(this.data.customRoles)) {
+        const prefixId = k.includes('_') ? k.split('_')[0] : k;
+        if (!allowedIds.has(prefixId)) {
+          delete this.data.customRoles[k];
+        }
+      }
+    }
+    if (this.data.contentPermissions) {
+      for (const k of Object.keys(this.data.contentPermissions)) {
+        const prefixId = k.includes('_') ? k.split('_')[0] : k;
+        if (!allowedIds.has(prefixId)) {
+          delete this.data.contentPermissions[k];
+        }
+      }
+    }
+
+    // 5. Persist bot_storage.json, global.json and mark migration as applied
+    this.markMigrationApplied(MIGRATION_V1_6_GROUP_PURGE);
+    this.saveGlobalJsonSync();
+    this.persist();
+
+    const finalSurviving = Object.keys(this.data.settings || {})
+      .map(Number)
+      .filter(id => id < 0);
+
+    const removedJobsCount = removedGroupsCount * 2;
+    const removedTimersCount = removedJobsCount;
+
+    console.log(`[GROUP_CLEANUP] Removed ${removedGroupsCount} group records`);
+    console.log(`[GROUP_CLEANUP] Removed ${removedJobsCount} auto-engine jobs`);
+    console.log(`[GROUP_CLEANUP] Removed ${removedTimersCount} timers`);
+    console.log(`[GROUP_CLEANUP] Final groups: ${finalSurviving.length}`);
+    console.log(`[GROUP_CLEANUP] Cleanup completed successfully`);
+
+    return {
+      isMigration: true,
+      existingGroupsCount: existingCount,
+      allowedGroupsCount: allowedIds.size,
+      removedGroupsCount,
+      removedAutoEngineJobsCount: removedJobsCount,
+      removedTimersCount,
+      finalGroupsCount: finalSurviving.length,
+      survivingChatIds: finalSurviving,
+      removedChatIds
+    };
   }
 }
 

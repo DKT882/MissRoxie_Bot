@@ -252,4 +252,29 @@ export class MongoStorageService {
       return false;
     }
   }
+
+  public static async purgeNonAuthoritativeGroups(allowedIds: Set<string>, allowedNumIds: Set<number>): Promise<number> {
+    try {
+      const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
+      if (!collection) return 0;
+
+      const allowedStrArray = Array.from(allowedIds);
+      const allowedNumArray = Array.from(allowedNumIds);
+
+      // Delete all group documents that are NOT in the allowlist
+      const query: any = {
+        $and: [
+          { chatId: { $nin: allowedStrArray } },
+          { numChatId: { $nin: allowedNumArray } }
+        ]
+      };
+
+      const result = await collection.deleteMany(query);
+      console.log(`[MongoStorage] Purged ${result.deletedCount} non-authoritative group documents from MongoDB Atlas.`);
+      return result.deletedCount;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to purge non-authoritative groups from MongoDB Atlas: ${err?.message}`);
+      return 0;
+    }
+  }
 }
