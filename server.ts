@@ -2576,14 +2576,7 @@ export async function startServer() {
     }
   }
 
-  // 3. Ensure one-time authoritative 6-group migration is executed across MongoDB and local storage
-  try {
-    await db.ensureAuthoritativeMigrationApplied();
-  } catch (migErr: any) {
-    console.error('[Roxie Database] Migration check error during startup:', migErr?.message);
-  }
-
-  // 4. Hydrate groups from MongoDB Atlas (now guaranteed clean)
+  // 3. Hydrate groups from MongoDB Atlas (authoritative persistent store - strictly read-only)
   if (mongoManager.getStatus().isConnected) {
     try {
       const currentBotId = db.getCurrentBotId() ?? undefined;
@@ -2594,18 +2587,18 @@ export async function startServer() {
     }
   }
 
-  // 5. Verify final group state established
+  // 4. Verify final group state established
   const finalGroups = db.getAllGroupSettings();
   const finalGroupCount = Object.keys(finalGroups).filter(k => Number(k) < 0).length;
   console.log(`[Roxie Startup] Final group state established: ${finalGroupCount} active group(s) in storage.`);
 
-  // 6. Start HTTP server
+  // 5. Start HTTP server
   console.log(`[Roxie Server] Starting HTTP server on port ${PORT}...`);
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Roxie Server] Listening on port ${PORT}`);
   });
 
-  // 7. Automatically initiate bot polling and AutoEngine in background AFTER HTTP server is listening
+  // 6. Automatically initiate bot polling and AutoEngine in background AFTER HTTP server is listening
   if (process.env.TELEGRAM_BOT_TOKEN?.trim()) {
     console.log('[Roxie Telegram] Initializing Telegram bot subsystem...');
     telegramBot.startPolling().catch((err) => {

@@ -98,15 +98,11 @@ async function main() {
       const handled = await ChatbotService.handleMessage(msg as any, botUser as any);
       global.fetch = origFetch;
 
-      assert.strictEqual(handled, true, 'Explicit trigger should handle and deliver terminal fallback message');
-      assert.strictEqual(sentActions.length, 1, 'Typing action should have been initiated on trigger');
-      assert.strictEqual(sentActions[0].action, 'typing');
-      assert.strictEqual(sentMessages.length, 1, 'A terminal fallback text message must be delivered to resolve typing state');
-      assert.ok(sentMessages[0].text.length > 0, 'Fallback text must not be empty');
-      console.log(`      Delivered terminal message: "${sentMessages[0].text}"`);
+      assert.strictEqual(handled, false, 'Explicit trigger with failed AI suppresses output');
+      assert.strictEqual(sentMessages.length, 0, 'Zero dummy or fallback text messages sent when AI fails');
     });
 
-    await runTest('1.2: Lust Mode Explicit Trigger with Failed OpenRouter Delivers Playful Terminal Fallback', async () => {
+    await runTest('1.2: Lust Mode Explicit Trigger with Failed OpenRouter Suppresses Output Without Dummy Text', async () => {
       sentActions.length = 0;
       sentMessages.length = 0;
 
@@ -133,10 +129,8 @@ async function main() {
       global.fetch = origFetch;
       db.updateGroupSettings(testChatId, { lustMode: false });
 
-      assert.strictEqual(handled, true, 'Lust mode explicit trigger should deliver fallback message');
-      assert.strictEqual(sentMessages.length, 1, 'Terminal fallback message sent');
-      assert.ok(sentMessages[0].text.includes('jaan') || sentMessages[0].text.includes('babe'), 'Fallback has affectionate tone');
-      console.log(`      Delivered LustMode terminal message: "${sentMessages[0].text}"`);
+      assert.strictEqual(handled, false, 'Lust mode explicit trigger suppresses output on AI failure');
+      assert.strictEqual(sentMessages.length, 0, 'Zero dummy text messages sent');
     });
 
     await runTest('1.3: Spontaneous Group Chat Message without Trigger Does NOT Send Premature Typing Indicator', async () => {

@@ -147,6 +147,7 @@ async function runGroupRemovalTestSuite() {
     const legacyRemoval = storage.removeGroupFromDashboard(legacyChatId, currentBot.id);
     assert.strictEqual(legacyRemoval, false, 'Legacy group without matching botId should not be removed');
     assert((storage as any).data.settings[legacyChatId], 'Legacy settings must remain intact');
+    delete (storage as any).data.settings[legacyChatId];
     console.log('✓ TEST E Passed: Legacy records protected from deletion.');
 
     // -------------------------------------------------------------------------

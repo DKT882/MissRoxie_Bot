@@ -1229,14 +1229,12 @@ export class StorageManager {
     }
 
     let hydratedCount = 0;
-    let syncedToMongoCount = 0;
+    const syncedToMongoCount = 0;
     let errorsCount = 0;
 
     const targetBotId = botIdToHydrate !== undefined ? botIdToHydrate : (this.currentBotId !== null ? this.currentBotId : undefined);
 
     try {
-      await this.ensureAuthoritativeMigrationApplied();
-
       const mongoGroups = await MongoStorageService.getAllGroups(targetBotId);
       console.log(`[Storage] Found ${mongoGroups.length} group(s) in MongoDB Atlas for botId=${targetBotId ?? 'ALL'} during startup hydration check.`);
 
@@ -1250,59 +1248,42 @@ export class StorageManager {
           const chatIdStr = String(numChatId);
           mongoChatIds.add(chatIdStr);
 
-          const existingSettings = this.data.settings?.[numChatId];
-          const localUpdated = existingSettings?.updatedAt ? new Date(existingSettings.updatedAt).getTime() : 0;
-          const mongoUpdated = doc.updatedAt ? new Date(doc.updatedAt).getTime() : (doc.createdAt ? new Date(doc.createdAt).getTime() : 0);
-
-          // Merge / conflict resolution rule:
-          // If group not in RAM or MongoDB is newer/equal -> MongoDB is persistent source of truth
-          if (!existingSettings || mongoUpdated >= localUpdated) {
-            this.restoreGroupData(numChatId, doc);
-            if (this.isDataDirWritable) {
-              const targetFile = path.join(this.groupsDir, `${numChatId}.json`);
-              const rawData = this.buildGroupDataObject(numChatId);
-              const safeData = this.sanitizeGroupData(rawData);
-              const jsonContent = JSON.stringify(safeData, null, 2);
-              this.atomicWriteJsonSync(targetFile, jsonContent);
-              this.lastSaveTimestamps.set(chatIdStr, new Date().toISOString());
-            }
-            hydratedCount++;
-          } else {
-            // Local is strictly newer (e.g. offline file edits) -> push local to MongoDB
+          // MongoDB is the authoritative persistent source of truth - hydrate into RAM
+          this.restoreGroupData(numChatId, doc);
+          if (this.isDataDirWritable) {
+            const targetFile = path.join(this.groupsDir, `${numChatId}.json`);
             const rawData = this.buildGroupDataObject(numChatId);
             const safeData = this.sanitizeGroupData(rawData);
-            await MongoStorageService.saveGroup(safeData, targetBotId, this.currentBotUsername ?? undefined);
-            syncedToMongoCount++;
+            const jsonContent = JSON.stringify(safeData, null, 2);
+            this.atomicWriteJsonSync(targetFile, jsonContent);
+            this.lastSaveTimestamps.set(chatIdStr, new Date().toISOString());
           }
+          hydratedCount++;
         } catch (groupErr: any) {
           console.error(`[Storage] Failed to hydrate group ${doc?.chatId} from MongoDB:`, groupErr?.message);
           errorsCount++;
         }
       }
 
-      // Check for any groups currently in RAM that match targetBotId and do NOT exist in MongoDB at all -> replicate to Mongo
+      // If local RAM contained groups loaded from disk that are NOT in MongoDB for this bot scope,
+      // prune them from local RAM cache without touching MongoDB (NEVER push local groups to MongoDB during hydration).
       if (this.data.settings) {
         for (const idStr of Object.keys(this.data.settings)) {
           const numChatId = Number(idStr);
           if (isNaN(numChatId) || numChatId >= 0) continue;
           const s = this.data.settings[numChatId];
           if (targetBotId !== undefined && s.botId !== undefined && s.botId !== targetBotId) {
-            continue; // Do not push groups belonging to other bots
+            continue; // Do not touch groups belonging to other bots
           }
           if (!mongoChatIds.has(String(numChatId))) {
-            try {
-              const rawData = this.buildGroupDataObject(numChatId);
-              const safeData = this.sanitizeGroupData(rawData);
-              await MongoStorageService.saveGroup(safeData, targetBotId, this.currentBotUsername ?? undefined);
-              syncedToMongoCount++;
-            } catch (syncErr: any) {
-              console.warn(`[Storage] Failed to replicate local group ${numChatId} to MongoDB:`, syncErr?.message);
-            }
+            // Group exists only in stale local cache, not in authoritative MongoDB.
+            // Prune from local RAM/disk cache to prevent ghost state; NEVER write/insert into MongoDB.
+            this.deleteGroupData(numChatId);
           }
         }
       }
 
-      console.log(`[Storage] MongoDB hydration completed: ${hydratedCount} loaded into RAM & disk cache, ${syncedToMongoCount} synced to MongoDB, ${errorsCount} errors.`);
+      console.log(`[Storage] MongoDB hydration completed: ${hydratedCount} loaded into RAM & disk cache, 0 mutations to MongoDB, ${errorsCount} errors.`);
     } catch (err: any) {
       console.error('[Storage] Error during MongoDB startup hydration:', err?.message);
       errorsCount++;
@@ -5816,19 +5797,12 @@ export class StorageManager {
     force?: boolean;
     botId?: number;
   } = {}): Promise<{ applied: boolean; details?: any }> {
-    const isLocalApplied = this.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE);
-    let isMongoApplied = false;
-    if (mongoManager.getStatus().isConnected) {
-      isMongoApplied = await MongoStorageService.isMigrationApplied(MIGRATION_V1_6_GROUP_PURGE);
-    } else {
-      isMongoApplied = isLocalApplied;
-    }
-
-    if (!options.force && isLocalApplied && isMongoApplied) {
+    if (!options.force) {
+      // Historical migration has been retired from automatic execution.
       return { applied: false };
     }
 
-    console.log(`[Storage] Authoritative 6-group migration pending check (LocalApplied=${isLocalApplied}, MongoApplied=${isMongoApplied}). Executing dual-store purge...`);
+    console.log(`[Storage] Explicit force purge requested. Executing dual-store purge...`);
     const details = await this.purgeNonAuthoritativeGroups({
       allowedIds: options.allowedIds,
       force: true,
