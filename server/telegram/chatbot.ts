@@ -1090,10 +1090,11 @@ export class ChatbotService {
   }
 
   public static isTriggered(message: TelegramMessage, botUser: TelegramUser | null): boolean {
-    const text = (message.text || message.caption || '').trim();
+    const rawText = message.text || message.caption || '';
+    const text = rawText.trim();
 
     // 1. In private chat, every message is an explicit trigger
-    if (message.chat.type === 'private') {
+    if (message.chat?.type === 'private') {
       return true;
     }
 
@@ -1101,16 +1102,56 @@ export class ChatbotService {
     if (message.reply_to_message?.from) {
       const replyFrom = message.reply_to_message.from;
       if (botUser && replyFrom.id === botUser.id) return true;
-      if (replyFrom.is_bot && (replyFrom.username?.toLowerCase() === 'missroxie_bot' || replyFrom.username?.toLowerCase() === botUser?.username?.toLowerCase())) return true;
+      if (replyFrom.is_bot) {
+        const usernameLower = replyFrom.username?.toLowerCase();
+        const botUsernameLower = botUser?.username?.toLowerCase();
+        const firstNameLower = replyFrom.first_name?.toLowerCase();
+        if (
+          (botUsernameLower && usernameLower === botUsernameLower) ||
+          usernameLower === 'missroxie_bot' ||
+          usernameLower === 'roxie' ||
+          (firstNameLower && firstNameLower.includes('roxie'))
+        ) {
+          return true;
+        }
+      }
     }
 
-    // 3. Mention "Roxie", bot username, or media requests case-insensitively
+    // 3. Telegram entities and caption_entities detection
+    const entities = [...(message.entities || []), ...(message.caption_entities || [])];
+    const botUsernameNoAt = botUser?.username ? botUser.username.toLowerCase() : 'missroxie_bot';
+    const botUsernameWithAt = `@${botUsernameNoAt}`;
+
+    for (const entity of entities) {
+      if (entity.type === 'mention' && rawText) {
+        const mentionSlice = rawText.substring(entity.offset, entity.offset + entity.length).toLowerCase().trim();
+        if (
+          mentionSlice === botUsernameWithAt ||
+          mentionSlice === '@missroxie_bot' ||
+          mentionSlice === '@roxie'
+        ) {
+          return true;
+        }
+      } else if (entity.type === 'text_mention' && entity.user) {
+        if (
+          (botUser && entity.user.id === botUser.id) ||
+          entity.user.username?.toLowerCase() === botUsernameNoAt ||
+          entity.user.username?.toLowerCase() === 'missroxie_bot' ||
+          entity.user.first_name?.toLowerCase().includes('roxie')
+        ) {
+          return true;
+        }
+      }
+    }
+
+    // 4. Case-insensitive text / caption inspection
     const lowerText = text.toLowerCase();
-    const botUsername = botUser?.username ? `@${botUser.username.toLowerCase()}` : '@missroxie_bot';
     if (
       lowerText.includes('roxie') ||
-      lowerText.includes(botUsername) ||
+      lowerText.includes(botUsernameWithAt) ||
+      lowerText.includes(botUsernameNoAt) ||
       lowerText.includes('@missroxie_bot') ||
+      lowerText.includes('@roxie') ||
       lowerText.includes('sticker') ||
       lowerText.includes('stkr') ||
       lowerText.includes('gif') ||
@@ -2401,6 +2442,7 @@ export class ChatbotService {
     }
 
     const isExplicitTrigger = isPrivate || this.isTriggered(message, botUser);
+    console.log(`[DIRECT_DEBUG] generate_decision_start: chatId=${chatId}, messageId=${msgId}, isTriggered=${isExplicitTrigger}, isPrivate=${isPrivate}, replyTo=${message.reply_to_message?.message_id || 0}, hasText=${Boolean(userText)}`);
 
     // Spontaneous natural group chat chime-in check (only when not explicitly triggered)
     if (!isExplicitTrigger) {
@@ -2420,6 +2462,7 @@ export class ChatbotService {
           }
         }
       }
+      console.log(`[DIRECT_DEBUG] decision_skipped: chatId=${chatId}, messageId=${msgId}, reason=No trigger condition met`);
       return {
         requestId,
         chatId,
@@ -2488,11 +2531,12 @@ export class ChatbotService {
     const mediaIntent = this.detectMediaIntent(userText);
     if (mediaIntent.isExplicitMedia) {
       const targetMediaMood = mediaIntent.requestedMood || mood;
+      const autoStickerAllowed = isPrivate || db.checkAutoStickerEligibility(chatId).allowed;
 
       if (isLustMode) {
         // In Lust Mode: STRICT custom-sticker-only rule (Rule 1, 11)
         const customSticker = this.selectCustomStickerForLustMode(targetMediaMood, chatId, false);
-        if (customSticker) {
+        if (customSticker && autoStickerAllowed) {
           return {
             requestId,
             chatId,
@@ -2501,8 +2545,22 @@ export class ChatbotService {
             personality: personalityLabel,
             mood,
             responseType: 'sticker',
+            content: 'Jaan, ye raha tumhare liye sticker! 😘',
             mediaFileId: customSticker,
             replyToMessageId: msgId
+          };
+        } else if (customSticker && !autoStickerAllowed) {
+          return {
+            requestId,
+            chatId,
+            messageId: msgId,
+            userId,
+            personality: personalityLabel,
+            mood,
+            responseType: 'text',
+            content: 'Abhi sticker mood nahi hai jaan, thodi aur baatein karo na! 😘',
+            replyToMessageId: msgId,
+            reason: 'LustMode sticker activity cooldown active'
           };
         } else {
           return {
@@ -2522,7 +2580,7 @@ export class ChatbotService {
 
       if (mediaIntent.mediaType === 'sticker') {
         const stickerId = this.selectSticker(targetMediaMood, chatId);
-        if (stickerId && this.isValidFileId(stickerId)) {
+        if (stickerId && this.isValidFileId(stickerId) && autoStickerAllowed) {
           return {
             requestId,
             chatId,
@@ -2531,8 +2589,22 @@ export class ChatbotService {
             personality: 'Psychologist-style',
             mood,
             responseType: 'sticker',
+            content: 'Lo, ye raha tumhare liye sticker! 😉',
             mediaFileId: stickerId,
             replyToMessageId: msgId
+          };
+        } else if (stickerId && this.isValidFileId(stickerId) && !autoStickerAllowed) {
+          return {
+            requestId,
+            chatId,
+            messageId: msgId,
+            userId,
+            personality: 'Psychologist-style',
+            mood,
+            responseType: 'text',
+            content: 'Abhi sticker cooldown pe hai yaar, group mein thodi aur baatein karo! 😉',
+            replyToMessageId: msgId,
+            reason: 'Sticker activity cooldown active'
           };
         } else {
           return {
@@ -2794,6 +2866,8 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     let lastHttpStatus: number | undefined;
     const aiStartTime = Date.now();
 
+    console.log(`[DIRECT_DEBUG] ai_generation_start: chatId=${chatId}, messageId=${msgId}, model=${configuredModels[0] || 'openrouter/free'}, candidateCount=${configuredModels.length}`);
+
     await this.acquireAiSlot();
     try {
       for (let attemptIdx = 0; attemptIdx < configuredModels.length; attemptIdx++) {
@@ -2930,6 +3004,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
     if (!replyContent) {
       metricsTracker.increment('ai_failures');
       console.error(`[CHATBOT_AI_FAILURE] All OpenRouter models failed for chat ${chatId}, message ${msgId}. Suppressing output; zero dummy text sent.`);
+      console.log(`[DIRECT_DEBUG] ai_generation_failed: chatId=${chatId}, messageId=${msgId}, reason=All OpenRouter models failed`);
       return {
         requestId,
         chatId,
@@ -3021,7 +3096,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         const roll = Math.random();
 
         if (roll < stickerOnlyProb) {
-          // FORMAT B: exactly 1 custom sticker only
+          // FORMAT B: exactly 1 custom sticker only (preserves content for fallback)
           decision = {
             requestId,
             chatId,
@@ -3030,6 +3105,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
             personality: personalityLabel,
             mood,
             responseType: 'sticker',
+            content: cleanedText,
             mediaFileId: customSticker,
             replyToMessageId: msgId,
             modelUsed
@@ -3114,6 +3190,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
             personality: personalityLabel,
             mood,
             responseType: 'sticker',
+            content: cleanedText,
             mediaFileId: candidateSticker,
             replyToMessageId: msgId,
             modelUsed
@@ -3148,6 +3225,7 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
       }
     }
 
+    console.log(`[DIRECT_DEBUG] decision_result: chatId=${chatId}, messageId=${msgId}, type=${decision.responseType}, hasContent=${Boolean(decision.content)}, hasMedia=${Boolean(decision.mediaFileId)}`);
     return decision;
   }
 
@@ -3387,31 +3465,134 @@ STRICT INVARIANTS:
     const settings = db.getGroupSettings(decision.chatId);
     const isLustMode = Boolean(settings?.lustMode);
 
-    if (decision.responseType === 'text_plus_sticker' && decision.content && decision.mediaFileId) {
+    if (decision.responseType === 'text_plus_sticker' && decision.content) {
       const sanitizedContent = this.cleanAiText(decision.content);
       decision.content = sanitizedContent;
 
+      console.log(`[DIRECT_DEBUG] dispatch_start: chatId=${decision.chatId}, type=text_plus_sticker, replyTo=${decision.replyToMessageId}`);
+
+      // 1. Send text first
+      const textRes = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
+        reply_to_message_id: decision.replyToMessageId
+      });
+
+      const textSuccess = Boolean(textRes?.ok || (textRes as any)?.message_id);
+      console.log(`[DIRECT_DEBUG] text_send_result: chatId=${decision.chatId}, success=${textSuccess}`);
+
+      if (textSuccess) {
+        const textMsgId = textRes.result?.message_id || (textRes as any).message_id;
+        console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
+        db.recordAutoResponseSent(decision.chatId);
+        scheduleDmAutoDelete(decision.chatId, textMsgId);
+
+        let stickerSuccess = false;
+        let stickerMsgId: number | undefined;
+        let stickerFileId: string | undefined;
+
+        // 2. Only after successful text delivery, evaluate sticker eligibility
+        if (decision.mediaFileId) {
+          const isStickerAllowed = decision.chatId > 0 || db.checkAutoStickerEligibility(decision.chatId).allowed;
+          const isLustModeCustomAllowed = !isLustMode || this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true);
+          console.log(`[DIRECT_DEBUG] sticker_check_for_both: chatId=${decision.chatId}, allowed=${isStickerAllowed}, customAllowed=${isLustModeCustomAllowed}`);
+
+          if (isStickerAllowed && isLustModeCustomAllowed) {
+            const stickerRes = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
+              reply_to_message_id: decision.replyToMessageId
+            });
+            console.log(`[DIRECT_DEBUG] sticker_send_result: chatId=${decision.chatId}, success=${Boolean(stickerRes?.ok)}`);
+            if (stickerRes.ok) {
+              stickerSuccess = true;
+              stickerMsgId = stickerRes.result?.message_id;
+              stickerFileId = stickerRes.result?.sticker?.file_id || decision.mediaFileId;
+              db.recordAutoStickerSent(decision.chatId);
+              if (stickerMsgId) {
+                scheduleDmAutoDelete(decision.chatId, stickerMsgId);
+              }
+            } else {
+              console.warn(`[CHATBOT] Sticker send failed for text_plus_sticker in chat ${decision.chatId}: ${(stickerRes as any)?.description}`);
+            }
+          }
+        }
+
+        const fullContent = stickerSuccess ? `${sanitizedContent} [Sent sticker]` : sanitizedContent;
+        conv.messages.push({ role: 'assistant', content: fullContent });
+        this.trimContext(conv);
+        recordAssistantEntry(
+          fullContent,
+          stickerSuccess ? 'sticker' : 'text',
+          stickerFileId,
+          stickerMsgId || textMsgId
+        );
+        console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=success, stickerSent=${stickerSuccess}`);
+        return true;
+      }
+
+      console.error(JSON.stringify({
+        event: 'TELEGRAM_SEND_FAILURE',
+        requestId: decision.requestId,
+        chatId: decision.chatId,
+        replyToMessageId: decision.replyToMessageId,
+        responseType: 'text_plus_sticker',
+        textError: (textRes as any)?.description || 'Telegram sendMessage failed'
+      }));
+      console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=text_failed`);
+      return false;
+    }
+
+    if (decision.responseType === 'sticker' && decision.mediaFileId) {
+      console.log(`[DIRECT_DEBUG] dispatch_start: chatId=${decision.chatId}, type=sticker, replyTo=${decision.replyToMessageId}`);
+
       const isStickerAllowed = decision.chatId > 0 || db.checkAutoStickerEligibility(decision.chatId).allowed;
       const isLustModeCustomAllowed = !isLustMode || this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true);
+      const fallbackText = decision.content ? this.cleanAiText(decision.content) : '';
+      console.log(`[DIRECT_DEBUG] sticker_check: chatId=${decision.chatId}, allowed=${isStickerAllowed}, customAllowed=${isLustModeCustomAllowed}, hasFallback=${Boolean(fallbackText)}`);
 
-      if (!isStickerAllowed || !isLustModeCustomAllowed) {
+      if (isStickerAllowed && isLustModeCustomAllowed) {
+        const res = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
+          reply_to_message_id: decision.replyToMessageId
+        });
+        const stickerSuccess = Boolean(res?.ok);
+        console.log(`[DIRECT_DEBUG] sticker_send_result: chatId=${decision.chatId}, success=${stickerSuccess}`);
+
+        if (stickerSuccess) {
+          const outMsgId = res.result?.message_id;
+          console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'sticker', replyToMessageId: decision.replyToMessageId })}`);
+          conv.messages.push({ role: 'assistant', content: '[Sent sticker]' });
+          this.trimContext(conv);
+          const stickerFileId = res.result?.sticker?.file_id || decision.mediaFileId;
+          recordAssistantEntry('[Sent sticker]', 'sticker', stickerFileId, outMsgId);
+          scheduleDmAutoDelete(decision.chatId, outMsgId);
+          db.recordAutoStickerSent(decision.chatId);
+          console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=sticker_success`);
+          return true;
+        }
+        console.warn(`[CHATBOT] Sticker delivery failed for chat ${decision.chatId}: ${(res as any)?.description}. Attempting text fallback.`);
+      } else {
         if (!isLustModeCustomAllowed) {
           console.warn(`[LUST] BLOCKED DEFAULT STICKER\nchatId: ${decision.chatId}\nfileId: ${decision.mediaFileId}\nsource: default`);
         } else {
-          console.log(`[CHATBOT] Gated text_plus_sticker to text-only for chat ${decision.chatId} due to sticker activity cooldown`);
+          console.log(`[CHATBOT] Gated sticker send blocked for chat ${decision.chatId} due to sticker activity cooldown. Attempting text fallback.`);
         }
-        // Fallback: send text only, blocking sticker from Telegram
-        const textRes = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
+      }
+
+      // Fallback: Deliver text response if sticker was blocked or failed to send AND valid fallback content exists
+      if (fallbackText) {
+        console.log(`[DIRECT_DEBUG] fallback_text_send_start: chatId=${decision.chatId}, textLength=${fallbackText.length}`);
+        const textRes = await telegramApi.sendMessage(decision.chatId, fallbackText, {
           reply_to_message_id: decision.replyToMessageId
         });
-        if (textRes.ok || (textRes as any).message_id) {
+        const textSuccess = Boolean(textRes?.ok || (textRes as any)?.message_id);
+        console.log(`[DIRECT_DEBUG] fallback_text_send_result: chatId=${decision.chatId}, success=${textSuccess}`);
+
+        if (textSuccess) {
           const outMsgId = textRes.result?.message_id || (textRes as any).message_id;
-          console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
-          conv.messages.push({ role: 'assistant', content: sanitizedContent });
+          console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId, fallbackFrom: 'sticker' })}`);
+          conv.messages.push({ role: 'assistant', content: fallbackText });
           this.trimContext(conv);
-          recordAssistantEntry(sanitizedContent, 'text', undefined, outMsgId);
+          recordAssistantEntry(fallbackText, 'text', undefined, outMsgId);
           scheduleDmAutoDelete(decision.chatId, outMsgId);
           db.recordAutoResponseSent(decision.chatId);
+          console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=text_fallback_success`);
           return true;
         }
         console.error(JSON.stringify({
@@ -3419,88 +3600,14 @@ STRICT INVARIANTS:
           requestId: decision.requestId,
           chatId: decision.chatId,
           replyToMessageId: decision.replyToMessageId,
-          responseType: 'text',
-          error: (textRes as any)?.description || 'Telegram sendMessage failed'
+          responseType: 'text_fallback',
+          error: (textRes as any)?.description || 'Telegram sendMessage fallback failed'
         }));
+        console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=text_fallback_failed`);
         return false;
       }
 
-      const textRes = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
-        reply_to_message_id: decision.replyToMessageId
-      });
-      const stickerRes = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
-        reply_to_message_id: decision.replyToMessageId
-      });
-      if (textRes.ok || (textRes as any).message_id || stickerRes.ok) {
-        const outMsgId = stickerRes.result?.message_id || textRes.result?.message_id || (textRes as any).message_id;
-        console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text_plus_sticker', replyToMessageId: decision.replyToMessageId })}`);
-        const fullContent = `${sanitizedContent} [Sent sticker]`;
-        conv.messages.push({ role: 'assistant', content: fullContent });
-        this.trimContext(conv);
-        const stickerFileId = stickerRes.ok ? (stickerRes.result?.sticker?.file_id || decision.mediaFileId) : undefined;
-        recordAssistantEntry(fullContent, stickerRes.ok ? 'sticker' : 'text', stickerFileId, outMsgId);
-        const textMsgId = textRes.result?.message_id || (textRes as any).message_id;
-        if (textMsgId) {
-          scheduleDmAutoDelete(decision.chatId, textMsgId);
-        }
-        if (stickerRes.result?.message_id) {
-          scheduleDmAutoDelete(decision.chatId, stickerRes.result.message_id);
-        }
-        if (textRes.ok || (textRes as any).message_id) {
-          db.recordAutoResponseSent(decision.chatId);
-        }
-        if (stickerRes.ok) {
-          db.recordAutoStickerSent(decision.chatId);
-        }
-        return true;
-      }
-      console.error(JSON.stringify({
-        event: 'TELEGRAM_SEND_FAILURE',
-        requestId: decision.requestId,
-        chatId: decision.chatId,
-        replyToMessageId: decision.replyToMessageId,
-        responseType: 'text_plus_sticker',
-        textError: (textRes as any)?.description,
-        stickerError: (stickerRes as any)?.description || 'Telegram send text/sticker failed'
-      }));
-      return false;
-    }
-
-    if (decision.responseType === 'sticker' && decision.mediaFileId) {
-      const isStickerAllowed = decision.chatId > 0 || db.checkAutoStickerEligibility(decision.chatId).allowed;
-      if (!isStickerAllowed) {
-        console.log(`[CHATBOT] Gated sticker send blocked for chat ${decision.chatId} due to sticker activity cooldown`);
-        return false;
-      }
-
-      if (isLustMode && !this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true)) {
-        console.warn(`[LUST] BLOCKED DEFAULT STICKER\nchatId: ${decision.chatId}\nfileId: ${decision.mediaFileId}\nsource: default`);
-        // Block default sticker from reaching Telegram
-        return false;
-      }
-
-      const res = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
-        reply_to_message_id: decision.replyToMessageId
-      });
-      if (res.ok) {
-        const outMsgId = res.result?.message_id;
-        console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'sticker', replyToMessageId: decision.replyToMessageId })}`);
-        conv.messages.push({ role: 'assistant', content: '[Sent sticker]' });
-        this.trimContext(conv);
-        const stickerFileId = res.result?.sticker?.file_id || decision.mediaFileId;
-        recordAssistantEntry('[Sent sticker]', 'sticker', stickerFileId, outMsgId);
-        scheduleDmAutoDelete(decision.chatId, outMsgId);
-        db.recordAutoStickerSent(decision.chatId);
-        return true;
-      }
-      console.error(JSON.stringify({
-        event: 'TELEGRAM_SEND_FAILURE',
-        requestId: decision.requestId,
-        chatId: decision.chatId,
-        replyToMessageId: decision.replyToMessageId,
-        responseType: 'sticker',
-        error: (res as any)?.description || 'Telegram sendSticker failed'
-      }));
+      console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=no_sticker_and_no_fallback`);
       return false;
     }
 
@@ -3532,10 +3639,15 @@ STRICT INVARIANTS:
     if (decision.responseType === 'text' && decision.content) {
       const sanitizedContent = this.cleanAiText(decision.content);
       decision.content = sanitizedContent;
+      console.log(`[DIRECT_DEBUG] dispatch_start: chatId=${decision.chatId}, type=text, replyTo=${decision.replyToMessageId}`);
+
       const res = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
         reply_to_message_id: decision.replyToMessageId
       });
-      if (res.ok || (res as any).message_id) {
+      const textSuccess = Boolean(res?.ok || (res as any)?.message_id);
+      console.log(`[DIRECT_DEBUG] text_send_result: chatId=${decision.chatId}, success=${textSuccess}`);
+
+      if (textSuccess) {
         const outMsgId = res.result?.message_id || (res as any).message_id;
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
         conv.messages.push({ role: 'assistant', content: sanitizedContent });
@@ -3543,6 +3655,7 @@ STRICT INVARIANTS:
         recordAssistantEntry(sanitizedContent, 'text', undefined, outMsgId);
         scheduleDmAutoDelete(decision.chatId, outMsgId);
         db.recordAutoResponseSent(decision.chatId);
+        console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=text_success`);
         return true;
       }
       console.error(JSON.stringify({
@@ -3553,6 +3666,7 @@ STRICT INVARIANTS:
         responseType: 'text',
         error: (res as any)?.description || 'Telegram sendMessage failed'
       }));
+      console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=text_failed`);
       return false;
     }
 

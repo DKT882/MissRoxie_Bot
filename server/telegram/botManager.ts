@@ -878,6 +878,7 @@ export class TelegramBotManager {
     });
 
     // 8. Roxie AI Chatbot triggers: delegate to executeTask to run outside global slot
+    const isBot = Boolean(message.from?.is_bot || (this.botUser && message.from?.id === this.botUser.id));
     const isPrivateChat = message.chat?.type === 'private';
 
     logDebug({
@@ -887,7 +888,7 @@ export class TelegramBotManager {
       is_command: false
     });
 
-    return { handled: true, shouldTriggerAi: true };
+    return { handled: true, shouldTriggerAi: !isBot };
   }
 
   private async handleChatJoinRequest(joinRequest: TelegramChatJoinRequest) {
