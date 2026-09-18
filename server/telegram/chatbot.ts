@@ -115,6 +115,7 @@ export interface ChatbotDecision {
   replyToMessageId: number;
   modelUsed?: string;
   reason?: string;
+  explicitStickerRequest?: boolean;
 }
 
 export const BASE_PERSONALITY = `You are Roxie, the user's charming, witty, caring, and affectionate girlfriend chatting on Telegram.
@@ -1089,6 +1090,12 @@ export class ChatbotService {
     return sanitized.replace(/\s{2,}/g, ' ').trim();
   }
 
+  public static hasExplicitStickerKeyword(text: string): boolean {
+    if (!text || typeof text !== 'string') return false;
+    const lower = text.toLowerCase().trim();
+    return /\bsticker[s]?\b/i.test(lower) || /\bstkr\b/i.test(lower) || lower.includes('sticker');
+  }
+
   public static isTriggered(message: TelegramMessage, botUser: TelegramUser | null): boolean {
     const rawText = message.text || message.caption || '';
     const text = rawText.trim();
@@ -1147,16 +1154,15 @@ export class ChatbotService {
     // 4. Case-insensitive text / caption inspection
     const lowerText = text.toLowerCase();
     if (
+      /\broxie\b/i.test(lowerText) ||
       lowerText.includes('roxie') ||
       lowerText.includes(botUsernameWithAt) ||
       lowerText.includes(botUsernameNoAt) ||
       lowerText.includes('@missroxie_bot') ||
       lowerText.includes('@roxie') ||
-      lowerText.includes('sticker') ||
-      lowerText.includes('stkr') ||
+      ChatbotService.hasExplicitStickerKeyword(lowerText) ||
       lowerText.includes('gif') ||
-      lowerText.includes('animation') ||
-      lowerText.includes('bhej')
+      lowerText.includes('animation')
     ) {
       return true;
     }
@@ -2527,7 +2533,58 @@ export class ChatbotService {
       ? (brotherTrigger.isTriggered ? 'LustMode-BrotherPushback' : 'LustMode-Couple') 
       : 'Psychologist-style';
 
-    // Check Explicit Media Requests
+    // Priority: Explicit "sticker" Keyword Trigger (STICKER ONLY / NO TEXT FALLBACK)
+    if (ChatbotService.hasExplicitStickerKeyword(userText)) {
+      const autoStickerAllowed = isPrivate || db.checkAutoStickerEligibility(chatId).allowed;
+      if (!autoStickerAllowed) {
+        console.log(`[CHATBOT] Explicit sticker request blocked for chat ${chatId} due to sticker activity cooldown. Sending nothing.`);
+        return {
+          requestId,
+          chatId,
+          messageId: msgId,
+          userId,
+          personality: personalityLabel,
+          mood,
+          responseType: 'none',
+          replyToMessageId: msgId,
+          reason: 'Explicit sticker request blocked by sticker activity cooldown'
+        };
+      }
+
+      const stickerId = isLustMode
+        ? this.selectCustomStickerForLustMode(mood, chatId, false)
+        : this.selectSticker(mood, chatId);
+
+      if (stickerId && this.isValidFileId(stickerId)) {
+        return {
+          requestId,
+          chatId,
+          messageId: msgId,
+          userId,
+          personality: personalityLabel,
+          mood,
+          responseType: 'sticker',
+          mediaFileId: stickerId,
+          replyToMessageId: msgId,
+          explicitStickerRequest: true
+        };
+      } else {
+        console.log(`[CHATBOT] Explicit sticker requested for chat ${chatId} but library empty. Sending nothing.`);
+        return {
+          requestId,
+          chatId,
+          messageId: msgId,
+          userId,
+          personality: personalityLabel,
+          mood,
+          responseType: 'none',
+          replyToMessageId: msgId,
+          reason: 'Explicit sticker requested but library empty'
+        };
+      }
+    }
+
+    // Check Explicit Media Requests (e.g. GIF / animation)
     const mediaIntent = this.detectMediaIntent(userText);
     if (mediaIntent.isExplicitMedia) {
       const targetMediaMood = mediaIntent.requestedMood || mood;
@@ -3544,8 +3601,9 @@ STRICT INVARIANTS:
 
       const isStickerAllowed = decision.chatId > 0 || db.checkAutoStickerEligibility(decision.chatId).allowed;
       const isLustModeCustomAllowed = !isLustMode || this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true);
-      const fallbackText = decision.content ? this.cleanAiText(decision.content) : '';
-      console.log(`[DIRECT_DEBUG] sticker_check: chatId=${decision.chatId}, allowed=${isStickerAllowed}, customAllowed=${isLustModeCustomAllowed}, hasFallback=${Boolean(fallbackText)}`);
+      const isExplicitStickerOnly = Boolean(decision.explicitStickerRequest);
+      const fallbackText = (!isExplicitStickerOnly && decision.content) ? this.cleanAiText(decision.content) : '';
+      console.log(`[DIRECT_DEBUG] sticker_check: chatId=${decision.chatId}, allowed=${isStickerAllowed}, customAllowed=${isLustModeCustomAllowed}, explicitStickerOnly=${isExplicitStickerOnly}, hasFallback=${Boolean(fallbackText)}`);
 
       if (isStickerAllowed && isLustModeCustomAllowed) {
         const res = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
@@ -3566,12 +3624,12 @@ STRICT INVARIANTS:
           console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=sticker_success`);
           return true;
         }
-        console.warn(`[CHATBOT] Sticker delivery failed for chat ${decision.chatId}: ${(res as any)?.description}. Attempting text fallback.`);
+        console.warn(`[CHATBOT] Sticker delivery failed for chat ${decision.chatId}: ${(res as any)?.description}. ${fallbackText ? 'Attempting text fallback.' : 'No fallback for explicit sticker.'}`);
       } else {
         if (!isLustModeCustomAllowed) {
           console.warn(`[LUST] BLOCKED DEFAULT STICKER\nchatId: ${decision.chatId}\nfileId: ${decision.mediaFileId}\nsource: default`);
         } else {
-          console.log(`[CHATBOT] Gated sticker send blocked for chat ${decision.chatId} due to sticker activity cooldown. Attempting text fallback.`);
+          console.log(`[CHATBOT] Gated sticker send blocked for chat ${decision.chatId} due to sticker activity cooldown. ${fallbackText ? 'Attempting text fallback.' : 'No fallback for explicit sticker.'}`);
         }
       }
 
@@ -3724,7 +3782,8 @@ STRICT INVARIANTS:
 
   public static async generateProactiveResponse(
     chatId: number,
-    botUser: TelegramUser | null = null
+    botUser: TelegramUser | null = null,
+    targetMessage?: GroupConversationMessage | null
   ): Promise<ChatbotDecision | null> {
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) return null;
@@ -3735,7 +3794,7 @@ STRICT INVARIANTS:
     const isLustMode = Boolean(settings?.lustMode);
 
     const priorGroupMsgs = db.getGroupMemory(chatId);
-    const randomHumanMsg = ChatbotService.getRandomRecentHumanMessage(chatId);
+    const randomHumanMsg = targetMessage !== undefined ? targetMessage : ChatbotService.getRandomRecentHumanMessage(chatId);
     let contextPrefix = '';
     let userPromptInstruction = '';
 
@@ -3873,17 +3932,20 @@ STRICT INVARIANTS:
       source: 'telegram'
     });
 
+    const targetReplyMessageId = (randomHumanMsg?.messageId && randomHumanMsg.messageId > 0) ? randomHumanMsg.messageId : 0;
+    const targetUserId = (randomHumanMsg?.userId ? Number(randomHumanMsg.userId) : 0);
+
     const requestId = `proactive_${chatId}_${Date.now()}`;
     return {
       requestId,
       chatId,
-      messageId: 0,
-      userId: 0,
+      messageId: targetReplyMessageId,
+      userId: targetUserId,
       personality: isLustMode ? 'LustMode-Couple' : 'Psychologist-style',
       mood: isLustMode ? 'playful' : 'normal',
       responseType: 'text',
       content: cleaned,
-      replyToMessageId: 0,
+      replyToMessageId: targetReplyMessageId,
       modelUsed
     };
   }

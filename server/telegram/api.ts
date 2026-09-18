@@ -765,12 +765,29 @@ export class TelegramApi {
       reply_markup?: any;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    const res = await this.call('sendSticker', {
+    let res = await this.call('sendSticker', {
       chat_id: chatId,
       sticker,
       reply_to_message_id: options?.reply_to_message_id,
       reply_markup: options?.reply_markup
     });
+
+    // Fallback: If Telegram rejected due to deleted/missing replied message, retry without reply parameters
+    if (!res.ok && options?.reply_to_message_id && (
+      res.description?.toLowerCase().includes('message to be replied not found') ||
+      res.description?.toLowerCase().includes('reply message not found') ||
+      res.description?.toLowerCase().includes('message to reply not found') ||
+      res.error_code === 400
+    )) {
+      const retryWithoutReply = await this.call('sendSticker', {
+        chat_id: chatId,
+        sticker,
+        reply_markup: options?.reply_markup
+      });
+      if (retryWithoutReply.ok) {
+        res = retryWithoutReply;
+      }
+    }
     if (res.ok) {
       logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendSticker' });
     } else {

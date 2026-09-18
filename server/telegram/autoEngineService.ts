@@ -427,7 +427,10 @@ export class AutoEngineService {
     // Send typing status ONLY after AI has generated a valid response
     telegramApi.sendChatAction(chatId, 'typing').catch(() => {});
 
-    const sendRes = await telegramApi.sendMessage(chatId, decision.content);
+    const replyOptions = (decision.replyToMessageId && decision.replyToMessageId > 0)
+      ? { reply_to_message_id: decision.replyToMessageId }
+      : undefined;
+    const sendRes = await telegramApi.sendMessage(chatId, decision.content, replyOptions);
     if (sendRes.ok || (sendRes as any).message_id) {
       db.recordAutoResponseSent(chatId);
       const job = this.jobs.get(this.makeJobKey(botId, chatId, 'response'));
@@ -449,7 +452,8 @@ export class AutoEngineService {
     botId: number,
     chatId: number,
     settings: GroupSettings,
-    engineConfig: AutoEngineConfig
+    engineConfig: AutoEngineConfig,
+    replyToMessageId?: number
   ): Promise<void> {
     const stickerCheck = db.checkAutoStickerEligibility(chatId);
     if (!stickerCheck.allowed) {
@@ -461,7 +465,15 @@ export class AutoEngineService {
 
     const stickerFileId = ChatbotService.selectProactiveSticker(chatId);
     if (stickerFileId) {
-      const sendRes = await telegramApi.sendSticker(chatId, stickerFileId);
+      let targetReplyId = replyToMessageId;
+      if (!targetReplyId || targetReplyId <= 0) {
+        const randomHumanMsg = ChatbotService.getRandomRecentHumanMessage(chatId);
+        targetReplyId = (randomHumanMsg?.messageId && randomHumanMsg.messageId > 0) ? randomHumanMsg.messageId : undefined;
+      }
+      const replyOptions = (targetReplyId && targetReplyId > 0)
+        ? { reply_to_message_id: targetReplyId }
+        : undefined;
+      const sendRes = await telegramApi.sendSticker(chatId, stickerFileId, replyOptions);
       if (sendRes.ok || (sendRes as any).message_id) {
         db.recordAutoStickerSent(chatId);
         console.log(`[AUTO_ENGINE] sticker sent for chat ${chatId} (stickerId: ${stickerFileId})`);

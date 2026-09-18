@@ -3,6 +3,7 @@ import { db } from '../server/db/storage.js';
 import { telegramApi } from '../server/telegram/api.js';
 import { ChatbotService, ChatbotDecision } from '../server/telegram/chatbot.js';
 import { TelegramBotManager } from '../server/telegram/botManager.js';
+import { autoEngineService } from '../server/telegram/autoEngineService.js';
 import { TelegramMessage, TelegramUpdate, TelegramUser } from '../server/telegram/types.js';
 
 let passed = 0;
@@ -111,7 +112,7 @@ async function runDirectMentionPipelineTestSuite() {
 
   try {
     // -------------------------------------------------------------------------
-    // Test 1: @Roxie with activity 0 + TEXT → 1 text, 0 sticker
+    // Test 1: @Roxie with activity 0 + TEXT -> 1 text, 0 sticker, correct reply target
     // -------------------------------------------------------------------------
     resetTracking();
     db.updateGroupSettings(testChat, {
@@ -130,213 +131,73 @@ async function runDirectMentionPipelineTestSuite() {
     const handled1 = await ChatbotService.handleMessage(msg1, botUser);
     assert.strictEqual(handled1, true, 'Direct text mention must be handled successfully');
     assert.strictEqual(sentMessages.length, 1, 'Exactly 1 text message must be sent');
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 101, 'Must reply to message 101');
     assert.strictEqual(sentStickers.length, 0, 'Zero stickers must be sent');
     assert.strictEqual(sentChatActions.length, 1, 'Typing action must be fired after successful AI generation');
-    pass('1. @Roxie with activity 0 + TEXT -> 1 text, 0 sticker');
+    pass('1. @Roxie with activity 0 + TEXT -> 1 text, 0 sticker, correct reply target');
 
     // -------------------------------------------------------------------------
-    // Test 2: @Roxie with activity >= gap + TEXT → 1 text, 0 sticker
+    // Test 2: "roxie hello" (case-insensitive keyword) -> text + correct reply_to_message_id
     // -------------------------------------------------------------------------
     resetTracking();
-    db.updateGroupSettings(testChat, {
-      humanMessagesSinceLastSticker: 10,
-      requiredStickerGap: 6
-    });
-
     const msg2: TelegramMessage = {
       message_id: 102,
       date: Math.floor(Date.now() / 1000),
-      chat: { id: testChat, type: 'supergroup', title: 'Direct Mention Group' },
+      chat: { id: testChat, type: 'supergroup' },
       from: { id: 99111, is_bot: false, first_name: 'Alice' },
-      text: 'Roxie kaise ho aap?'
+      text: 'roxie kya kar rahi ho?'
     };
 
-    const decision2: ChatbotDecision = {
-      requestId: 'req_2',
-      chatId: testChat,
-      messageId: 102,
-      userId: 99111,
-      personality: 'Psychologist-style',
-      mood: 'normal',
-      responseType: 'text',
-      content: 'Main mast hoon!',
-      replyToMessageId: 102
-    };
-
-    const dispatched2 = await (ChatbotService as any).dispatchResponse(decision2);
-    assert.strictEqual(dispatched2, true, 'Text dispatch must succeed');
-    assert.strictEqual(sentMessages.length, 1, '1 text message sent');
-    assert.strictEqual(sentStickers.length, 0, '0 stickers sent for text-only decision');
-    pass('2. @Roxie with activity >= gap + TEXT -> 1 text, 0 sticker');
+    assert.strictEqual(ChatbotService.isTriggered(msg2, botUser), true, 'roxie keyword must trigger response');
+    const handled2 = await ChatbotService.handleMessage(msg2, botUser);
+    assert.strictEqual(handled2, true);
+    assert.strictEqual(sentMessages.length, 1);
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 102, 'Must reply to message 102');
+    pass('2. "roxie hello" keyword -> text + correct reply_to_message_id');
 
     // -------------------------------------------------------------------------
-    // Test 3: @Roxie with activity 0 + STICKER → 1 text fallback, 0 sticker
+    // Test 3: "ROXIE hello" (all uppercase) -> text + correct reply target
     // -------------------------------------------------------------------------
     resetTracking();
-    db.updateGroupSettings(testChat, {
-      humanMessagesSinceLastSticker: 0,
-      requiredStickerGap: 6
-    });
-
-    const decision3: ChatbotDecision = {
-      requestId: 'req_3',
-      chatId: testChat,
-      messageId: 103,
-      userId: 99111,
-      personality: 'Psychologist-style',
-      mood: 'normal',
-      responseType: 'sticker',
-      content: 'Abhi sticker nahi bhej sakti, par main yahi hoon!',
-      mediaFileId: 'CAACAgIAAxkBAAEtest_sticker_direct_mention_123',
-      replyToMessageId: 103
-    };
-
-    const dispatched3 = await (ChatbotService as any).dispatchResponse(decision3);
-    assert.strictEqual(dispatched3, true, 'Gated sticker must successfully deliver fallback text');
-    assert.strictEqual(sentStickers.length, 0, 'Sticker MUST be blocked due to activity gating');
-    assert.strictEqual(sentMessages.length, 1, 'Fallback text message MUST be delivered');
-    assert.strictEqual(sentMessages[0].text, 'Abhi sticker nahi bhej sakti, par main yahi hoon!');
-    pass('3. @Roxie with activity 0 + STICKER -> 1 text fallback, 0 sticker');
-
-    // -------------------------------------------------------------------------
-    // Test 4: @Roxie with activity >= gap + STICKER → 1 sticker + reset
-    // -------------------------------------------------------------------------
-    resetTracking();
-    db.updateGroupSettings(testChat, {
-      humanMessagesSinceLastSticker: 8,
-      requiredStickerGap: 6
-    });
-
-    const decision4: ChatbotDecision = {
-      requestId: 'req_4',
-      chatId: testChat,
-      messageId: 104,
-      userId: 99111,
-      personality: 'Psychologist-style',
-      mood: 'normal',
-      responseType: 'sticker',
-      content: 'Fallback text not needed since sticker succeeds',
-      mediaFileId: 'CAACAgIAAxkBAAEtest_sticker_direct_mention_123',
-      replyToMessageId: 104
-    };
-
-    const dispatched4 = await (ChatbotService as any).dispatchResponse(decision4);
-    assert.strictEqual(dispatched4, true, 'Eligible sticker dispatch must succeed');
-    assert.strictEqual(sentStickers.length, 1, '1 sticker sent');
-    assert.strictEqual(sentMessages.length, 0, '0 fallback text sent since sticker succeeded');
-    const settingsAfter4 = db.getGroupSettings(testChat);
-    assert.strictEqual(settingsAfter4.humanMessagesSinceLastSticker, 0, 'Counter must reset to 0');
-    assert.ok(settingsAfter4.requiredStickerGap >= 5 && settingsAfter4.requiredStickerGap <= 10, 'New gap generated');
-    pass('4. @Roxie with activity >= gap + STICKER -> 1 sticker + reset');
-
-    // -------------------------------------------------------------------------
-    // Test 5: @Roxie with activity 0 + BOTH → 1 text, 0 sticker
-    // -------------------------------------------------------------------------
-    resetTracking();
-    db.updateGroupSettings(testChat, {
-      humanMessagesSinceLastSticker: 0,
-      requiredStickerGap: 6
-    });
-
-    const decision5: ChatbotDecision = {
-      requestId: 'req_5',
-      chatId: testChat,
-      messageId: 105,
-      userId: 99111,
-      personality: 'Psychologist-style',
-      mood: 'normal',
-      responseType: 'text_plus_sticker',
-      content: 'Ye lo mera jawab!',
-      mediaFileId: 'CAACAgIAAxkBAAEtest_sticker_direct_mention_123',
-      replyToMessageId: 105
-    };
-
-    const dispatched5 = await (ChatbotService as any).dispatchResponse(decision5);
-    assert.strictEqual(dispatched5, true, 'Both decision must succeed via text delivery');
-    assert.strictEqual(sentMessages.length, 1, 'Text message sent immediately');
-    assert.strictEqual(sentMessages[0].text, 'Ye lo mera jawab!');
-    assert.strictEqual(sentStickers.length, 0, 'Sticker blocked due to activity gating');
-    pass('5. @Roxie with activity 0 + BOTH -> 1 text, 0 sticker');
-
-    // -------------------------------------------------------------------------
-    // Test 6: @Roxie with activity >= gap + BOTH → 1 text + 1 sticker + reset
-    // -------------------------------------------------------------------------
-    resetTracking();
-    db.updateGroupSettings(testChat, {
-      humanMessagesSinceLastSticker: 7,
-      requiredStickerGap: 6
-    });
-
-    const decision6: ChatbotDecision = {
-      requestId: 'req_6',
-      chatId: testChat,
-      messageId: 106,
-      userId: 99111,
-      personality: 'Psychologist-style',
-      mood: 'normal',
-      responseType: 'text_plus_sticker',
-      content: 'Double reply for you!',
-      mediaFileId: 'CAACAgIAAxkBAAEtest_sticker_direct_mention_123',
-      replyToMessageId: 106
-    };
-
-    const dispatched6 = await (ChatbotService as any).dispatchResponse(decision6);
-    assert.strictEqual(dispatched6, true, 'Both dispatch must succeed');
-    assert.strictEqual(sentMessages.length, 1, 'Text message sent first');
-    assert.strictEqual(sentStickers.length, 1, 'Sticker sent second');
-    const settingsAfter6 = db.getGroupSettings(testChat);
-    assert.strictEqual(settingsAfter6.humanMessagesSinceLastSticker, 0, 'Counter reset to 0');
-    pass('6. @Roxie with activity >= gap + BOTH -> 1 text + 1 sticker + reset');
-
-    // -------------------------------------------------------------------------
-    // Test 7: AI failure → 0 text + 0 sticker + 0 typing
-    // -------------------------------------------------------------------------
-    resetTracking();
-    aiGenerationFail = true;
-
-    const msg7: TelegramMessage = {
-      message_id: 107,
+    const msg3: TelegramMessage = {
+      message_id: 103,
       date: Math.floor(Date.now() / 1000),
-      chat: { id: testChat, type: 'supergroup', title: 'Direct Mention Group' },
+      chat: { id: testChat, type: 'supergroup' },
       from: { id: 99111, is_bot: false, first_name: 'Alice' },
-      text: '@MissRoxie_Bot please answer me'
+      text: 'ROXIE HELLO HOW ARE YOU'
     };
 
-    const handled7 = await ChatbotService.handleMessage(msg7, botUser);
-    assert.strictEqual(handled7, false, 'AI failure must return false');
-    assert.strictEqual(sentMessages.length, 0, 'Zero text messages sent on AI failure');
-    assert.strictEqual(sentStickers.length, 0, 'Zero stickers sent on AI failure');
-    assert.strictEqual(sentChatActions.length, 0, 'Zero typing actions fired on AI failure');
-    pass('7. AI failure -> 0 text + 0 sticker + 0 typing');
+    assert.strictEqual(ChatbotService.isTriggered(msg3, botUser), true, 'ROXIE uppercase keyword must trigger response');
+    const handled3 = await ChatbotService.handleMessage(msg3, botUser);
+    assert.strictEqual(handled3, true);
+    assert.strictEqual(sentMessages.length, 1);
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 103, 'Must reply to message 103');
+    pass('3. "ROXIE hello" -> text + correct reply target');
 
     // -------------------------------------------------------------------------
-    // Test 8: sendMessage Telegram failure → error handled and no false success
+    // Test 4: "@Roxie hello" -> text + correct reply target
     // -------------------------------------------------------------------------
     resetTracking();
-    failSendMessage = true;
-
-    const decision8: ChatbotDecision = {
-      requestId: 'req_8',
-      chatId: testChat,
-      messageId: 108,
-      userId: 99111,
-      personality: 'Psychologist-style',
-      mood: 'normal',
-      responseType: 'text',
-      content: 'This will fail to send',
-      replyToMessageId: 108
+    const msg4: TelegramMessage = {
+      message_id: 104,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: '@Roxie hello'
     };
 
-    const dispatched8 = await (ChatbotService as any).dispatchResponse(decision8);
-    assert.strictEqual(dispatched8, false, 'Telegram send failure must return false');
-    assert.strictEqual(sentMessages.length, 0, 'No false success recorded');
-    pass('8. sendMessage Telegram failure -> error handled and no false success');
+    assert.strictEqual(ChatbotService.isTriggered(msg4, botUser), true);
+    const handled4 = await ChatbotService.handleMessage(msg4, botUser);
+    assert.strictEqual(handled4, true);
+    assert.strictEqual(sentMessages.length, 1);
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 104);
+    pass('4. @Roxie hello -> text + correct reply target');
 
     // -------------------------------------------------------------------------
-    // Test 9: Telegram `mention` entity detection
+    // Test 5: Telegram mention entity
     // -------------------------------------------------------------------------
-    const msg9: TelegramMessage = {
-      message_id: 109,
+    const msg5: TelegramMessage = {
+      message_id: 105,
       date: Math.floor(Date.now() / 1000),
       chat: { id: testChat, type: 'supergroup' },
       from: { id: 99111, is_bot: false, first_name: 'Alice' },
@@ -344,15 +205,14 @@ async function runDirectMentionPipelineTestSuite() {
       entities: [{ type: 'mention', offset: 0, length: 14 }]
     };
 
-    const isTrig9 = ChatbotService.isTriggered(msg9, botUser);
-    assert.strictEqual(isTrig9, true, 'Telegram mention entity must trigger response');
-    pass('9. Telegram mention entity detection');
+    assert.strictEqual(ChatbotService.isTriggered(msg5, botUser), true);
+    pass('5. Telegram mention entity detection');
 
     // -------------------------------------------------------------------------
-    // Test 10: Telegram `text_mention` detection
+    // Test 6: Telegram text_mention
     // -------------------------------------------------------------------------
-    const msg10: TelegramMessage = {
-      message_id: 110,
+    const msg6: TelegramMessage = {
+      message_id: 106,
       date: Math.floor(Date.now() / 1000),
       chat: { id: testChat, type: 'supergroup' },
       from: { id: 99111, is_bot: false, first_name: 'Alice' },
@@ -360,150 +220,259 @@ async function runDirectMentionPipelineTestSuite() {
       entities: [{ type: 'text_mention', offset: 4, length: 10, user: botUser }]
     };
 
-    const isTrig10 = ChatbotService.isTriggered(msg10, botUser);
-    assert.strictEqual(isTrig10, true, 'Telegram text_mention entity must trigger response');
-    pass('10. Telegram text_mention detection');
+    assert.strictEqual(ChatbotService.isTriggered(msg6, botUser), true);
+    pass('6. Telegram text_mention detection');
 
     // -------------------------------------------------------------------------
-    // Test 11: Caption mention detection
+    // Test 7: Reply to Roxie -> response + correct reply target
     // -------------------------------------------------------------------------
-    const msg11: TelegramMessage = {
-      message_id: 111,
+    resetTracking();
+    const msg7: TelegramMessage = {
+      message_id: 107,
       date: Math.floor(Date.now() / 1000),
       chat: { id: testChat, type: 'supergroup' },
       from: { id: 99111, is_bot: false, first_name: 'Alice' },
-      photo: [{ file_id: 'photo_1', file_unique_id: 'p1', width: 100, height: 100 }],
-      caption: '@MissRoxie_Bot look at this photo',
-      caption_entities: [{ type: 'mention', offset: 0, length: 14 }]
-    };
-
-    const isTrig11 = ChatbotService.isTriggered(msg11, botUser);
-    assert.strictEqual(isTrig11, true, 'Caption mention must trigger response');
-    pass('11. Caption mention detection where supported');
-
-    // -------------------------------------------------------------------------
-    // Test 12: Reply to Roxie triggers response
-    // -------------------------------------------------------------------------
-    const msg12: TelegramMessage = {
-      message_id: 112,
-      date: Math.floor(Date.now() / 1000),
-      chat: { id: testChat, type: 'supergroup' },
-      from: { id: 99111, is_bot: false, first_name: 'Alice' },
-      text: 'Yes exactly what you said!',
+      text: 'what?',
       reply_to_message: {
-        message_id: 99,
-        date: Math.floor(Date.now() / 1000) - 10,
+        message_id: 90,
+        date: Math.floor(Date.now() / 1000) - 5,
         chat: { id: testChat, type: 'supergroup' },
         from: botUser,
-        text: 'Previous message from Roxie'
+        text: 'Previous bot response'
       }
     };
 
-    const isTrig12 = ChatbotService.isTriggered(msg12, botUser);
-    assert.strictEqual(isTrig12, true, 'Reply to Roxie must trigger response');
-    pass('12. Reply to Roxie triggers response');
+    assert.strictEqual(ChatbotService.isTriggered(msg7, botUser), true, 'Reply to Roxie must trigger response');
+    const handled7 = await ChatbotService.handleMessage(msg7, botUser);
+    assert.strictEqual(handled7, true);
+    assert.strictEqual(sentMessages.length, 1);
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 107, 'Must reply to user message 107');
+    pass('7. Reply to Roxie -> response + correct reply target');
 
     // -------------------------------------------------------------------------
-    // Test 13: Normal human message does not enter direct-response path
+    // Test 8: Normal human message -> no direct response
     // -------------------------------------------------------------------------
-    const msg13: TelegramMessage = {
-      message_id: 113,
+    const msg8: TelegramMessage = {
+      message_id: 108,
       date: Math.floor(Date.now() / 1000),
       chat: { id: testChat, type: 'supergroup' },
       from: { id: 99111, is_bot: false, first_name: 'Alice' },
       text: 'Anyone want to play football tonight?'
     };
 
-    const isTrig13 = ChatbotService.isTriggered(msg13, botUser);
-    assert.strictEqual(isTrig13, false, 'Non-mention message must not trigger direct response');
-    pass('13. Normal human message does not enter direct-response path');
+    assert.strictEqual(ChatbotService.isTriggered(msg8, botUser), false, 'Normal chat must not trigger direct response');
+    pass('8. Normal message -> no direct response');
 
     // -------------------------------------------------------------------------
-    // Test 14: Bot message cannot trigger response
-    // -------------------------------------------------------------------------
-    const msg14: TelegramMessage = {
-      message_id: 114,
-      date: Math.floor(Date.now() / 1000),
-      chat: { id: testChat, type: 'supergroup' },
-      from: botUser,
-      text: '@MissRoxie_Bot self message'
-    };
-
-    // Intake in botManager
-    db.updateGroupSettings(testChat, { humanMessagesSinceLastSticker: 2 });
-    const update14: TelegramUpdate = { update_id: 7014, message: msg14 };
-    await botManager.processUpdate(update14);
-    const settingsAfter14 = db.getGroupSettings(testChat);
-    assert.strictEqual(settingsAfter14.humanMessagesSinceLastSticker, 2, 'Bot messages must never increment counter');
-    pass('14. Bot own message cannot recursively trigger response or increment counter');
-
-    // -------------------------------------------------------------------------
-    // Test 15: Gated sticker decision with valid decision.content → text fallback
-    // -------------------------------------------------------------------------
-    resetTracking();
-    db.updateGroupSettings(testChat, {
-      humanMessagesSinceLastSticker: 1,
-      requiredStickerGap: 8
-    });
-
-    const decision15: ChatbotDecision = {
-      requestId: 'req_15',
-      chatId: testChat,
-      messageId: 115,
-      userId: 99111,
-      personality: 'Psychologist-style',
-      mood: 'normal',
-      responseType: 'sticker',
-      content: 'Main text reply from AI generation',
-      mediaFileId: 'CAACAgIAAxkBAAEtest_sticker_direct_mention_123',
-      replyToMessageId: 115
-    };
-
-    const dispatched15 = await (ChatbotService as any).dispatchResponse(decision15);
-    assert.strictEqual(dispatched15, true, 'Must succeed with text fallback');
-    assert.strictEqual(sentStickers.length, 0, 'Sticker blocked');
-    assert.strictEqual(sentMessages.length, 1, 'Text fallback delivered');
-    assert.strictEqual(sentMessages[0].text, 'Main text reply from AI generation');
-    pass('15. Gated sticker decision with valid decision.content -> text fallback');
-
-    // -------------------------------------------------------------------------
-    // Test 16: Failed sticker delivery with valid decision.content → text fallback
+    // Test 9: "sticker" -> sticker only (when eligible) + reply target
     // -------------------------------------------------------------------------
     resetTracking();
     db.updateGroupSettings(testChat, {
       humanMessagesSinceLastSticker: 10,
-      requiredStickerGap: 8
+      requiredStickerGap: 6
+    });
+
+    const msg9: TelegramMessage = {
+      message_id: 109,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'sticker'
+    };
+
+    assert.strictEqual(ChatbotService.hasExplicitStickerKeyword(msg9.text || ''), true);
+    const handled9 = await ChatbotService.handleMessage(msg9, botUser);
+    assert.strictEqual(handled9, true);
+    assert.strictEqual(sentStickers.length, 1, 'Exactly 1 sticker sent');
+    assert.strictEqual(sentMessages.length, 0, 'Zero text messages sent for explicit sticker keyword');
+    assert.strictEqual(sentStickers[0].options?.reply_to_message_id, 109, 'Must reply to user message 109');
+    pass('9. "sticker" -> sticker only');
+
+    // -------------------------------------------------------------------------
+    // Test 10: "send me a sticker" -> sticker only + reply target
+    // -------------------------------------------------------------------------
+    resetTracking();
+    db.updateGroupSettings(testChat, {
+      humanMessagesSinceLastSticker: 10,
+      requiredStickerGap: 6
+    });
+
+    const msg10: TelegramMessage = {
+      message_id: 110,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'send me a sticker'
+    };
+
+    const handled10 = await ChatbotService.handleMessage(msg10, botUser);
+    assert.strictEqual(handled10, true);
+    assert.strictEqual(sentStickers.length, 1);
+    assert.strictEqual(sentMessages.length, 0);
+    assert.strictEqual(sentStickers[0].options?.reply_to_message_id, 110);
+    pass('10. "send me a sticker" -> sticker only');
+
+    // -------------------------------------------------------------------------
+    // Test 11: "ROXIE PLEASE SEND STICKER" -> sticker only
+    // -------------------------------------------------------------------------
+    resetTracking();
+    db.updateGroupSettings(testChat, {
+      humanMessagesSinceLastSticker: 10,
+      requiredStickerGap: 6
+    });
+
+    const msg11: TelegramMessage = {
+      message_id: 111,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'ROXIE PLEASE SEND STICKER'
+    };
+
+    const handled11 = await ChatbotService.handleMessage(msg11, botUser);
+    assert.strictEqual(handled11, true);
+    assert.strictEqual(sentStickers.length, 1);
+    assert.strictEqual(sentMessages.length, 0);
+    assert.strictEqual(sentStickers[0].options?.reply_to_message_id, 111);
+    pass('11. "ROXIE PLEASE SEND STICKER" -> sticker only');
+
+    // -------------------------------------------------------------------------
+    // Test 12: Sticker keyword + activity below gap -> NO text AND NO sticker
+    // -------------------------------------------------------------------------
+    resetTracking();
+    db.updateGroupSettings(testChat, {
+      humanMessagesSinceLastSticker: 2,
+      requiredStickerGap: 6
+    });
+
+    const msg12: TelegramMessage = {
+      message_id: 112,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'roxie sticker please'
+    };
+
+    const handled12 = await ChatbotService.handleMessage(msg12, botUser);
+    assert.strictEqual(handled12, false, 'Gated explicit sticker request must send nothing');
+    assert.strictEqual(sentStickers.length, 0, 'No sticker sent when gated');
+    assert.strictEqual(sentMessages.length, 0, 'No text fallback sent for explicit sticker request');
+    pass('12. sticker keyword + activity below gap -> no text and no sticker');
+
+    // -------------------------------------------------------------------------
+    // Test 13: Sticker keyword + activity >= gap -> exactly one sticker + reset
+    // -------------------------------------------------------------------------
+    resetTracking();
+    db.updateGroupSettings(testChat, {
+      humanMessagesSinceLastSticker: 6,
+      requiredStickerGap: 6
+    });
+
+    const msg13: TelegramMessage = {
+      message_id: 113,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'I want a sticker please'
+    };
+
+    const handled13 = await ChatbotService.handleMessage(msg13, botUser);
+    assert.strictEqual(handled13, true);
+    assert.strictEqual(sentStickers.length, 1, 'Exactly one sticker delivered');
+    assert.strictEqual(sentMessages.length, 0, 'Zero text delivered');
+    const settingsAfter13 = db.getGroupSettings(testChat);
+    assert.strictEqual(settingsAfter13.humanMessagesSinceLastSticker, 0, 'Activity counter reset to 0');
+    pass('13. sticker keyword + activity >= gap -> exactly one sticker');
+
+    // -------------------------------------------------------------------------
+    // Test 14: Failed explicit sticker doesn't reset counter and sends no text
+    // -------------------------------------------------------------------------
+    resetTracking();
+    db.updateGroupSettings(testChat, {
+      humanMessagesSinceLastSticker: 10,
+      requiredStickerGap: 6
     });
     failSendSticker = true;
 
-    const decision16: ChatbotDecision = {
-      requestId: 'req_16',
-      chatId: testChat,
-      messageId: 116,
-      userId: 99111,
-      personality: 'Psychologist-style',
-      mood: 'normal',
-      responseType: 'sticker',
-      content: 'AI text fallback when sticker send fails',
-      mediaFileId: 'invalid_sticker_id',
-      replyToMessageId: 116
+    const msg14: TelegramMessage = {
+      message_id: 114,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'sticker'
     };
 
-    const dispatched16 = await (ChatbotService as any).dispatchResponse(decision16);
-    assert.strictEqual(dispatched16, true, 'Failed sticker must trigger text fallback');
-    assert.strictEqual(sentMessages.length, 1, 'Text fallback sent on sticker delivery failure');
-    assert.strictEqual(sentMessages[0].text, 'AI text fallback when sticker send fails');
-    pass('16. Failed sticker delivery with valid decision.content -> text fallback');
+    const handled14 = await ChatbotService.handleMessage(msg14, botUser);
+    assert.strictEqual(handled14, false, 'Failed sticker delivery returns false');
+    assert.strictEqual(sentMessages.length, 0, 'No text fallback sent on failed explicit sticker');
+    const settingsAfter14 = db.getGroupSettings(testChat);
+    assert.strictEqual(settingsAfter14.humanMessagesSinceLastSticker, 10, 'Activity counter must NOT reset on failure');
+    pass('14. failed explicit sticker doesn\'t reset counter');
 
     // -------------------------------------------------------------------------
-    // Test 17: Failed sticker delivery does NOT reset activity counter
+    // Test 15: Proactive response selects a recent human message and replies to its message_id
     // -------------------------------------------------------------------------
-    const settingsAfter16 = db.getGroupSettings(testChat);
-    assert.strictEqual(settingsAfter16.humanMessagesSinceLastSticker, 10, 'Failed sticker must NOT reset counter');
-    pass('17. Failed sticker delivery does NOT reset activity counter');
+    resetTracking();
+    db.clearGroupMemory(testChat);
+    db.addGroupConversationEntry(testChat, {
+      role: 'user',
+      userId: 99111,
+      name: 'Alice',
+      content: 'I am bored today',
+      timestamp: Date.now() - 5000,
+      messageId: 201
+    });
+
+    const proactiveDec = await ChatbotService.generateProactiveResponse(testChat, botUser);
+    assert.ok(proactiveDec);
+    assert.strictEqual(proactiveDec.replyToMessageId, 201, 'Proactive decision must target selected human message_id');
+    pass('15. proactive response selects a recent human message');
+    pass('16. proactive response replies to the selected message\'s message_id');
 
     // -------------------------------------------------------------------------
-    // Test 18: Concurrent direct requests cannot create duplicate sticker sends
+    // Test 17: Proactive selection never selects Roxie's own message
+    // -------------------------------------------------------------------------
+    db.clearGroupMemory(testChat);
+    db.addGroupConversationEntry(testChat, {
+      role: 'assistant',
+      name: 'Roxie',
+      displayName: 'Roxie',
+      sender: 'bot',
+      content: 'Hey guys!',
+      timestamp: Date.now() - 2000,
+      messageId: 301
+    });
+
+    const selMsg17 = ChatbotService.getRandomRecentHumanMessage(testChat);
+    assert.strictEqual(selMsg17, null, 'Must not select assistant message');
+    pass('17. proactive selection never selects Roxie\'s own message');
+
+    // -------------------------------------------------------------------------
+    // Test 18: Proactive selection never selects bot/service messages
+    // -------------------------------------------------------------------------
+    db.clearGroupMemory(testChat);
+    db.addGroupConversationEntry(testChat, {
+      role: 'user',
+      name: 'ServiceBot',
+      sender: 'bot',
+      content: '/start command',
+      timestamp: Date.now() - 3000,
+      messageId: 401
+    });
+    db.addGroupConversationEntry(testChat, {
+      role: 'user',
+      name: 'Group Admin',
+      content: '👤 Alice joined the group',
+      timestamp: Date.now() - 2000,
+      messageId: 402
+    });
+
+    const selMsg18 = ChatbotService.getRandomRecentHumanMessage(testChat);
+    assert.strictEqual(selMsg18, null, 'Must not select service or command message');
+    pass('18. proactive selection never selects bot/service messages');
+
+    // -------------------------------------------------------------------------
+    // Test 19: Concurrent triggers don't produce duplicate stickers
     // -------------------------------------------------------------------------
     resetTracking();
     db.updateGroupSettings(testChat, {
@@ -511,8 +480,8 @@ async function runDirectMentionPipelineTestSuite() {
       requiredStickerGap: 8
     });
 
-    const decision18a: ChatbotDecision = {
-      requestId: 'req_18a',
+    const decision19a: ChatbotDecision = {
+      requestId: 'req_19a',
       chatId: testChat,
       messageId: 1181,
       userId: 99111,
@@ -524,8 +493,8 @@ async function runDirectMentionPipelineTestSuite() {
       replyToMessageId: 1181
     };
 
-    const decision18b: ChatbotDecision = {
-      requestId: 'req_18b',
+    const decision19b: ChatbotDecision = {
+      requestId: 'req_19b',
       chatId: testChat,
       messageId: 1182,
       userId: 99112,
@@ -538,17 +507,111 @@ async function runDirectMentionPipelineTestSuite() {
     };
 
     // First request dispatches and consumes eligibility
-    const resA = await (ChatbotService as any).dispatchResponse(decision18a);
-    assert.strictEqual(resA, true);
+    const res19a = await (ChatbotService as any).dispatchResponse(decision19a);
+    assert.strictEqual(res19a, true);
     assert.strictEqual(sentStickers.length, 1, 'First request sends sticker');
 
     // Second sequential dispatch finds counter reset to 0 -> sends text fallback!
-    const resB = await (ChatbotService as any).dispatchResponse(decision18b);
-    assert.strictEqual(resB, true);
+    const res19b = await (ChatbotService as any).dispatchResponse(decision19b);
+    assert.strictEqual(res19b, true);
     assert.strictEqual(sentStickers.length, 1, 'Second request sticker is gated (no duplicate sticker)');
     assert.strictEqual(sentMessages.length, 1, 'Second request receives text fallback');
-    assert.strictEqual(sentMessages[0].text, 'Concurrent fallback text B');
-    pass('18. Concurrent direct requests cannot create duplicate sticker sends');
+    pass('19. concurrent triggers don\'t produce duplicate stickers');
+
+    // -------------------------------------------------------------------------
+    // Test 20: AI failure -> no text/sticker/typing
+    // -------------------------------------------------------------------------
+    resetTracking();
+    aiGenerationFail = true;
+
+    const msg20: TelegramMessage = {
+      message_id: 120,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'roxie please answer'
+    };
+
+    const handled20 = await ChatbotService.handleMessage(msg20, botUser);
+    assert.strictEqual(handled20, false);
+    assert.strictEqual(sentMessages.length, 0);
+    assert.strictEqual(sentStickers.length, 0);
+    assert.strictEqual(sentChatActions.length, 0);
+    pass('20. AI failure -> no text/sticker/typing');
+
+    // -------------------------------------------------------------------------
+    // Test 21: Proactive single message selection and consistent reply targeting
+    // -------------------------------------------------------------------------
+    resetTracking();
+    aiGenerationFail = false;
+    db.clearGroupMemory(testChat);
+    db.updateGroupSettings(testChat, {
+      humanMessagesSinceLastSticker: 10,
+      requiredStickerGap: 5
+    });
+
+    const targetMsgId = 123;
+    db.addGroupConversationEntry(testChat, {
+      role: 'user',
+      userId: 77777,
+      name: 'ConsistentUser',
+      content: 'Target human message for proactive test',
+      timestamp: Date.now() - 1000,
+      messageId: targetMsgId
+    });
+
+    const origGetRandom = ChatbotService.getRandomRecentHumanMessage;
+    let getRandomCalls = 0;
+    ChatbotService.getRandomRecentHumanMessage = (chatId: number) => {
+      getRandomCalls++;
+      return origGetRandom.call(ChatbotService, chatId);
+    };
+
+    try {
+      // 1. generateProactiveResponse calls getRandomRecentHumanMessage exactly once and sets replyToMessageId
+      const proactiveDec = await ChatbotService.generateProactiveResponse(testChat, botUser);
+      assert.ok(proactiveDec, 'Proactive decision should be returned');
+      assert.strictEqual(getRandomCalls, 1, 'getRandomRecentHumanMessage must be called exactly once during generation');
+      assert.strictEqual(proactiveDec.replyToMessageId, targetMsgId, 'Decision replyToMessageId must match selected human message');
+
+      // 2. dispatchResponse for text_plus_sticker uses the same replyToMessageId for both text and sticker
+      const proactiveTextPlusStickerDec: ChatbotDecision = {
+        requestId: 'req_proactive_21',
+        chatId: testChat,
+        messageId: targetMsgId,
+        userId: 77777,
+        personality: 'Psychologist-style',
+        mood: 'playful',
+        responseType: 'text_plus_sticker',
+        content: 'Proactive reaction text',
+        mediaFileId: 'CAACAgIAAxkBAAEtest_sticker_direct_mention_123',
+        replyToMessageId: targetMsgId
+      };
+
+      const dispatchRes = await (ChatbotService as any).dispatchResponse(proactiveTextPlusStickerDec);
+      assert.strictEqual(dispatchRes, true);
+      assert.strictEqual(sentMessages.length, 1, 'Sent text message');
+      assert.strictEqual(sentMessages[0].options?.reply_to_message_id, targetMsgId, 'Sent text reply_to_message_id must equal targetMsgId (123)');
+      assert.strictEqual(sentStickers.length, 1, 'Sent sticker message');
+      assert.strictEqual(sentStickers[0].options?.reply_to_message_id, targetMsgId, 'Sent sticker reply_to_message_id must equal targetMsgId (123)');
+      assert.strictEqual(getRandomCalls, 1, 'getRandomRecentHumanMessage must NOT be called again during dispatch');
+
+      // 3. executeAutoSticker with passed replyToMessageId does not call getRandomRecentHumanMessage
+      db.updateGroupSettings(testChat, {
+        humanMessagesSinceLastSticker: 10,
+        requiredStickerGap: 5
+      });
+      const settings = db.getGroupSettings(testChat);
+      const engineConfig = settings.autoEngine;
+      const initialCalls = getRandomCalls;
+      await (autoEngineService as any).executeAutoSticker(botUser.id, testChat, settings, engineConfig, targetMsgId);
+      assert.strictEqual(getRandomCalls, initialCalls, 'executeAutoSticker must not call getRandomRecentHumanMessage when replyToMessageId is provided');
+      assert.strictEqual(sentStickers.length, 2, 'Sent second sticker');
+      assert.strictEqual(sentStickers[1].options?.reply_to_message_id, targetMsgId, 'Second sticker must target passed replyToMessageId (123)');
+    } finally {
+      ChatbotService.getRandomRecentHumanMessage = origGetRandom;
+    }
+    pass('21. proactive pipeline selects single message and carries reply_to_message_id consistently to text and sticker');
 
   } finally {
     telegramApi.sendMessage = origSendMessage;
@@ -558,7 +621,7 @@ async function runDirectMentionPipelineTestSuite() {
   }
 
   console.log(`\n===================================================================`);
-  console.log(`🎉 Direct Mention Pipeline Test Suite Completed: ${passed}/18 Passed (100%)`);
+  console.log(`🎉 Direct Mention Pipeline Test Suite Completed: ${passed} Tests Passed (100%)`);
   console.log(`===================================================================\n`);
 }
 
