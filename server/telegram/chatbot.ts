@@ -1,6 +1,6 @@
 import { TelegramMessage, TelegramUser, TelegramRequestContext } from './types.js';
 import { telegramApi } from './api.js';
-import { db, isSensitiveData, GROUP_MEMORY_LIMIT, GroupConversationEntry } from '../db/storage.js';
+import { db, isSensitiveData, GROUP_MEMORY_LIMIT, GroupConversationEntry, GroupConversationMessage } from '../db/storage.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
 import { logDebug } from '../observability/logger.js';
@@ -3391,9 +3391,16 @@ STRICT INVARIANTS:
       const sanitizedContent = this.cleanAiText(decision.content);
       decision.content = sanitizedContent;
 
-      if (isLustMode && !this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true)) {
-        console.warn(`[LUST] BLOCKED DEFAULT STICKER\nchatId: ${decision.chatId}\nfileId: ${decision.mediaFileId}\nsource: default`);
-        // Fallback: send text only, blocking default sticker from Telegram
+      const isStickerAllowed = decision.chatId > 0 || db.checkAutoStickerEligibility(decision.chatId).allowed;
+      const isLustModeCustomAllowed = !isLustMode || this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true);
+
+      if (!isStickerAllowed || !isLustModeCustomAllowed) {
+        if (!isLustModeCustomAllowed) {
+          console.warn(`[LUST] BLOCKED DEFAULT STICKER\nchatId: ${decision.chatId}\nfileId: ${decision.mediaFileId}\nsource: default`);
+        } else {
+          console.log(`[CHATBOT] Gated text_plus_sticker to text-only for chat ${decision.chatId} due to sticker activity cooldown`);
+        }
+        // Fallback: send text only, blocking sticker from Telegram
         const textRes = await telegramApi.sendMessage(decision.chatId, sanitizedContent, {
           reply_to_message_id: decision.replyToMessageId
         });
@@ -3460,6 +3467,12 @@ STRICT INVARIANTS:
     }
 
     if (decision.responseType === 'sticker' && decision.mediaFileId) {
+      const isStickerAllowed = decision.chatId > 0 || db.checkAutoStickerEligibility(decision.chatId).allowed;
+      if (!isStickerAllowed) {
+        console.log(`[CHATBOT] Gated sticker send blocked for chat ${decision.chatId} due to sticker activity cooldown`);
+        return false;
+      }
+
       if (isLustMode && !this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true)) {
         console.warn(`[LUST] BLOCKED DEFAULT STICKER\nchatId: ${decision.chatId}\nfileId: ${decision.mediaFileId}\nsource: default`);
         // Block default sticker from reaching Telegram
@@ -3572,6 +3585,29 @@ STRICT INVARIANTS:
     return this.conversations.size;
   }
 
+  public static getRandomRecentHumanMessage(chatId: number): GroupConversationMessage | null {
+    const memory = db.getGroupMemory(chatId);
+    if (!memory || memory.length === 0) return null;
+
+    // Filter for genuine human messages (exclude assistant/bot, outgoing, empty, commands, system events)
+    const humanMsgs = memory.filter(m => {
+      if (m.role === 'assistant' || m.name === 'Roxie' || m.displayName === 'Roxie' || m.sender === 'bot') return false;
+      if (m.direction === 'outgoing') return false;
+      const content = (m.content || '').trim();
+      if (!content) return false;
+      if (content.startsWith('/') || content.startsWith('!')) return false;
+      if (content.startsWith('👤 ') || content.startsWith('🚪 ') || content.startsWith('📌 ') || content.startsWith('⚠️ ')) return false;
+      return true;
+    });
+
+    if (humanMsgs.length === 0) return null;
+
+    // Window of up to the latest 20 human messages
+    const recentWindow = humanMsgs.slice(-20);
+    const randomIndex = Math.floor(Math.random() * recentWindow.length);
+    return recentWindow[randomIndex];
+  }
+
   public static async generateProactiveResponse(
     chatId: number,
     botUser: TelegramUser | null = null
@@ -3585,10 +3621,20 @@ STRICT INVARIANTS:
     const isLustMode = Boolean(settings?.lustMode);
 
     const priorGroupMsgs = db.getGroupMemory(chatId);
+    const randomHumanMsg = ChatbotService.getRandomRecentHumanMessage(chatId);
     let contextPrefix = '';
     let userPromptInstruction = '';
 
-    if (priorGroupMsgs && priorGroupMsgs.length > 0) {
+    if (randomHumanMsg) {
+      const recentGroupSlice = priorGroupMsgs ? priorGroupMsgs.slice(-15) : [];
+      contextPrefix = `RECENT GROUP CONVERSATION:\n` +
+        recentGroupSlice.map(m => `${m.name || (m.role === 'assistant' ? 'Roxie' : 'User')}: ${m.content}`).join('\n') +
+        `\n\nTARGET MESSAGE TO REACT TO:\n"${randomHumanMsg.name || 'User'}": "${randomHumanMsg.content}"\n\n`;
+
+      userPromptInstruction = isLustMode
+        ? `${contextPrefix}[INSTRUCTION]: Chime into the group naturally as Roxie (sweet, romantic, witty, caring girlfriend). React directly or playfully to what ${randomHumanMsg.name || 'the user'} said, or share a cute thought in 1 concise sentence (5 to 25 words in Hinglish/English).`
+        : `${contextPrefix}[INSTRUCTION]: Chime into the group naturally as Roxie (witty, playful, observant girlfriend/friend). React directly or playfully to what ${randomHumanMsg.name || 'the user'} said, or share a fun thought in 1 concise sentence (5 to 25 words in Hinglish/English).`;
+    } else if (priorGroupMsgs && priorGroupMsgs.length > 0) {
       contextPrefix = `RECENT GROUP CONVERSATION:\n` +
         priorGroupMsgs.slice(-15).map(m => `${m.name || (m.role === 'assistant' ? 'Roxie' : 'User')}: ${m.content}`).join('\n') +
         `\n\n`;
@@ -3729,6 +3775,11 @@ STRICT INVARIANTS:
   }
 
   public static selectProactiveSticker(chatId: number): string | null {
+    const isEligible = chatId > 0 || db.checkAutoStickerEligibility(chatId).allowed;
+    if (!isEligible) {
+      return null;
+    }
+
     const settings = db.getGroupSettings(chatId);
     const isLustMode = Boolean(settings?.lustMode);
 

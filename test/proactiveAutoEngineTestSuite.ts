@@ -248,6 +248,9 @@ async function runProactiveAutoEngineTestSuite() {
     sentStickers = [];
     // Temporarily disable auto response to isolate auto sticker execution
     db.updateGroupSettings(testGroup1, {
+      lustMode: false,
+      humanMessagesSinceLastSticker: 15,
+      requiredStickerGap: 10,
       autoResponse: { enabled: false, mode: 'disabled', cooldownSeconds: 30 }
     });
     const aiCallsBeforeSticker = openRouterAiCalls;
@@ -505,7 +508,9 @@ async function runProactiveAutoEngineTestSuite() {
     // --------------------------------------------------------------------------------------
     db.updateGroupSettings(testGroup3, {
       lustMode: true,
-      botLeft: false
+      botLeft: false,
+      humanMessagesSinceLastSticker: 15,
+      requiredStickerGap: 10
     });
     const lustSticker = ChatbotService.selectProactiveSticker(testGroup3);
     // If no custom stickers in group library, it safely returns null (never default sticker)
@@ -518,7 +523,16 @@ async function runProactiveAutoEngineTestSuite() {
     // TEST 23: Non-Lust Mode Proactive Sticker Selects Valid File ID
     // --------------------------------------------------------------------------------------
     db.updateGroupSettings(testGroup3, {
-      lustMode: false
+      botLeft: false,
+      unavailable: false,
+      lustMode: false,
+      humanMessagesSinceLastSticker: 15,
+      requiredStickerGap: 10,
+      autoSticker: {
+        enabled: true,
+        mode: 'random',
+        cooldownSeconds: 30
+      }
     });
     const nonLustSticker = ChatbotService.selectProactiveSticker(testGroup3);
     assert(nonLustSticker !== null);

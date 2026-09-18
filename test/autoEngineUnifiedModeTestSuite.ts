@@ -101,6 +101,7 @@ async function runAutoEngineUnifiedModeTestSuite() {
   const initialGroups = db.getAllGroupSettings(botId);
   for (const [idStr] of Object.entries(initialGroups)) {
     db.updateGroupSettings(Number(idStr), {
+      lustMode: false,
       autoEngine: { enabled: false, mode: 'off' },
       autoResponse: { enabled: false, mode: 'disabled' },
       autoSticker: { enabled: false, mode: 'disabled' }
@@ -338,6 +339,8 @@ async function runAutoEngineUnifiedModeTestSuite() {
       botId,
       botLeft: false,
       unavailable: false,
+      humanMessagesSinceLastSticker: 15,
+      requiredStickerGap: 10,
       autoEngine: {
         enabled: true,
         mode: 'stickers_only',
@@ -485,6 +488,9 @@ async function runAutoEngineUnifiedModeTestSuite() {
       botId,
       botLeft: false,
       unavailable: false,
+      lustMode: false,
+      humanMessagesSinceLastSticker: 15,
+      requiredStickerGap: 10,
       autoEngine: {
         enabled: true,
         mode: 'stickers_only',

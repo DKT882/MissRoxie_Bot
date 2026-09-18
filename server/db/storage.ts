@@ -2121,9 +2121,19 @@ export class StorageManager {
         protectionFloodWindow: 5,
         protectionDuplicateLimit: 3,
         protectionLinkBurstLimit: 3,
+        humanMessagesSinceLastSticker: 0,
+        stickerActivityMin: 10,
+        stickerActivityMax: 20,
+        requiredStickerGap: Math.floor(Math.random() * (20 - 10 + 1)) + 10,
+        responseTypeWeights: { text: 50, sticker: 30, both: 20 },
         autoEngine: {
           enabled: true,
           mode: 'messages_and_stickers',
+          humanMessagesSinceLastSticker: 0,
+          stickerActivityMin: 10,
+          stickerActivityMax: 20,
+          requiredStickerGap: 15,
+          responseTypeWeights: { text: 50, sticker: 30, both: 20 },
           messages: {
             preset: 'normal',
             minSeconds: 480,
@@ -2210,6 +2220,21 @@ export class StorageManager {
       if (s.protectionFloodWindow === undefined) { s.protectionFloodWindow = 5; needsSave = true; }
       if (s.protectionDuplicateLimit === undefined) { s.protectionDuplicateLimit = 3; needsSave = true; }
       if (s.protectionLinkBurstLimit === undefined) { s.protectionLinkBurstLimit = 3; needsSave = true; }
+      if (s.humanMessagesSinceLastSticker === undefined) { s.humanMessagesSinceLastSticker = 0; needsSave = true; }
+      if (s.stickerActivityMin === undefined) { s.stickerActivityMin = 10; needsSave = true; }
+      if (s.stickerActivityMax === undefined) { s.stickerActivityMax = 20; needsSave = true; }
+      if (s.requiredStickerGap === undefined || s.requiredStickerGap === 0) {
+        const min = s.stickerActivityMin || 10;
+        const max = s.stickerActivityMax || 20;
+        const safeMin = Math.min(min, max);
+        const safeMax = Math.max(min, max);
+        s.requiredStickerGap = Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
+        needsSave = true;
+      }
+      if (!s.responseTypeWeights || typeof s.responseTypeWeights !== 'object') {
+        s.responseTypeWeights = { text: 50, sticker: 30, both: 20 };
+        needsSave = true;
+      }
       if (!s.autoEngine) {
         const arEnabled = Boolean(s.autoResponse?.enabled && s.autoResponse.mode !== 'disabled');
         const asEnabled = Boolean(s.autoSticker?.enabled && s.autoSticker.mode !== 'disabled');
@@ -2221,6 +2246,11 @@ export class StorageManager {
         s.autoEngine = {
           enabled: initialMode !== 'off',
           mode: initialMode,
+          humanMessagesSinceLastSticker: s.humanMessagesSinceLastSticker,
+          stickerActivityMin: s.stickerActivityMin,
+          stickerActivityMax: s.stickerActivityMax,
+          requiredStickerGap: s.requiredStickerGap,
+          responseTypeWeights: s.responseTypeWeights,
           messages: {
             preset: 'normal',
             minSeconds: Math.max(120, s.autoResponse?.minSeconds || 480),
@@ -2237,6 +2267,12 @@ export class StorageManager {
           }
         };
         needsSave = true;
+      } else {
+        if (s.autoEngine.humanMessagesSinceLastSticker === undefined) s.autoEngine.humanMessagesSinceLastSticker = s.humanMessagesSinceLastSticker;
+        if (s.autoEngine.stickerActivityMin === undefined) s.autoEngine.stickerActivityMin = s.stickerActivityMin;
+        if (s.autoEngine.stickerActivityMax === undefined) s.autoEngine.stickerActivityMax = s.stickerActivityMax;
+        if (s.autoEngine.requiredStickerGap === undefined) s.autoEngine.requiredStickerGap = s.requiredStickerGap;
+        if (s.autoEngine.responseTypeWeights === undefined) s.autoEngine.responseTypeWeights = s.responseTypeWeights;
       }
       if (!s.autoResponse) {
         s.autoResponse = {
@@ -2572,9 +2608,26 @@ export class StorageManager {
       }
     }
 
+    const updatedHumanCount = updates.humanMessagesSinceLastSticker ?? updates.autoEngine?.humanMessagesSinceLastSticker ?? current.humanMessagesSinceLastSticker ?? 0;
+    const updatedStickerGap = updates.requiredStickerGap ?? updates.autoEngine?.requiredStickerGap ?? current.requiredStickerGap;
+    const updatedMin = updates.stickerActivityMin ?? updates.autoEngine?.stickerActivityMin ?? current.stickerActivityMin ?? 10;
+    const updatedMax = updates.stickerActivityMax ?? updates.autoEngine?.stickerActivityMax ?? current.stickerActivityMax ?? 20;
+    const updatedWeights = updates.responseTypeWeights ?? updates.autoEngine?.responseTypeWeights ?? current.responseTypeWeights ?? { text: 50, sticker: 30, both: 20 };
+
+    mergedAutoEngine.humanMessagesSinceLastSticker = updatedHumanCount;
+    mergedAutoEngine.requiredStickerGap = updatedStickerGap;
+    mergedAutoEngine.stickerActivityMin = updatedMin;
+    mergedAutoEngine.stickerActivityMax = updatedMax;
+    mergedAutoEngine.responseTypeWeights = updatedWeights;
+
     const updated = {
       ...current,
       ...updates,
+      humanMessagesSinceLastSticker: updatedHumanCount,
+      requiredStickerGap: updatedStickerGap,
+      stickerActivityMin: updatedMin,
+      stickerActivityMax: updatedMax,
+      responseTypeWeights: updatedWeights,
       autoEngine: mergedAutoEngine,
       autoResponse: mergedAutoResponse,
       autoSticker: mergedAutoSticker,
@@ -5565,7 +5618,55 @@ export class StorageManager {
     this.scheduleSave(numId);
   }
 
-  public checkAutoStickerEligibility(chatId: number | string): { allowed: boolean; remainingSeconds?: number; reason?: string } {
+  public incrementHumanMessageCount(chatId: number | string): number {
+    const numId = Number(chatId);
+    if (numId > 0) return 0;
+    const settings = this.getGroupSettings(numId);
+    const newCount = (settings.humanMessagesSinceLastSticker || 0) + 1;
+    settings.humanMessagesSinceLastSticker = newCount;
+    if (settings.autoEngine) {
+      settings.autoEngine.humanMessagesSinceLastSticker = newCount;
+    }
+    this.saveGroupJsonSync(numId);
+    this.scheduleSave(numId);
+    return newCount;
+  }
+
+  public getHumanMessagesSinceLastSticker(chatId: number | string): number {
+    const numId = Number(chatId);
+    if (numId > 0) return 9999;
+    const settings = this.getGroupSettings(numId);
+    return settings.humanMessagesSinceLastSticker ?? 0;
+  }
+
+  public getRequiredStickerGap(chatId: number | string): number {
+    const numId = Number(chatId);
+    if (numId > 0) return 0;
+    const settings = this.getGroupSettings(numId);
+    return settings.requiredStickerGap || settings.stickerActivityMin || 10;
+  }
+
+  public resetStickerActivity(chatId: number | string): void {
+    const numId = Number(chatId);
+    if (numId > 0) return;
+    const settings = this.getGroupSettings(numId);
+    const min = settings.stickerActivityMin || 10;
+    const max = settings.stickerActivityMax || 20;
+    const safeMin = Math.min(min, max);
+    const safeMax = Math.max(min, max);
+    const newGap = Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
+
+    settings.humanMessagesSinceLastSticker = 0;
+    settings.requiredStickerGap = newGap;
+    if (settings.autoEngine) {
+      settings.autoEngine.humanMessagesSinceLastSticker = 0;
+      settings.autoEngine.requiredStickerGap = newGap;
+    }
+    this.saveGroupJsonSync(numId);
+    this.scheduleSave(numId);
+  }
+
+  public checkAutoStickerEligibility(chatId: number | string): { allowed: boolean; remainingSeconds?: number; remainingMessages?: number; reason?: string } {
     const numId = Number(chatId);
     if (numId > 0) return { allowed: true };
 
@@ -5575,45 +5676,15 @@ export class StorageManager {
       return { allowed: false, reason: 'disabled' };
     }
 
-    if (cfg.mode === 'every_message') {
-      return { allowed: true };
-    }
-
-    const last = cfg.lastStickerTimestamp || 0;
-    if (last === 0) {
-      return { allowed: true };
-    }
-
-    const now = Date.now();
-
-    // Check explicit nextAllowedAt if available and valid
-    if (cfg.nextAllowedAt && cfg.nextAllowedAt > now) {
-      const remainingSeconds = Math.ceil((cfg.nextAllowedAt - now) / 1000);
-      if (remainingSeconds <= 86400) {
-        return { allowed: false, remainingSeconds, reason: 'cooldown' };
-      }
-    }
-
-    const elapsed = (now - last) / 1000;
-
-    if (cfg.mode === 'cooldown') {
-      const cooldown = Math.max(10, Math.min(86400, Number(cfg.cooldownSeconds || 60)));
-      if (elapsed < cooldown) {
-        return { allowed: false, remainingSeconds: Math.ceil(cooldown - elapsed), reason: 'cooldown' };
-      }
-      return { allowed: true };
-    }
-
-    if (cfg.mode === 'random' || cfg.randomize) {
-      const rawMin = Number(cfg.minSeconds ?? 60);
-      const rawMax = Number(cfg.maxSeconds ?? 300);
-      const safeMin = Math.max(10, Math.min(86400, isNaN(rawMin) ? 60 : rawMin));
-      const safeMax = Math.max(safeMin, Math.min(86400, isNaN(rawMax) ? 300 : rawMax));
-      const target = cfg.nextIntervalSeconds || safeMin;
-      if (elapsed < target) {
-        return { allowed: false, remainingSeconds: Math.ceil(target - elapsed), reason: 'cooldown' };
-      }
-      return { allowed: true };
+    // Absolute Sticker Activity Gating Rule:
+    const currentCount = settings.humanMessagesSinceLastSticker ?? 0;
+    const requiredGap = settings.requiredStickerGap || settings.stickerActivityMin || 10;
+    if (currentCount < requiredGap) {
+      return {
+        allowed: false,
+        remainingMessages: requiredGap - currentCount,
+        reason: `activity_cooldown (${currentCount}/${requiredGap})`
+      };
     }
 
     return { allowed: true };
@@ -5624,6 +5695,9 @@ export class StorageManager {
     if (numId > 0) return;
 
     const settings = this.getGroupSettings(numId);
+    // Reset human message counter and generate new required gap only after successful delivery
+    this.resetStickerActivity(numId);
+
     if (!settings.autoSticker) {
       settings.autoSticker = {
         enabled: true,

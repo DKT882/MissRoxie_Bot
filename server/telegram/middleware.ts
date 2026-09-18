@@ -202,7 +202,11 @@ export class TelegramMiddleware {
     }
 
     // Inspect Telegram ChatMember status
-    const member = await this.getTargetMember(ctx.chatId, actorUserId);
+    let member = await this.getTargetMember(ctx.chatId, actorUserId);
+    if (!member || (member.status !== 'creator' && member.status !== 'administrator')) {
+      const freshMember = await this.getTargetMember(ctx.chatId, actorUserId, true);
+      if (freshMember) member = freshMember;
+    }
     const customRole = db.getCustomRole(ctx.chatId, actorUserId);
 
     if (member) {

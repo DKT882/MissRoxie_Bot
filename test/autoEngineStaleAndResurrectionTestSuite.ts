@@ -251,6 +251,8 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
     botId: botIdA,
     botLeft: false,
     unavailable: false,
+    humanMessagesSinceLastSticker: 15,
+    requiredStickerGap: 10,
     autoSticker: {
       enabled: true,
       mode: 'random',
@@ -304,6 +306,8 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
     botId: botIdA,
     botLeft: false,
     unavailable: false,
+    humanMessagesSinceLastSticker: 15,
+    requiredStickerGap: 10,
     autoSticker: {
       enabled: true,
       mode: 'random',
@@ -416,6 +420,8 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
     botId: botIdA,
     botLeft: false,
     unavailable: false,
+    humanMessagesSinceLastSticker: 15,
+    requiredStickerGap: 10,
     autoSticker: {
       enabled: true,
       mode: 'random',
@@ -441,6 +447,7 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   await advanceTime(5000);
   assert.strictEqual(sentStickers.length, 1, 'No immediate repeat sticker sent');
 
+  db.updateGroupSettings(stickerGroup, { humanMessagesSinceLastSticker: 15, requiredStickerGap: 10 });
   await advanceTime(60000); // Next 60s elapsed
   assert.strictEqual(sentStickers.length, 2, 'Exactly 2 stickers sent after next interval');
   autoEngineService.cancelAllForGroup(botIdA, stickerGroup);
@@ -455,6 +462,8 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
     botLeft: false,
     unavailable: false,
     chatbotEnabled: true,
+    humanMessagesSinceLastSticker: 15,
+    requiredStickerGap: 10,
     autoResponse: {
       enabled: true,
       mode: 'random',
@@ -854,6 +863,8 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
     botId: botIdA,
     botLeft: false,
     unavailable: false,
+    humanMessagesSinceLastSticker: 15,
+    requiredStickerGap: 10,
     autoResponse: {
       enabled: false,
       mode: 'disabled',
@@ -880,11 +891,13 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   assert.strictEqual(sentStickers.length, 1, 'First sticker executed');
   assert.ok(autoEngineService.getJob(botIdA, e2eGroup, 'sticker'), 'Exactly one future timer scheduled after 1st execution');
 
+  db.updateGroupSettings(e2eGroup, { humanMessagesSinceLastSticker: 15, requiredStickerGap: 10 });
   await advanceTime(35000); // 2nd execution
   assert.strictEqual(sentStickers.length, 2, 'Second sticker executed');
   assert.ok(autoEngineService.getJob(botIdA, e2eGroup, 'sticker'), 'Exactly one future timer scheduled after 2nd execution');
 
   // 3. Simulate chat not found error
+  db.updateGroupSettings(e2eGroup, { humanMessagesSinceLastSticker: 15, requiredStickerGap: 10 });
   apiFailureMode[e2eGroup] = 'Bad Request: chat not found';
   await advanceTime(35000); // 3rd execution fails permanently
 
@@ -949,6 +962,8 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
     botId: botIdA,
     botLeft: false,
     unavailable: false,
+    humanMessagesSinceLastSticker: 15,
+    requiredStickerGap: 10,
     autoResponse: {
       enabled: false,
       mode: 'disabled',
@@ -988,7 +1003,9 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   assert.ok(jobAfterRun1.targetRunAt - virtualTime >= 30000, 'Next run scheduled strictly in future (>= 30s, no 0ms tight loop)');
 
   // 4. Execution 2: advance time to execute 2nd sticker
-  const stickerRun2Delay = jobAfterRun1.targetRunAt - virtualTime;
+  db.updateGroupSettings(stickerChatId, { humanMessagesSinceLastSticker: 15, requiredStickerGap: 10 });
+  const jobBeforeRun2 = autoEngineService.getJob(botIdA, stickerChatId, 'sticker')!;
+  const stickerRun2Delay = jobBeforeRun2.targetRunAt - virtualTime;
   await advanceTime(stickerRun2Delay + 50);
 
   // Invariants after run 2:
@@ -1012,6 +1029,7 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
 
   // 6. Transient 500 failure handling
   apiFailureMode[stickerChatId] = 'Internal Server Error (500)';
+  db.updateGroupSettings(stickerChatId, { humanMessagesSinceLastSticker: 15, requiredStickerGap: 10 });
   const preFailJob = autoEngineService.getJob(botIdA, stickerChatId, 'sticker')!;
   await advanceTime((preFailJob.targetRunAt - virtualTime) + 50);
 
@@ -1023,6 +1041,7 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
 
   // 7. Transient 429 rate limit backoff handling
   apiFailureMode[stickerChatId] = 'Too Many Requests: retry after 20';
+  db.updateGroupSettings(stickerChatId, { humanMessagesSinceLastSticker: 15, requiredStickerGap: 10 });
   await advanceTime((post500Job.targetRunAt - virtualTime) + 50);
 
   assert.strictEqual(sentStickers.length, 2, 'Sticker count not increased on 429 failure');
@@ -1033,6 +1052,7 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
 
   // 8. Recovery after transient failure
   delete apiFailureMode[stickerChatId];
+  db.updateGroupSettings(stickerChatId, { humanMessagesSinceLastSticker: 15, requiredStickerGap: 10 });
   await advanceTime((post429Job.targetRunAt - virtualTime) + 50);
 
   assert.strictEqual(sentStickers.length, 3, 'Sticker sent successfully after recovery');

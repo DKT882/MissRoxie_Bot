@@ -799,6 +799,38 @@ export class TelegramBotManager {
         replyToMessageId: message.reply_to_message?.message_id
       });
       this.lastStoredMessageTimestamp = new Date().toISOString();
+
+      // Track genuine human conversation activity for activity-gated AutoEngine
+      const isBot = Boolean(message.from?.is_bot || (this.botUser && message.from?.id === this.botUser.id));
+      const isServiceMessage = Boolean(
+        message.new_chat_members ||
+        message.left_chat_member ||
+        message.new_chat_title ||
+        message.new_chat_photo ||
+        message.delete_chat_photo ||
+        message.group_chat_created ||
+        message.supergroup_chat_created ||
+        message.channel_chat_created ||
+        message.pinned_message ||
+        (message as any).migrate_to_chat_id ||
+        (message as any).migrate_from_chat_id
+      );
+      const isMeaningfulContent = Boolean(
+        (message.text && message.text.trim().length > 0) ||
+        (message.caption && message.caption.trim().length > 0) ||
+        message.sticker ||
+        message.photo ||
+        message.video ||
+        message.animation ||
+        message.voice ||
+        message.audio ||
+        message.document
+      );
+
+      if (!isBot && !isServiceMessage && isMeaningfulContent) {
+        db.incrementHumanMessageCount(chatId);
+      }
+
       logDebug({
         event: 'STORAGE_MESSAGE_SAVED',
         chat_id: chatId,

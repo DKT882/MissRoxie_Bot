@@ -148,6 +148,12 @@ export interface TelegramMessage {
   new_chat_members?: TelegramUser[];
   left_chat_member?: TelegramUser;
   new_chat_title?: string;
+  new_chat_photo?: any[];
+  delete_chat_photo?: boolean;
+  group_chat_created?: boolean;
+  supergroup_chat_created?: boolean;
+  channel_chat_created?: boolean;
+  pinned_message?: any;
 }
 
 export interface InlineKeyboardButton {
@@ -364,6 +370,16 @@ export interface GroupSettings {
   automations?: Array<{ id: string; trigger: string; action: string; parameters?: string; enabled: boolean; createdBy: number; createdAt: string }>;
   rules?: string;
   lastAllTimestamp?: number;
+  // Activity-gated Auto Engine & Sticker Cooldown
+  humanMessagesSinceLastSticker?: number;
+  requiredStickerGap?: number;
+  stickerActivityMin?: number; // default 10
+  stickerActivityMax?: number; // default 20
+  responseTypeWeights?: {
+    text: number; // default 50
+    sticker: number; // default 30
+    both: number; // default 20
+  };
   autoEngine?: AutoEngineConfig;
   autoResponse?: AutoResponseConfig;
   autoSticker?: AutoStickerConfig;
@@ -399,6 +415,15 @@ export interface AutoEngineConfig {
   lastMessageTimestamp?: number;
   lastStickerTimestamp?: number;
   lastSentTimestamp?: number;
+  humanMessagesSinceLastSticker?: number;
+  requiredStickerGap?: number;
+  stickerActivityMin?: number;
+  stickerActivityMax?: number;
+  responseTypeWeights?: {
+    text: number;
+    sticker: number;
+    both: number;
+  };
 }
 
 export interface AutoResponseConfig {

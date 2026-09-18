@@ -424,6 +424,9 @@ export class AutoEngineService {
       return;
     }
 
+    // Send typing status ONLY after AI has generated a valid response
+    telegramApi.sendChatAction(chatId, 'typing').catch(() => {});
+
     const sendRes = await telegramApi.sendMessage(chatId, decision.content);
     if (sendRes.ok || (sendRes as any).message_id) {
       db.recordAutoResponseSent(chatId);
@@ -448,6 +451,14 @@ export class AutoEngineService {
     settings: GroupSettings,
     engineConfig: AutoEngineConfig
   ): Promise<void> {
+    const stickerCheck = db.checkAutoStickerEligibility(chatId);
+    if (!stickerCheck.allowed) {
+      console.log(`[AUTO_ENGINE] Sticker skipped for chat ${chatId}: ${stickerCheck.reason || 'activity cooldown active'}`);
+      const nextDelay = this.calculateDelayMs(engineConfig.stickers, 600, 1200, 600, 'stickers');
+      this.scheduleJob(botId, chatId, 'sticker', nextDelay, 'activity_cooldown');
+      return;
+    }
+
     const stickerFileId = ChatbotService.selectProactiveSticker(chatId);
     if (stickerFileId) {
       const sendRes = await telegramApi.sendSticker(chatId, stickerFileId);
