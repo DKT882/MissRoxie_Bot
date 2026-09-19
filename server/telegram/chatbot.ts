@@ -2481,6 +2481,7 @@ export class ChatbotService {
 
     // 2. Atomic Per-Message Lock: Deduplicate & ensure exactly one response pipeline/execution
     const lockResult = this.acquireMessageLock(chatId, msgId);
+    console.log(`[TRIGGER_TRACE] dedup=${lockResult.acquired ? 'acquired' : lockResult.reason} (chatId=${chatId} messageId=${msgId})`);
     if (!lockResult.acquired) {
       return false;
     }
@@ -2490,6 +2491,7 @@ export class ChatbotService {
 
     try {
       const decision = await this.generateResponseDecision(requestId, message, botUser, reqCtx);
+      console.log(`[TRIGGER_TRACE] decision chatId=${chatId} messageId=${msgId} responseType=${decision?.responseType || 'null'} replyToMessageId=${decision?.replyToMessageId}`);
       if (!decision || decision.responseType === 'none') {
         return false;
       }
@@ -2694,6 +2696,8 @@ export class ChatbotService {
     const rawUserText = (message.text || message.caption || '').trim();
     const isExplicitTrigger = isPrivate || this.isTriggered(message, botUser);
     const isExplicitSticker = ChatbotService.hasExplicitStickerKeyword(rawUserText);
+    const isMention = Boolean((message.entities || []).some(e => e.type === 'mention' || e.type === 'text_mention'));
+    console.log(`[TRIGGER_TRACE] trigger_state chatId=${chatId} messageId=${msgId} isTriggered=${isExplicitTrigger} explicitSticker=${isExplicitSticker} isReplyToRoxie=${isReplyToRoxie} isMention=${isMention} normalizedText="${rawUserText}"`);
 
     // Rolling In-Memory Context Window (Shared per Group Chat or DM)
     const now = Date.now();
@@ -3705,6 +3709,7 @@ STRICT INVARIANTS:
 
   private static async dispatchResponse(decision: ChatbotDecision, reqCtx?: TelegramRequestContext): Promise<boolean> {
     console.log(`CHATBOT_DECISION ${JSON.stringify(decision)}`);
+    console.log(`[TRIGGER_TRACE] dispatch type=${decision.responseType} targetMessageId=${decision.replyToMessageId} chatId=${decision.chatId}`);
 
     const targetChatId = reqCtx?.chatId ?? decision.chatId;
     if (reqCtx && targetChatId !== reqCtx.chatId) {
@@ -3856,6 +3861,7 @@ STRICT INVARIANTS:
         if (stickerSuccess) {
           const outMsgId = res.result?.message_id;
           console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'sticker', replyToMessageId: decision.replyToMessageId })}`);
+          console.log(`[TRIGGER_TRACE] telegram_send_success type=sticker chatId=${decision.chatId} messageId=${decision.replyToMessageId}`);
           conv.messages.push({ role: 'assistant', content: '[Sent sticker]' });
           this.trimContext(conv);
           const stickerFileId = res.result?.sticker?.file_id || decision.mediaFileId;
@@ -3865,6 +3871,7 @@ STRICT INVARIANTS:
           console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=sticker_success`);
           return true;
         }
+        console.log(`[TRIGGER_TRACE] telegram_send_failure type=sticker chatId=${decision.chatId} messageId=${decision.replyToMessageId} error=${(res as any)?.description || 'Unknown error'}`);
         console.warn(`[CHATBOT] Sticker delivery failed for chat ${decision.chatId}: ${(res as any)?.description}. ${fallbackText ? 'Attempting text fallback.' : 'No fallback for explicit sticker.'}`);
       } else {
         if (!isLustModeCustomAllowed) {
@@ -3949,6 +3956,7 @@ STRICT INVARIANTS:
       if (textSuccess) {
         const outMsgId = res.result?.message_id || (res as any).message_id;
         console.log(`CHATBOT_SEND ${JSON.stringify({ requestId: decision.requestId, responseType: 'text', replyToMessageId: decision.replyToMessageId })}`);
+        console.log(`[TRIGGER_TRACE] telegram_send_success type=text chatId=${decision.chatId} messageId=${decision.replyToMessageId}`);
         conv.messages.push({ role: 'assistant', content: sanitizedContent });
         this.trimContext(conv);
         recordAssistantEntry(sanitizedContent, 'text', undefined, outMsgId);
@@ -3957,6 +3965,7 @@ STRICT INVARIANTS:
         console.log(`[DIRECT_DEBUG] dispatch_complete: chatId=${decision.chatId}, outcome=text_success`);
         return true;
       }
+      console.log(`[TRIGGER_TRACE] telegram_send_failure type=text chatId=${decision.chatId} messageId=${decision.replyToMessageId} error=${(res as any)?.description || 'Unknown error'}`);
       console.error(JSON.stringify({
         event: 'TELEGRAM_SEND_FAILURE',
         requestId: decision.requestId,

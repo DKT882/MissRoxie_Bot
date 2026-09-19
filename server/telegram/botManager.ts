@@ -575,6 +575,8 @@ export class TelegramBotManager {
       return;
     }
 
+    console.log(`[TRIGGER_TRACE] incoming chatId=${chatId} messageId=${message.message_id} fromId=${userId} fromUsername=${message.from?.username || ''} isBot=${message.from?.is_bot} text="${message.text || ''}" caption="${message.caption || ''}"`);
+
     const authStart = Date.now();
     if (reqCtx) {
       logDebug({
@@ -723,6 +725,7 @@ export class TelegramBotManager {
 
     const isHuman = ChatbotService.isGenuineHumanMessage(message, this.botUser);
     const isRoxieSelf = ChatbotService.isRoxieSelfMessage(message, this.botUser);
+    console.log(`[TRIGGER_TRACE] genuine_human=${isHuman} isRoxieSelf=${isRoxieSelf} (chatId=${chatId} messageId=${message.message_id})`);
 
     // 3. Check Smart User Protection & Moderation (for human users)
     if (isHuman) {
