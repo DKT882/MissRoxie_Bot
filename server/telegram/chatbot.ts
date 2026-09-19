@@ -706,10 +706,13 @@ export class ChatbotService {
       process.env.OPENROUTER_FALLBACK_MODEL_1?.trim() || process.env.OPENROUTER_FALLBACK_1?.trim(),
       process.env.OPENROUTER_FALLBACK_MODEL_2?.trim() || process.env.OPENROUTER_FALLBACK_2?.trim(),
       process.env.OPENROUTER_FALLBACK_MODEL_3?.trim() || process.env.OPENROUTER_FALLBACK_3?.trim(),
-      'meta-llama/llama-3.3-70b-instruct:free',
-      'mistralai/mistral-small-24b-instruct-2501:free',
-      'google/gemini-2.0-flash-exp:free',
-      'qwen/qwen-2.5-72b-instruct:free'
+      'google/gemma-4-31b-it:free',
+      'google/gemma-4-26b-a4b-it:free',
+      'deepseek/deepseek-v4-flash-0731:free',
+      'qwen/qwen3.8-27b:free',
+      'z-ai/glm-5.2:free',
+      'nvidia/nemotron-3.5-lightning:free',
+      'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'
     ].filter(Boolean) as string[];
 
     const rawConfigured = process.env.OPENROUTER_MODELS
