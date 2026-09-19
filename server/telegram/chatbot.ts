@@ -1269,7 +1269,7 @@ export class ChatbotService {
       return true;
     }
 
-    if (usernameLower === 'missroxie_bot' || usernameLower === 'roxie') {
+    if (sender.is_bot && (usernameLower === 'missroxie_bot' || usernameLower === 'roxie')) {
       return true;
     }
 
@@ -1293,7 +1293,19 @@ export class ChatbotService {
   public static hasExplicitStickerKeyword(text: string): boolean {
     if (!text || typeof text !== 'string') return false;
     const lower = text.toLowerCase().trim();
-    return /\bsticker[s]?\b/i.test(lower) || /\bstkr\b/i.test(lower) || lower.includes('sticker') || lower.includes('स्टिकर') || lower.includes('स्टीकर');
+    if (!lower) return false;
+
+    // Word boundary matching for English 'sticker', 'stickers', 'stkr'
+    if (/\b(stickers?|stkr)\b/i.test(lower)) {
+      return true;
+    }
+
+    // Devanagari Hindi word matching for 'स्टिकर', 'स्टीकर', 'स्टिकर्स', 'स्टीकर्स'
+    if (/(?:^|[^\p{L}\p{N}])(स्टिकर्स?|स्टीकर्स?)(?:[^\p{L}\p{N}]|$)/u.test(lower)) {
+      return true;
+    }
+
+    return false;
   }
 
   public static isTriggered(message: TelegramMessage, botUser: TelegramUser | null): boolean {
@@ -2679,8 +2691,9 @@ export class ChatbotService {
        message.reply_to_message.from.username?.toLowerCase() === 'roxie' ||
        message.reply_to_message.from.first_name?.toLowerCase().includes('roxie'))
     );
+    const rawUserText = (message.text || message.caption || '').trim();
     const isExplicitTrigger = isPrivate || this.isTriggered(message, botUser);
-    const isExplicitSticker = ChatbotService.hasExplicitStickerKeyword(userText);
+    const isExplicitSticker = ChatbotService.hasExplicitStickerKeyword(rawUserText);
 
     // Rolling In-Memory Context Window (Shared per Group Chat or DM)
     const now = Date.now();
@@ -3495,71 +3508,19 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
         };
       }
     } else {
-      // Standard Non-LustMode Automatic Natural Sticker Decision Engine:
-      // When a relevant sticker exists matching current mood/group library:
-      // ~65% Text Only
-      // ~20% Text + Sticker
-      // ~15% Sticker Only
-      const candidateSticker = this.selectSticker(mood, chatId);
-      const autoStickerAllowed = isPrivate || db.checkAutoStickerEligibility(chatId).allowed;
-      if (candidateSticker && autoStickerAllowed) {
-        const roll = Math.random();
-        if (roll < 0.20) {
-          decision = {
-            requestId,
-            chatId,
-            messageId: msgId,
-            userId,
-            personality: personalityLabel,
-            mood,
-            responseType: 'text_plus_sticker',
-            content: cleanedText,
-            mediaFileId: candidateSticker,
-            replyToMessageId: msgId,
-            modelUsed
-          };
-        } else if (roll < 0.35) {
-          decision = {
-            requestId,
-            chatId,
-            messageId: msgId,
-            userId,
-            personality: personalityLabel,
-            mood,
-            responseType: 'sticker',
-            content: cleanedText,
-            mediaFileId: candidateSticker,
-            replyToMessageId: msgId,
-            modelUsed
-          };
-        } else {
-          decision = {
-            requestId,
-            chatId,
-            messageId: msgId,
-            userId,
-            personality: personalityLabel,
-            mood,
-            responseType: 'text',
-            content: cleanedText,
-            replyToMessageId: msgId,
-            modelUsed
-          };
-        }
-      } else {
-        decision = {
-          requestId,
-          chatId,
-          messageId: msgId,
-          userId,
-          personality: personalityLabel,
-          mood,
-          responseType: 'text',
-          content: cleanedText,
-          replyToMessageId: msgId,
-          modelUsed
-        };
-      }
+      // Standard Direct Roxie Mentions produce AI text response (Priority 2: Direct Trigger)
+      decision = {
+        requestId,
+        chatId,
+        messageId: msgId,
+        userId,
+        personality: personalityLabel,
+        mood,
+        responseType: 'text',
+        content: cleanedText,
+        replyToMessageId: msgId,
+        modelUsed
+      };
     }
 
     console.log(`[DIRECT_DEBUG] decision_result: chatId=${chatId}, messageId=${msgId}, type=${decision.responseType}, hasContent=${Boolean(decision.content)}, hasMedia=${Boolean(decision.mediaFileId)}`);
