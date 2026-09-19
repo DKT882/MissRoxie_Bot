@@ -430,57 +430,81 @@ export class AutoEngineService {
       return;
     }
 
-    // Mark message as considered immediately to guarantee at most 1 opportunity per message
-    db.setLastProactiveConsideredMessageId(chatId, latestHumanMsg.messageId);
-
-    const autoResponseEligibility = db.checkAutoResponseEligibility(chatId);
-    if (!autoResponseEligibility.allowed) {
-      console.log(`[AUTO_ENGINE] proactive_skip_reason=interval (chatId=${chatId}, remaining=${autoResponseEligibility.remainingSeconds || 0}s)`);
+    // Check if message is already processed or in-flight in ChatbotService
+    if (ChatbotService.isMessageProcessedOrInFlight(chatId, latestHumanMsg.messageId)) {
+      console.log(`[AUTO_ENGINE] proactive_skip_reason=already_processed (chatId=${chatId}, messageId=${latestHumanMsg.messageId})`);
+      db.setLastProactiveConsideredMessageId(chatId, latestHumanMsg.messageId);
       const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
-      this.scheduleJob(botId, chatId, 'response', nextDelay, 'interval_cooldown');
+      this.scheduleJob(botId, chatId, 'response', nextDelay, 'already_processed');
       return;
     }
 
-    const roll = Math.random();
-    if (roll > ChatbotService.PROACTIVE_OPPORTUNITY_PROBABILITY) {
-      console.log(`[AUTO_ENGINE] proactive_skip_reason=random_roll (chatId=${chatId}, roll=${roll.toFixed(3)}, threshold=${ChatbotService.PROACTIVE_OPPORTUNITY_PROBABILITY})`);
+    const lock = ChatbotService.acquireMessageLock(chatId, latestHumanMsg.messageId);
+    if (!lock.acquired) {
+      console.log(`[AUTO_ENGINE] proactive_skip_reason=lock_rejected (chatId=${chatId}, messageId=${latestHumanMsg.messageId})`);
+      db.setLastProactiveConsideredMessageId(chatId, latestHumanMsg.messageId);
       const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
-      this.scheduleJob(botId, chatId, 'response', nextDelay, 'random_roll_skip');
+      this.scheduleJob(botId, chatId, 'response', nextDelay, 'lock_rejected');
       return;
     }
 
-    const selectedMsg = latestHumanMsg;
-    console.log(`[AUTO_ENGINE] proactive_selected_message=${selectedMsg.messageId} in chat ${chatId}`);
+    let sendSuccess = false;
+    try {
+      // Mark message as considered immediately to guarantee at most 1 opportunity per message
+      db.setLastProactiveConsideredMessageId(chatId, latestHumanMsg.messageId);
 
-    const decision = await ChatbotService.generateProactiveResponse(chatId, null, selectedMsg);
-    if (!decision || decision.responseType === 'none' || !decision.content) {
-      this.handleFailure(botId, chatId, 'response', new Error('OpenRouter proactive generation produced no response'));
-      return;
-    }
-
-    // Send typing status ONLY after AI has generated a valid response
-    telegramApi.sendChatAction(chatId, 'typing').catch(() => {});
-
-    const replyOptions = (decision.replyToMessageId && decision.replyToMessageId > 0)
-      ? { reply_to_message_id: decision.replyToMessageId }
-      : undefined;
-    const sendRes = await telegramApi.sendMessage(chatId, decision.content, replyOptions);
-    if (sendRes.ok || (sendRes as any).message_id) {
-      db.recordAutoResponseSent(chatId);
-      console.log(`[AUTO_ENGINE] proactive_response_sent=${selectedMsg.messageId} in chat ${chatId}`);
-      const job = this.jobs.get(this.makeJobKey(botId, chatId, 'response'));
-      if (job) job.consecutiveFailures = 0;
-    } else {
-      const desc = (sendRes as any)?.description || 'Telegram send failed';
-      if (this.isPermanentInvalidTargetError(desc)) {
-        this.handlePermanentInvalidTarget(botId, chatId, desc);
+      const autoResponseEligibility = db.checkAutoResponseEligibility(chatId);
+      if (!autoResponseEligibility.allowed) {
+        console.log(`[AUTO_ENGINE] proactive_skip_reason=interval (chatId=${chatId}, remaining=${autoResponseEligibility.remainingSeconds || 0}s)`);
+        const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
+        this.scheduleJob(botId, chatId, 'response', nextDelay, 'interval_cooldown');
         return;
       }
-      throw new Error(desc);
-    }
 
-    const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
-    this.scheduleJob(botId, chatId, 'response', nextDelay, 'next_interval');
+      const roll = Math.random();
+      if (roll > ChatbotService.PROACTIVE_OPPORTUNITY_PROBABILITY) {
+        console.log(`[AUTO_ENGINE] proactive_skip_reason=random_roll (chatId=${chatId}, roll=${roll.toFixed(3)}, threshold=${ChatbotService.PROACTIVE_OPPORTUNITY_PROBABILITY})`);
+        const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
+        this.scheduleJob(botId, chatId, 'response', nextDelay, 'random_roll_skip');
+        return;
+      }
+
+      const selectedMsg = latestHumanMsg;
+      console.log(`[AUTO_ENGINE] proactive_selected_message=${selectedMsg.messageId} in chat ${chatId}`);
+
+      const decision = await ChatbotService.generateProactiveResponse(chatId, null, selectedMsg);
+      if (!decision || decision.responseType === 'none' || !decision.content) {
+        this.handleFailure(botId, chatId, 'response', new Error('OpenRouter proactive generation produced no response'));
+        return;
+      }
+
+      // Send typing status ONLY after AI has generated a valid response
+      telegramApi.sendChatAction(chatId, 'typing').catch(() => {});
+
+      const replyOptions = (decision.replyToMessageId && decision.replyToMessageId > 0)
+        ? { reply_to_message_id: decision.replyToMessageId }
+        : undefined;
+      const sendRes = await telegramApi.sendMessage(chatId, decision.content, replyOptions);
+      if (sendRes.ok || (sendRes as any).message_id) {
+        sendSuccess = true;
+        db.recordAutoResponseSent(chatId);
+        console.log(`[AUTO_ENGINE] proactive_response_sent=${selectedMsg.messageId} in chat ${chatId}`);
+        const job = this.jobs.get(this.makeJobKey(botId, chatId, 'response'));
+        if (job) job.consecutiveFailures = 0;
+      } else {
+        const desc = (sendRes as any)?.description || 'Telegram send failed';
+        if (this.isPermanentInvalidTargetError(desc)) {
+          this.handlePermanentInvalidTarget(botId, chatId, desc);
+          return;
+        }
+        throw new Error(desc);
+      }
+
+      const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
+      this.scheduleJob(botId, chatId, 'response', nextDelay, 'next_interval');
+    } finally {
+      ChatbotService.releaseMessageLock(chatId, latestHumanMsg.messageId, sendSuccess);
+    }
   }
 
   private async executeAutoSticker(

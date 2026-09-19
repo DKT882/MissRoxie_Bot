@@ -491,6 +491,13 @@ async function runProactiveAutoEngineTestSuite() {
       gs18.autoResponse.lastResponseTimestamp = 0;
       gs18.autoResponse.nextAllowedAt = 0;
     }
+    db.addGroupConversationEntry(testGroup1, {
+      role: 'user',
+      name: 'Tester',
+      content: 'hello again for fail test',
+      timestamp: virtualTime,
+      messageId: 557
+    });
     const beforeFailJob = autoEngineService.getJob(botIdA, testGroup1, 'response');
     assert(beforeFailJob);
     const failDelay = beforeFailJob.targetRunAt - virtualTime;
@@ -521,7 +528,7 @@ async function runProactiveAutoEngineTestSuite() {
       userId: 7771,
       content: 'Any updates guys?',
       timestamp: virtualTime,
-      messageId: 557
+      messageId: 558
     });
 
     const before429Job = autoEngineService.getJob(botIdA, testGroup1, 'response');
@@ -552,7 +559,7 @@ async function runProactiveAutoEngineTestSuite() {
       userId: 7771,
       content: 'Check this out!',
       timestamp: virtualTime,
-      messageId: 558
+      messageId: 559
     });
 
     const beforeKickJob = autoEngineService.getJob(botIdA, testGroup1, 'response');

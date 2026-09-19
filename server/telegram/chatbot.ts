@@ -1,4 +1,4 @@
-import { TelegramMessage, TelegramUser, TelegramRequestContext } from './types.js';
+import { TelegramMessage, TelegramUser, TelegramRequestContext, AutoEngineConfig, AutoEngineMode } from './types.js';
 import { telegramApi } from './api.js';
 import { db, isSensitiveData, GROUP_MEMORY_LIMIT, GroupConversationEntry, GroupConversationMessage } from '../db/storage.js';
 import { metricsTracker } from '../observability/metricsService.js';
@@ -521,9 +521,66 @@ export class ChatbotService {
   private static RANDOM_CHAT_PROBABILITY = 0.03; // 3% chance
   public static PROACTIVE_OPPORTUNITY_PROBABILITY = 0.15; // 15% chance per eligible proactive window
 
-  // Atomic Response Gate to guarantee exactly ONE response per incoming Telegram message
-  private static processedMessageKeys: Set<string> = new Set();
-  private static activeProcessingKeys: Set<string> = new Set();
+  // Atomic Response Gate & Per-Message Idempotency Lock (${chatId}:${messageId})
+  private static inFlightMessageLocks: Map<string, Promise<boolean>> = new Map();
+  private static inFlightMessageResolvers: Map<string, (val: boolean) => void> = new Map();
+  private static completedMessageKeys: Set<string> = new Set();
+
+  public static getMessageKey(chatId: number, messageId: number): string {
+    return `${chatId}:${messageId}`;
+  }
+
+  public static isMessageProcessedOrInFlight(chatId: number, messageId: number): boolean {
+    const key = this.getMessageKey(chatId, messageId);
+    return this.completedMessageKeys.has(key) || this.inFlightMessageLocks.has(key);
+  }
+
+  public static acquireMessageLock(
+    chatId: number,
+    messageId: number
+  ): { acquired: boolean; reason?: string; inFlightPromise?: Promise<boolean> } {
+    const key = this.getMessageKey(chatId, messageId);
+    if (this.completedMessageKeys.has(key)) {
+      console.log(`[MESSAGE_DEDUP] duplicate_skip chatId=${chatId} messageId=${messageId} reason=already_completed`);
+      return { acquired: false, reason: 'already_completed' };
+    }
+    if (this.inFlightMessageLocks.has(key)) {
+      console.log(`[MESSAGE_DEDUP] duplicate_skip chatId=${chatId} messageId=${messageId} reason=already_in_flight`);
+      return { acquired: false, reason: 'already_in_flight', inFlightPromise: this.inFlightMessageLocks.get(key) };
+    }
+
+    console.log(`[MESSAGE_DEDUP] acquire chatId=${chatId} messageId=${messageId}`);
+    let resolver!: (val: boolean) => void;
+    const promise = new Promise<boolean>((res) => { resolver = res; });
+    this.inFlightMessageLocks.set(key, promise);
+    this.inFlightMessageResolvers.set(key, resolver);
+    return { acquired: true };
+  }
+
+  public static releaseMessageLock(chatId: number, messageId: number, result: boolean = false): void {
+    const key = this.getMessageKey(chatId, messageId);
+    const resolver = this.inFlightMessageResolvers.get(key);
+    if (resolver) {
+      resolver(result);
+      this.inFlightMessageResolvers.delete(key);
+    }
+    this.inFlightMessageLocks.delete(key);
+    this.completedMessageKeys.add(key);
+    if (this.completedMessageKeys.size > 5000) {
+      const oldest = this.completedMessageKeys.values().next().value;
+      if (oldest) this.completedMessageKeys.delete(oldest);
+    }
+    console.log(`[MESSAGE_DEDUP] completed chatId=${chatId} messageId=${messageId}`);
+  }
+
+  // Backward compatibility alias for acquireGate/releaseGate
+  public static acquireGate(chatId: number, messageId: number): boolean {
+    return this.acquireMessageLock(chatId, messageId).acquired;
+  }
+
+  public static releaseGate(chatId: number, messageId: number): void {
+    this.releaseMessageLock(chatId, messageId);
+  }
 
   public static setProactiveOpportunityProbability(prob: number): void {
     this.PROACTIVE_OPPORTUNITY_PROBABILITY = prob;
@@ -538,12 +595,44 @@ export class ChatbotService {
     this.chatRandomCooldowns.clear();
     this.recentStickers.clear();
     this.recentAnimations.clear();
-    this.processedMessageKeys.clear();
-    this.activeProcessingKeys.clear();
+    this.inFlightMessageLocks.clear();
+    this.inFlightMessageResolvers.clear();
+    this.completedMessageKeys.clear();
     this.chatAiQueues.clear();
     this.activeAiRequests = 0;
     this.aiSlotWaiters = [];
     this.PROACTIVE_OPPORTUNITY_PROBABILITY = 0.15;
+  }
+
+  public static resolveLegacyConfig(settings: any): AutoEngineConfig {
+    const ar = settings?.autoResponse;
+    const as = settings?.autoSticker;
+    const arEnabled = Boolean(ar?.enabled && ar.mode !== 'disabled');
+    const asEnabled = Boolean(as?.enabled && as.mode !== 'disabled');
+
+    let mode: AutoEngineMode = 'off';
+    if (arEnabled && asEnabled) mode = 'messages_and_stickers';
+    else if (arEnabled && !asEnabled) mode = 'messages_only';
+    else if (!arEnabled && asEnabled) mode = 'stickers_only';
+
+    return {
+      enabled: mode !== 'off',
+      mode,
+      messages: {
+        preset: 'custom',
+        minSeconds: ar?.minSeconds ?? 480,
+        maxSeconds: ar?.maxSeconds ?? 900,
+        cooldownSeconds: ar?.cooldownSeconds ?? 480,
+        randomize: ar?.randomize ?? (ar?.mode === 'random') ?? true
+      },
+      stickers: {
+        preset: 'custom',
+        minSeconds: as?.minSeconds ?? 600,
+        maxSeconds: as?.maxSeconds ?? 1200,
+        cooldownSeconds: as?.cooldownSeconds ?? 600,
+        randomize: as?.randomize ?? (as?.mode === 'random') ?? true
+      }
+    };
   }
 
   public static enqueueChatAiMessage(
@@ -592,21 +681,6 @@ export class ChatbotService {
 
     this.chatAiQueues.set(chatId, current);
     return current.then(() => result);
-  }
-
-  public static acquireGate(chatId: number, messageId: number): boolean {
-    const key = `${chatId}_${messageId}`;
-    if (this.activeProcessingKeys.has(key) || this.processedMessageKeys.has(key)) {
-      console.log(`CHATBOT_DUPLICATE_BLOCKED { chatId: ${chatId}, messageId: ${messageId}, reason: 'Duplicate incoming message ID' }`);
-      return false;
-    }
-    this.activeProcessingKeys.add(key);
-    this.processedMessageKeys.add(key);
-    if (this.processedMessageKeys.size > 2000) {
-      const first = this.processedMessageKeys.values().next().value;
-      if (first) this.processedMessageKeys.delete(first);
-    }
-    return true;
   }
 
   // Permanent error model blacklist for 401/402/403/404 responses
@@ -694,11 +768,6 @@ export class ChatbotService {
         next(0);
       }
     }
-  }
-
-  public static releaseGate(chatId: number, messageId: number): void {
-    const key = `${chatId}_${messageId}`;
-    this.activeProcessingKeys.delete(key);
   }
 
   public static clearConversation(chatId: number | string): boolean {
@@ -2398,19 +2467,14 @@ export class ChatbotService {
       return false;
     }
 
-    // 2. Atomic Gate: Deduplicate & ensure exactly one response decision
-    if (!this.acquireGate(chatId, msgId)) {
-      console.log(JSON.stringify({
-        event: 'CHATBOT_DUPLICATE_BLOCKED',
-        requestId: reqCtx?.traceId,
-        chatId,
-        messageId: msgId,
-        reason: 'Duplicate incoming message ID'
-      }));
+    // 2. Atomic Per-Message Lock: Deduplicate & ensure exactly one response pipeline/execution
+    const lockResult = this.acquireMessageLock(chatId, msgId);
+    if (!lockResult.acquired) {
       return false;
     }
 
     const requestId = `req_${chatId}_${msgId}_${Date.now()}`;
+    let sent = false;
 
     try {
       const decision = await this.generateResponseDecision(requestId, message, botUser, reqCtx);
@@ -2430,6 +2494,9 @@ export class ChatbotService {
         }));
         decision.chatId = chatId;
       }
+
+      // Guarantee exact reply_to_message_id = msgId for response caused by this human message
+      decision.replyToMessageId = msgId;
 
       logDebug({
         event: 'TELEGRAM_MESSAGE_ROUTE',
@@ -2453,7 +2520,7 @@ export class ChatbotService {
         });
       }
 
-      const sent = await this.dispatchResponse(decision, reqCtx);
+      sent = await this.dispatchResponse(decision, reqCtx);
       const sendFinishedAt = Date.now();
 
       if (reqCtx) {
@@ -2499,7 +2566,7 @@ export class ChatbotService {
       }));
       return false;
     } finally {
-      this.releaseGate(chatId, msgId);
+      this.releaseMessageLock(chatId, msgId, sent);
     }
   }
 
@@ -2613,46 +2680,7 @@ export class ChatbotService {
        message.reply_to_message.from.first_name?.toLowerCase().includes('roxie'))
     );
     const isExplicitTrigger = isPrivate || this.isTriggered(message, botUser);
-
-    if (isReplyToRoxie) {
-      console.log(`[DIRECT] reply_to_roxie_trigger message=${msgId}`);
-    } else if (isExplicitTrigger && !ChatbotService.hasExplicitStickerKeyword(userText)) {
-      console.log(`[DIRECT] roxie_keyword_trigger message=${msgId}`);
-    }
-
-    console.log(`[DIRECT_DEBUG] generate_decision_start: chatId=${chatId}, messageId=${msgId}, isTriggered=${isExplicitTrigger}, isPrivate=${isPrivate}, replyTo=${message.reply_to_message?.message_id || 0}, hasText=${Boolean(userText)}`);
-
-    // Spontaneous natural group chat chime-in check (only when not explicitly triggered)
-    if (!isExplicitTrigger) {
-      // Check Auto Response frequency & cooldown (anti-spam protection for spontaneous chat)
-      const autoResponseEligibility = db.checkAutoResponseEligibility(chatId);
-      if (autoResponseEligibility.allowed) {
-        const now = Date.now();
-        const lastRandom = this.chatRandomCooldowns.get(chatId) || 0;
-        if (now - lastRandom > this.RANDOM_CHAT_COOLDOWN_MS) {
-          if (Math.random() < this.RANDOM_CHAT_PROBABILITY) {
-            this.chatRandomCooldowns.set(chatId, now);
-            const randomDecision = await this.generateRandomNaturalDecision(requestId, message);
-            if (randomDecision && randomDecision.responseType !== 'none') {
-              db.recordAutoResponseSent(chatId);
-              return randomDecision;
-            }
-          }
-        }
-      }
-      console.log(`[DIRECT_DEBUG] decision_skipped: chatId=${chatId}, messageId=${msgId}, reason=No trigger condition met`);
-      return {
-        requestId,
-        chatId,
-        messageId: msgId,
-        userId,
-        personality: 'Psychologist-style',
-        mood: 'normal',
-        responseType: 'none',
-        replyToMessageId: msgId,
-        reason: 'No trigger condition met'
-      };
-    }
+    const isExplicitSticker = ChatbotService.hasExplicitStickerKeyword(userText);
 
     // Rolling In-Memory Context Window (Shared per Group Chat or DM)
     const now = Date.now();
@@ -2705,12 +2733,17 @@ export class ChatbotService {
       ? (brotherTrigger.isTriggered ? 'LustMode-BrotherPushback' : 'LustMode-Couple') 
       : 'Psychologist-style';
 
-    // Priority: Explicit "sticker" Keyword Trigger (STICKER ONLY / NO TEXT FALLBACK)
-    if (ChatbotService.hasExplicitStickerKeyword(userText)) {
+    // =========================================================================
+    // STEP 2: PRIORITY 1 — EXPLICIT "STICKER" KEYWORD (STICKER ONLY / NO TEXT FALLBACK)
+    // =========================================================================
+    if (isExplicitSticker) {
       console.log(`[STICKER] explicit_keyword message=${msgId}`);
+      console.log(`[RESPONSE_PIPELINE] explicit_sticker chatId=${chatId} messageId=${msgId}`);
+      db.setLastProactiveConsideredMessageId(chatId, msgId);
+
       const autoStickerAllowed = isPrivate || db.checkAutoStickerEligibility(chatId).allowed;
       if (!autoStickerAllowed) {
-        console.log(`[CHATBOT] Explicit sticker request blocked for chat ${chatId} due to sticker activity cooldown. Sending nothing.`);
+        console.log(`[RESPONSE_PIPELINE] explicit_sticker_gated (no text fallback) chatId=${chatId} messageId=${msgId}`);
         return {
           requestId,
           chatId,
@@ -2742,7 +2775,7 @@ export class ChatbotService {
           explicitStickerRequest: true
         };
       } else {
-        console.log(`[CHATBOT] Explicit sticker requested for chat ${chatId} but library empty. Sending nothing.`);
+        console.log(`[RESPONSE_PIPELINE] explicit_sticker_library_empty (no text fallback) chatId=${chatId} messageId=${msgId}`);
         return {
           requestId,
           chatId,
@@ -2756,6 +2789,80 @@ export class ChatbotService {
         };
       }
     }
+
+    // =========================================================================
+    // STEP 3: PRIORITY 2 — DIRECT ROXIE TRIGGER (@Roxie, "roxie", reply-to-Roxie, private)
+    // =========================================================================
+    if (!isExplicitTrigger && !isReplyToRoxie) {
+      // =========================================================================
+      // STEP 4: PRIORITY 3 — PROACTIVE RANDOM OPPORTUNITY ON NEW HUMAN MESSAGE
+      // =========================================================================
+      if (!isPrivate) {
+        const engineConfig: AutoEngineConfig = settings?.autoEngine || ChatbotService.resolveLegacyConfig(settings || {});
+        const isEngineEnabled = Boolean(engineConfig?.enabled && engineConfig?.mode !== 'off');
+        const shouldRunMessages = isEngineEnabled && (engineConfig.mode === 'messages_only' || engineConfig.mode === 'messages_and_stickers');
+
+        if (shouldRunMessages) {
+          const lastConsidered = db.getLastProactiveConsideredMessageId(chatId);
+          if (msgId > lastConsidered) {
+            db.setLastProactiveConsideredMessageId(chatId, msgId);
+
+            const autoResponseEligibility = db.checkAutoResponseEligibility(chatId);
+            if (autoResponseEligibility.allowed) {
+              const roll = Math.random();
+              if (roll <= ChatbotService.PROACTIVE_OPPORTUNITY_PROBABILITY) {
+                console.log(`[RESPONSE_PIPELINE] proactive chatId=${chatId} messageId=${msgId} roll=${roll.toFixed(3)}`);
+                const proactiveDecision = await this.generateProactiveResponse(chatId, botUser, {
+                  messageId: msgId,
+                  userId: message.from?.id,
+                  content: userText,
+                  name: userName,
+                  role: 'user',
+                  timestamp: message.date ? message.date * 1000 : Date.now()
+                });
+
+                if (proactiveDecision && proactiveDecision.responseType !== 'none' && proactiveDecision.content) {
+                  proactiveDecision.replyToMessageId = msgId;
+                  db.recordAutoResponseSent(chatId);
+                  return proactiveDecision;
+                }
+              } else {
+                console.log(`[RESPONSE_PIPELINE] skipped (proactive_random_roll) chatId=${chatId} messageId=${msgId} roll=${roll.toFixed(3)} threshold=${ChatbotService.PROACTIVE_OPPORTUNITY_PROBABILITY}`);
+              }
+            } else {
+              console.log(`[RESPONSE_PIPELINE] skipped (proactive_interval_cooldown) chatId=${chatId} messageId=${msgId} remaining=${autoResponseEligibility.remainingSeconds || 0}s`);
+            }
+          } else {
+            console.log(`[RESPONSE_PIPELINE] skipped (already_considered) chatId=${chatId} messageId=${msgId} lastConsidered=${lastConsidered}`);
+          }
+        }
+      }
+
+      // =========================================================================
+      // STEP 5: PRIORITY 4 — NO RESPONSE
+      // =========================================================================
+      console.log(`[RESPONSE_PIPELINE] skipped chatId=${chatId} messageId=${msgId} reason=no_trigger`);
+      return {
+        requestId,
+        chatId,
+        messageId: msgId,
+        userId,
+        personality: 'Psychologist-style',
+        mood: 'normal',
+        responseType: 'none',
+        replyToMessageId: msgId,
+        reason: 'No trigger condition met'
+      };
+    }
+
+    // DIRECT TRIGGER CONFIRMED
+    if (isReplyToRoxie) {
+      console.log(`[DIRECT] reply_to_roxie_trigger message=${msgId}`);
+    } else {
+      console.log(`[DIRECT] roxie_keyword_trigger message=${msgId}`);
+    }
+    console.log(`[RESPONSE_PIPELINE] direct chatId=${chatId} messageId=${msgId}`);
+    db.setLastProactiveConsideredMessageId(chatId, msgId);
 
     // Check Explicit Media Requests (e.g. GIF / animation)
     const mediaIntent = this.detectMediaIntent(userText);
