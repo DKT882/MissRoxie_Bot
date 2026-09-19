@@ -214,6 +214,8 @@ export class TelegramBotManager {
 
       // Delete webhook to allow long polling
       await telegramApi.deleteWebhook();
+      const whInfo = await telegramApi.getWebhookInfo().catch(() => null);
+      console.log(`[TELEGRAM_WEBHOOK_INFO] url="${whInfo?.result?.url || ''}" pending_update_count=${whInfo?.result?.pending_update_count} last_error_date=${whInfo?.result?.last_error_date} last_error_message="${whInfo?.result?.last_error_message || ''}"`);
 
       // Register admin-only command visibility with Telegram
       await registerBotCommands().catch((err) => {
@@ -267,6 +269,13 @@ export class TelegramBotManager {
 
         const pollElapsed = Date.now() - pollReqStart;
 
+        if (data.ok && Array.isArray(data.result)) {
+          const count = data.result.length;
+          console.log(`[TELEGRAM_POLL_TRACE] ok=true updateCount=${count} firstUpdateId=${count > 0 ? data.result[0]?.update_id : 'none'} lastUpdateId=${count > 0 ? data.result[count - 1]?.update_id : 'none'}`);
+        } else {
+          console.log(`[TELEGRAM_POLL_TRACE] ok=${Boolean(data.ok)} error_code=${data.error_code} description="${data.description || ''}"`);
+        }
+
         if (!data.ok) {
           metricsTracker.increment('telegram_api_errors');
           if (data.error_code === 409) {
@@ -296,6 +305,9 @@ export class TelegramBotManager {
           const updatesToProcess: TelegramUpdate[] = [];
 
           for (const update of data.result as TelegramUpdate[]) {
+            const updateKeys = Object.keys(update || {});
+            console.log(`[TELEGRAM_UPDATE_TRACE] updateId=${update.update_id} updateKeys=[${updateKeys.join(',')}] hasMessage=${Boolean(update.message)} hasEditedMessage=${Boolean(update.edited_message)} hasCallbackQuery=${Boolean(update.callback_query)} messageChatId=${update.message?.chat?.id} messageId=${update.message?.message_id} messageFromId=${update.message?.from?.id} messageText="${update.message?.text || ''}"`);
+
             if (update.update_id) {
               if (TelegramBotManager.processedUpdateIds.has(update.update_id)) {
                 continue;
@@ -329,6 +341,7 @@ export class TelegramBotManager {
 
             // CRITICAL: Immediately enqueue into background queues without blocking the next getUpdates polling request
             for (const u of updatesToProcess) {
+              console.log(`[TELEGRAM_UPDATE_TRACE] dispatching_to_processUpdate=true updateId=${u.update_id}`);
               this.processUpdate(u).catch((err) => {
                 console.error('[POLLING] Unhandled error processing update:', err);
               });
@@ -376,6 +389,7 @@ export class TelegramBotManager {
   }
 
   public async processUpdate(update: TelegramUpdate) {
+    console.log(`[TELEGRAM_UPDATE_TRACE] processUpdate_received=true updateId=${update.update_id}`);
     metricsTracker.increment('telegram_updates_received');
     const receivedAt = Date.now();
     const msg = update.message || update.edited_message;
