@@ -731,6 +731,34 @@ export class ChatbotService {
     return filtered.length > 0 ? filtered : rawCandidates;
   }
 
+  /**
+   * Starts a scoped typing indicator loop for a specific chat.
+   * Sends an immediate 'typing' chat action and refreshes every 4000ms until stopped.
+   * Returns a cleanup function that cancels the interval immediately.
+   */
+  private static startTypingLoop(chatId: number): () => void {
+    let stopped = false;
+    telegramApi.sendChatAction(chatId, 'typing').catch((err) => {
+      console.warn(JSON.stringify({
+        event: 'CHATBOT_TYPING_ERROR',
+        chatId,
+        error: err?.message || 'Failed to send typing indicator'
+      }));
+    });
+
+    const intervalId = setInterval(() => {
+      if (stopped) return;
+      telegramApi.sendChatAction(chatId, 'typing').catch(() => {});
+    }, 4000);
+
+    return () => {
+      if (!stopped) {
+        stopped = true;
+        clearInterval(intervalId);
+      }
+    };
+  }
+
   // Global bounded concurrency for AI calls (max 4 simultaneous OpenRouter requests)
   public static activeAiRequests: number = 0;
   public static readonly MAX_CONCURRENT_AI_REQUESTS = 4;
@@ -2491,9 +2519,14 @@ export class ChatbotService {
 
     const requestId = `req_${chatId}_${msgId}_${Date.now()}`;
     let sent = false;
+    let stopTyping: (() => void) | null = null;
 
     try {
-      const decision = await this.generateResponseDecision(requestId, message, botUser, reqCtx);
+      const decision = await this.generateResponseDecision(requestId, message, botUser, reqCtx, () => {
+        if (!stopTyping) {
+          stopTyping = ChatbotService.startTypingLoop(chatId);
+        }
+      });
       console.log(`[TRIGGER_TRACE] decision chatId=${chatId} messageId=${msgId} responseType=${decision?.responseType || 'null'} replyToMessageId=${decision?.replyToMessageId}`);
       if (!decision || decision.responseType === 'none') {
         return false;
@@ -2583,6 +2616,7 @@ export class ChatbotService {
       }));
       return false;
     } finally {
+      stopTyping?.();
       this.releaseMessageLock(chatId, msgId, sent);
     }
   }
@@ -2591,7 +2625,8 @@ export class ChatbotService {
     requestId: string,
     message: TelegramMessage,
     botUser: TelegramUser | null,
-    reqCtx?: TelegramRequestContext
+    reqCtx?: TelegramRequestContext,
+    onAiStart?: () => void
   ): Promise<ChatbotDecision | null> {
     const chatId = reqCtx?.chatId ?? message.chat.id;
     const msgId = reqCtx?.messageId ?? message.message_id;
@@ -3225,6 +3260,10 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
 
     console.log(`[DIRECT_DEBUG] ai_generation_start: chatId=${chatId}, messageId=${msgId}, model=${configuredModels[0] || 'openrouter/free'}, candidateCount=${configuredModels.length}`);
 
+    if (onAiStart) {
+      onAiStart();
+    }
+
     await this.acquireAiSlot();
     try {
       for (let attemptIdx = 0; attemptIdx < configuredModels.length; attemptIdx++) {
@@ -3423,16 +3462,6 @@ Reply naturally as Roxie directly to the user regarding what they just said. Ret
       requestId,
       length: cleanedText.length,
       modelUsed
-    });
-
-    // Fire-and-forget typing status only when AI has successfully produced a response
-    telegramApi.sendChatAction(chatId, 'typing').catch((err) => {
-      console.warn(JSON.stringify({
-        event: 'CHATBOT_TYPING_ERROR',
-        requestId,
-        chatId,
-        error: err?.message || 'Failed to send typing indicator'
-      }));
     });
 
     let decision: ChatbotDecision;
