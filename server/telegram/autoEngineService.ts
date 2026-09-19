@@ -412,13 +412,47 @@ export class AutoEngineService {
     settings: GroupSettings,
     engineConfig: AutoEngineConfig
   ): Promise<void> {
+    console.log(`[AUTO_ENGINE] proactive_check (chatId=${chatId})`);
+
     if (settings.chatbotEnabled === false) {
       const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
       this.scheduleJob(botId, chatId, 'response', nextDelay, 'chatbot_disabled');
       return;
     }
 
-    const decision = await ChatbotService.generateProactiveResponse(chatId, null);
+    const latestHumanMsg = ChatbotService.getLatestRecentHumanMessage(chatId);
+    const lastConsidered = db.getLastProactiveConsideredMessageId(chatId);
+
+    if (!latestHumanMsg || latestHumanMsg.messageId <= lastConsidered) {
+      console.log(`[AUTO_ENGINE] proactive_skip_reason=not_new_message (chatId=${chatId}, latest=${latestHumanMsg?.messageId || 0}, lastConsidered=${lastConsidered})`);
+      const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
+      this.scheduleJob(botId, chatId, 'response', nextDelay, 'no_new_human_message');
+      return;
+    }
+
+    // Mark message as considered immediately to guarantee at most 1 opportunity per message
+    db.setLastProactiveConsideredMessageId(chatId, latestHumanMsg.messageId);
+
+    const autoResponseEligibility = db.checkAutoResponseEligibility(chatId);
+    if (!autoResponseEligibility.allowed) {
+      console.log(`[AUTO_ENGINE] proactive_skip_reason=interval (chatId=${chatId}, remaining=${autoResponseEligibility.remainingSeconds || 0}s)`);
+      const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
+      this.scheduleJob(botId, chatId, 'response', nextDelay, 'interval_cooldown');
+      return;
+    }
+
+    const roll = Math.random();
+    if (roll > ChatbotService.PROACTIVE_OPPORTUNITY_PROBABILITY) {
+      console.log(`[AUTO_ENGINE] proactive_skip_reason=random_roll (chatId=${chatId}, roll=${roll.toFixed(3)}, threshold=${ChatbotService.PROACTIVE_OPPORTUNITY_PROBABILITY})`);
+      const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
+      this.scheduleJob(botId, chatId, 'response', nextDelay, 'random_roll_skip');
+      return;
+    }
+
+    const selectedMsg = latestHumanMsg;
+    console.log(`[AUTO_ENGINE] proactive_selected_message=${selectedMsg.messageId} in chat ${chatId}`);
+
+    const decision = await ChatbotService.generateProactiveResponse(chatId, null, selectedMsg);
     if (!decision || decision.responseType === 'none' || !decision.content) {
       this.handleFailure(botId, chatId, 'response', new Error('OpenRouter proactive generation produced no response'));
       return;
@@ -433,6 +467,7 @@ export class AutoEngineService {
     const sendRes = await telegramApi.sendMessage(chatId, decision.content, replyOptions);
     if (sendRes.ok || (sendRes as any).message_id) {
       db.recordAutoResponseSent(chatId);
+      console.log(`[AUTO_ENGINE] proactive_response_sent=${selectedMsg.messageId} in chat ${chatId}`);
       const job = this.jobs.get(this.makeJobKey(botId, chatId, 'response'));
       if (job) job.consecutiveFailures = 0;
     } else {

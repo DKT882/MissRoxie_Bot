@@ -519,10 +519,19 @@ export class ChatbotService {
   public static MIN_CONTEXT_MESSAGES = 10;
   private static RANDOM_CHAT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes cooldown for random chime-in
   private static RANDOM_CHAT_PROBABILITY = 0.03; // 3% chance
+  public static PROACTIVE_OPPORTUNITY_PROBABILITY = 0.15; // 15% chance per eligible proactive window
 
   // Atomic Response Gate to guarantee exactly ONE response per incoming Telegram message
   private static processedMessageKeys: Set<string> = new Set();
   private static activeProcessingKeys: Set<string> = new Set();
+
+  public static setProactiveOpportunityProbability(prob: number): void {
+    this.PROACTIVE_OPPORTUNITY_PROBABILITY = prob;
+  }
+
+  public static resetProactiveOpportunityProbability(): void {
+    this.PROACTIVE_OPPORTUNITY_PROBABILITY = 0.15;
+  }
 
   public static reset() {
     this.conversations.clear();
@@ -534,6 +543,7 @@ export class ChatbotService {
     this.chatAiQueues.clear();
     this.activeAiRequests = 0;
     this.aiSlotWaiters = [];
+    this.PROACTIVE_OPPORTUNITY_PROBABILITY = 0.15;
   }
 
   public static enqueueChatAiMessage(
@@ -1090,13 +1100,139 @@ export class ChatbotService {
     return sanitized.replace(/\s{2,}/g, ' ').trim();
   }
 
+  public static isTelegramServiceText(text: string): boolean {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+
+    // 1. Prefix-based Telegram service markers
+    if (
+      trimmed.startsWith('📌 ') ||
+      trimmed.startsWith('👤 ') ||
+      trimmed.startsWith('🚪 ') ||
+      trimmed.startsWith('⚠️ ')
+    ) {
+      return true;
+    }
+
+    // 2. Strict pattern matching for pin / unpin service notifications
+    if (
+      /^(📌\s*)?(the\s+)?message\s+(was\s+)?(pinned|unpinned)[\.\!]?$/i.test(trimmed) ||
+      /^(📌\s*)?(pinned|unpinned)\s+(the\s+)?message[\.\!]?$/i.test(trimmed) ||
+      /^(the\s+)?message\s+pinned[\.\!]?$/i.test(trimmed)
+    ) {
+      return true;
+    }
+
+    // 3. Other standard Telegram service notifications in text form
+    if (
+      /^(the\s+)?(group|chat)\s+(title|photo|name)\s+(was\s+)?(changed|updated|deleted|removed)[\.\!]?$/i.test(trimmed) ||
+      /^(a\s+)?new\s+member\s+(joined|left)[\.\!]?$/i.test(trimmed)
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  public static isTelegramServiceMessage(message: TelegramMessage): boolean {
+    if (!message) return false;
+
+    const msg = message as any;
+    if (
+      msg.pinned_message ||
+      msg.unpinned_message ||
+      msg.new_chat_members ||
+      msg.left_chat_member ||
+      msg.new_chat_title ||
+      msg.new_chat_photo ||
+      msg.delete_chat_photo ||
+      msg.group_chat_created ||
+      msg.supergroup_chat_created ||
+      msg.channel_chat_created ||
+      msg.message_auto_delete_timer_changed ||
+      msg.migrate_to_chat_id ||
+      msg.migrate_from_chat_id ||
+      msg.video_chat_scheduled ||
+      msg.video_chat_started ||
+      msg.video_chat_ended ||
+      msg.video_chat_participants_invited ||
+      msg.forum_topic_created ||
+      msg.forum_topic_edited ||
+      msg.forum_topic_closed ||
+      msg.forum_topic_reopened ||
+      msg.general_forum_topic_hidden ||
+      msg.general_forum_topic_unhidden ||
+      msg.write_access_allowed ||
+      msg.user_shared ||
+      msg.chat_shared
+    ) {
+      return true;
+    }
+
+    const textOrCaption = (message.text || message.caption || '').trim();
+    if (textOrCaption && ChatbotService.isTelegramServiceText(textOrCaption)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  public static isRoxieSelfMessage(message: TelegramMessage, botUser: TelegramUser | null): boolean {
+    if (!message) return false;
+
+    const msg = message as any;
+    if (msg.direction === 'outgoing' || msg.source === 'bot') {
+      return true;
+    }
+
+    const sender = message.from;
+    if (!sender) return false;
+
+    if (botUser && sender.id === botUser.id) {
+      return true;
+    }
+
+    const usernameLower = sender.username?.toLowerCase();
+    const botUsernameLower = botUser?.username?.toLowerCase();
+
+    if (botUsernameLower && usernameLower === botUsernameLower) {
+      return true;
+    }
+
+    if (usernameLower === 'missroxie_bot' || usernameLower === 'roxie') {
+      return true;
+    }
+
+    if (sender.is_bot && sender.first_name?.toLowerCase() === 'roxie') {
+      return true;
+    }
+
+    return false;
+  }
+
+  public static isGenuineHumanMessage(message: TelegramMessage, botUser: TelegramUser | null = null): boolean {
+    if (!message || !message.from) return false;
+
+    if (ChatbotService.isRoxieSelfMessage(message, botUser)) return false;
+    if (message.from.is_bot) return false;
+    if (ChatbotService.isTelegramServiceMessage(message)) return false;
+
+    return true;
+  }
+
   public static hasExplicitStickerKeyword(text: string): boolean {
     if (!text || typeof text !== 'string') return false;
     const lower = text.toLowerCase().trim();
-    return /\bsticker[s]?\b/i.test(lower) || /\bstkr\b/i.test(lower) || lower.includes('sticker');
+    return /\bsticker[s]?\b/i.test(lower) || /\bstkr\b/i.test(lower) || lower.includes('sticker') || lower.includes('स्टिकर') || lower.includes('स्टीकर');
   }
 
   public static isTriggered(message: TelegramMessage, botUser: TelegramUser | null): boolean {
+    // 0. Safety Guard: Only genuine human messages can trigger Roxie
+    if (!ChatbotService.isGenuineHumanMessage(message, botUser)) {
+      return false;
+    }
+
     const rawText = message.text || message.caption || '';
     const text = rawText.trim();
 
@@ -1151,18 +1287,19 @@ export class ChatbotService {
       }
     }
 
-    // 4. Case-insensitive text / caption inspection
-    const lowerText = text.toLowerCase();
+    // 4. Word-boundary text & keyword triggers (English, Hinglish, and Hindi Devanagari)
     if (
-      /\broxie\b/i.test(lowerText) ||
-      lowerText.includes('roxie') ||
-      lowerText.includes(botUsernameWithAt) ||
-      lowerText.includes(botUsernameNoAt) ||
-      lowerText.includes('@missroxie_bot') ||
-      lowerText.includes('@roxie') ||
-      ChatbotService.hasExplicitStickerKeyword(lowerText) ||
-      lowerText.includes('gif') ||
-      lowerText.includes('animation')
+      /\broxie\b/i.test(text) ||
+      /\broxy\b/i.test(text) ||
+      /@roxie\b/i.test(text) ||
+      /@roxy\b/i.test(text) ||
+      /@missroxie_bot\b/i.test(text) ||
+      /\bmissroxie_bot\b/i.test(text) ||
+      /(^|\s|[^\p{L}\p{N}])(रॉक्सी|रोक्सी)($|\s|[^\p{L}\p{N}])/u.test(text) ||
+      (botUsernameNoAt && new RegExp(`(@|\\b)${botUsernameNoAt}\\b`, 'i').test(text)) ||
+      ChatbotService.hasExplicitStickerKeyword(text) ||
+      /\bgif\b/i.test(text) ||
+      /\banimation\b/i.test(text)
     ) {
       return true;
     }
@@ -2250,6 +2387,11 @@ export class ChatbotService {
     const msgId = reqCtx?.messageId ?? message.message_id ?? 0;
     if (!chatId || !msgId) return false;
 
+    // 0. Safety Guard: Reject self messages, bots, and Telegram service messages
+    if (!ChatbotService.isGenuineHumanMessage(message, botUser)) {
+      return false;
+    }
+
     // 1. Strict Command Precedence: Commands MUST NEVER enter the chatbot pipeline
     const textOrCaption = (message.text || message.caption || '').trim();
     if (textOrCaption.startsWith('/') || textOrCaption.startsWith('!')) {
@@ -2376,6 +2518,21 @@ export class ChatbotService {
       ? (message.from.last_name ? `${message.from.first_name} ${message.from.last_name}` : message.from.first_name)
       : (message.from?.username ? `@${message.from.username}` : (userId ? `User ${userId}` : 'User'));
 
+    // Safety guard: reject self messages, bots, and service messages
+    if (!ChatbotService.isGenuineHumanMessage(message, botUser)) {
+      return {
+        requestId,
+        chatId,
+        messageId: msgId,
+        userId,
+        personality: 'Psychologist-style',
+        mood: 'normal',
+        responseType: 'none',
+        replyToMessageId: msgId,
+        reason: 'Ignored non-human or service message'
+      };
+    }
+
     if (!isPrivate) {
       const settings = db.getGroupSettings(chatId);
       if (settings.chatbotEnabled === false) {
@@ -2445,9 +2602,24 @@ export class ChatbotService {
           messageId: msgId
         });
       }
+      console.log(`[AUTO_ENGINE] new_human_message (chatId=${chatId}, messageId=${msgId})`);
     }
 
+    const isReplyToRoxie = Boolean(
+      message.reply_to_message?.from &&
+      ((botUser && message.reply_to_message.from.id === botUser.id) ||
+       message.reply_to_message.from.username?.toLowerCase() === (botUser?.username?.toLowerCase() || 'missroxie_bot') ||
+       message.reply_to_message.from.username?.toLowerCase() === 'roxie' ||
+       message.reply_to_message.from.first_name?.toLowerCase().includes('roxie'))
+    );
     const isExplicitTrigger = isPrivate || this.isTriggered(message, botUser);
+
+    if (isReplyToRoxie) {
+      console.log(`[DIRECT] reply_to_roxie_trigger message=${msgId}`);
+    } else if (isExplicitTrigger && !ChatbotService.hasExplicitStickerKeyword(userText)) {
+      console.log(`[DIRECT] roxie_keyword_trigger message=${msgId}`);
+    }
+
     console.log(`[DIRECT_DEBUG] generate_decision_start: chatId=${chatId}, messageId=${msgId}, isTriggered=${isExplicitTrigger}, isPrivate=${isPrivate}, replyTo=${message.reply_to_message?.message_id || 0}, hasText=${Boolean(userText)}`);
 
     // Spontaneous natural group chat chime-in check (only when not explicitly triggered)
@@ -2535,6 +2707,7 @@ export class ChatbotService {
 
     // Priority: Explicit "sticker" Keyword Trigger (STICKER ONLY / NO TEXT FALLBACK)
     if (ChatbotService.hasExplicitStickerKeyword(userText)) {
+      console.log(`[STICKER] explicit_keyword message=${msgId}`);
       const autoStickerAllowed = isPrivate || db.checkAutoStickerEligibility(chatId).allowed;
       if (!autoStickerAllowed) {
         console.log(`[CHATBOT] Explicit sticker request blocked for chat ${chatId} due to sticker activity cooldown. Sending nothing.`);
@@ -3763,12 +3936,25 @@ STRICT INVARIANTS:
 
     // Filter for genuine human messages (exclude assistant/bot, outgoing, empty, commands, system events)
     const humanMsgs = memory.filter(m => {
-      if (m.role === 'assistant' || m.name === 'Roxie' || m.displayName === 'Roxie' || m.sender === 'bot') return false;
+      if (m.role === 'assistant' || m.sender === 'bot' || m.source === 'bot') return false;
       if (m.direction === 'outgoing') return false;
+      const nameLower = (m.name || '').toLowerCase();
+      const displayNameLower = (m.displayName || '').toLowerCase();
+      const usernameLower = (m.username || '').toLowerCase();
+      if (
+        nameLower === 'roxie' ||
+        nameLower.includes('roxie') ||
+        displayNameLower === 'roxie' ||
+        displayNameLower.includes('roxie') ||
+        usernameLower === 'missroxie_bot' ||
+        usernameLower === 'roxie'
+      ) {
+        return false;
+      }
       const content = (m.content || '').trim();
       if (!content) return false;
       if (content.startsWith('/') || content.startsWith('!')) return false;
-      if (content.startsWith('👤 ') || content.startsWith('🚪 ') || content.startsWith('📌 ') || content.startsWith('⚠️ ')) return false;
+      if (ChatbotService.isTelegramServiceText(content)) return false;
       return true;
     });
 
@@ -3778,6 +3964,37 @@ STRICT INVARIANTS:
     const recentWindow = humanMsgs.slice(-20);
     const randomIndex = Math.floor(Math.random() * recentWindow.length);
     return recentWindow[randomIndex];
+  }
+
+  public static getLatestRecentHumanMessage(chatId: number): GroupConversationMessage | null {
+    const memory = db.getGroupMemory(chatId);
+    if (!memory || memory.length === 0) return null;
+
+    const humanMsgs = memory.filter(m => {
+      if (m.role === 'assistant' || m.sender === 'bot' || m.source === 'bot') return false;
+      if (m.direction === 'outgoing') return false;
+      const nameLower = (m.name || '').toLowerCase();
+      const displayNameLower = (m.displayName || '').toLowerCase();
+      const usernameLower = (m.username || '').toLowerCase();
+      if (
+        nameLower === 'roxie' ||
+        nameLower.includes('roxie') ||
+        displayNameLower === 'roxie' ||
+        displayNameLower.includes('roxie') ||
+        usernameLower === 'missroxie_bot' ||
+        usernameLower === 'roxie'
+      ) {
+        return false;
+      }
+      const content = (m.content || '').trim();
+      if (!content) return false;
+      if (content.startsWith('/') || content.startsWith('!')) return false;
+      if (ChatbotService.isTelegramServiceText(content)) return false;
+      return true;
+    });
+
+    if (humanMsgs.length === 0) return null;
+    return humanMsgs[humanMsgs.length - 1];
   }
 
   public static async generateProactiveResponse(

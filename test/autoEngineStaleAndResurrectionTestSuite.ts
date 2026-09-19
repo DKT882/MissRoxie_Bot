@@ -4,6 +4,7 @@ import path from 'path';
 import { db } from '../server/db/storage.js';
 import { telegramApi } from '../server/telegram/api.js';
 import { autoEngineService } from '../server/telegram/autoEngineService.js';
+import { ChatbotService } from '../server/telegram/chatbot.js';
 import { mongoManager } from '../server/db/mongodb.js';
 import { MongoStorageService } from '../server/db/mongoStorage.js';
 import { safeStaleGroupCleanup } from '../scripts/safeStaleGroupCleanup.js';
@@ -147,6 +148,7 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   }
   autoEngineService.stop();
   pendingCallbacks = [];
+  ChatbotService.setProactiveOpportunityProbability(1.0);
   autoEngineService.start(botIdA);
 
   // --- TEST T & U: Classification tests ---
@@ -209,10 +211,12 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   pass('Test U: isPermanentInvalidTargetError does NOT classify non-permanent errors');
 
   // --- TEST A: Single 400 'chat not found' marks group unavailable/botLeft and never schedules retry ---
+  db.addGroupConversationEntry(testChatId1, { role: 'user', name: 'User', content: 'hello everyone', messageId: 100, timestamp: Date.now() });
   db.updateGroupSettings(testChatId1, {
     botId: botIdA,
     botLeft: false,
     unavailable: false,
+    chatbotEnabled: true,
     autoResponse: {
       enabled: true,
       mode: 'random',
@@ -277,10 +281,12 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   // --- TEST C: Single 'group chat was upgraded to a supergroup' marks old group unavailable ---
   const upgradedOldChatId = -100999222005;
   apiFailureMode[upgradedOldChatId] = 'Bad Request: group chat was upgraded to a supergroup chat';
+  db.addGroupConversationEntry(upgradedOldChatId, { role: 'user', name: 'User', content: 'hello everyone', messageId: 100, timestamp: Date.now() });
   db.updateGroupSettings(upgradedOldChatId, {
     botId: botIdA,
     botLeft: false,
     unavailable: false,
+    chatbotEnabled: true,
     autoResponse: {
       enabled: true,
       mode: 'random',
@@ -328,6 +334,7 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   // --- TEST E: Transient 500 error triggers backoff and does NOT mark group unavailable ---
   const transientChatId = -100999222006;
   apiFailureMode[transientChatId] = 'Internal Server Error: 500';
+  db.addGroupConversationEntry(transientChatId, { role: 'user', name: 'User', content: 'hello everyone', messageId: 100, timestamp: Date.now() });
   db.updateGroupSettings(transientChatId, {
     botId: botIdA,
     botLeft: false,
@@ -360,6 +367,7 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   // --- TEST W: Consecutive failures counter increments on failure and resets on success ---
   // Clear API failure mode so next execution succeeds
   delete apiFailureMode[transientChatId];
+  db.addGroupConversationEntry(transientChatId, { role: 'user', name: 'User', content: 'another human message', messageId: 101, timestamp: Date.now() });
   // Advance time past the backoff interval (60s backoff)
   await advanceTime(70000);
   const recoveredJob = autoEngineService.getJob(botIdA, transientChatId, 'response');
@@ -370,6 +378,7 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
 
   // --- TEST F: 429 Too Many Requests triggers retry_after backoff and does NOT mark unavailable ---
   const rateLimitedChatId = -100999222007;
+  db.addGroupConversationEntry(rateLimitedChatId, { role: 'user', name: 'User', content: 'hello everyone', messageId: 100, timestamp: Date.now() });
   db.updateGroupSettings(rateLimitedChatId, {
     botId: botIdA,
     botLeft: false,
@@ -457,6 +466,7 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   const dualGroup = -100999222009;
   sentMessages = [];
   sentStickers = [];
+  db.addGroupConversationEntry(dualGroup, { role: 'user', name: 'User', content: 'hello everyone', messageId: 100, timestamp: Date.now() });
   db.updateGroupSettings(dualGroup, {
     botId: botIdA,
     botLeft: false,
@@ -492,6 +502,11 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   assert.strictEqual(sentMessages.length, 1, 'Response sent at 45s');
   assert.strictEqual(sentStickers.length, 0, 'Sticker not yet sent at 45s');
 
+  const curDual = db.getGroupSettings(dualGroup);
+  if (curDual?.autoResponse) {
+    curDual.autoResponse.lastResponseTimestamp = 0;
+  }
+  db.addGroupConversationEntry(dualGroup, { role: 'user', name: 'User', content: 'another human msg', messageId: 101, timestamp: Date.now() });
   await advanceTime(50000); // 95s total
   assert.strictEqual(sentMessages.length, 2, 'Second response sent at 95s');
   assert.strictEqual(sentStickers.length, 1, 'First sticker sent at 95s');
@@ -815,10 +830,12 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
   const newSupergroupMigrated = -100999222023;
 
   apiFailureMode[oldGroupMigrated] = 'Bad Request: group chat was upgraded to a supergroup chat';
+  db.addGroupConversationEntry(oldGroupMigrated, { role: 'user', name: 'User', content: 'hello everyone', messageId: 100, timestamp: Date.now() });
   db.updateGroupSettings(oldGroupMigrated, {
     botId: botIdA,
     botLeft: false,
     unavailable: false,
+    chatbotEnabled: true,
     autoResponse: { enabled: true, mode: 'random', minSeconds: 30, maxSeconds: 60, cooldownSeconds: 30 }
   });
 
@@ -831,6 +848,7 @@ async function runAutoEngineStaleAndResurrectionTestSuite() {
 
   // Register newly discovered supergroup
   delete apiFailureMode[newSupergroupMigrated];
+  db.addGroupConversationEntry(newSupergroupMigrated, { role: 'user', name: 'User', content: 'hello everyone', messageId: 100, timestamp: Date.now() });
   db.updateGroupSettings(newSupergroupMigrated, {
     botId: botIdA,
     botLeft: false,

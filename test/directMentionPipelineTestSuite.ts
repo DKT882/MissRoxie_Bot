@@ -4,6 +4,7 @@ import { telegramApi } from '../server/telegram/api.js';
 import { ChatbotService, ChatbotDecision } from '../server/telegram/chatbot.js';
 import { TelegramBotManager } from '../server/telegram/botManager.js';
 import { autoEngineService } from '../server/telegram/autoEngineService.js';
+import { ReactionService } from '../server/telegram/reactionService.js';
 import { TelegramMessage, TelegramUpdate, TelegramUser } from '../server/telegram/types.js';
 
 let passed = 0;
@@ -31,6 +32,7 @@ async function runDirectMentionPipelineTestSuite() {
   let sentMessages: Array<{ chatId: number; text: string; options?: any }> = [];
   let sentStickers: Array<{ chatId: number; fileId: string; options?: any }> = [];
   let sentChatActions: Array<{ chatId: number; action: string }> = [];
+  let sentReactions: Array<{ chatId: number; messageId: number; reaction: string }> = [];
   let aiGenerationFail = false;
   let simulatedAiText: string | null = 'Hey! Main theek hoon, tum sunao?';
   let failSendMessage = false;
@@ -39,6 +41,7 @@ async function runDirectMentionPipelineTestSuite() {
   const origSendMessage = telegramApi.sendMessage;
   const origSendSticker = telegramApi.sendSticker;
   const origSendChatAction = telegramApi.sendChatAction;
+  const origSetMessageReaction = telegramApi.setMessageReaction;
   const origFetch = global.fetch;
 
   telegramApi.sendMessage = async (chatId: number, text: string, options?: any): Promise<any> => {
@@ -59,6 +62,11 @@ async function runDirectMentionPipelineTestSuite() {
 
   telegramApi.sendChatAction = async (chatId: number, action: any): Promise<any> => {
     sentChatActions.push({ chatId, action });
+    return { ok: true, result: true };
+  };
+
+  telegramApi.setMessageReaction = async (chatId: number, messageId: number, reaction: string): Promise<any> => {
+    sentReactions.push({ chatId, messageId, reaction });
     return { ok: true, result: true };
   };
 
@@ -88,6 +96,7 @@ async function runDirectMentionPipelineTestSuite() {
     sentMessages = [];
     sentStickers = [];
     sentChatActions = [];
+    sentReactions = [];
     aiGenerationFail = false;
     simulatedAiText = 'Hey! Main theek hoon, tum sunao?';
     failSendMessage = false;
@@ -613,10 +622,525 @@ async function runDirectMentionPipelineTestSuite() {
     }
     pass('21. proactive pipeline selects single message and carries reply_to_message_id consistently to text and sticker');
 
+    // -------------------------------------------------------------------------
+    // Test 22: Strict word boundary \broxie\b does NOT trigger on unrelated substrings
+    // -------------------------------------------------------------------------
+    resetTracking();
+    const unrelatedSubstrings = [
+      'pyroxie is a mineral',
+      'hydroxie compound',
+      'proxie server configuration',
+      'roxieeee is elongated',
+      'approxie mate value'
+    ];
+
+    for (const text of unrelatedSubstrings) {
+      const msg: TelegramMessage = {
+        message_id: 2200 + Math.floor(Math.random() * 1000),
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: testChat, type: 'supergroup' },
+        from: { id: 99111, is_bot: false, first_name: 'Alice' },
+        text
+      };
+      assert.strictEqual(
+        ChatbotService.isTriggered(msg, botUser),
+        false,
+        `"${text}" must NOT trigger Roxie due to strict word boundary`
+      );
+    }
+
+    const validKeywords = [
+      'hey roxie',
+      'roxie kya kar rahi ho?',
+      'kaha ho roxie',
+      'are roxie suno na',
+      'what is roxie doing',
+      'ROXIE 😂',
+      'hello @Roxie how are you',
+      'tell me roxie please',
+      'hey roxy kaise ho',
+      'रॉक्सी कैसी हो?',
+      'रोक्सी सुनो',
+      'रॉक्सी क्या हाल है'
+    ];
+
+    for (const text of validKeywords) {
+      const msg: TelegramMessage = {
+        message_id: 2300 + Math.floor(Math.random() * 1000),
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: testChat, type: 'supergroup' },
+        from: { id: 99111, is_bot: false, first_name: 'Alice' },
+        text
+      };
+      assert.strictEqual(
+        ChatbotService.isTriggered(msg, botUser),
+        true,
+        `"${text}" MUST trigger Roxie`
+      );
+    }
+    pass('22. strict word boundary \\broxie\\b triggers only on actual keyword/mention, not on substrings');
+
+    // -------------------------------------------------------------------------
+    // Test 23: Direct replies to Roxie's messages trigger response
+    // -------------------------------------------------------------------------
+    resetTracking();
+    const replyToRoxieMsg: TelegramMessage = {
+      message_id: 301,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'what do you mean by that?',
+      reply_to_message: {
+        message_id: 300,
+        date: Math.floor(Date.now() / 1000) - 10,
+        chat: { id: testChat, type: 'supergroup' },
+        from: { id: botUser.id, is_bot: true, first_name: 'Roxie', username: botUser.username },
+        text: 'Main yahi thi!'
+      }
+    };
+
+    assert.strictEqual(ChatbotService.isTriggered(replyToRoxieMsg, botUser), true, 'Reply to Roxie message must trigger response');
+    const handled23 = await ChatbotService.handleMessage(replyToRoxieMsg, botUser);
+    assert.strictEqual(handled23, true);
+    assert.strictEqual(sentMessages.length, 1);
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 301, 'Must reply to user message 301');
+    pass('23. direct reply to message sent by Roxie triggers response to user\'s message_id');
+
+    // -------------------------------------------------------------------------
+    // Test 24: Proactive opportunity deduplication per human message
+    // -------------------------------------------------------------------------
+    resetTracking();
+    db.clearGroupMemory(testChat);
+    db.setLastProactiveConsideredMessageId(testChat, 0);
+    ChatbotService.setProactiveOpportunityProbability(1.0);
+
+    const s24 = db.getGroupSettings(testChat);
+    if (s24.autoResponse) {
+      s24.autoResponse.lastResponseTimestamp = 0;
+      s24.autoResponse.nextAllowedAt = 0;
+    }
+
+    // Step A: When group is empty, executeAutoResponse skips
+    await (autoEngineService as any).executeAutoResponse(botUser.id, testChat, s24, s24.autoEngine);
+    assert.strictEqual(sentMessages.length, 0, 'Empty chat must produce 0 proactive responses');
+
+    // Step B: User sends message 401
+    db.addGroupConversationEntry(testChat, {
+      role: 'user',
+      userId: 8888,
+      name: 'Bob',
+      content: 'Any plans for the weekend?',
+      timestamp: Date.now(),
+      messageId: 401
+    });
+
+    if (s24.autoResponse) {
+      s24.autoResponse.lastResponseTimestamp = 0;
+      s24.autoResponse.nextAllowedAt = 0;
+    }
+
+    // First execution considers message 401 and sends 1 proactive reply
+    await (autoEngineService as any).executeAutoResponse(botUser.id, testChat, s24, s24.autoEngine);
+    assert.strictEqual(sentMessages.length, 1, 'New message 401 must trigger proactive response');
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 401, 'Proactive response must target message 401');
+    assert.strictEqual(db.getLastProactiveConsideredMessageId(testChat), 401);
+
+    // Step C: Second execution without new messages skips because 401 <= lastProactiveConsideredMessageId
+    if (s24.autoResponse) {
+      s24.autoResponse.lastResponseTimestamp = 0;
+      s24.autoResponse.nextAllowedAt = 0;
+    }
+    await (autoEngineService as any).executeAutoResponse(botUser.id, testChat, s24, s24.autoEngine);
+    assert.strictEqual(sentMessages.length, 1, 'No additional message should be sent without new human messages');
+
+    pass('24. proactive auto response deduplication prevents repeated spam on silent chats');
+
+    // -------------------------------------------------------------------------
+    // Test 25 (Edge Case A): Roxie's own text message -> ignored, 0 AI, 0 sticker, 0 reaction, 0 activity count
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    db.clearGroupMemory(testChat);
+    db.updateGroupSettings(testChat, { humanMessagesSinceLastSticker: 0 });
+
+    const roxieOwnTextMsg: TelegramMessage = {
+      message_id: 501,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: botUser.id, is_bot: true, first_name: 'Roxie', username: botUser.username },
+      text: 'Main theek hoon! roxie'
+    };
+
+    assert.strictEqual(ChatbotService.isRoxieSelfMessage(roxieOwnTextMsg, botUser), true);
+    assert.strictEqual(ChatbotService.isGenuineHumanMessage(roxieOwnTextMsg, botUser), false);
+    assert.strictEqual(ChatbotService.isTriggered(roxieOwnTextMsg, botUser), false);
+
+    const handledSelfText = await ChatbotService.handleMessage(roxieOwnTextMsg, botUser);
+    assert.strictEqual(handledSelfText, false, 'handleMessage must return false for Roxie self text');
+
+    const reactionSelfText = await ReactionService.handleMessageReaction(roxieOwnTextMsg, botUser);
+    assert.strictEqual(reactionSelfText, false, 'handleMessageReaction must return false for Roxie self text');
+
+    const botMgrRes25 = await (botManager as any).handleMessage(roxieOwnTextMsg, false);
+    assert.strictEqual(botMgrRes25.shouldTriggerAi, false, 'shouldTriggerAi must be false for Roxie self text');
+
+    const groupSettings25 = db.getGroupSettings(testChat);
+    assert.strictEqual(groupSettings25.humanMessagesSinceLastSticker, 0, 'Self message must NOT increment humanMessagesSinceLastSticker');
+    assert.strictEqual(sentMessages.length, 0, 'Zero messages sent');
+    assert.strictEqual(sentStickers.length, 0, 'Zero stickers sent');
+    assert.strictEqual(sentReactions.length, 0, 'Zero reactions sent');
+    assert.strictEqual(ChatbotService.getLatestRecentHumanMessage(testChat), null, 'Self message must not be returned as recent human message');
+    pass('25. (Edge Case A) Roxie\'s own text message is completely ignored (0 AI, 0 stickers, 0 reactions, 0 activity increment, not a proactive target)');
+
+    // -------------------------------------------------------------------------
+    // Test 26 (Edge Case B): Roxie's own sticker -> ignored, 0 AI, 0 sticker, 0 reaction, 0 activity count
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    const roxieOwnStickerMsg: TelegramMessage = {
+      message_id: 502,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: botUser.id, is_bot: true, first_name: 'Roxie', username: botUser.username },
+      sticker: { file_id: 'CAACAgIAAxkBAAEtest_roxie_sticker', file_unique_id: 'u502', width: 512, height: 512, is_animated: false, is_video: false }
+    };
+
+    assert.strictEqual(ChatbotService.isRoxieSelfMessage(roxieOwnStickerMsg, botUser), true);
+    assert.strictEqual(ChatbotService.isGenuineHumanMessage(roxieOwnStickerMsg, botUser), false);
+    assert.strictEqual(ChatbotService.isTriggered(roxieOwnStickerMsg, botUser), false);
+
+    const handledSelfSticker = await ChatbotService.handleMessage(roxieOwnStickerMsg, botUser);
+    assert.strictEqual(handledSelfSticker, false);
+
+    const botMgrRes26 = await (botManager as any).handleMessage(roxieOwnStickerMsg, false);
+    assert.strictEqual(botMgrRes26.shouldTriggerAi, false);
+    assert.strictEqual(db.getGroupSettings(testChat).humanMessagesSinceLastSticker, 0);
+    assert.strictEqual(sentMessages.length, 0);
+    assert.strictEqual(sentStickers.length, 0);
+    assert.strictEqual(sentReactions.length, 0);
+    pass('26. (Edge Case B) Roxie\'s own sticker is completely ignored (0 AI, 0 sticker, 0 reaction, 0 activity increment)');
+
+    // -------------------------------------------------------------------------
+    // Test 27 (Edge Case C): Other bot message -> ignored, 0 AI, 0 reaction, 0 activity count
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    const otherBotMsg: TelegramMessage = {
+      message_id: 503,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 7771234, is_bot: true, first_name: 'SpamBot', username: 'other_spam_bot' },
+      text: 'hello roxie check out our crypto bot!'
+    };
+
+    assert.strictEqual(ChatbotService.isGenuineHumanMessage(otherBotMsg, botUser), false);
+    assert.strictEqual(ChatbotService.isTriggered(otherBotMsg, botUser), false);
+
+    const handledOtherBot = await ChatbotService.handleMessage(otherBotMsg, botUser);
+    assert.strictEqual(handledOtherBot, false);
+
+    const reactionOtherBot = await ReactionService.handleMessageReaction(otherBotMsg, botUser);
+    assert.strictEqual(reactionOtherBot, false);
+
+    const botMgrRes27 = await (botManager as any).handleMessage(otherBotMsg, false);
+    assert.strictEqual(botMgrRes27.shouldTriggerAi, false);
+    assert.strictEqual(sentMessages.length, 0);
+    assert.strictEqual(sentReactions.length, 0);
+    pass('27. (Edge Case C) Other bot messages are ignored (0 AI, 0 reaction, 0 activity count, not proactive target)');
+
+    // -------------------------------------------------------------------------
+    // Test 28 (Edge Case D): Telegram pin service message (pinned_message) -> ignored
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    const pinServiceMsg: TelegramMessage = {
+      message_id: 504,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      pinned_message: {
+        message_id: 500,
+        date: Math.floor(Date.now() / 1000) - 100,
+        chat: { id: testChat, type: 'supergroup' },
+        from: { id: 99111, is_bot: false, first_name: 'Alice' },
+        text: 'Important announcement!'
+      }
+    } as any;
+
+    assert.strictEqual(ChatbotService.isTelegramServiceMessage(pinServiceMsg), true);
+    assert.strictEqual(ChatbotService.isGenuineHumanMessage(pinServiceMsg, botUser), false);
+    assert.strictEqual(ChatbotService.isTriggered(pinServiceMsg, botUser), false);
+
+    const handledPinService = await ChatbotService.handleMessage(pinServiceMsg, botUser);
+    assert.strictEqual(handledPinService, false);
+
+    const reactionPinService = await ReactionService.handleMessageReaction(pinServiceMsg, botUser);
+    assert.strictEqual(reactionPinService, false);
+
+    const botMgrRes28 = await (botManager as any).handleMessage(pinServiceMsg, false);
+    assert.strictEqual(botMgrRes28.shouldTriggerAi, false);
+    assert.strictEqual(sentMessages.length, 0);
+    assert.strictEqual(sentReactions.length, 0);
+    pass('28. (Edge Case D) Telegram pin service message (pinned_message) is ignored');
+
+    // -------------------------------------------------------------------------
+    // Test 29 (Edge Case E): Telegram unpin service message -> ignored
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    const unpinServiceMsg: TelegramMessage = {
+      message_id: 505,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      unpinned_message: {
+        message_id: 500,
+        date: Math.floor(Date.now() / 1000) - 100,
+        chat: { id: testChat, type: 'supergroup' }
+      }
+    } as any;
+
+    assert.strictEqual(ChatbotService.isTelegramServiceMessage(unpinServiceMsg), true);
+    assert.strictEqual(ChatbotService.isGenuineHumanMessage(unpinServiceMsg, botUser), false);
+    assert.strictEqual(ChatbotService.isTriggered(unpinServiceMsg, botUser), false);
+    pass('29. (Edge Case E) Telegram unpin service message is ignored');
+
+    // -------------------------------------------------------------------------
+    // Test 30 (Edge Case F): "The message was pinned" text notification -> ignored
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    const pinTextMsg: TelegramMessage = {
+      message_id: 506,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'The message was pinned'
+    };
+
+    assert.strictEqual(ChatbotService.isTelegramServiceText('The message was pinned'), true);
+    assert.strictEqual(ChatbotService.isTelegramServiceMessage(pinTextMsg), true);
+    assert.strictEqual(ChatbotService.isGenuineHumanMessage(pinTextMsg, botUser), false);
+    assert.strictEqual(ChatbotService.isTriggered(pinTextMsg, botUser), false);
+
+    const handledPinText = await ChatbotService.handleMessage(pinTextMsg, botUser);
+    assert.strictEqual(handledPinText, false);
+
+    const reactionPinText = await ReactionService.handleMessageReaction(pinTextMsg, botUser);
+    assert.strictEqual(reactionPinText, false);
+
+    const botMgrRes30 = await (botManager as any).handleMessage(pinTextMsg, false);
+    assert.strictEqual(botMgrRes30.shouldTriggerAi, false);
+    assert.strictEqual(sentMessages.length, 0);
+    assert.strictEqual(sentReactions.length, 0);
+    pass('30. (Edge Case F) "The message was pinned" text notification produces 0 AI, 0 sticker, 0 reaction, 0 activity count');
+
+    // -------------------------------------------------------------------------
+    // Test 31 (Edge Case G): Equivalent pin notifications ("📌 The message was pinned", "Message pinned") -> ignored
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    const pinVariations = [
+      'the message was pinned',
+      'Message was pinned',
+      'Message pinned',
+      'The message was unpinned',
+      'Message unpinned',
+      '📌 The message was pinned',
+      '📌 Message pinned',
+      '👤 Alice joined the group',
+      '🚪 Bob left the group',
+      '⚠️ Group settings updated'
+    ];
+
+    for (let i = 0; i < pinVariations.length; i++) {
+      const text = pinVariations[i];
+      assert.strictEqual(ChatbotService.isTelegramServiceText(text), true, `"${text}" must be recognized as service text`);
+      const vMsg: TelegramMessage = {
+        message_id: 520 + i,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: testChat, type: 'supergroup' },
+        from: { id: 99111, is_bot: false, first_name: 'Alice' },
+        text
+      };
+      assert.strictEqual(ChatbotService.isGenuineHumanMessage(vMsg, botUser), false);
+      assert.strictEqual(ChatbotService.isTriggered(vMsg, botUser), false);
+    }
+    pass('31. (Edge Case G) All equivalent pin/unpin/service variations are recognized and ignored');
+
+    // -------------------------------------------------------------------------
+    // Test 32 (Edge Case H): Genuine human "hello" -> valid human message & proactive opportunity
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    db.clearGroupMemory(testChat);
+    db.updateGroupSettings(testChat, { humanMessagesSinceLastSticker: 0 });
+
+    const humanHelloMsg: TelegramMessage = {
+      message_id: 550,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'hello everyone how are you today?'
+    };
+
+    assert.strictEqual(ChatbotService.isGenuineHumanMessage(humanHelloMsg, botUser), true);
+    const botMgrRes32 = await (botManager as any).handleMessage(humanHelloMsg, false);
+    assert.strictEqual(botMgrRes32.shouldTriggerAi, true, 'Human message must have shouldTriggerAi = true');
+    assert.strictEqual(db.getGroupSettings(testChat).humanMessagesSinceLastSticker, 1, 'Increments human activity count');
+
+    const latestHuman32 = ChatbotService.getLatestRecentHumanMessage(testChat);
+    assert.ok(latestHuman32);
+    assert.strictEqual(latestHuman32?.messageId, 550);
+    pass('32. (Edge Case H) Genuine human "hello" is accepted, increments human activity, and is available for proactive response');
+
+    // -------------------------------------------------------------------------
+    // Test 33 (Edge Case I): Genuine human "roxie" -> immediate response with reply_to_message_id
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    const humanRoxieMsg: TelegramMessage = {
+      message_id: 560,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'roxie what are you doing today?'
+    };
+
+    assert.strictEqual(ChatbotService.isGenuineHumanMessage(humanRoxieMsg, botUser), true);
+    assert.strictEqual(ChatbotService.isTriggered(humanRoxieMsg, botUser), true);
+
+    const handled33 = await ChatbotService.handleMessage(humanRoxieMsg, botUser);
+    assert.strictEqual(handled33, true);
+    assert.strictEqual(sentMessages.length, 1);
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 560);
+    pass('33. (Edge Case I) Genuine human "roxie" triggers immediate reply to triggering message_id');
+
+    // -------------------------------------------------------------------------
+    // Test 34 (Edge Case J): Genuine human reply to Roxie -> immediate response with reply_to_message_id
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    const humanReplyToRoxieMsg: TelegramMessage = {
+      message_id: 570,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'really? tell me more!',
+      reply_to_message: {
+        message_id: 569,
+        date: Math.floor(Date.now() / 1000) - 5,
+        chat: { id: testChat, type: 'supergroup' },
+        from: { id: botUser.id, is_bot: true, first_name: 'Roxie', username: botUser.username },
+        text: 'I was just thinking about you!'
+      }
+    };
+
+    assert.strictEqual(ChatbotService.isGenuineHumanMessage(humanReplyToRoxieMsg, botUser), true);
+    assert.strictEqual(ChatbotService.isTriggered(humanReplyToRoxieMsg, botUser), true);
+
+    const handled34 = await ChatbotService.handleMessage(humanReplyToRoxieMsg, botUser);
+    assert.strictEqual(handled34, true);
+    assert.strictEqual(sentMessages.length, 1);
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 570);
+    pass('34. (Edge Case J) Genuine human reply to Roxie triggers immediate reply to user\'s message_id');
+
+    // -------------------------------------------------------------------------
+    // Test 35 (Edge Case K): Genuine human "sticker" -> explicit sticker response behavior
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    db.updateGroupSettings(testChat, {
+      humanMessagesSinceLastSticker: 10,
+      requiredStickerGap: 5
+    });
+
+    const humanStickerKeywordMsg: TelegramMessage = {
+      message_id: 580,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: testChat, type: 'supergroup' },
+      from: { id: 99111, is_bot: false, first_name: 'Alice' },
+      text: 'send sticker please roxie'
+    };
+
+    assert.strictEqual(ChatbotService.isGenuineHumanMessage(humanStickerKeywordMsg, botUser), true);
+    assert.strictEqual(ChatbotService.isTriggered(humanStickerKeywordMsg, botUser), true);
+
+    const handled35 = await ChatbotService.handleMessage(humanStickerKeywordMsg, botUser);
+    assert.strictEqual(handled35, true);
+    assert.strictEqual(sentStickers.length, 1);
+    assert.strictEqual(sentStickers[0].options?.reply_to_message_id, 580);
+    pass('35. (Edge Case K) Genuine human "sticker" request triggers explicit sticker response');
+
+    // -------------------------------------------------------------------------
+    // Test 36 (Edge Case L): Human message containing normal word "pinned" -> NOT treated as service message
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    const normalPinnedMessages = [
+      'I pinned the photo yesterday',
+      'did you pin the note on the board?',
+      'pin this please when you get a chance',
+      'we pinned our vacation plans on the fridge',
+      'maine message pinned kiya tha kal'
+    ];
+
+    for (let i = 0; i < normalPinnedMessages.length; i++) {
+      const text = normalPinnedMessages[i];
+      assert.strictEqual(ChatbotService.isTelegramServiceText(text), false, `"${text}" must NOT be recognized as service text`);
+      const humanPinnedMsg: TelegramMessage = {
+        message_id: 590 + i,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: testChat, type: 'supergroup' },
+        from: { id: 99111, is_bot: false, first_name: 'Alice' },
+        text
+      };
+      assert.strictEqual(ChatbotService.isGenuineHumanMessage(humanPinnedMsg, botUser), true, `"${text}" must be recognized as genuine human message`);
+    }
+    pass('36. (Edge Case L) Human messages containing the normal word "pinned" or "pin" are NOT treated as service messages');
+
+    // -------------------------------------------------------------------------
+    // Test 37 (Edge Case M): Duplicate processing deduplication
+    // -------------------------------------------------------------------------
+    resetTracking();
+    ReactionService.resetCaches();
+    db.clearGroupMemory(testChat);
+    db.setLastProactiveConsideredMessageId(testChat, 0);
+
+    const s37 = db.getGroupSettings(testChat);
+    if (s37.autoResponse) {
+      s37.autoResponse.lastResponseTimestamp = 0;
+      s37.autoResponse.nextAllowedAt = 0;
+    }
+
+    db.addGroupConversationEntry(testChat, {
+      role: 'user',
+      userId: 99111,
+      name: 'Alice',
+      content: 'Any updates on the project?',
+      timestamp: Date.now(),
+      messageId: 777
+    });
+
+    // Run proactive once
+    await (autoEngineService as any).executeAutoResponse(botUser.id, testChat, s37, s37.autoEngine);
+    assert.strictEqual(sentMessages.length, 1, 'First run delivers proactive response');
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 777);
+    assert.strictEqual(db.getLastProactiveConsideredMessageId(testChat), 777);
+
+    // Run proactive again without new messages
+    if (s37.autoResponse) {
+      s37.autoResponse.lastResponseTimestamp = 0;
+      s37.autoResponse.nextAllowedAt = 0;
+    }
+    await (autoEngineService as any).executeAutoResponse(botUser.id, testChat, s37, s37.autoEngine);
+    assert.strictEqual(sentMessages.length, 1, 'Second run must skip (deduplicated by considered messageId)');
+    pass('37. (Edge Case M) Duplicate processing deduplication guarantees at most 1 proactive opportunity per human message');
   } finally {
     telegramApi.sendMessage = origSendMessage;
     telegramApi.sendSticker = origSendSticker;
     telegramApi.sendChatAction = origSendChatAction;
+    telegramApi.setMessageReaction = origSetMessageReaction;
     global.fetch = origFetch;
   }
 

@@ -2,6 +2,7 @@ import { db } from '../db/storage.js';
 import { TelegramMessage, ContentType, PolicyDecision } from './types.js';
 import { TelegramMiddleware, RoleRank } from './middleware.js';
 import { ContentProtectionService } from './contentProtection.js';
+import { ChatbotService } from './chatbot.js';
 
 export interface ContentPolicyEvaluation {
   decision: PolicyDecision;
@@ -18,6 +19,12 @@ export class ContentPolicyEngine {
     chatId: number,
     userId: number
   ): Promise<ContentPolicyEvaluation> {
+    // Roxie bot itself and self messages always bypass locks
+    const botId = db.getCurrentBotId();
+    if ((userId && botId && userId === botId) || ChatbotService.isRoxieSelfMessage(message, null)) {
+      return { decision: 'ADMIN_BYPASS' };
+    }
+
     // Check Actor Hierarchy (Admins / Owners bypass locks)
     const ctx = {
       message,

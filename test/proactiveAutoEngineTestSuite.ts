@@ -22,8 +22,8 @@ async function runProactiveAutoEngineTestSuite() {
   const testGroup3 = -100999888103;
 
   // Mock API tracking
-  let sentMessages: Array<{ chatId: number; text: string }> = [];
-  let sentStickers: Array<{ chatId: number; fileId: string }> = [];
+  let sentMessages: Array<{ chatId: number; text: string; options?: any }> = [];
+  let sentStickers: Array<{ chatId: number; fileId: string; options?: any }> = [];
   let openRouterAiCalls = 0;
 
   // Backup original API and fetch methods
@@ -34,12 +34,12 @@ async function runProactiveAutoEngineTestSuite() {
   const origFetch = global.fetch;
 
   telegramApi.sendMessage = async (chatId: number, text: string, options?: any): Promise<any> => {
-    sentMessages.push({ chatId, text });
+    sentMessages.push({ chatId, text, options });
     return { ok: true, result: { message_id: 9000 + sentMessages.length, text } };
   };
 
   telegramApi.sendSticker = async (chatId: number, sticker: string, options?: any): Promise<any> => {
-    sentStickers.push({ chatId, fileId: sticker });
+    sentStickers.push({ chatId, fileId: sticker, options });
     return { ok: true, result: { message_id: 8000 + sentStickers.length, sticker: { file_id: sticker } } };
   };
 
@@ -118,6 +118,16 @@ async function runProactiveAutoEngineTestSuite() {
         autoResponse: { enabled: false, mode: 'disabled', cooldownSeconds: 30 },
         autoSticker: { enabled: false, mode: 'disabled', cooldownSeconds: 60 }
       });
+    }
+
+    for (const tg of [testGroup1, testGroup2, testGroup3]) {
+      if ((db as any).data.groupConversationMemories) {
+        delete (db as any).data.groupConversationMemories[String(tg)];
+      }
+      if ((db as any).data.groupMemories) {
+        delete (db as any).data.groupMemories[String(tg)];
+      }
+      db.setLastProactiveConsideredMessageId(tg, 0);
     }
 
     // --------------------------------------------------------------------------------------
@@ -225,22 +235,56 @@ async function runProactiveAutoEngineTestSuite() {
     pass('TEST 05: Both enabled creates exactly two independent timers');
 
     // --------------------------------------------------------------------------------------
-    // TEST 06: Silent Group Triggers Proactive Auto Response Without Incoming Messages
+    // TEST 06: Proactive Auto Response is Activity-Based & Never Spams Silent Groups
     // --------------------------------------------------------------------------------------
     sentMessages = [];
     openRouterAiCalls = 0;
+    ChatbotService.setProactiveOpportunityProbability(1.0);
+
+    // Subtest 6A: Silent group with 0 human messages produces 0 outbound text & 0 AI calls
     const initialRespJob = autoEngineService.getJob(botIdA, testGroup1, 'response');
     assert(initialRespJob);
     const delayToRun = initialRespJob.targetRunAt - virtualTime;
     await advanceTime(delayToRun + 100);
 
-    assert.strictEqual(sentMessages.length, 1, 'Proactive message must be sent to Telegram');
+    assert.strictEqual(sentMessages.length, 0, 'Silent group must NOT send proactive text messages');
+    assert.strictEqual(openRouterAiCalls, 0, 'Silent group must NOT make OpenRouter AI calls');
+
+    // Subtest 6B: Adding a human message triggers exactly 1 proactive opportunity targeting that message
+    const gs = db.getGroupSettings(testGroup1);
+    if (gs.autoResponse) {
+      gs.autoResponse.lastResponseTimestamp = 0;
+      gs.autoResponse.nextAllowedAt = 0;
+    }
+    db.addGroupConversationEntry(testGroup1, {
+      role: 'user',
+      name: 'Aman',
+      userId: 77711,
+      content: 'Aaj ka kya plan hai sabka?',
+      timestamp: virtualTime,
+      messageId: 501
+    });
+
+    const nextRespJob = autoEngineService.getJob(botIdA, testGroup1, 'response');
+    assert(nextRespJob);
+    const nextDelay = nextRespJob.targetRunAt - virtualTime;
+    await advanceTime(nextDelay + 100);
+
+    assert.strictEqual(sentMessages.length, 1, 'Proactive message must be sent after new human message');
     assert.strictEqual(sentMessages[0].chatId, testGroup1);
-    assert(sentMessages[0].text.length > 0);
+    assert.strictEqual(sentMessages[0].options?.reply_to_message_id, 501, 'Proactive message must reply to the triggering human message');
     assert.strictEqual(openRouterAiCalls, 1, 'OpenRouter must be called for proactive text response');
-    // Verify next run is scheduled
-    assert(autoEngineService.getJob(botIdA, testGroup1, 'response') !== undefined);
-    pass('TEST 06: Silent group triggers Auto Response without incoming message');
+
+    // Subtest 6C: Subsequent timer tick without new human message must NOT send further messages
+    const followUpJob = autoEngineService.getJob(botIdA, testGroup1, 'response');
+    assert(followUpJob);
+    const followUpDelay = followUpJob.targetRunAt - virtualTime;
+    await advanceTime(followUpDelay + 100);
+
+    assert.strictEqual(sentMessages.length, 1, 'Silent group must not receive repeated spam responses');
+    assert.strictEqual(openRouterAiCalls, 1, 'No additional AI calls should occur without new human messages');
+
+    pass('TEST 06: Proactive Auto Response is strictly activity-based and does not spam silent groups');
 
     // --------------------------------------------------------------------------------------
     // TEST 07: Silent Group Triggers Proactive Auto Sticker Without Incoming Messages & Zero AI
@@ -442,6 +486,11 @@ async function runProactiveAutoEngineTestSuite() {
     );
     assert.strictEqual(failDecision.responseType, 'none', 'On AI failure, responseType must be none');
 
+    const gs18 = db.getGroupSettings(testGroup1);
+    if (gs18.autoResponse) {
+      gs18.autoResponse.lastResponseTimestamp = 0;
+      gs18.autoResponse.nextAllowedAt = 0;
+    }
     const beforeFailJob = autoEngineService.getJob(botIdA, testGroup1, 'response');
     assert(beforeFailJob);
     const failDelay = beforeFailJob.targetRunAt - virtualTime;
@@ -461,6 +510,20 @@ async function runProactiveAutoEngineTestSuite() {
       return { ok: false, description: 'Too Many Requests: retry after 42' } as any;
     };
 
+    const gs19 = db.getGroupSettings(testGroup1);
+    if (gs19.autoResponse) {
+      gs19.autoResponse.lastResponseTimestamp = 0;
+      gs19.autoResponse.nextAllowedAt = 0;
+    }
+    db.addGroupConversationEntry(testGroup1, {
+      role: 'user',
+      name: 'Tester',
+      userId: 7771,
+      content: 'Any updates guys?',
+      timestamp: virtualTime,
+      messageId: 557
+    });
+
     const before429Job = autoEngineService.getJob(botIdA, testGroup1, 'response');
     assert(before429Job);
     await advanceTime((before429Job.targetRunAt - virtualTime) + 100);
@@ -477,6 +540,20 @@ async function runProactiveAutoEngineTestSuite() {
     telegramApi.sendMessage = async () => {
       return { ok: false, description: 'Forbidden: bot was kicked from the supergroup chat' } as any;
     };
+
+    const gs20 = db.getGroupSettings(testGroup1);
+    if (gs20.autoResponse) {
+      gs20.autoResponse.lastResponseTimestamp = 0;
+      gs20.autoResponse.nextAllowedAt = 0;
+    }
+    db.addGroupConversationEntry(testGroup1, {
+      role: 'user',
+      name: 'Tester',
+      userId: 7771,
+      content: 'Check this out!',
+      timestamp: virtualTime,
+      messageId: 558
+    });
 
     const beforeKickJob = autoEngineService.getJob(botIdA, testGroup1, 'response');
     assert(beforeKickJob);

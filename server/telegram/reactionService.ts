@@ -1,6 +1,7 @@
 import { telegramApi } from './api.js';
-import { TelegramMessage } from './types.js';
+import { TelegramMessage, TelegramUser } from './types.js';
 import { db } from '../db/storage.js';
+import { ChatbotService } from './chatbot.js';
 
 export const REACTION_POOLS = {
   FUNNY: ['😂', '🤣', '😭', '💀', '🤭'],
@@ -37,6 +38,11 @@ export class ReactionService {
     // 1. Guard against commands
     const textOrCaption = (message.text || message.caption || '').trim();
     if (textOrCaption.startsWith('/') || textOrCaption.startsWith('!')) {
+      return null;
+    }
+
+    // 1.1 Guard against service message text
+    if (ChatbotService.isTelegramServiceText(textOrCaption)) {
       return null;
     }
 
@@ -199,8 +205,14 @@ export class ReactionService {
   /**
    * Process and potentially dispatch a smart Telegram reaction for an incoming message.
    */
-  public static async handleMessageReaction(message: TelegramMessage): Promise<boolean> {
+  public static async handleMessageReaction(message: TelegramMessage, botUser: TelegramUser | null = null): Promise<boolean> {
     if (!message || !message.chat || !message.message_id) {
+      return false;
+    }
+
+    // 0. Guard against self messages, bots, and Telegram service messages
+    if (!ChatbotService.isGenuineHumanMessage(message, botUser)) {
+      console.log('REACTION_SKIPPED', { chatId: message.chat.id, messageId: message.message_id, reason: 'Non-human or service message' });
       return false;
     }
 

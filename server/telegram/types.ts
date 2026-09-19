@@ -371,6 +371,7 @@ export interface GroupSettings {
   rules?: string;
   lastAllTimestamp?: number;
   // Activity-gated Auto Engine & Sticker Cooldown
+  lastProactiveConsideredMessageId?: number;
   humanMessagesSinceLastSticker?: number;
   requiredStickerGap?: number;
   stickerActivityMin?: number; // default 10

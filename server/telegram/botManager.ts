@@ -587,11 +587,11 @@ export class TelegramBotManager {
       });
     }
 
-    // Global per-user rate limiter check
-    if (chatId && userId) {
+    // Global per-user rate limiter check (exempt Roxie self messages)
+    if (chatId && userId && !ChatbotService.isRoxieSelfMessage(message, this.botUser)) {
       const rateCheck = await RateLimiterService.checkAndRecord(message, chatId, userId);
       if (!rateCheck.allowed) {
-        return;
+        return { handled: true, shouldTriggerAi: false };
       }
     }
     if (message.reply_to_message?.from) {
@@ -645,7 +645,7 @@ export class TelegramBotManager {
     const shortcutHandled = await ModerationService.handleNotesShortcut(message);
     if (shortcutHandled) {
       this.recordResponseSent();
-      return;
+      return { handled: true, shouldTriggerAi: false };
     }
 
     // 1. Process Welcome and Goodbye messages
@@ -671,7 +671,7 @@ export class TelegramBotManager {
         if (rawCmd.includes('@')) {
           const targetBot = rawCmd.split('@')[1];
           if (this.botUser?.username && targetBot.toLowerCase() !== this.botUser.username.toLowerCase()) {
-            return;
+            return { handled: true, shouldTriggerAi: false };
           }
         }
 
@@ -717,31 +717,36 @@ export class TelegramBotManager {
           message_id: message.message_id,
           is_command: true
         }));
-        return;
+        return { handled: true, shouldTriggerAi: false };
       }
     }
 
-    // 3. Check Smart User Protection
-    const smartProtected = await SmartProtectionService.handleMessage(message);
-    if (smartProtected) return;
+    const isHuman = ChatbotService.isGenuineHumanMessage(message, this.botUser);
+    const isRoxieSelf = ChatbotService.isRoxieSelfMessage(message, this.botUser);
 
-    // 4. Check Anti-Flood protection
-    const floodIntercepted = await ModerationService.handleAntiFlood(message);
-    if (floodIntercepted) return;
+    // 3. Check Smart User Protection & Moderation (for human users)
+    if (isHuman) {
+      const smartProtected = await SmartProtectionService.handleMessage(message);
+      if (smartProtected) return { handled: true, shouldTriggerAi: false };
 
-    // 4. Check Custom Text Filters
-    const filterIntercepted = await ModerationService.handleCustomFilters(message);
-    if (filterIntercepted) return;
+      // 4. Check Anti-Flood protection
+      const floodIntercepted = await ModerationService.handleAntiFlood(message);
+      if (floodIntercepted) return { handled: true, shouldTriggerAi: false };
 
-    // 5. Check Link & Contact-Bait Protection (with warning tracking & 5-warn permanent mute)
-    if (textOrCaption || (message.entities && message.entities.length > 0) || (message.caption_entities && message.caption_entities.length > 0)) {
-      const linkIntercepted = await ModerationService.handleLinkProtection(message);
-      if (linkIntercepted) return;
+      // 4. Check Custom Text Filters
+      const filterIntercepted = await ModerationService.handleCustomFilters(message);
+      if (filterIntercepted) return { handled: true, shouldTriggerAi: false };
+
+      // 5. Check Link & Contact-Bait Protection (with warning tracking & 5-warn permanent mute)
+      if (textOrCaption || (message.entities && message.entities.length > 0) || (message.caption_entities && message.caption_entities.length > 0)) {
+        const linkIntercepted = await ModerationService.handleLinkProtection(message);
+        if (linkIntercepted) return { handled: true, shouldTriggerAi: false };
+      }
+
+      // 6. Check Content Locks & Media / Sticker / File / Forward / Poll / Location Protection
+      const mediaIntercepted = await ModerationService.handleMediaAndStickerProtection(message);
+      if (mediaIntercepted) return { handled: true, shouldTriggerAi: false };
     }
-
-    // 6. Check Content Locks & Media / Sticker / File / Forward / Poll / Location Protection
-    const mediaIntercepted = await ModerationService.handleMediaAndStickerProtection(message);
-    if (mediaIntercepted) return;
 
     const mediaType = message.sticker ? 'sticker' :
       message.photo ? 'photo' :
@@ -783,7 +788,7 @@ export class TelegramBotManager {
     // Record incoming group message in persistent memory for Group Messages dashboard & real replies
     if (chatId && chatId < 0 && message.message_id) {
       db.addGroupConversationEntry(chatId, {
-        role: 'user',
+        role: isHuman ? 'user' : 'assistant',
         userId: message.from?.id,
         name: displayName,
         displayName,
@@ -794,27 +799,14 @@ export class TelegramBotManager {
         chatId,
         mediaType,
         mediaFileId: message.sticker?.file_id,
-        direction: 'incoming',
-        source: 'telegram',
+        direction: isRoxieSelf ? 'outgoing' : 'incoming',
+        source: isHuman ? 'telegram' : 'bot',
+        sender: isHuman ? 'user' : 'bot',
         replyToMessageId: message.reply_to_message?.message_id
       });
       this.lastStoredMessageTimestamp = new Date().toISOString();
 
       // Track genuine human conversation activity for activity-gated AutoEngine
-      const isBot = Boolean(message.from?.is_bot || (this.botUser && message.from?.id === this.botUser.id));
-      const isServiceMessage = Boolean(
-        message.new_chat_members ||
-        message.left_chat_member ||
-        message.new_chat_title ||
-        message.new_chat_photo ||
-        message.delete_chat_photo ||
-        message.group_chat_created ||
-        message.supergroup_chat_created ||
-        message.channel_chat_created ||
-        message.pinned_message ||
-        (message as any).migrate_to_chat_id ||
-        (message as any).migrate_from_chat_id
-      );
       const isMeaningfulContent = Boolean(
         (message.text && message.text.trim().length > 0) ||
         (message.caption && message.caption.trim().length > 0) ||
@@ -827,7 +819,7 @@ export class TelegramBotManager {
         message.document
       );
 
-      if (!isBot && !isServiceMessage && isMeaningfulContent) {
+      if (isHuman && isMeaningfulContent && !ChatbotService.isTelegramServiceText(content)) {
         db.incrementHumanMessageCount(chatId);
       }
 
@@ -840,13 +832,13 @@ export class TelegramBotManager {
     } else if (chatId && chatId > 0 && userId && message.message_id) {
       // Record incoming private chat message in persistent memory for Control Center dashboard
       db.addPrivateMessage(chatId, userId, {
-        role: 'user',
+        role: isHuman ? 'user' : 'assistant',
         content,
         timestamp: message.date ? message.date * 1000 : Date.now(),
         messageId: message.message_id,
         mediaType,
         mediaFileId: message.sticker?.file_id,
-        direction: 'in',
+        direction: isRoxieSelf ? 'out' : 'in',
         username: message.from?.username,
         name: displayName,
         language: ChatbotService.detectLanguage(content).language
@@ -873,12 +865,13 @@ export class TelegramBotManager {
     }
 
     // 7. Check Smart Telegram Reactions (non-blocking & independent)
-    ReactionService.handleMessageReaction(message).catch((err) => {
-      console.error('[ReactionService] Error handling message reaction:', err);
-    });
+    if (isHuman && !ChatbotService.isTelegramServiceText(content)) {
+      ReactionService.handleMessageReaction(message, this.botUser).catch((err) => {
+        console.error('[ReactionService] Error handling message reaction:', err);
+      });
+    }
 
     // 8. Roxie AI Chatbot triggers: delegate to executeTask to run outside global slot
-    const isBot = Boolean(message.from?.is_bot || (this.botUser && message.from?.id === this.botUser.id));
     const isPrivateChat = message.chat?.type === 'private';
 
     logDebug({
@@ -888,7 +881,7 @@ export class TelegramBotManager {
       is_command: false
     });
 
-    return { handled: true, shouldTriggerAi: !isBot };
+    return { handled: true, shouldTriggerAi: isHuman };
   }
 
   private async handleChatJoinRequest(joinRequest: TelegramChatJoinRequest) {

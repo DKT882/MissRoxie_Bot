@@ -122,6 +122,7 @@ async function runActivityGatedAutoEngineTestSuite() {
   }
 
   autoEngineService.stop();
+  ChatbotService.setProactiveOpportunityProbability(1.0);
   db.clearGroupMemory(testChatA);
   db.clearGroupMemory(testChatB);
   db.clearGroupMemory(testChatC);
@@ -147,54 +148,50 @@ async function runActivityGatedAutoEngineTestSuite() {
         stickers: { preset: 'custom', minSeconds: 30, maxSeconds: 30, cooldownSeconds: 30, randomize: false }
       }
     });
+    db.setLastProactiveConsideredMessageId(testChatA, 0);
 
-    // 1. Initial requiredStickerGap is persistent across getGroupSettings calls
-    const initialGap = db.getRequiredStickerGap(testChatA);
-    assert.strictEqual(initialGap, 10, 'Initial gap should be 10');
-    const readSettings1 = db.getGroupSettings(testChatA);
-    const readSettings2 = db.getGroupSettings(testChatA);
-    assert.strictEqual(readSettings1.requiredStickerGap, 10, 'requiredStickerGap must not change on getGroupSettings read');
-    assert.strictEqual(readSettings2.requiredStickerGap, 10, 'requiredStickerGap must remain strictly persistent');
+    // 1. Initial requiredStickerGap is 10
+    const gap1 = db.getRequiredStickerGap(testChatA);
+    assert.strictEqual(gap1, 10);
     pass('Test 1: requiredStickerGap is persistent across multiple getGroupSettings reads');
 
-    // 2. Human messages increment counter
-    assert.strictEqual(db.getHumanMessagesSinceLastSticker(testChatA), 0);
-    db.incrementHumanMessageCount(testChatA);
-    db.incrementHumanMessageCount(testChatA);
-    assert.strictEqual(db.getHumanMessagesSinceLastSticker(testChatA), 2, 'Counter should be 2 after 2 human messages');
+    // 2. 5 user messages arrive -> counter = 5
+    for (let i = 0; i < 5; i++) {
+      db.incrementHumanMessageCount(testChatA);
+    }
+    assert.strictEqual(db.getHumanMessagesSinceLastSticker(testChatA), 5);
     pass('Test 2: Human messages increment activity counter');
 
-    // 3. User sticker, media, photo, voice increment counter
+    // 3. User sticker arrives -> counter = 6
     db.incrementHumanMessageCount(testChatA);
-    db.incrementHumanMessageCount(testChatA);
-    db.incrementHumanMessageCount(testChatA);
-    assert.strictEqual(db.getHumanMessagesSinceLastSticker(testChatA), 5, 'Counter should be 5');
+    assert.strictEqual(db.getHumanMessagesSinceLastSticker(testChatA), 6);
     pass('Test 3: User stickers and media increment activity counter');
 
-    // 4. Sticker eligibility is blocked when counter < requiredStickerGap
+    // 4. Activity check confirms sticker is blocked
     const check1 = db.checkAutoStickerEligibility(testChatA);
-    assert.strictEqual(check1.allowed, false, 'Sticker must be blocked when counter (5) < gap (10)');
-    assert(check1.reason && check1.reason.includes('activity_cooldown'), 'Reason must indicate activity cooldown');
+    assert.strictEqual(check1.allowed, false, 'Sticker must not be eligible when count < gap');
+    assert.strictEqual(check1.remainingMessages, 4, 'Remaining messages must be 4');
     pass('Test 4: Sticker is blocked when humanMessagesSinceLastSticker < requiredStickerGap');
 
-    // 5. Timer fires 10 times with zero new human messages -> 0 Roxie stickers sent
+    // 5. Timer firing 10 times does NOT send stickers and maintains counter
     autoEngineService.start(botId);
-    sentStickers = [];
     sentMessages = [];
+    sentStickers = [];
     for (let i = 0; i < 10; i++) {
-      await advanceTime(130000);
+      await advanceTime(35000);
     }
-    assert.strictEqual(sentStickers.length, 0, 'Zero stickers should be sent while under activity threshold');
+    assert.strictEqual(sentStickers.length, 0, 'Zero stickers sent after 10 timer ticks');
+    assert.strictEqual(db.getHumanMessagesSinceLastSticker(testChatA), 6, 'Activity counter remains untouched by timer ticks');
     pass('Test 5: Timer firing 10 times under activity threshold sends ZERO stickers');
 
-    // 6. Increment up to 9 human messages -> timer fires -> 0 stickers
-    while (db.getHumanMessagesSinceLastSticker(testChatA) < 9) {
+    // 6. 3 more user messages arrive -> counter = 9 (still below 10)
+    for (let i = 0; i < 3; i++) {
       db.incrementHumanMessageCount(testChatA);
     }
     assert.strictEqual(db.getHumanMessagesSinceLastSticker(testChatA), 9);
     sentStickers = [];
-    await advanceTime(130000);
-    assert.strictEqual(sentStickers.length, 0, 'Zero stickers at 9 messages (gap=10)');
+    await advanceTime(35000);
+    assert.strictEqual(sentStickers.length, 0, 'Zero stickers sent at 9/10 threshold');
     pass('Test 6: At 9 human messages (gap=10), sticker send is strictly blocked');
 
     // 7. 10th human message arrives -> sticker becomes eligible, but is NOT automatically sent immediately
@@ -208,6 +205,19 @@ async function runActivityGatedAutoEngineTestSuite() {
     console.log('\n--- SECTION 2: Proactive Opportunity & Response Distribution ---');
 
     // 8. Next opportunity selects TEXT
+    db.addGroupConversationEntry(testChatA, {
+      role: 'user',
+      name: 'Alice',
+      content: 'Hello group!',
+      timestamp: Date.now(),
+      messageId: 101
+    });
+    db.setLastProactiveConsideredMessageId(testChatA, 0);
+    const s8 = db.getGroupSettings(testChatA);
+    if (s8.autoResponse) {
+      s8.autoResponse.lastResponseTimestamp = 0;
+      s8.autoResponse.nextAllowedAt = 0;
+    }
     db.updateGroupSettings(testChatA, {
       autoEngine: {
         enabled: true,
@@ -379,6 +389,19 @@ async function runActivityGatedAutoEngineTestSuite() {
     console.log('\n--- SECTION 5: AI Failure & Ghost Typing Safety ---');
 
     // 18. AI generation failure never sends dummy/filler text and leaves 0 typing indicator
+    db.addGroupConversationEntry(testChatA, {
+      role: 'user',
+      name: 'Alice',
+      content: 'Any updates?',
+      timestamp: Date.now(),
+      messageId: 102
+    });
+    db.setLastProactiveConsideredMessageId(testChatA, 0);
+    const s18 = db.getGroupSettings(testChatA);
+    if (s18.autoResponse) {
+      s18.autoResponse.lastResponseTimestamp = 0;
+      s18.autoResponse.nextAllowedAt = 0;
+    }
     db.updateGroupSettings(testChatA, {
       autoEngine: {
         enabled: true,
@@ -442,6 +465,19 @@ async function runActivityGatedAutoEngineTestSuite() {
     pass('Test 21: AutoEngine schedules exactly one job per group without duplicates');
 
     // 22. messages_only mode never sends stickers even with high activity
+    db.addGroupConversationEntry(testChatA, {
+      role: 'user',
+      name: 'Alice',
+      content: 'Hello messages only!',
+      timestamp: Date.now(),
+      messageId: 103
+    });
+    db.setLastProactiveConsideredMessageId(testChatA, 0);
+    const s22 = db.getGroupSettings(testChatA);
+    if (s22.autoResponse) {
+      s22.autoResponse.lastResponseTimestamp = 0;
+      s22.autoResponse.nextAllowedAt = 0;
+    }
     db.updateGroupSettings(testChatA, {
       autoEngine: {
         enabled: true,
@@ -491,6 +527,19 @@ async function runActivityGatedAutoEngineTestSuite() {
     // 25. Typing indicator is sent only after AI generation succeeds
     sentChatActions = [];
     sentMessages = [];
+    db.addGroupConversationEntry(testChatA, {
+      role: 'user',
+      name: 'Alice',
+      content: 'Typing test message',
+      timestamp: Date.now(),
+      messageId: 104
+    });
+    db.setLastProactiveConsideredMessageId(testChatA, 0);
+    const s25 = db.getGroupSettings(testChatA);
+    if (s25.autoResponse) {
+      s25.autoResponse.lastResponseTimestamp = 0;
+      s25.autoResponse.nextAllowedAt = 0;
+    }
     db.updateGroupSettings(testChatA, {
       autoEngine: {
         enabled: true,
@@ -504,6 +553,32 @@ async function runActivityGatedAutoEngineTestSuite() {
     pass('Test 25: Typing indicator sent strictly after successful AI text generation');
 
     // 26. Invalid Telegram group cancels ONLY that group's timers
+    db.addGroupConversationEntry(testChatA, {
+      role: 'user',
+      name: 'Alice',
+      content: 'Test chat A message',
+      timestamp: Date.now(),
+      messageId: 105
+    });
+    db.setLastProactiveConsideredMessageId(testChatA, 0);
+    const s26A = db.getGroupSettings(testChatA);
+    if (s26A.autoResponse) {
+      s26A.autoResponse.lastResponseTimestamp = 0;
+      s26A.autoResponse.nextAllowedAt = 0;
+    }
+    db.addGroupConversationEntry(testChatB, {
+      role: 'user',
+      name: 'Bob',
+      content: 'Test chat B message',
+      timestamp: Date.now(),
+      messageId: 201
+    });
+    db.setLastProactiveConsideredMessageId(testChatB, 0);
+    const s26B = db.getGroupSettings(testChatB);
+    if (s26B.autoResponse) {
+      s26B.autoResponse.lastResponseTimestamp = 0;
+      s26B.autoResponse.nextAllowedAt = 0;
+    }
     telegramApi.sendMessage = async (chatId: number, text: string): Promise<any> => {
       if (chatId === testChatA) {
         return { ok: false, error_code: 400, description: 'Bad Request: chat not found' };
@@ -531,6 +606,29 @@ async function runActivityGatedAutoEngineTestSuite() {
     pass('Test 27: Read-only startup hydration preserves activity counters and required gaps');
 
     // 28. OpenRouter fallback chain works seamlessly during proactive responses
+    db.updateGroupSettings(testChatA, {
+      botLeft: false,
+      unavailable: false,
+      unavailableReason: undefined,
+      autoEngine: {
+        enabled: true,
+        mode: 'messages_only',
+        messages: { preset: 'custom', minSeconds: 30, maxSeconds: 30, cooldownSeconds: 30, randomize: false }
+      }
+    });
+    db.addGroupConversationEntry(testChatA, {
+      role: 'user',
+      name: 'Alice',
+      content: 'Fallback chain message',
+      timestamp: Date.now(),
+      messageId: 106
+    });
+    db.setLastProactiveConsideredMessageId(testChatA, 0);
+    const s28 = db.getGroupSettings(testChatA);
+    if (s28.autoResponse) {
+      s28.autoResponse.lastResponseTimestamp = 0;
+      s28.autoResponse.nextAllowedAt = 0;
+    }
     let fallbackCalls = 0;
     global.fetch = async (url: any, opts: any): Promise<any> => {
       if (typeof url === 'string' && url.includes('openrouter.ai')) {

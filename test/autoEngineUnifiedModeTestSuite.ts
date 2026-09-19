@@ -107,6 +107,7 @@ async function runAutoEngineUnifiedModeTestSuite() {
       autoSticker: { enabled: false, mode: 'disabled' }
     });
   }
+  ChatbotService.setProactiveOpportunityProbability(1.0);
   autoEngineService.start(botId);
 
   const mockBotUser = { id: botId, is_bot: true, first_name: 'Miss Roxie', username: 'MissRoxie_Bot' };
@@ -306,6 +307,19 @@ async function runAutoEngineUnifiedModeTestSuite() {
       }
     });
 
+    db.addGroupConversationEntry(testChatA, {
+      role: 'user',
+      name: 'Alice',
+      content: 'Test message for 11',
+      timestamp: Date.now(),
+      messageId: 8811
+    });
+    db.setLastProactiveConsideredMessageId(testChatA, 0);
+    const s11A = db.getGroupSettings(testChatA);
+    if (s11A.autoResponse) {
+      s11A.autoResponse.lastResponseTimestamp = 0;
+      s11A.autoResponse.nextAllowedAt = 0;
+    }
     autoEngineService.syncGroup(botId, testChatA);
     autoEngineService.syncGroup(botId, testChatB);
 
@@ -520,6 +534,15 @@ async function runAutoEngineUnifiedModeTestSuite() {
       json: async () => ({ choices: [{ message: { content: 'Proactive conversation message' } }] })
     })) as any;
 
+    db.addGroupConversationEntry(testChatA, {
+      role: 'user',
+      name: 'Alice',
+      content: 'Proactive test 22 message',
+      timestamp: Date.now(),
+      messageId: 622
+    });
+    db.setLastProactiveConsideredMessageId(testChatA, 0);
+
     db.updateGroupSettings(testChatA, {
       autoEngine: {
         enabled: true,
@@ -527,6 +550,11 @@ async function runAutoEngineUnifiedModeTestSuite() {
         messages: { preset: 'custom', minSeconds: 30, maxSeconds: 60, cooldownSeconds: 30, randomize: true }
       }
     });
+    const s22 = db.getGroupSettings(testChatA);
+    if (s22.autoResponse) {
+      s22.autoResponse.lastResponseTimestamp = 0;
+      s22.autoResponse.nextAllowedAt = 0;
+    }
     autoEngineService.syncGroup(botId, testChatA);
     sentMessages = [];
 
@@ -545,6 +573,15 @@ async function runAutoEngineUnifiedModeTestSuite() {
       text: async () => JSON.stringify({ error: { message: 'Server down' } })
     })) as any;
 
+    db.addGroupConversationEntry(testChatA, {
+      role: 'user',
+      name: 'Alice',
+      content: 'Proactive test 23 message',
+      timestamp: Date.now(),
+      messageId: 623
+    });
+    db.setLastProactiveConsideredMessageId(testChatA, 0);
+
     db.updateGroupSettings(testChatA, {
       autoEngine: {
         enabled: true,
@@ -552,6 +589,11 @@ async function runAutoEngineUnifiedModeTestSuite() {
         messages: { preset: 'custom', minSeconds: 30, maxSeconds: 60, cooldownSeconds: 30, randomize: true }
       }
     });
+    const s23 = db.getGroupSettings(testChatA);
+    if (s23.autoResponse) {
+      s23.autoResponse.lastResponseTimestamp = 0;
+      s23.autoResponse.nextAllowedAt = 0;
+    }
     autoEngineService.syncGroup(botId, testChatA);
 
     await advanceTime(70000);

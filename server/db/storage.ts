@@ -2121,6 +2121,7 @@ export class StorageManager {
         protectionFloodWindow: 5,
         protectionDuplicateLimit: 3,
         protectionLinkBurstLimit: 3,
+        lastProactiveConsideredMessageId: 0,
         humanMessagesSinceLastSticker: 0,
         stickerActivityMin: 10,
         stickerActivityMax: 20,
@@ -5630,6 +5631,22 @@ export class StorageManager {
     this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
     return newCount;
+  }
+
+  public getLastProactiveConsideredMessageId(chatId: number | string): number {
+    const numId = Number(chatId);
+    if (numId > 0) return 0;
+    const settings = this.getGroupSettings(numId);
+    return settings.lastProactiveConsideredMessageId || 0;
+  }
+
+  public setLastProactiveConsideredMessageId(chatId: number | string, messageId: number): void {
+    const numId = Number(chatId);
+    if (numId > 0) return;
+    const settings = this.getGroupSettings(numId);
+    settings.lastProactiveConsideredMessageId = messageId;
+    this.saveGroupJsonSync(numId);
+    this.scheduleSave(numId);
   }
 
   public getHumanMessagesSinceLastSticker(chatId: number | string): number {
