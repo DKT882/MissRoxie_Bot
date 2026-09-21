@@ -798,7 +798,7 @@ export class StorageManager {
       },
       stickerPacks: stickerPacksList.slice(0, 100),
       abuseWords: abuseWordsList,
-      members: this.getGroupMembers(chatId).slice(0, 500),
+      members: this.getGroupMembers(chatId).slice(0, 10000),
       moderators: ((settings as any).admins || []).slice(0, 100),
       messages,
       statistics: {
@@ -1209,7 +1209,36 @@ export class StorageManager {
     // 8. Members restoration
     if (Array.isArray(data.members) && data.members.length > 0) {
       if (!this.data.groupMembers) this.data.groupMembers = {};
-      this.data.groupMembers[key] = data.members.slice(0, 500);
+      for (const m of data.members) {
+        if (m && m.userId) {
+          const groupKey = `${chatId}_${m.userId}`;
+          this.data.groupMembers[groupKey] = {
+            userId: m.userId,
+            username: m.username,
+            firstName: m.firstName || (m as any).name || '',
+            lastName: m.lastName,
+            groupId: chatId,
+            lastSeen: m.lastSeen || (m as any).lastActive || new Date().toISOString(),
+            customRole: m.customRole || (m.role && m.role !== 'member' ? m.role : undefined)
+          };
+        }
+      }
+    } else if (data.groupMembers && typeof data.groupMembers === 'object') {
+      if (!this.data.groupMembers) this.data.groupMembers = {};
+      for (const [k, m] of Object.entries(data.groupMembers as Record<string, any>)) {
+        if (m && m.userId) {
+          const groupKey = k.startsWith(`${chatId}_`) ? k : `${chatId}_${m.userId}`;
+          this.data.groupMembers[groupKey] = {
+            userId: m.userId,
+            username: m.username,
+            firstName: m.firstName || (m as any).name || '',
+            lastName: m.lastName,
+            groupId: chatId,
+            lastSeen: m.lastSeen || (m as any).lastActive || new Date().toISOString(),
+            customRole: m.customRole || (m.role && m.role !== 'member' ? m.role : undefined)
+          };
+        }
+      }
     }
 
     // 9. User lust levels
@@ -1218,6 +1247,29 @@ export class StorageManager {
       for (const ul of data.lustMode.userLustLevels) {
         if (ul?.groupId && ul?.userId) {
           this.data.userLustLevels[`${ul.groupId}_${ul.userId}`] = ul;
+        }
+      }
+    }
+
+    // 10. Historical Member Backfill from messages
+    const memory = this.getGroupMemory(chatId);
+    if (Array.isArray(memory)) {
+      if (!this.data.groupMembers) this.data.groupMembers = {};
+      for (const msg of memory) {
+        if (msg && msg.role === 'user') {
+          const uId = (msg as any).userId;
+          if (uId && typeof uId === 'number' && uId > 0 && uId !== 1087968824 && uId !== 777000) {
+            const groupKey = `${chatId}_${uId}`;
+            if (!this.data.groupMembers[groupKey]) {
+              this.data.groupMembers[groupKey] = {
+                userId: uId,
+                username: msg.username,
+                firstName: msg.name || msg.displayName || 'Member',
+                groupId: chatId,
+                lastSeen: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString()
+              };
+            }
+          }
         }
       }
     }
@@ -1892,10 +1944,11 @@ export class StorageManager {
 
   // --- User Caching (for resolving @username to userId and vice-versa) ---
   public cacheUser(
-    user: { id: number; username?: string; first_name?: string; last_name?: string },
+    user: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean },
     groupId?: number
   ): CachedMember | null {
-    if (!user || !user.id || user.id === 1087968824 || user.id === 0) return null;
+    if (!user || !user.id || user.id === 1087968824 || user.id === 777000 || user.id === 0) return null;
+    if ((user as any).is_bot) return null;
 
     const now = new Date().toISOString();
     const customRole = groupId ? this.getCustomRole(groupId, user.id) : undefined;
@@ -1950,16 +2003,29 @@ export class StorageManager {
     // Update group-specific member entry
     if (groupId) {
       const groupKey = `${groupId}_${user.id}`;
-      this.data.groupMembers[groupKey] = cached;
+      const existing = this.data.groupMembers[groupKey];
+      this.data.groupMembers[groupKey] = {
+        ...cached,
+        customRole: cached.customRole || existing?.customRole
+      };
+      this.scheduleSave(groupId);
+    } else {
+      this.scheduleSave();
     }
 
-    this.scheduleSave();
     return cached;
+  }
+
+  public recordObservedGroupMember(
+    groupId: number,
+    user: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean }
+  ): CachedMember | null {
+    return this.cacheUser(user, groupId);
   }
 
   // Alias for backward compatibility
   public registerUser(
-    user: { id: number; username?: string; first_name?: string; last_name?: string },
+    user: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean },
     groupId?: number
   ) {
     return this.cacheUser(user, groupId);

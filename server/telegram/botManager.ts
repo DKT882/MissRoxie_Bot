@@ -492,6 +492,9 @@ export class TelegramBotManager {
           const cbChatId = update.callback_query.message?.chat?.id;
           const cbChatTitle = update.callback_query.message?.chat?.title;
           if (cbChatId && cbChatId < 0) {
+            if (update.callback_query.from) {
+              db.cacheUser(update.callback_query.from, cbChatId);
+            }
             db.getGroupSettings(cbChatId, cbChatTitle);
             db.scheduleSave(cbChatId);
           }

@@ -176,7 +176,7 @@ export class MongoStorageService {
         stickers: groupData.stickers || {},
         stickerPacks: (groupData.stickerPacks || []).slice(0, 100),
         abuseWords: (groupData.abuseWords || []).slice(0, 500),
-        members: (groupData.members || []).slice(0, 500),
+        members: (groupData.members || []).slice(0, 10000),
         moderators: (groupData.moderators || []).slice(0, 100),
         messages: (groupData.messages || []).slice(-500),
         schedules: (groupData.schedules || groupData.statistics?.schedules || []).slice(-50),

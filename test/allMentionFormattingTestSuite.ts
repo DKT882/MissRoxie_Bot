@@ -533,6 +533,137 @@ async function runAllMentionFormattingTestSuite() {
     assert.ok(statusText.includes('Note: Mentions all eligible members currently tracked and available to Roxie in this group'), 'Must include transparent limitation note');
   });
 
+  // =========================================================================
+  // TEST SECTION 9: PERSISTENT OBSERVED-MEMBER REGISTRY & HYDRATION
+  // =========================================================================
+  await test('12. Incoming message observes new human user and records in group registry', async () => {
+    resetChatMembers(testChatId);
+
+    const humanUser: TelegramUser = { id: 771122, is_bot: false, first_name: 'David', username: 'david_observed' };
+    const recorded = db.cacheUser(humanUser, testChatId);
+
+    assert.ok(recorded, 'cacheUser must return CachedMember record');
+    assert.strictEqual(recorded.userId, 771122);
+    assert.strictEqual(recorded.username, 'david_observed');
+    assert.strictEqual(recorded.firstName, 'David');
+
+    const members = db.getGroupMembersList(testChatId);
+    assert.strictEqual(members.length, 1);
+    assert.strictEqual(members[0].userId, 771122);
+  });
+
+  await test('13. Subsequent message from same user updates lastSeen without creating duplicates', async () => {
+    resetChatMembers(testChatId);
+
+    const user: TelegramUser = { id: 881122, is_bot: false, first_name: 'Elena', username: 'elena_v' };
+    db.cacheUser(user, testChatId);
+    const initialMembers = db.getGroupMembersList(testChatId);
+    assert.strictEqual(initialMembers.length, 1);
+    const initialLastSeen = initialMembers[0].lastSeen;
+
+    // Simulate subsequent message slightly later
+    await new Promise((r) => setTimeout(r, 10));
+    db.cacheUser({ id: 881122, is_bot: false, first_name: 'Elena Updated', username: 'elena_v' }, testChatId);
+
+    const updatedMembers = db.getGroupMembersList(testChatId);
+    assert.strictEqual(updatedMembers.length, 1, 'Duplicate record must not be created for the same user ID');
+    assert.strictEqual(updatedMembers[0].firstName, 'Elena Updated');
+    assert.ok(updatedMembers[0].lastSeen >= initialLastSeen, 'lastSeen must be updated');
+  });
+
+  await test('14. Bots, anonymous channels, and Roxie self-messages are rejected from group member registry', async () => {
+    resetChatMembers(testChatId);
+
+    const botUser: TelegramUser = { id: 991100, is_bot: true, first_name: 'Helper Bot', username: 'helper_bot' };
+    const resBot = db.cacheUser(botUser, testChatId);
+    assert.strictEqual(resBot, null, 'Bots must not be cached as group members');
+
+    const anonUser: TelegramUser = { id: 1087968824, is_bot: false, first_name: 'Group Anonymous' };
+    const resAnon = db.cacheUser(anonUser, testChatId);
+    assert.strictEqual(resAnon, null, 'Anonymous channel ID 1087968824 must not be cached');
+
+    const telegramServiceUser: TelegramUser = { id: 777000, is_bot: false, first_name: 'Telegram Service' };
+    const resTel = db.cacheUser(telegramServiceUser, testChatId);
+    assert.strictEqual(resTel, null, 'Telegram service ID 777000 must not be cached');
+
+    const members = db.getGroupMembersList(testChatId);
+    assert.strictEqual(members.length, 0, 'No invalid users should be in group members list');
+  });
+
+  await test('15. Username change updates existing member record by user ID', async () => {
+    resetChatMembers(testChatId);
+
+    const user: TelegramUser = { id: 661122, is_bot: false, first_name: 'Frank', username: 'old_handle' };
+    db.cacheUser(user, testChatId);
+    assert.strictEqual(db.findUserByUsername('old_handle', testChatId)?.userId, 661122);
+
+    // User changes username to @new_handle
+    db.cacheUser({ id: 661122, is_bot: false, first_name: 'Frank', username: 'new_handle' }, testChatId);
+    assert.strictEqual(db.findUserByUsername('new_handle', testChatId)?.userId, 661122);
+
+    const members = db.getGroupMembersList(testChatId);
+    assert.strictEqual(members.length, 1);
+    assert.strictEqual(members[0].username, 'new_handle');
+  });
+
+  await test('16. Group hydration / restoreGroupData preserves 500+ members in RAM without loss', async () => {
+    resetChatMembers(testChatId);
+
+    // Create a mock export with 523 members
+    const mockMembers: any[] = [];
+    for (let i = 1; i <= 523; i++) {
+      mockMembers.push({
+        userId: 200000 + i,
+        username: `hydrated_user_${i}`,
+        firstName: `Hydrated User ${i}`,
+        role: 'member',
+        lastActive: new Date().toISOString()
+      });
+    }
+
+    const mockGroupData = {
+      schemaVersion: 1,
+      chat: { chatId: String(testChatId), title: testChatTitle, type: 'supergroup' },
+      settings: { chatId: testChatId, chatTitle: testChatTitle },
+      members: mockMembers
+    };
+
+    // Restore into storage
+    db.restoreGroupData(testChatId, mockGroupData);
+
+    const restoredList = db.getGroupMembersList(testChatId);
+    assert.strictEqual(restoredList.length, 523, 'All 523 members must be restored into groupMembers dictionary');
+
+    const eligible = await CommandHandler.getAllEligibleGroupMembers(testChatId, 7770001);
+    // 523 restored members + 1 mock admin = 524 eligible
+    assert.strictEqual(eligible.length, 524, 'All eligible members must be resolved including admin');
+  });
+
+  await test('17. Historical memory backfill restores past human message senders into groupMembers', async () => {
+    resetChatMembers(testChatId);
+
+    // Simulate group memory with 5 distinct historical human messages
+    const mockGroupDataWithMemory = {
+      schemaVersion: 1,
+      chat: { chatId: String(testChatId), title: testChatTitle, type: 'supergroup' },
+      settings: { chatId: testChatId, chatTitle: testChatTitle },
+      members: [], // Empty explicit members array
+      messages: [
+        { role: 'user', name: 'HistUser1', username: 'hist_1', userId: 300001, timestamp: Date.now() - 50000 },
+        { role: 'user', name: 'HistUser2', username: 'hist_2', userId: 300002, timestamp: Date.now() - 40000 },
+        { role: 'assistant', name: 'Roxie', content: 'Hello', timestamp: Date.now() - 30000 },
+        { role: 'user', name: 'HistUser3', username: 'hist_3', userId: 300003, timestamp: Date.now() - 20000 }
+      ]
+    };
+
+    db.restoreGroupData(testChatId, mockGroupDataWithMemory);
+
+    const restoredFromMemory = db.getGroupMembersList(testChatId);
+    assert.strictEqual(restoredFromMemory.length, 3, 'All 3 historical human senders must be backfilled into groupMembers');
+    const userIds = restoredFromMemory.map(m => m.userId).sort();
+    assert.deepStrictEqual(userIds, [300001, 300002, 300003]);
+  });
+
   console.log('\n===============================================================');
   console.log(`MASTER /ALL PAGINATION SUITE RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('===============================================================\n');
