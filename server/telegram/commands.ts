@@ -4117,16 +4117,90 @@ export class CommandHandler {
   }
 
   public static readonly ALL_MENTION_EMOJIS = Object.freeze([
-    '👤', '😂', '🔥', '😎', '💀', '✨', '⚡', '🎉', '🌟', '🚀',
-    '🥳', '💫', '🦁', '👑', '💎', '🎯', '🍀', '🌈', '🍕', '🐱',
-    '🐼', '🦊', '🦋', '🎈', '❤️', '🤩', '🤙', '💯', '🌸', '🪄'
+    '🥹', '😂', '🫦', '🥺', '🍒', '🫣', '👁️', '🦦', '❤️', '🎉',
+    '🔥', '😎', '💀', '✨', '⚡', '🌟', '🚀', '🥳', '💫', '🦁',
+    '👑', '💎', '🎯', '🍀', '🌈', '🍕', '🐱', '🐼', '🦊', '🦋',
+    '🎈', '🤩', '🤙', '💯', '🌸', '🪄', '💖', '👀', '👻', '🦄'
   ]);
+
+  /**
+   * Resolves all eligible group members currently known/available to Roxie.
+   *
+   * Telegram Bot API Limitation Note:
+   * Telegram Bot API does not expose an unrestricted complete member-list endpoint
+   * for arbitrary groups. /all mentions all eligible members currently known/available
+   * to Roxie through tracked activity, join events, conversation memory, and Telegram
+   * administrators fetched dynamically via getChatAdministrators.
+   */
+  public static async getAllEligibleGroupMembers(
+    chatId: number,
+    botId?: number
+  ): Promise<CachedMember[]> {
+    // 1. Refresh administrators to ensure latest admins are cached in group members
+    try {
+      const adminRes = await telegramApi.getChatAdministrators(chatId);
+      if (adminRes.ok && Array.isArray(adminRes.result)) {
+        for (const admin of adminRes.result) {
+          if (admin.user && !admin.user.is_bot) {
+            db.cacheUser(admin.user, chatId);
+          }
+        }
+      }
+    } catch {
+      // Non-blocking: fallback to already stored members
+    }
+
+    const primaryMembers = db.getGroupMembersList(chatId) || [];
+    const secondaryMembers = db.getGroupMembers(chatId) || [];
+
+    const seenUserIds = new Set<number>();
+    const eligibleMembers: CachedMember[] = [];
+    const allCandidateMembers = [...primaryMembers, ...secondaryMembers];
+
+    for (const m of allCandidateMembers) {
+      if (!m || !m.userId) continue;
+      const uid = Number(m.userId);
+      if (isNaN(uid) || uid <= 0) continue;
+      if (uid === 1087968824 || uid === 777000) continue;
+      if (botId && uid === botId) continue;
+      if (seenUserIds.has(uid)) continue;
+
+      const rawUname = (m.username || '').trim();
+      const cleanUname = rawUname.replace(/^@/, '').trim();
+      const lowerUname = cleanUname.toLowerCase();
+      const firstName = (m.firstName || '').trim();
+
+      // Exclude bots
+      if (
+        (m as any).is_bot ||
+        lowerUname.includes('bot') ||
+        lowerUname.endsWith('bot')
+      ) {
+        continue;
+      }
+
+      // Exclude deleted accounts if identifiable
+      if (firstName.toLowerCase() === 'deleted account' || cleanUname.toLowerCase() === 'deletedaccount') {
+        continue;
+      }
+
+      seenUserIds.add(uid);
+      eligibleMembers.push({
+        userId: uid,
+        username: cleanUname || undefined,
+        firstName: firstName || 'Member',
+        lastSeen: (m as any).lastSeen || (m as any).lastActive || new Date().toISOString()
+      });
+    }
+
+    return eligibleMembers;
+  }
 
   public static buildAllMentionsChunks(
     members: CachedMember[],
     defaultMsg: string,
     botId?: number,
-    chunkSize: number = 12
+    chunkSize: number = 10
   ): { mentions: string[]; chunks: string[] } {
     const seenUserIds = new Set<number>();
     const mentions: string[] = [];
@@ -4134,28 +4208,31 @@ export class CommandHandler {
 
     for (const m of members) {
       if (!m || !m.userId) continue;
-      if (botId && m.userId === botId) continue;
-      if (seenUserIds.has(m.userId)) continue;
+      const uid = Number(m.userId);
+      if (isNaN(uid) || uid <= 0) continue;
+      if (uid === 1087968824 || uid === 777000) continue;
+      if (botId && uid === botId) continue;
+      if (seenUserIds.has(uid)) continue;
 
       const rawUname = (m.username || '').trim();
       const cleanUname = rawUname.replace(/^@/, '').trim();
       const lowerUname = cleanUname.toLowerCase();
+      const firstName = (m.firstName || '').trim();
 
       // Exclude bots
-      if (lowerUname.includes('bot') || lowerUname.endsWith('bot') || (m as any).is_bot) {
+      if ((m as any).is_bot || lowerUname.includes('bot') || lowerUname.endsWith('bot')) {
         continue;
       }
 
-      seenUserIds.add(m.userId);
+      // Exclude deleted accounts if identifiable
+      if (firstName.toLowerCase() === 'deleted account' || cleanUname.toLowerCase() === 'deletedaccount') {
+        continue;
+      }
+
+      seenUserIds.add(uid);
 
       const emoji = emojis[Math.floor(Math.random() * emojis.length)];
-
-      if (cleanUname.length > 0) {
-        mentions.push(`${emoji} → @${cleanUname}`);
-      } else {
-        const displayName = m.firstName?.trim() || 'Member';
-        mentions.push(`${emoji} → <a href="tg://user?id=${m.userId}">${escapeHtml(displayName)}</a>`);
-      }
+      mentions.push(`<a href="tg://user?id=${uid}">${emoji}</a>`);
     }
 
     if (mentions.length === 0) {
@@ -4163,9 +4240,15 @@ export class CommandHandler {
     }
 
     const chunks: string[] = [];
+    const cleanDefaultMsg = (defaultMsg || '').trim();
     for (let i = 0; i < mentions.length; i += chunkSize) {
       const chunkMentions = mentions.slice(i, i + chunkSize);
-      chunks.push(defaultMsg ? `${defaultMsg}\n\n${chunkMentions.join('\n')}` : chunkMentions.join('\n'));
+      const emojiRow = chunkMentions.join('');
+      if (i === 0 && cleanDefaultMsg) {
+        chunks.push(`${cleanDefaultMsg}\n\n${emojiRow}`);
+      } else {
+        chunks.push(emojiRow);
+      }
     }
 
     return { mentions, chunks };
@@ -4184,40 +4267,30 @@ export class CommandHandler {
       return;
     }
 
+    // Get bot ID to exclude self
+    const botId = (await telegramApi.getMe())?.result?.id;
+
     if (ctx.args[0]?.toLowerCase() === 'status') {
-      const members = db.getGroupMembersList(ctx.chatId);
+      const members = await CommandHandler.getAllEligibleGroupMembers(ctx.chatId, botId);
       await telegramApi.sendMessage(
         ctx.chatId,
         `ℹ️ <b>/all Command Status</b>\n\n` +
-        `Cached Members: ${members.length}\n` +
-        `Usage: <code>/all [custom message text]</code>`,
+        `Eligible Members Available: ${members.length}\n` +
+        `Estimated Messages: ${Math.ceil(members.length / 10)}\n` +
+        `Usage: <code>/all [custom message text]</code>\n\n` +
+        `<i>Note: Mentions all eligible members currently tracked and available to Roxie in this group.</i>`,
         { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
       );
       return;
     }
 
-    // Refresh administrators to ensure latest admins are cached in group members
-    try {
-      const adminRes = await telegramApi.getChatAdministrators(ctx.chatId);
-      if (adminRes.ok && Array.isArray(adminRes.result)) {
-        for (const admin of adminRes.result) {
-          if (admin.user && !admin.user.is_bot) {
-            db.cacheUser(admin.user, ctx.chatId);
-          }
-        }
-      }
-    } catch {
-      // Non-blocking: fallback to already stored members
-    }
-
     const customText = CommandHandler.getCommandText(ctx, 0);
-    const defaultMsg = customText || 'Hiee';
-    const members = db.getGroupMembersList(ctx.chatId);
+    const defaultMsg = customText || '';
 
-    // Get bot ID to exclude self
-    const botId = (await telegramApi.getMe())?.result?.id;
+    // Snapshot complete eligible member list once
+    const members = await CommandHandler.getAllEligibleGroupMembers(ctx.chatId, botId);
 
-    const { mentions, chunks } = CommandHandler.buildAllMentionsChunks(members, defaultMsg, botId, 12);
+    const { mentions, chunks } = CommandHandler.buildAllMentionsChunks(members, defaultMsg, botId, 10);
 
     if (mentions.length === 0) {
       await telegramApi.sendMessage(
@@ -4291,6 +4364,12 @@ export class CommandHandler {
           reply_to_message_id: i === 0 ? targetReplyId : undefined,
           parse_mode: 'HTML'
         });
+      }
+
+      // Conservative sequential per-chat pacing (1000ms) between consecutive chunks to comply with Telegram's 1 msg/sec group limit
+      if (i < chunks.length - 1) {
+        const pacingMs = process.env.NODE_ENV === 'test' ? 10 : 1000;
+        await new Promise(resolve => setTimeout(resolve, pacingMs));
       }
     }
 

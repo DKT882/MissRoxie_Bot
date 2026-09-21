@@ -152,20 +152,19 @@ async function runFinalPreCommitVerification() {
       assert.strictEqual(capturedCalls[0].method, 'sendMessage', 'Method must be sendMessage');
 
       const sentText = capturedCalls[0].args[1];
-      assert.ok(sentText.includes('Hiee'), 'Default message header must be present');
-      assert.ok(sentText.includes('@alice_1'), 'Alice must be mentioned');
-      assert.ok(sentText.includes('@bob_2'), 'Bob must be mentioned');
-      assert.ok(sentText.includes('@charlie_3'), 'Charlie must be mentioned');
-      assert.ok(sentText.includes('<a href="tg://user?id=1004">Diana</a>'), 'Diana (no username) must have clickable HTML mention');
-      assert.ok(sentText.includes('@admin_user'), 'Admin User must be mentioned');
+      assert.ok(sentText.includes('<a href="tg://user?id=1001">'), 'Alice must have clickable emoji mention');
+      assert.ok(sentText.includes('<a href="tg://user?id=1002">'), 'Bob must have clickable emoji mention');
+      assert.ok(sentText.includes('<a href="tg://user?id=1003">'), 'Charlie must have clickable emoji mention');
+      assert.ok(sentText.includes('<a href="tg://user?id=1004">'), 'Diana must have clickable emoji mention');
+      assert.ok(sentText.includes('<a href="tg://user?id=999001">'), 'Admin User must have clickable emoji mention');
       assert.ok(!sentText.includes('spambot'), 'Bot must NOT be mentioned');
+      assert.ok(!sentText.includes('@alice_1'), 'Must not contain @alice_1 text');
+      assert.ok(!sentText.includes('→'), 'Must not contain arrow');
 
-      // Verify each member line has emoji
-      const lines = sentText.split('\n').filter((l: string) => l.includes('→'));
-      assert.strictEqual(lines.length, 5, `Must have exactly 5 member mention lines, got ${lines.length}`);
-      for (const line of lines) {
-        assert.match(line, /^[^\s]+ → (@[a-zA-Z0-9_]+|<a href="tg:\/\/user\?id=\d+">.*<\/a>)$/, `Line "${line}" must have emoji arrow mention`);
-      }
+      // Verify all 5 emojis are in a single row without newlines between members
+      const emojiMentions = sentText.match(/<a href="tg:\/\/user\?id=\d+">[^<]+<\/a>/g) || [];
+      assert.strictEqual(emojiMentions.length, 5, `Must have exactly 5 member emoji mentions, got ${emojiMentions.length}`);
+      assert.strictEqual(sentText, emojiMentions.join(''), 'Sent message must be a single row of emoji mentions');
     });
 
     await test('1.2: /all edge cases: 1 member, member without username, bot present, deleted/unavailable member', () => {
@@ -174,13 +173,13 @@ async function runFinalPreCommitVerification() {
       const res1 = CommandHandler.buildAllMentionsChunks(singleMember, 'Hey', 7770001, 12);
       assert.strictEqual(res1.chunks.length, 1);
       assert.strictEqual(res1.mentions.length, 1);
-      assert.ok(res1.mentions[0].includes('@solouser'));
+      assert.ok(res1.mentions[0].includes('<a href="tg://user?id=501">'));
 
       // Member without username
       const noUnameMember: CachedMember[] = [{ userId: 502, firstName: 'NoUsername User', lastSeen: new Date().toISOString() }];
       const res2 = CommandHandler.buildAllMentionsChunks(noUnameMember, 'Hey', 7770001, 12);
       assert.strictEqual(res2.chunks.length, 1);
-      assert.ok(res2.mentions[0].includes('<a href="tg://user?id=502">NoUsername User</a>'));
+      assert.ok(res2.mentions[0].includes('<a href="tg://user?id=502">'));
 
       // Bot present (must be excluded)
       const botMember: CachedMember[] = [
@@ -189,13 +188,13 @@ async function runFinalPreCommitVerification() {
       ];
       const res3 = CommandHandler.buildAllMentionsChunks(botMember, 'Hey', 7770001, 12);
       assert.strictEqual(res3.mentions.length, 1);
-      assert.ok(res3.mentions[0].includes('@realperson'));
+      assert.ok(res3.mentions[0].includes('<a href="tg://user?id=504">'));
 
       // Null/corrupted member entries
       const nullMember: any[] = [null, undefined, { userId: 0 }, { userId: 505, username: 'validguy', firstName: 'Valid', lastSeen: new Date().toISOString() }];
       const res4 = CommandHandler.buildAllMentionsChunks(nullMember, 'Hey', 7770001, 12);
       assert.strictEqual(res4.mentions.length, 1);
-      assert.ok(res4.mentions[0].includes('@validguy'));
+      assert.ok(res4.mentions[0].includes('<a href="tg://user?id=505">'));
     });
 
     // =========================================================================
@@ -233,7 +232,7 @@ async function runFinalPreCommitVerification() {
       assert.strictEqual(capturedCalls[0].method, 'sendPhoto');
       assert.strictEqual(capturedCalls[0].args[0], testChatId);
       assert.strictEqual(capturedCalls[0].args[1], 'photo_file_id_xyz');
-      assert.ok(capturedCalls[0].args[2].caption.includes('@alice_1'), 'Caption must contain mentions');
+      assert.ok(capturedCalls[0].args[2].caption.includes('<a href="tg://user?id=1001">'), 'Caption must contain mentions');
       assert.strictEqual(capturedCalls[0].args[2].parse_mode, 'HTML');
       assert.strictEqual(capturedCalls[0].args[2].reply_to_message_id, 1199);
     });
@@ -270,7 +269,7 @@ async function runFinalPreCommitVerification() {
       assert.strictEqual(capturedCalls[0].method, 'sendAnimation');
       assert.strictEqual(capturedCalls[0].args[0], testChatId);
       assert.strictEqual(capturedCalls[0].args[1], 'anim_file_id_xyz');
-      assert.ok(capturedCalls[0].args[2].caption.includes('@alice_1'), 'Caption must contain mentions');
+      assert.ok(capturedCalls[0].args[2].caption.includes('<a href="tg://user?id=1001">'), 'Caption must contain mentions');
       assert.strictEqual(capturedCalls[0].args[2].parse_mode, 'HTML');
       assert.strictEqual(capturedCalls[0].args[2].reply_to_message_id, 1198);
     });
@@ -308,7 +307,7 @@ async function runFinalPreCommitVerification() {
       assert.strictEqual(capturedCalls[0].args[0], testChatId);
       assert.strictEqual(capturedCalls[0].args[1], 'video_file_id_xyz');
       assert.ok(capturedCalls[0].args[2].caption.includes('xyy'), 'Caption must contain custom text xyy');
-      assert.ok(capturedCalls[0].args[2].caption.includes('@alice_1'), 'Caption must contain mentions');
+      assert.ok(capturedCalls[0].args[2].caption.includes('<a href="tg://user?id=1001">'), 'Caption must contain mentions');
       assert.strictEqual(capturedCalls[0].args[2].parse_mode, 'HTML');
       assert.strictEqual(capturedCalls[0].args[2].reply_to_message_id, 1197);
     });

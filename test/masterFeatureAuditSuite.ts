@@ -247,7 +247,7 @@ async function runAllTests() {
     // ----------------------------------------------------
     // AREA 3: /all formatting with random emoji per member
     // ----------------------------------------------------
-    await test('AREA 3: buildAllMentionsChunks formats members with random emojis and @username / HTML mention', () => {
+    await test('AREA 3: buildAllMentionsChunks formats members with clickable emoji mentions in single row', () => {
       const testMembers: CachedMember[] = [
         { userId: 1001, username: 'alice', firstName: 'Alice', lastSeen: new Date().toISOString() },
         { userId: 1002, firstName: 'Bob', lastSeen: new Date().toISOString() }, // No username
@@ -258,16 +258,17 @@ async function runAllTests() {
       const { mentions, chunks } = CommandHandler.buildAllMentionsChunks(testMembers, 'Attention everyone!', 7770001, 10);
       assert.strictEqual(mentions.length, 3, 'Should include 3 real members (excluding bot)');
 
-      // Verify each mention line has emoji + arrow + mention
+      // Verify each mention is a clickable HTML link around an emoji
       for (const m of mentions) {
-        assert.match(m, /^[^\s]+ → (@[a-zA-Z0-9_]+|<a href="tg:\/\/user\?id=\d+">.*<\/a>)$/, `Mention "${m}" must match emoji pattern`);
+        assert.match(m, /^<a href="tg:\/\/user\?id=\d+">[^<]+<\/a>$/, `Mention "${m}" must be clickable emoji link`);
       }
 
       assert.strictEqual(chunks.length, 1, 'Should fit in 1 chunk');
       assert.ok(chunks[0].includes('Attention everyone!'), 'Chunk must contain default message');
-      assert.ok(chunks[0].includes('@alice'), 'Chunk must include Alice mention');
+      assert.ok(chunks[0].includes('tg://user?id=1001'), 'Chunk must include Alice HTML mention');
       assert.ok(chunks[0].includes('tg://user?id=1002'), 'Chunk must include Bob HTML mention');
-      assert.ok(chunks[0].includes('@charlie'), 'Chunk must include Charlie mention');
+      assert.ok(chunks[0].includes('tg://user?id=1003'), 'Chunk must include Charlie HTML mention');
+      assert.ok(!chunks[0].includes('@alice'), 'Must not display @username');
     });
 
     // ----------------------------------------------------
@@ -311,7 +312,7 @@ async function runAllTests() {
       assert.strictEqual(photoCall.args[0], testChatId);
       assert.strictEqual(photoCall.args[1], 'file_photo_123');
       assert.ok(photoCall.args[2].caption.includes('Special photo announcement'), 'Caption must contain custom text');
-      assert.ok(photoCall.args[2].caption.includes('@m_one'), 'Caption must contain member tag');
+      assert.ok(photoCall.args[2].caption.includes('<a href="tg://user?id=2001">'), 'Caption must contain member tag');
       assert.strictEqual(photoCall.args[2].parse_mode, 'HTML');
     });
 
