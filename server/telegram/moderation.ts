@@ -329,101 +329,11 @@ export class ModerationService {
     const linkRegex = /(?:https?:\/\/|ftp:\/\/|tg:\/\/|www\.|t\.me\/|telegram\.me\/|telegram\.dog\/|\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:[a-zA-Z]{2,24}|co\.[a-zA-Z]{2}|com\.[a-zA-Z]{2}|org\.[a-zA-Z]{2}|net\.[a-zA-Z]{2}|edu\.[a-zA-Z]{2}|gov\.[a-zA-Z]{2})(?::\d+)?(?:\/[^\s]*)?)/i;
     const hasLink = hasUrlEntity || (textToCheck.length > 0 && linkRegex.test(textToCheck));
 
-    // Comprehensive contact-bait / DM solicitation detection with multi-layer evasion normalization
-    let hasContactBait = false;
-    if (textToCheck.length > 0) {
-      const rawLower = textToCheck.toLowerCase();
-      // Exclude third-party bio mentions like "check the bio of this bot / person"
-      const isThirdPartyBio = /\b(?:check|see|look|read|view)\s+(?:the\s+)?bio\s+of\b/i.test(rawLower);
-
-      if (!isThirdPartyBio) {
-        const normalizedSpaces = rawLower.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
-        const cleanedPunctuation = normalizedSpaces
-          .replace(/[\.\-_~*`!,?#@$%^&()\[\]{}|\\/+=:;]/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        const collapsed = normalizedSpaces.replace(/(.)\1+/g, '$1');
-        const collapsedCleaned = cleanedPunctuation.replace(/(.)\1+/g, '$1');
-
-        const unspacedLetters = cleanedPunctuation
-          .replace(/\bd\s*m\s*m\s*e\b/g, 'dm me')
-          .replace(/\bd\s*m\s*e\b/g, 'dm me')
-          .replace(/\bd(?:\s*d)?(?:\s*m)+\b/g, 'dm')
-          .replace(/\bp(?:\s*p)?(?:\s*m)+\b/g, 'pm')
-          .replace(/\bm(?:\s*s)?(?:\s*g)+\b/g, 'msg')
-          .replace(/\bt\s*x\s*t\b/g, 'txt')
-          .replace(/\bt\s*e\s*x\s*t\b/g, 'text')
-          .replace(/\bp\s*i\s*n\s*g\b/g, 'ping')
-          .replace(/\bc\s*h\s*e\s*c\s*k\b/g, 'check')
-          .replace(/\bb\s*i\s*o\b/g, 'bio')
-          .replace(/\bp\s*r\s*o\s*f\s*i?\s*l?\s*e?\b/g, 'profile')
-          .replace(/\bk\s*a?\s*r?\s*o\b/g, 'kro')
-          .replace(/\bk\s*r\s*n\s*a\b/g, 'krna')
-          .replace(/\bk\s*a?\s*r\b/g, 'kr')
-          .replace(/\bm\s*e\s*e?\b/g, 'me')
-          .replace(/\bdmme\b/g, 'dm me')
-          .replace(/\s+/g, ' ')
-          .trim();
-        const unspacedCollapsed = unspacedLetters.replace(/(.)\1+/g, '$1');
-
-        const contactBaitPatterns = [
-          // 1. Direct DM / PM / Message / Text / Inbox / Ping / Contact solicitation (English + Hinglish verbs)
-          /\b(?:d+\s*m+|p+\s*m+|msg+|mssg+|mes+age+|txt+|text+|inbox+|ping+|contact+|write+)\s*(?:me+|us+|k+r+o+|k+a+r+o+|k+r+|k+a+r+|k+r+n+a+|k+a+r+n+a+|k+r+\s*d+o+|k+a+r+\s*d+o+)\b/i,
-          /\b(?:d+\s*m+|p+\s*m+|msg+|mssg+|mes+age+|txt+|text+|inbox+|ping+|contact+|write+)\s*(?:me+|us+)?\s*(?:in\s*private|privately|direct(?:ly)?|now+|plz+|pls+|please+|asap+|fast+)\b/i,
-          /\b(?:d+\s*m+|p+\s*m+|msg+|mssg+|mes+age+|txt+|text+|inbox+|ping+|contact+)\s*(?:me+|us+|k+r+o+|k+a+r+o+|k+r+|k+a+r+)?\s*(?:now+|plz+|pls+|please+|asap+|fast+)\b/i,
-          // 2. "DM for ...", "Message for ...", "PM for ...", "DM if ...", "Message if ..."
-          /\b(?:d+\s*m+|p+\s*m+|msg+|mssg+|mes+age+|txt+|text+|inbox+|ping+|contact+|write+)\s*(?:me+\s*)?(?:for|if|regarding|about)\s+[a-z0-9]/i,
-          // 3. "Send / drop / give a DM / PM / msg / message / text / ping"
-          /\b(?:send+|drop+|give+)\s*(?:me+\s*)?(?:a\s*)?(?:d+\s*m+|p+\s*m+|msg+|mssg+|mes+age+|inbox+|text+|ping+)\b/i,
-          // 4. Hit me up / HMU / reach me / reach out
-          /\b(?:hit\s*me\s*up|hmu)\b/i,
-          /\bhit\s*me\s*(?:in|on)\s*(?:d+\s*m+|p+\s*m+|inbox+)\b/i,
-          /\b(?:reach|contact)\s*me\b/i,
-          /\breach\s*out\s*(?:to\s*me|in\s*dm|in\s*pm|in\s*inbox|via\s*dm|via\s*pm)?\b/i,
-          /\bcontact\s*(?:me\s*)?(?:in|via|through|on)\s*(?:d+\s*m+|p+\s*m+|inbox+|dm's|dms+)\b/i,
-          // 5. Hinglish & Hindi contact-bait phrases ("mujhe dm kro", "dm mein kro", "private me kro")
-          /\b(?:mujhe|mujhko|humko)\s*(?:d+\s*m+|p+\s*m+|msg+|mssg+|mes+age+|txt+|text+|inbox+|ping+|contact+)\s*(?:k+r+o+|k+a+r+o+|k+r+|k+a+r+|k+r+n+a+|k+a+r+n+a+|k+r+\s*d+o+|k+a+r+\s*d+o+|me+|kare)?\b/i,
-          /\b(?:d+\s*m+|p+\s*m+|msg+|mssg+|mes+age+|txt+|text+|inbox+|ping+)\s*(?:me|mein|mai|pe|par)\s*(?:k+r+o+|k+a+r+o+|k+r+|k+a+r+|k+r+n+a+|k+a+r+n+a+|k+r+\s*d+o+|k+a+r+\s*d+o+|bhejo+|bhej+|bhejna+|kare)\b/i,
-          /\bprivate\s*(?:me|mein|mai)?\s*(?:k+r+o+|k+a+r+o+|k+r+|k+a+r+|k+r+n+a+|k+a+r+n+a+|k+r+\s*d+o+|k+a+r+\s*d+o+|bhejo+|bhej+|bhejna+|kare|chat+|msg+|mssg+|mes+age+|d+\s*m+|p+\s*m+)\b/i,
-          // 6. Private chat / talk solicitation
-          /\b(?:talk+|chat+|speak+)\s*(?:to\s*me\s*)?(?:in\s*private|privately)\b/i,
-          /\b(?:mes+age+|chat+|talk+)\s*privately\b/i,
-          /\b(?:private\s*message|private\s*chat)\s*(?:me+)?\b/i,
-          // 7. "Come / slide / join / write in DM / inbox"
-          /\b(?:come+|slide+|hop+|join+|write+)\s*(?:in|into|to)?\s*(?:my)?\s*(?:d+\s*m+|p+\s*m+|inbox+|dms+|dm's)\b/i,
-          /\bcome\s*dm\b/i,
-          // 8. Bio / Profile / Account / About Solicitation (English + Hinglish)
-          /\b(?:check+|chek+|see+|look+(?:\s*at)?|visit+|view+|read+|find+|dekho+|dekh+)\s*my\s*(?:bio+|profile+|prof+|account+|about+)\b/i,
-          /\b(?:check+|chek+|dekho+|dekh+)\s*(?:bio+|profile+|prof+)\s*(?:for\s+[a-z0-9]|and\s+dm|now|pls|please|k+r+o+|k+a+r+o+|k+r+|k+a+r+|k+r+n+a+|k+a+r+n+a+|k+r+\s*d+o+|k+a+r+\s*d+o+)\b/i,
-          /\b(?:bio+|profile+|prof+)\s*(?:check+|chek+|dekho+|dekh+)\s*(?:k+r+o+|k+a+r+o+|k+r+|k+a+r+|k+r+n+a+|k+a+r+n+a+|k+r+\s*d+o+|k+a+r+\s*d+o+|kare)?\b/i,
-          /\b(?:check+|chek+)\s*bio+\b/i,
-          /\bcheck\s*profile\b/i,
-          // 9. "Details in bio", "Info in bio", "Bio link", "Link in bio", "Bio has info", "Bio me details", "Profile me details"
-          /\b(?:details|info|link|information|rates|prices|photos)\s*(?:is\s*)?(?:in|on|at|me|mein|mai|pe|par)\s*(?:my\s*)?(?:bio+|profile+|prof+)\b/i,
-          /\b(?:bio+|profile+|prof+)\s*(?:has|contains|me|mein|mai|pe|par)\s*(?:the\s*)?(?:info\b|details|link|information|rates|prices|photos)\b/i,
-          /\b(?:bio+\s*link+|bio+\s*check+|link+\s*in+\s*(?:my+\s*)?bio+|profile+\s*link+)\b/i
-        ];
-
-        const variants = [
-          rawLower,
-          normalizedSpaces,
-          cleanedPunctuation,
-          collapsed,
-          collapsedCleaned,
-          unspacedLetters,
-          unspacedCollapsed
-        ];
-
-        hasContactBait = contactBaitPatterns.some((pattern) => variants.some((v) => pattern.test(v)));
-      }
-    }
-
-    if (!hasLink && !hasContactBait) {
+    if (!hasLink) {
       return false;
     }
 
     let isLinkViolation = false;
-    let isContactViolation = false;
 
     // Fetch sender member info (with fresh fallback to eliminate stale cache false negatives)
     const isBot = message.from.id === botId;
@@ -460,35 +370,13 @@ export class ModerationService {
       }
     }
 
-    if (!isLinkViolation && hasContactBait) {
-      // CONTACT-BAIT PERMISSIONS: Group Administrators, Group Owner, and Roxie/Bot are allowed
-      if (!isBot && !isOwner && !isAdmin) {
-        isContactViolation = true;
-      }
-    }
-
-    if (!isLinkViolation && !isContactViolation) {
+    if (!isLinkViolation) {
       return false;
     }
 
     // Delete the forbidden message
     await telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
     db.untrackMessages(chatId, [message.message_id]);
-
-    // For contact-bait / DM solicitation: DELETE ONLY (no warning, no notification, no mute escalation)
-    if (isContactViolation && !isLinkViolation) {
-      db.addLog({
-        chatId,
-        chatTitle: message.chat.title,
-        targetUserId: message.from.id,
-        targetUsername: message.from.username,
-        adminUserId: botId,
-        adminUsername: 'Bot/AutoMod',
-        action: 'delete_link',
-        reason: 'Posting contact-bait / DM requests in group'
-      });
-      return true;
-    }
 
     const username = message.from.username ? `@${message.from.username}` : (message.from.first_name || `User ${message.from.id}`);
     const reason = 'Posting unauthorized links';

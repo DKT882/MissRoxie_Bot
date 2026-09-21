@@ -530,6 +530,8 @@ export interface ScheduledMessage {
   replyToMessageId?: number;
   autoDeletePrevious?: boolean;
   lastSentMessageId?: number;
+  mentionMode?: 'none' | 'random_member' | 'all_members';
+  lastMentionedUserId?: number;
   createdAt: string;
   runsCount: number;
 }

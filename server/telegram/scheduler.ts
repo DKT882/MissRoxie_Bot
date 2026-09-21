@@ -5,6 +5,20 @@ import { ModerationService } from './moderation.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
 
+const MENTION_EMOJIS = Object.freeze([
+  '👤', '😂', '🔥', '😎', '💀', '✨', '⚡', '🎉', '🌟', '🚀',
+  '🥳', '💫', '🦁', '👑', '💎', '🎯', '🍀', '🌈', '🍕', '🐱',
+  '🐼', '🦊', '🦋', '🎈', '❤️', '🤩', '🤙', '💯', '🌸', '🪄'
+]);
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export class MessageScheduler {
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
@@ -161,7 +175,83 @@ export class MessageScheduler {
               }
             }
 
-            const textContent = freshSchedule.messageText || freshSchedule.message || '';
+            let textContent = freshSchedule.messageText || freshSchedule.message || '';
+            let newLastMentionedUserId: number | undefined = freshSchedule.lastMentionedUserId;
+
+            // Resolve dynamic mentions if schedule has mentionMode or placeholder tokens
+            const hasMemberToken = /@(?:member|random)|\[(?:member|random)\]/i.test(textContent);
+            const hasAllToken = /@all|\/all|\[all\]/i.test(textContent);
+            const shouldMentionRandom = freshSchedule.mentionMode === 'random_member' || hasMemberToken;
+            const shouldMentionAll = freshSchedule.mentionMode === 'all_members' || hasAllToken;
+
+            if (shouldMentionRandom) {
+              const allMembers = db.getGroupMembersList(freshSchedule.chatId);
+              const botId = db.getCurrentBotId();
+              const eligible = allMembers.filter(m => {
+                if (!m || !m.userId) return false;
+                if (botId && m.userId === botId) return false;
+                const uname = (m.username || '').toLowerCase();
+                if (uname.includes('bot') || uname.endsWith('bot') || (m as any).is_bot) return false;
+                return true;
+              });
+
+              if (eligible.length > 0) {
+                // Member mention rotation: Avoid repeating the same member consecutively
+                let candidates = eligible.filter(m => m.userId !== freshSchedule.lastMentionedUserId);
+                if (candidates.length === 0) {
+                  candidates = eligible;
+                }
+                const selected = candidates[Math.floor(Math.random() * candidates.length)];
+                newLastMentionedUserId = selected.userId;
+
+                const rawUname = (selected.username || '').trim().replace(/^@/, '');
+                const mentionTag = rawUname.length > 0
+                  ? `@${rawUname}`
+                  : `<a href="tg://user?id=${selected.userId}">${escapeHtml(selected.firstName || 'Member')}</a>`;
+
+                if (hasMemberToken) {
+                  textContent = textContent.replace(/@(?:member|random)|\[(?:member|random)\]/gi, mentionTag);
+                } else if (textContent) {
+                  textContent = `${textContent} ${mentionTag}`;
+                } else {
+                  textContent = mentionTag;
+                }
+              }
+            } else if (shouldMentionAll) {
+              const allMembers = db.getGroupMembersList(freshSchedule.chatId);
+              const botId = db.getCurrentBotId();
+              const seenUserIds = new Set<number>();
+              const mentions: string[] = [];
+
+              for (const m of allMembers) {
+                if (!m || !m.userId) continue;
+                if (botId && m.userId === botId) continue;
+                if (seenUserIds.has(m.userId)) continue;
+
+                const rawUname = (m.username || '').trim().replace(/^@/, '');
+                const lowerUname = rawUname.toLowerCase();
+                if (lowerUname.includes('bot') || lowerUname.endsWith('bot') || (m as any).is_bot) continue;
+
+                seenUserIds.add(m.userId);
+                const emoji = MENTION_EMOJIS[Math.floor(Math.random() * MENTION_EMOJIS.length)];
+                if (rawUname.length > 0) {
+                  mentions.push(`${emoji} → @${rawUname}`);
+                } else {
+                  const displayName = m.firstName?.trim() || 'Member';
+                  mentions.push(`${emoji} → <a href="tg://user?id=${m.userId}">${escapeHtml(displayName)}</a>`);
+                }
+              }
+
+              const allMentionsText = mentions.join('\n');
+              if (hasAllToken) {
+                textContent = textContent.replace(/@all|\/all|\[all\]/gi, allMentionsText);
+              } else if (textContent) {
+                textContent = `${textContent}\n\n${allMentionsText}`;
+              } else {
+                textContent = allMentionsText;
+              }
+            }
+
             const sendOptions: any = {};
             if (freshSchedule.replyToMessageId) {
               sendOptions.reply_to_message_id = freshSchedule.replyToMessageId;
@@ -195,7 +285,10 @@ export class MessageScheduler {
             } else if (freshSchedule.contentType === 'sticker' && freshSchedule.mediaFileId) {
               sendRes = await telegramApi.sendSticker(freshSchedule.chatId, freshSchedule.mediaFileId, sendOptions);
             } else {
-              sendRes = await telegramApi.sendMessage(freshSchedule.chatId, textContent, sendOptions);
+              sendRes = await telegramApi.sendMessage(freshSchedule.chatId, textContent, {
+                parse_mode: 'HTML',
+                ...sendOptions
+              });
             }
 
             if (sendRes && sendRes.ok && sendRes.result) {
@@ -217,8 +310,14 @@ export class MessageScheduler {
               if (hasInterval) {
                 const nextDate = new Date(now + freshSchedule.intervalMs!).toISOString();
                 db.updateScheduleNextRun(freshSchedule.id, nextDate, 'success', undefined, newSentMessageId);
+                if (newLastMentionedUserId !== undefined) {
+                  db.updateSchedule(freshSchedule.id, { lastMentionedUserId: newLastMentionedUserId });
+                }
               } else {
                 db.updateScheduleNextRun(freshSchedule.id, '', 'success', undefined, newSentMessageId);
+                if (newLastMentionedUserId !== undefined) {
+                  db.updateSchedule(freshSchedule.id, { lastMentionedUserId: newLastMentionedUserId });
+                }
                 db.toggleSchedule(freshSchedule.id, false);
               }
             } else {
@@ -261,7 +360,8 @@ export class MessageScheduler {
     messageText: string,
     contentType?: 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation',
     mediaFileId?: string,
-    autoDeletePrevious?: boolean
+    autoDeletePrevious?: boolean,
+    explicitMentionMode?: 'none' | 'random_member' | 'all_members'
   ): { success: boolean; schedule?: ScheduledMessage; error?: string } {
     const parsed = this.parseInterval(intervalStr);
     if (!parsed) {
@@ -279,6 +379,15 @@ export class MessageScheduler {
       };
     }
 
+    let mentionMode: 'none' | 'random_member' | 'all_members' = explicitMentionMode || 'none';
+    if (mentionMode === 'none') {
+      if (/@(?:member|random)|\[(?:member|random)\]/i.test(trimmedText)) {
+        mentionMode = 'random_member';
+      } else if (/@all|\/all|\[all\]/i.test(trimmedText)) {
+        mentionMode = 'all_members';
+      }
+    }
+
     const nextRun = new Date(Date.now() + parsed.ms).toISOString();
     const schedule = db.addSchedule({
       chatId,
@@ -292,7 +401,8 @@ export class MessageScheduler {
       intervalMs: parsed.ms,
       intervalFormatted: parsed.formatted,
       nextRun,
-      autoDeletePrevious: autoDeletePrevious || false
+      autoDeletePrevious: autoDeletePrevious || false,
+      mentionMode
     });
 
     db.addLog({
@@ -301,7 +411,7 @@ export class MessageScheduler {
       adminUserId: adminId,
       adminUsername,
       action: 'schedule_created',
-      details: `Created recurring schedule [${schedule.id}] every ${parsed.formatted}`
+      details: `Created recurring schedule [${schedule.id}] every ${parsed.formatted}${mentionMode !== 'none' ? ` (mentionMode: ${mentionMode})` : ''}`
     });
 
     return { success: true, schedule };

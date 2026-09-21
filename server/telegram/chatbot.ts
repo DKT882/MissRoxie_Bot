@@ -984,6 +984,8 @@ export class ChatbotService {
       'i should react',
       'i should say',
       'i should respond',
+      'i should reply',
+      'as roxie',
       'generate a response',
       'generate a comment',
       'as an ai',
@@ -994,6 +996,7 @@ export class ChatbotService {
       'strict conversation rules',
       'psychologically observant female friend',
       'you are roxie',
+      '[instruction]',
       '[latest message',
       '[current mood',
       '[task]',
@@ -1016,11 +1019,17 @@ export class ChatbotService {
     const metaRegexes = [
       /\b(roxie|assistant|ai)\s+(should|must|needs to)\s+(say|react|reply|respond|chime in)\b/i,
       /\b(the\s+user\s+(?:message|is\s+asking|says?)\s*:)/i,
-      /\b(reacting\s+to\s+the\s+user\s+message)\b/i,
-      /\b(here\s+is\s+(?:a\s+)?(?:short\s+)?(?:natural\s+)?(?:response|reaction|comment))\b/i,
+      /\bthe\s+user\s+(?:is\s+)?(?:say|says|said|ask|asks|asked|asking|messaged|wrote|saying)\s*[:/\-–—"']/i,
+      /\bthe\s+user\s+say\s*\//i,
+      /\btarget\s+message\s*(?:to\s+react\s+to)?\s*[:\-–—"']/i,
+      /\b(?:reacting|replying|responding)\s+to\s+(?:the\s+)?user(?:\s+message)?\b/i,
+      /\b(?:reply|react|respond)\s+to\s+the\s+user\s+(?:regarding|about|with|by)\b/i,
+      /\b(?:as\s+instructed|according\s+to\s+(?:the\s+)?instructions?|following\s+(?:the\s+)?instructions?)\b/i,
+      /\b(?:system\s+prompt|assistant\s+instruction|developer\s+instruction|prompt\s+instruction)\b/i,
+      /\b(here\s+is\s+(?:the|a)\s+(?:short\s+)?(?:natural\s+)?(?:response|reaction|comment|reply))\b/i,
       /\b(1\s+sentence[,\s]+5[-–\s]*25\s+words)\b/i,
       /\b(solicitation\.\s*roxie\s+should)\b/i,
-      /^(?:instruction|system|prompt|developer)\s*:\s*/i
+      /^(?:instruction|system|prompt|developer|assistant|user)\s*:\s*/i
     ];
 
     for (const rx of metaRegexes) {
@@ -3880,8 +3889,12 @@ STRICT INVARIANTS:
       const isStickerAllowed = decision.chatId > 0 || db.checkAutoStickerEligibility(decision.chatId).allowed;
       const isLustModeCustomAllowed = !isLustMode || this.isStickerAllowedForMode(decision.mediaFileId, decision.chatId, true);
       const isExplicitStickerOnly = Boolean(decision.explicitStickerRequest);
-      const fallbackText = (!isExplicitStickerOnly && decision.content) ? this.cleanAiText(decision.content) : '';
-      console.log(`[DIRECT_DEBUG] sticker_check: chatId=${decision.chatId}, allowed=${isStickerAllowed}, customAllowed=${isLustModeCustomAllowed}, explicitStickerOnly=${isExplicitStickerOnly}, hasFallback=${Boolean(fallbackText)}`);
+      const engineConfig: AutoEngineConfig = settings?.autoEngine || ChatbotService.resolveLegacyConfig(settings || {});
+      const isStickersOnlyMode = Boolean(engineConfig?.enabled && engineConfig?.mode === 'stickers_only');
+      const isAutoEngineOrProactive = Boolean(decision.requestId?.startsWith('proactive_'));
+      const suppressFallback = isExplicitStickerOnly || (isStickersOnlyMode && isAutoEngineOrProactive);
+      const fallbackText = (!suppressFallback && decision.content) ? this.cleanAiText(decision.content) : '';
+      console.log(`[DIRECT_DEBUG] sticker_check: chatId=${decision.chatId}, allowed=${isStickerAllowed}, customAllowed=${isLustModeCustomAllowed}, explicitStickerOnly=${isExplicitStickerOnly}, stickersOnlyMode=${isStickersOnlyMode}, hasFallback=${Boolean(fallbackText)}`);
 
       if (isStickerAllowed && isLustModeCustomAllowed) {
         const res = await telegramApi.sendSticker(decision.chatId, decision.mediaFileId, {
@@ -4131,19 +4144,19 @@ STRICT INVARIANTS:
         `\n\nTARGET MESSAGE TO REACT TO:\n"${randomHumanMsg.name || 'User'}": "${randomHumanMsg.content}"\n\n`;
 
       userPromptInstruction = isLustMode
-        ? `${contextPrefix}[INSTRUCTION]: Chime into the group naturally as Roxie (sweet, romantic, witty, caring girlfriend). React directly or playfully to what ${randomHumanMsg.name || 'the user'} said, or share a cute thought in 1 concise sentence (5 to 25 words in Hinglish/English).`
-        : `${contextPrefix}[INSTRUCTION]: Chime into the group naturally as Roxie (witty, playful, observant girlfriend/friend). React directly or playfully to what ${randomHumanMsg.name || 'the user'} said, or share a fun thought in 1 concise sentence (5 to 25 words in Hinglish/English).`;
+        ? `${contextPrefix}[TASK]: Reply naturally as Roxie (sweet, romantic, witty girlfriend). Return ONLY your direct reply in 1 concise sentence (5 to 25 words in Hinglish/English).`
+        : `${contextPrefix}[TASK]: Reply naturally as Roxie (witty, playful, caring girlfriend). Return ONLY your direct reply in 1 concise sentence (5 to 25 words in Hinglish/English).`;
     } else if (priorGroupMsgs && priorGroupMsgs.length > 0) {
       contextPrefix = `RECENT GROUP CONVERSATION:\n` +
         priorGroupMsgs.slice(-15).map(m => `${m.name || (m.role === 'assistant' ? 'Roxie' : 'User')}: ${m.content}`).join('\n') +
         `\n\n`;
       userPromptInstruction = isLustMode
-        ? `${contextPrefix}[INSTRUCTION]: Chime into the group naturally as Roxie (sweet, romantic, witty, caring girlfriend). React directly to the conversation or share a cute thought in 1 concise sentence (5 to 25 words in Hinglish/English).`
-        : `${contextPrefix}[INSTRUCTION]: Chime into the group naturally as Roxie (witty, playful, observant girlfriend/friend). React directly to the conversation or share a playful thought in 1 concise sentence (5 to 25 words in Hinglish/English).`;
+        ? `${contextPrefix}[TASK]: Chime into the group naturally as Roxie (sweet, romantic, witty girlfriend). Return ONLY your direct reply in 1 concise sentence (5 to 25 words in Hinglish/English).`
+        : `${contextPrefix}[TASK]: Chime into the group naturally as Roxie (witty, playful, caring girlfriend). Return ONLY your direct reply in 1 concise sentence (5 to 25 words in Hinglish/English).`;
     } else {
       userPromptInstruction = isLustMode
-        ? `[INSTRUCTION]: The group chat is currently silent. Start a conversation as Roxie (warm, playful, romantic, caring girlfriend) with a natural greeting, cute check-in, or witty thought in 1 concise sentence (5 to 25 words in Hinglish/English).`
-        : `[INSTRUCTION]: The group chat is currently silent. Start a conversation as Roxie (playful, friendly, witty, observant girlfriend) with a natural greeting, check-in, or fun question/thought in 1 concise sentence (5 to 25 words in Hinglish/English).`;
+        ? `[TASK]: Start a conversation as Roxie (warm, playful, romantic girlfriend) with a natural greeting or cute check-in in 1 concise sentence (5 to 25 words in Hinglish/English). Return ONLY Roxie's direct message.`
+        : `[TASK]: Start a conversation as Roxie (playful, friendly, witty girlfriend) with a natural greeting or check-in in 1 concise sentence (5 to 25 words in Hinglish/English). Return ONLY Roxie's direct message.`;
     }
 
     const systemPrompt = isLustMode
@@ -4212,7 +4225,11 @@ STRICT INVARIANTS:
             }
 
             if (content && content !== 'SKIP' && content.toUpperCase() !== 'SKIP.') {
-              const candidate = this.cleanAiText(content, '', 'Group');
+              const candidate = this.cleanAiText(
+                content,
+                randomHumanMsg?.content || '',
+                randomHumanMsg?.name || 'User'
+              );
               if (candidate && !this.isInstructionOrMetaLeak(candidate)) {
                 replyContent = candidate;
                 modelUsed = modelToTry;

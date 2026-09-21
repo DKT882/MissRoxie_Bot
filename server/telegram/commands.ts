@@ -3611,54 +3611,7 @@ export class CommandHandler {
   // 9. MEDIA & CONTENT FILTER SETTINGS
   // ==========================================
   private static async handlePhotosSetting(ctx: CommandContext) {
-    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
-
-    const actor = await TelegramMiddleware.resolveActor(ctx);
-    const arg = (ctx.args[0] || '').toLowerCase();
-    const currentSettings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
-
-    if (arg === 'on') {
-      db.updateGroupSettings(ctx.chatId, { mediaProtection: true });
-      db.setLock(ctx.chatId, 'photos', true);
-      TelegramMiddleware.logAudit({
-        chatId: ctx.chatId,
-        chatTitle: ctx.chatTitle,
-        actor,
-        command: 'photos',
-        action: 'setting_change',
-        result: 'success',
-        details: 'Photo protection enabled'
-      });
-      await telegramApi.sendMessage(
-        ctx.chatId,
-        '🛡️ <b>Photo & Image Protection is now ON.</b>\nPhotos from normal members will be automatically deleted unless freed with <code>/free</code>.',
-        { reply_to_message_id: ctx.message.message_id }
-      );
-    } else if (arg === 'off') {
-      db.updateGroupSettings(ctx.chatId, { mediaProtection: false });
-      db.setLock(ctx.chatId, 'photos', false);
-      TelegramMiddleware.logAudit({
-        chatId: ctx.chatId,
-        chatTitle: ctx.chatTitle,
-        actor,
-        command: 'photos',
-        action: 'setting_change',
-        result: 'success',
-        details: 'Photo protection disabled'
-      });
-      await telegramApi.sendMessage(
-        ctx.chatId,
-        '🔓 <b>Photo & Image Protection is now OFF.</b>\nAll group members may send photos freely.',
-        { reply_to_message_id: ctx.message.message_id }
-      );
-    } else {
-      await telegramApi.sendMessage(
-        ctx.chatId,
-        `ℹ️ <b>Photo & Image Protection:</b> ${currentSettings.mediaProtection ? '🟢 ON' : '🔴 OFF'}\n\nUsage: <code>/photos on</code> or <code>/photos off</code>`,
-        { reply_to_message_id: ctx.message.message_id }
-      );
-    }
+    return this.handleImageSetting(ctx);
   }
 
   private static async handleGifsSetting(ctx: CommandContext) {
@@ -4163,6 +4116,12 @@ export class CommandHandler {
     }
   }
 
+  public static readonly ALL_MENTION_EMOJIS = Object.freeze([
+    '👤', '😂', '🔥', '😎', '💀', '✨', '⚡', '🎉', '🌟', '🚀',
+    '🥳', '💫', '🦁', '👑', '💎', '🎯', '🍀', '🌈', '🍕', '🐱',
+    '🐼', '🦊', '🦋', '🎈', '❤️', '🤩', '🤙', '💯', '🌸', '🪄'
+  ]);
+
   public static buildAllMentionsChunks(
     members: CachedMember[],
     defaultMsg: string,
@@ -4171,6 +4130,7 @@ export class CommandHandler {
   ): { mentions: string[]; chunks: string[] } {
     const seenUserIds = new Set<number>();
     const mentions: string[] = [];
+    const emojis = CommandHandler.ALL_MENTION_EMOJIS;
 
     for (const m of members) {
       if (!m || !m.userId) continue;
@@ -4188,11 +4148,13 @@ export class CommandHandler {
 
       seenUserIds.add(m.userId);
 
+      const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+
       if (cleanUname.length > 0) {
-        mentions.push(`@${cleanUname}`);
+        mentions.push(`${emoji} → @${cleanUname}`);
       } else {
         const displayName = m.firstName?.trim() || 'Member';
-        mentions.push(`<a href="tg://user?id=${m.userId}">${escapeHtml(displayName)}</a>`);
+        mentions.push(`${emoji} → <a href="tg://user?id=${m.userId}">${escapeHtml(displayName)}</a>`);
       }
     }
 
@@ -4203,7 +4165,7 @@ export class CommandHandler {
     const chunks: string[] = [];
     for (let i = 0; i < mentions.length; i += chunkSize) {
       const chunkMentions = mentions.slice(i, i + chunkSize);
-      chunks.push(`${defaultMsg}\n\n${chunkMentions.join(' ')}`);
+      chunks.push(defaultMsg ? `${defaultMsg}\n\n${chunkMentions.join('\n')}` : chunkMentions.join('\n'));
     }
 
     return { mentions, chunks };
@@ -4229,7 +4191,7 @@ export class CommandHandler {
         `ℹ️ <b>/all Command Status</b>\n\n` +
         `Cached Members: ${members.length}\n` +
         `Usage: <code>/all [custom message text]</code>`,
-        { reply_to_message_id: ctx.message.message_id }
+        { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
       );
       return;
     }
@@ -4276,11 +4238,60 @@ export class CommandHandler {
       return;
     }
 
+    const reply = ctx.message.reply_to_message;
+    let repliedPhotoId: string | undefined;
+    let repliedAnimationId: string | undefined;
+    let repliedVideoId: string | undefined;
+    let repliedDocumentId: string | undefined;
+
+    if (reply) {
+      if (reply.photo && reply.photo.length > 0) {
+        repliedPhotoId = reply.photo[reply.photo.length - 1].file_id;
+      } else if (reply.animation) {
+        repliedAnimationId = reply.animation.file_id;
+      } else if (reply.video) {
+        repliedVideoId = reply.video.file_id;
+      } else if (reply.document) {
+        repliedDocumentId = reply.document.file_id;
+      }
+    }
+
+    const targetReplyId = reply?.message_id || ctx.message.message_id;
+
     for (let i = 0; i < chunks.length; i++) {
-      await telegramApi.sendMessage(ctx.chatId, chunks[i], {
-        reply_to_message_id: i === 0 && ctx.message.reply_to_message?.message_id ? ctx.message.reply_to_message.message_id : undefined,
-        parse_mode: 'HTML'
-      });
+      const chunkText = chunks[i];
+      if (i === 0 && (repliedPhotoId || repliedAnimationId || repliedVideoId || repliedDocumentId)) {
+        if (repliedPhotoId) {
+          await telegramApi.sendPhoto(ctx.chatId, repliedPhotoId, {
+            caption: chunkText,
+            parse_mode: 'HTML',
+            reply_to_message_id: targetReplyId
+          });
+        } else if (repliedAnimationId) {
+          await telegramApi.sendAnimation(ctx.chatId, repliedAnimationId, {
+            caption: chunkText,
+            parse_mode: 'HTML',
+            reply_to_message_id: targetReplyId
+          });
+        } else if (repliedVideoId) {
+          await telegramApi.sendVideo(ctx.chatId, repliedVideoId, {
+            caption: chunkText,
+            parse_mode: 'HTML',
+            reply_to_message_id: targetReplyId
+          });
+        } else if (repliedDocumentId) {
+          await telegramApi.sendDocument(ctx.chatId, repliedDocumentId, {
+            caption: chunkText,
+            parse_mode: 'HTML',
+            reply_to_message_id: targetReplyId
+          });
+        }
+      } else {
+        await telegramApi.sendMessage(ctx.chatId, chunkText, {
+          reply_to_message_id: i === 0 ? targetReplyId : undefined,
+          parse_mode: 'HTML'
+        });
+      }
     }
 
     TelegramMiddleware.logAudit({
@@ -4288,7 +4299,7 @@ export class CommandHandler {
       chatTitle: ctx.chatTitle,
       actor,
       command: 'all',
-      action: 'warn',
+      action: 'all_broadcast',
       result: 'success',
       details: `Mentioned ${mentions.length} members across ${chunks.length} message(s)`
     });
@@ -4512,13 +4523,52 @@ export class CommandHandler {
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
 
     if (arg === 'on') {
-      db.updateGroupSettings(ctx.chatId, { imageProtection: true });
-      await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>Image Protection is now ON.</b>', { reply_to_message_id: ctx.message.message_id });
+      db.updateGroupSettings(ctx.chatId, { imageProtection: true, photosProtection: true, mediaProtection: true });
+      db.setLock(ctx.chatId, 'photos', true);
+      db.setLock(ctx.chatId, 'photo', true);
+      db.setLock(ctx.chatId, 'images', true);
+      db.setLock(ctx.chatId, 'image', true);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor: await TelegramMiddleware.resolveActor(ctx),
+        command: 'image',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Image and photo protection enabled'
+      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '🛡️ <b>Image & Photo Protection is now ON.</b>\nPhotos and images from normal members will be automatically deleted unless freed with <code>/free</code>.',
+        { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
+      );
     } else if (arg === 'off') {
-      db.updateGroupSettings(ctx.chatId, { imageProtection: false });
-      await telegramApi.sendMessage(ctx.chatId, '🔓 <b>Image Protection is now OFF.</b>', { reply_to_message_id: ctx.message.message_id });
+      db.updateGroupSettings(ctx.chatId, { imageProtection: false, photosProtection: false, mediaProtection: false });
+      db.setLock(ctx.chatId, 'photos', false);
+      db.setLock(ctx.chatId, 'photo', false);
+      db.setLock(ctx.chatId, 'images', false);
+      db.setLock(ctx.chatId, 'image', false);
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor: await TelegramMiddleware.resolveActor(ctx),
+        command: 'image',
+        action: 'setting_change',
+        result: 'success',
+        details: 'Image and photo protection disabled'
+      });
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '🔓 <b>Image & Photo Protection is now OFF.</b>\nAll group members may send photos and images freely.',
+        { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
+      );
     } else {
-      await telegramApi.sendMessage(ctx.chatId, `ℹ️ <b>Image Protection:</b> ${settings.imageProtection ? '🟢 ON' : '🔴 OFF'}\nUsage: <code>/image on</code> or <code>/image off</code>`, { reply_to_message_id: ctx.message.message_id });
+      const isCurrentlyOn = Boolean(settings.imageProtection || settings.photosProtection || settings.mediaProtection || db.isLocked(ctx.chatId, 'photos'));
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>Image & Photo Protection:</b> ${isCurrentlyOn ? '🟢 ON' : '🔴 OFF'}\n\nUsage: <code>/image on</code> or <code>/image off</code>`,
+        { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
+      );
     }
   }
 

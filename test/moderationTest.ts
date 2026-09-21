@@ -110,6 +110,9 @@ async function runTestSuite() {
     }
   };
 
+  const effectiveBotId = db.getCurrentBotId() || botId;
+  memberStatusMap[effectiveBotId] = memberStatusMap[botId];
+
   telegramApi.getChatMember = async (_cId: number, uId: number) => {
     if (memberStatusMap[uId]) {
       return { ok: true, result: memberStatusMap[uId] };
@@ -172,12 +175,16 @@ async function runTestSuite() {
   {
     const originalBot = memberStatusMap[botId];
     memberStatusMap[botId] = { ...originalBot, can_promote_members: false };
+    memberStatusMap[effectiveBotId] = { ...originalBot, can_promote_members: false };
+    TelegramMiddleware.clearMemberCache();
 
     const ctx = makeCtx(adminWithPromoteId, '/demote', [], { from: memberStatusMap[adminTargetEditableId].user });
     const res = await TelegramMiddleware.validateModerationAction(ctx, 'demote');
     assert(res.allowed === false && res.reason?.includes('The bot needs the "Add New Admins" administrator permission'), 'CASE 2: Bot lacks can_promote_members -> Clean bot permission error');
 
     memberStatusMap[botId] = originalBot;
+    memberStatusMap[effectiveBotId] = originalBot;
+    TelegramMiddleware.clearMemberCache();
   }
 
   // CASE 3: Admin (can_promote=false), Bot (can_promote=true), Target (can_be_edited=true) -> Actor permission error

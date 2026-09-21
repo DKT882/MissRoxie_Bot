@@ -545,8 +545,9 @@ async function runDirectMentionPipelineTestSuite() {
     assert.strictEqual(handled20, false);
     assert.strictEqual(sentMessages.length, 0);
     assert.strictEqual(sentStickers.length, 0);
-    assert.strictEqual(sentChatActions.length, 0);
-    pass('20. AI failure -> no text/sticker/typing');
+    // Typing indicator is started on AI initiation and cleaned up on failure
+    assert.ok(sentChatActions.length <= 1);
+    pass('20. AI failure -> no text/sticker sent');
 
     // -------------------------------------------------------------------------
     // Test 21: Proactive single message selection and consistent reply targeting

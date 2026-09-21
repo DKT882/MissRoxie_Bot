@@ -78,7 +78,7 @@ export class ContentPolicyEngine {
 
     // 3. GIFs / Animations
     if (message.animation) {
-      const isLocked = Boolean(locks['gifs'] || locks['gif'] || settings.gifProtection || settings.gifsProtection || settings.mediaProtection);
+      const isLocked = Boolean(locks['gifs'] || locks['gif'] || settings.gifProtection || settings.gifsProtection);
       if (isLocked && !db.hasContentPermission(chatId, userId, 'gifs') && !db.hasContentPermission(chatId, userId, 'media')) {
         return { decision: 'BLOCK', lockType: 'gifs', reason: 'GIFs are locked' };
       }
@@ -86,7 +86,7 @@ export class ContentPolicyEngine {
 
     // 4. Photos
     if (message.photo && message.photo.length > 0) {
-      const isLocked = Boolean(locks['photos'] || locks['photo'] || locks['images'] || locks['image'] || settings.imageProtection || settings.photosProtection || settings.mediaProtection);
+      const isLocked = Boolean(locks['photos'] || locks['photo'] || locks['images'] || locks['image'] || settings.imageProtection || settings.photosProtection);
       if (isLocked && !db.hasContentPermission(chatId, userId, 'photos') && !db.hasContentPermission(chatId, userId, 'media')) {
         return { decision: 'BLOCK', lockType: 'photos', reason: 'Photos are locked' };
       }
@@ -94,7 +94,7 @@ export class ContentPolicyEngine {
 
     // 5. Videos & Video Notes
     if (message.video || message.video_note) {
-      const isLocked = Boolean(locks['videos'] || locks['video'] || settings.videosProtection || settings.mediaProtection);
+      const isLocked = Boolean(locks['videos'] || locks['video'] || settings.videosProtection);
       if (isLocked && !db.hasContentPermission(chatId, userId, 'videos') && !db.hasContentPermission(chatId, userId, 'media')) {
         return { decision: 'BLOCK', lockType: 'videos', reason: 'Videos are locked' };
       }
@@ -102,7 +102,7 @@ export class ContentPolicyEngine {
 
     // 6. Voice Notes
     if (message.voice) {
-      const isLocked = Boolean(locks['voice'] || settings.voiceProtection || settings.mediaProtection);
+      const isLocked = Boolean(locks['voice'] || settings.voiceProtection);
       if (isLocked && !db.hasContentPermission(chatId, userId, 'voice') && !db.hasContentPermission(chatId, userId, 'media')) {
         return { decision: 'BLOCK', lockType: 'voice', reason: 'Voice messages are locked' };
       }
@@ -110,7 +110,7 @@ export class ContentPolicyEngine {
 
     // 7. Audio / Music
     if (message.audio) {
-      const isLocked = Boolean(locks['audio'] || settings.audioProtection || settings.mediaProtection);
+      const isLocked = Boolean(locks['audio'] || settings.audioProtection);
       if (isLocked && !db.hasContentPermission(chatId, userId, 'audio') && !db.hasContentPermission(chatId, userId, 'media')) {
         return { decision: 'BLOCK', lockType: 'audio', reason: 'Audio files are locked' };
       }
