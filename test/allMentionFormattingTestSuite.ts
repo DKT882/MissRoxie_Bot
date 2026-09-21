@@ -664,6 +664,75 @@ async function runAllMentionFormattingTestSuite() {
     assert.deepStrictEqual(userIds, [300001, 300002, 300003]);
   });
 
+  await test('18. Telegram message_reaction update discovers reacting user in group', async () => {
+    resetChatMembers(testChatId);
+
+    const reactionUser: TelegramUser = { id: 654321, is_bot: false, first_name: 'ReactUser', username: 'react_star' };
+    const recorded = db.cacheUser(reactionUser, testChatId);
+
+    assert.ok(recorded, 'cacheUser must record reacting user');
+    assert.strictEqual(recorded.userId, 654321);
+    assert.strictEqual(recorded.username, 'react_star');
+
+    const members = db.getGroupMembersList(testChatId);
+    assert.strictEqual(members.length, 1);
+    assert.strictEqual(members[0].userId, 654321);
+  });
+
+  await test('19. Material change detection optimizes persistence saves (pure lastSeen does not schedule save)', async () => {
+    resetChatMembers(testChatId);
+
+    let scheduleSaveCount = 0;
+    const origScheduleSave = db.scheduleSave.bind(db);
+    db.scheduleSave = (id?: number | string) => {
+      scheduleSaveCount++;
+      return origScheduleSave(id);
+    };
+
+    try {
+      // 1. First encounter (new user) -> must trigger save
+      scheduleSaveCount = 0;
+      db.cacheUser({ id: 994411, is_bot: false, first_name: 'Frequent', username: 'freq_user' }, testChatId);
+      assert.strictEqual(scheduleSaveCount, 1, 'New user discovery must schedule save');
+
+      // 2. Identical user interaction (pure lastSeen update) -> must NOT trigger save
+      scheduleSaveCount = 0;
+      db.cacheUser({ id: 994411, is_bot: false, first_name: 'Frequent', username: 'freq_user' }, testChatId);
+      assert.strictEqual(scheduleSaveCount, 0, 'Pure lastSeen update without metadata change must NOT schedule save');
+
+      // 3. Material update (username changed) -> must trigger save
+      scheduleSaveCount = 0;
+      db.cacheUser({ id: 994411, is_bot: false, first_name: 'Frequent', username: 'freq_user_updated' }, testChatId);
+      assert.strictEqual(scheduleSaveCount, 1, 'Material change (username change) must schedule save');
+
+      // 4. Material update (first name changed) -> must trigger save
+      scheduleSaveCount = 0;
+      db.cacheUser({ id: 994411, is_bot: false, first_name: 'Frequent NewName', username: 'freq_user_updated' }, testChatId);
+      assert.strictEqual(scheduleSaveCount, 1, 'Material change (name change) must schedule save');
+    } finally {
+      db.scheduleSave = origScheduleSave;
+    }
+  });
+
+  await test('20. Cross-group isolation prevents member contamination across groups', async () => {
+    const groupA = -100555111;
+    const groupB = -100555222;
+    resetChatMembers(groupA);
+    resetChatMembers(groupB);
+
+    db.cacheUser({ id: 80001, is_bot: false, first_name: 'UserA', username: 'user_a' }, groupA);
+    db.cacheUser({ id: 80002, is_bot: false, first_name: 'UserB', username: 'user_b' }, groupB);
+
+    const membersA = db.getGroupMembers(groupA);
+    const membersB = db.getGroupMembers(groupB);
+
+    assert.strictEqual(membersA.length, 1);
+    assert.strictEqual(membersA[0].userId, 80001);
+
+    assert.strictEqual(membersB.length, 1);
+    assert.strictEqual(membersB[0].userId, 80002);
+  });
+
   console.log('\n===============================================================');
   console.log(`MASTER /ALL PAGINATION SUITE RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('===============================================================\n');

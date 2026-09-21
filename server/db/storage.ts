@@ -1768,21 +1768,6 @@ export class StorageManager {
       }
     }
 
-    // 3. Fallback: knownUsersById
-    if (membersMap.size === 0 && this.data.knownUsersById) {
-      for (const [uId, u] of Object.entries(this.data.knownUsersById)) {
-        membersMap.set(Number(uId), {
-          userId: Number(uId),
-          username: u.username,
-          firstName: u.firstName,
-          lastName: u.lastName,
-          role: (u as any).role || u.customRole || 'member',
-          lastActive: u.lastSeen
-        });
-        if (membersMap.size >= 25) break;
-      }
-    }
-
     return Array.from(membersMap.values());
   }
 
@@ -1945,20 +1930,21 @@ export class StorageManager {
   // --- User Caching (for resolving @username to userId and vice-versa) ---
   public cacheUser(
     user: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean },
-    groupId?: number
+    groupId?: number | string
   ): CachedMember | null {
     if (!user || !user.id || user.id === 1087968824 || user.id === 777000 || user.id === 0) return null;
     if ((user as any).is_bot) return null;
 
+    const numGroupId = groupId !== undefined && groupId !== null ? Number(groupId) : undefined;
     const now = new Date().toISOString();
-    const customRole = groupId ? this.getCustomRole(groupId, user.id) : undefined;
+    const customRole = numGroupId ? this.getCustomRole(numGroupId, user.id) : undefined;
 
     const cached: CachedMember = {
       userId: user.id,
       username: user.username,
       firstName: user.first_name || '',
       lastName: user.last_name || undefined,
-      groupId: groupId || undefined,
+      groupId: numGroupId || undefined,
       lastSeen: now,
       customRole: customRole !== 'NONE' ? customRole : undefined
     };
@@ -1972,6 +1958,12 @@ export class StorageManager {
     if (!this.data.groupMembers) {
       this.data.groupMembers = {};
     }
+
+    const prevGlobal = this.data.knownUsersById[user.id];
+    const isGlobalMaterialChange = !prevGlobal ||
+      prevGlobal.username !== cached.username ||
+      prevGlobal.firstName !== cached.firstName ||
+      prevGlobal.lastName !== cached.lastName;
 
     // Update by ID
     this.data.knownUsersById[user.id] = {
@@ -1989,9 +1981,9 @@ export class StorageManager {
           delete u.username;
         }
       }
-      if (groupId) {
+      if (numGroupId) {
         for (const [key, m] of Object.entries(this.data.groupMembers)) {
-          if (key.startsWith(`${groupId}_`) && m.userId !== user.id && m.username && m.username.toLowerCase() === uname) {
+          if (key.startsWith(`${numGroupId}_`) && m.userId !== user.id && m.username && m.username.toLowerCase() === uname) {
             delete m.username;
           }
         }
@@ -2001,16 +1993,26 @@ export class StorageManager {
     }
 
     // Update group-specific member entry
-    if (groupId) {
-      const groupKey = `${groupId}_${user.id}`;
+    if (numGroupId) {
+      const groupKey = `${numGroupId}_${user.id}`;
       const existing = this.data.groupMembers[groupKey];
+      const isGroupMaterialChange = !existing ||
+        existing.username !== cached.username ||
+        existing.firstName !== cached.firstName ||
+        existing.lastName !== cached.lastName ||
+        existing.customRole !== cached.customRole;
+
       this.data.groupMembers[groupKey] = {
         ...cached,
         customRole: cached.customRole || existing?.customRole
       };
-      this.scheduleSave(groupId);
+      if (isGroupMaterialChange) {
+        this.scheduleSave(numGroupId);
+      }
     } else {
-      this.scheduleSave();
+      if (isGlobalMaterialChange) {
+        this.scheduleSave();
+      }
     }
 
     return cached;

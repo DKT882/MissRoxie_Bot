@@ -263,7 +263,7 @@ export class TelegramBotManager {
         const data = await telegramApi.getUpdates(
           offset,
           20,
-          ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member', 'chat_join_request'],
+          ['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member', 'chat_join_request', 'message_reaction'],
           this.abortController?.signal
         );
 
@@ -508,6 +508,14 @@ export class TelegramBotManager {
           await this.handleChatMemberUpdate((update as any).chat_member);
         } else if ((update as any).my_chat_member) {
           await this.handleChatMemberUpdate((update as any).my_chat_member);
+        } else if ((update as any).message_reaction) {
+          const reactionUpdate = (update as any).message_reaction;
+          const rChatId = reactionUpdate.chat?.id;
+          const rUser = reactionUpdate.user;
+          if (rChatId && rChatId < 0 && rUser) {
+            db.cacheUser(rUser, rChatId);
+            db.getGroupSettings(rChatId, reactionUpdate.chat?.title);
+          }
         }
 
         const totalPipelineMs = Date.now() - pipelineStart;
