@@ -206,6 +206,263 @@ export class MongoStorageService {
     }
   }
 
+  public static async appendGroupMessage(chatId: string | number, message: any, targetBotId?: number, incrementHumanCounter: boolean = false): Promise<boolean> {
+    try {
+      const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
+      if (!collection) return false;
+
+      const normChatId = String(chatId);
+      const numChatId = Number(chatId);
+      const now = new Date();
+
+      const filter: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (targetBotId !== undefined && targetBotId !== null) {
+        filter.botId = targetBotId;
+      }
+
+      const cleanMsg = JSON.parse(JSON.stringify(message));
+
+      const updateDoc: any = {
+        $push: {
+          messages: {
+            $each: [cleanMsg],
+            $slice: -500
+          }
+        },
+        $set: { updatedAt: now }
+      };
+
+      if (incrementHumanCounter) {
+        updateDoc.$inc = {
+          "settings.humanMessagesSinceLastSticker": 1,
+          "autoEngine.humanMessagesSinceLastSticker": 1
+        };
+      }
+
+      const res = await collection.updateOne(filter, updateDoc);
+      if (res.matchedCount === 0) {
+        console.warn(`[MongoStorage] Group ${chatId} not found in MongoDB for message append (matchedCount: 0)`);
+        return false;
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to append message to group ${chatId}: ${err?.message}`);
+      return false;
+    }
+  }
+
+  public static async incrementHumanMessageCount(chatId: string | number, targetBotId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
+      if (!collection) return false;
+
+      const normChatId = String(chatId);
+      const numChatId = Number(chatId);
+      const now = new Date();
+
+      const filter: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (targetBotId !== undefined && targetBotId !== null) {
+        filter.botId = targetBotId;
+      }
+
+      const res = await collection.updateOne(
+        filter,
+        {
+          $inc: {
+            "settings.humanMessagesSinceLastSticker": 1,
+            "autoEngine.humanMessagesSinceLastSticker": 1
+          },
+          $set: { updatedAt: now }
+        }
+      );
+
+      if (res.matchedCount === 0) {
+        console.warn(`[MongoStorage] Group ${chatId} not found in MongoDB for counter increment (matchedCount: 0)`);
+        return false;
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to increment human message count for group ${chatId}: ${err?.message}`);
+      return false;
+    }
+  }
+
+  public static async updateStickerActivity(chatId: string | number, newGap: number, targetBotId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
+      if (!collection) return false;
+
+      const normChatId = String(chatId);
+      const numChatId = Number(chatId);
+      const now = new Date();
+
+      const filter: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (targetBotId !== undefined && targetBotId !== null) {
+        filter.botId = targetBotId;
+      }
+
+      const res = await collection.updateOne(
+        filter,
+        {
+          $set: {
+            "settings.humanMessagesSinceLastSticker": 0,
+            "settings.requiredStickerGap": newGap,
+            "autoEngine.humanMessagesSinceLastSticker": 0,
+            "autoEngine.requiredStickerGap": newGap,
+            updatedAt: now
+          }
+        }
+      );
+
+      if (res.matchedCount === 0) {
+        console.warn(`[MongoStorage] Group ${chatId} not found in MongoDB for sticker activity update (matchedCount: 0)`);
+        return false;
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to update sticker activity for group ${chatId}: ${err?.message}`);
+      return false;
+    }
+  }
+
+  public static async recordAutoStickerSent(chatId: string | number, newGap: number, targetBotId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
+      if (!collection) return false;
+
+      const normChatId = String(chatId);
+      const numChatId = Number(chatId);
+      const now = new Date();
+      const nowMs = now.getTime();
+
+      const filter: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (targetBotId !== undefined && targetBotId !== null) {
+        filter.botId = targetBotId;
+      }
+
+      const res = await collection.updateOne(
+        filter,
+        {
+          $set: {
+            "settings.lastStickerTimestamp": nowMs,
+            "settings.lastSentTimestamp": nowMs,
+            "settings.humanMessagesSinceLastSticker": 0,
+            "settings.requiredStickerGap": newGap,
+            "autoEngine.lastStickerTimestamp": nowMs,
+            "autoEngine.lastSentTimestamp": nowMs,
+            "autoEngine.humanMessagesSinceLastSticker": 0,
+            "autoEngine.requiredStickerGap": newGap,
+            "autoEngine.stickers.lastSentTimestamp": nowMs,
+            "autoSticker.lastSentTimestamp": nowMs,
+            updatedAt: now
+          }
+        }
+      );
+
+      if (res.matchedCount === 0) {
+        console.warn(`[MongoStorage] Group ${chatId} not found in MongoDB for auto sticker update (matchedCount: 0)`);
+        return false;
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to record auto sticker sent for group ${chatId}: ${err?.message}`);
+      return false;
+    }
+  }
+
+  public static async setLastProactiveConsideredMessageId(chatId: string | number, messageId: number, targetBotId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
+      if (!collection) return false;
+
+      const normChatId = String(chatId);
+      const numChatId = Number(chatId);
+      const now = new Date();
+
+      const filter: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (targetBotId !== undefined && targetBotId !== null) {
+        filter.botId = targetBotId;
+      }
+
+      const res = await collection.updateOne(
+        filter,
+        {
+          $set: {
+            "settings.lastProactiveConsideredMessageId": messageId,
+            updatedAt: now
+          }
+        }
+      );
+
+      if (res.matchedCount === 0) {
+        console.warn(`[MongoStorage] Group ${chatId} not found in MongoDB for proactive state update (matchedCount: 0)`);
+        return false;
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to set last proactive considered message ID for group ${chatId}: ${err?.message}`);
+      return false;
+    }
+  }
+
+  public static async recordAutoResponseSent(chatId: string | number, targetBotId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
+      if (!collection) return false;
+
+      const normChatId = String(chatId);
+      const numChatId = Number(chatId);
+      const now = new Date();
+      const nowMs = now.getTime();
+
+      const filter: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (targetBotId !== undefined && targetBotId !== null) {
+        filter.botId = targetBotId;
+      }
+
+      const res = await collection.updateOne(
+        filter,
+        {
+          $set: {
+            "settings.lastResponseTimestamp": nowMs,
+            "settings.lastSentTimestamp": nowMs,
+            "autoEngine.lastMessageTimestamp": nowMs,
+            "autoEngine.lastSentTimestamp": nowMs,
+            "autoEngine.messages.lastSentTimestamp": nowMs,
+            updatedAt: now
+          }
+        }
+      );
+
+      if (res.matchedCount === 0) {
+        console.warn(`[MongoStorage] Group ${chatId} not found in MongoDB for auto response update (matchedCount: 0)`);
+        return false;
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to record auto response sent for group ${chatId}: ${err?.message}`);
+      return false;
+    }
+  }
+
   public static async getAllGroups(botId?: number): Promise<MongoGroupDocument[]> {
     try {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();

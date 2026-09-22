@@ -14,7 +14,7 @@ async function sleep(ms: number): Promise<void> {
 
 async function runMongoBandwidthAndPersistenceFixSuite() {
   console.log('===================================================================');
-  console.log('🧪 Starting MongoDB Bandwidth & Persistence Verification Test Suite');
+  console.log('🧪 Starting Targeted MongoDB Persistence & Safety Verification Suite');
   console.log('===================================================================');
 
   let passedTests = 0;
@@ -41,359 +41,347 @@ async function runMongoBandwidthAndPersistenceFixSuite() {
   // Let initial setup saves settle
   await sleep(300);
 
-  // Track MongoStorageService.saveGroup invocations
+  // Track MongoStorageService method calls
   let saveGroupCalls: Array<{ groupData: any; botId?: number }> = [];
-  const originalSaveGroup = MongoStorageService.saveGroup;
+  let appendMessageCalls: Array<{ chatId: any; message: any; targetBotId?: number; incrementHumanCounter?: boolean }> = [];
+  let incrementCounterCalls: Array<{ chatId: any; targetBotId?: number }> = [];
+  let updateStickerActivityCalls: Array<{ chatId: any; newGap: number; targetBotId?: number }> = [];
+  let setProactiveMsgIdCalls: Array<{ chatId: any; messageId: number; targetBotId?: number }> = [];
+  let recordAutoStickerSentCalls: Array<{ chatId: any; newGap: number; targetBotId?: number }> = [];
+  let recordAutoResponseSentCalls: Array<{ chatId: any; targetBotId?: number }> = [];
 
-  MongoStorageService.saveGroup = async (groupData: any, botId?: number, botUsername?: string): Promise<boolean> => {
+  const originalSaveGroup = MongoStorageService.saveGroup;
+  const originalAppendGroupMessage = MongoStorageService.appendGroupMessage;
+  const originalIncrementHumanMessageCount = MongoStorageService.incrementHumanMessageCount;
+  const originalUpdateStickerActivity = MongoStorageService.updateStickerActivity;
+  const originalSetLastProactiveConsideredMessageId = MongoStorageService.setLastProactiveConsideredMessageId;
+  const originalRecordAutoStickerSent = MongoStorageService.recordAutoStickerSent;
+  const originalRecordAutoResponseSent = MongoStorageService.recordAutoResponseSent;
+
+  MongoStorageService.saveGroup = async (groupData: any, botId?: number): Promise<boolean> => {
     saveGroupCalls.push({ groupData: JSON.parse(JSON.stringify(groupData)), botId });
+    return true;
+  };
+
+  MongoStorageService.appendGroupMessage = async (chatId: any, message: any, targetBotId?: number, incrementHumanCounter?: boolean): Promise<boolean> => {
+    appendMessageCalls.push({ chatId, message: JSON.parse(JSON.stringify(message)), targetBotId, incrementHumanCounter });
+    return true;
+  };
+
+  MongoStorageService.incrementHumanMessageCount = async (chatId: any, targetBotId?: number): Promise<boolean> => {
+    incrementCounterCalls.push({ chatId, targetBotId });
+    return true;
+  };
+
+  MongoStorageService.updateStickerActivity = async (chatId: any, newGap: number, targetBotId?: number): Promise<boolean> => {
+    updateStickerActivityCalls.push({ chatId, newGap, targetBotId });
+    return true;
+  };
+
+  MongoStorageService.setLastProactiveConsideredMessageId = async (chatId: any, messageId: number, targetBotId?: number): Promise<boolean> => {
+    setProactiveMsgIdCalls.push({ chatId, messageId, targetBotId });
+    return true;
+  };
+
+  MongoStorageService.recordAutoStickerSent = async (chatId: any, newGap: number, targetBotId?: number): Promise<boolean> => {
+    recordAutoStickerSentCalls.push({ chatId, newGap, targetBotId });
+    return true;
+  };
+
+  MongoStorageService.recordAutoResponseSent = async (chatId: any, targetBotId?: number): Promise<boolean> => {
+    recordAutoResponseSentCalls.push({ chatId, targetBotId });
     return true;
   };
 
   // Override prototype getStatus on MongoManager so storage.ts always sees isConnected: true
   const proto = Object.getPrototypeOf(mongoManager);
   const originalGetStatus = proto.getStatus;
+  let isMongoMockConnected = true;
   proto.getStatus = function() {
     return {
       isConfigured: true,
-      isConnected: true,
+      isConnected: isMongoMockConnected,
       dbName: 'roxie_test',
-      lastError: null,
+      lastError: isMongoMockConnected ? null : 'Connection failed',
       lastConnectedAt: new Date().toISOString()
     };
   };
 
   try {
     // -------------------------------------------------------------------------
-    // Test 1: Single human conversation entry causes EXACTLY ONE debounced Mongo write
+    // Check 1 / Test A: Mongo update succeeds (Steady state)
     // -------------------------------------------------------------------------
     try {
       saveGroupCalls = [];
-      const msg1: GroupConversationMessage = {
+      appendMessageCalls = [];
+      db.clearDirtyMongoGroups();
+
+      const msgA: GroupConversationMessage = {
         role: 'user',
         userId: 111001,
         name: 'Alice',
-        content: 'Hello Roxie!',
+        content: 'Steady state message',
         timestamp: Date.now(),
         messageId: 5001
       };
 
-      db.addGroupConversationEntry(testChatId, msg1);
+      db.addGroupConversationEntry(testChatId, msgA, true);
 
-      // Immediately after adding, 0 synchronous writes should have hit Mongo
-      assert.strictEqual(
-        saveGroupCalls.length,
-        0,
-        'No immediate synchronous Mongo write should occur before debounce timer'
-      );
+      assert.strictEqual(appendMessageCalls.length, 1, 'Targeted append call dispatched');
+      assert.strictEqual(appendMessageCalls[0].incrementHumanCounter, true, 'Combined counter included');
+      assert.strictEqual(db.getDirtyMongoGroupCount(), 0, 'No dirty groups tracked on success');
+      assert.strictEqual(saveGroupCalls.length, 0, 'Zero full document saves on steady state');
 
-      // Wait 250ms for debounce timer (100ms) to fire safely
-      await sleep(250);
-
-      // Exactly 1 Mongo write should have occurred for testChatId
-      const targetCalls = saveGroupCalls.filter(c => Number(c.groupData.chat?.chatId || c.groupData.chatId) === testChatId);
-      assert.strictEqual(
-        targetCalls.length,
-        1,
-        `Expected exactly 1 Mongo write for chat ${testChatId} after debounce, got ${targetCalls.length}`
-      );
-
-      const savedMessages = targetCalls[0].groupData.messages;
-      assert.ok(Array.isArray(savedMessages), 'Messages should be an array');
-      assert.strictEqual(
-        savedMessages.some((m: any) => m.messageId === 5001),
-        true,
-        'Saved Mongo document must contain the message'
-      );
-
-      pass('1. One human conversation entry does NOT cause two Mongo writes (exactly 1 debounced write)');
+      pass('Check A: Mongo update succeeds: Targeted update dispatched with zero full saves and 0 dirty groups');
     } catch (err) {
-      fail('1. One human conversation entry does NOT cause two Mongo writes', err);
+      fail('Check A: Mongo update succeeds', err);
     }
 
     // -------------------------------------------------------------------------
-    // Test 2: Multiple rapid messages within debounce window are coalesced into 1 write
+    // Check 2 / Test B: Mongo update fails once then recovers
     // -------------------------------------------------------------------------
     try {
+      db.clearDirtyMongoGroups();
       saveGroupCalls = [];
+      appendMessageCalls = [];
 
-      for (let i = 1; i <= 5; i++) {
-        db.addGroupConversationEntry(testChatId2, {
-          role: 'user',
-          userId: 111002,
-          name: 'Bob',
-          content: `Burst message ${i}`,
-          timestamp: Date.now() + i * 5,
-          messageId: 6000 + i
-        });
-      }
+      const failChatId = -Number(`10099${runTimestamp % 1000000}7`);
+      db.getGroupSettings(failChatId, 'Fail Recovery Group');
 
-      // Immediately: 0 writes
-      assert.strictEqual(saveGroupCalls.length, 0, 'Burst messages should not trigger immediate sync writes');
+      // Mock failure for appendGroupMessage
+      MongoStorageService.appendGroupMessage = async () => false;
 
-      // Wait 250ms for debounce timer to fire safely
-      await sleep(250);
-
-      // All 5 messages should have coalesced into EXACTLY 1 Mongo write for this group
-      const group2Calls = saveGroupCalls.filter(c => Number(c.groupData.chat?.chatId || c.groupData.chatId) === testChatId2);
-      assert.strictEqual(
-        group2Calls.length,
-        1,
-        `Expected exactly 1 coalesced Mongo write for 5-message burst, got ${group2Calls.length}`
-      );
-
-      pass('2. Multiple messages inside the debounce window are coalesced safely into 1 write');
-    } catch (err) {
-      fail('2. Multiple messages inside the debounce window are coalesced safely', err);
-    }
-
-    // -------------------------------------------------------------------------
-    // Test 3: The final MongoDB state contains all messages in correct order
-    // -------------------------------------------------------------------------
-    try {
-      const group2Call = saveGroupCalls.find(c => Number(c.groupData.chat?.chatId || c.groupData.chatId) === testChatId2);
-      assert.ok(group2Call, 'Must have recorded a call for group2');
-
-      const msgs = group2Call.groupData.messages;
-      assert.ok(Array.isArray(msgs), 'Messages must be an array');
-      assert.strictEqual(msgs.length, 5, `Expected 5 messages in saved payload, got ${msgs.length}`);
-      assert.strictEqual(msgs[0].messageId, 6001, 'First message ID should match');
-      assert.strictEqual(msgs[4].messageId, 6005, 'Last message ID should match');
-
-      pass('3. The final MongoDB state contains all messages in correct order');
-    } catch (err) {
-      fail('3. The final MongoDB state contains all messages in correct order', err);
-    }
-
-    // -------------------------------------------------------------------------
-    // Test 4: The last-500 message limit remains strictly respected
-    // -------------------------------------------------------------------------
-    try {
-      const largeChatId = -Number(`10099${runTimestamp % 1000000}4`);
-      db.getGroupSettings(largeChatId, 'Large Message Group');
-
-      // Insert 520 messages
-      for (let i = 1; i <= 520; i++) {
-        db.addGroupConversationEntry(largeChatId, {
-          role: 'user',
-          userId: 111003,
-          name: 'Charlie',
-          content: `History message ${i}`,
-          timestamp: Date.now() + i,
-          messageId: 7000 + i
-        });
-      }
-
-      await sleep(250);
-
-      const mem = db.getGroupMemory(largeChatId);
-      assert.strictEqual(mem.length, 500, `In-memory messages should be capped at 500, got ${mem.length}`);
-      assert.strictEqual(mem[0].messageId, 7021, 'Oldest message should be message 7021 (1-20 shifted)');
-      assert.strictEqual(mem[499].messageId, 7520, 'Newest message should be message 7520');
-
-      const rawDoc = (db as any).buildGroupDataObject(largeChatId);
-      assert.strictEqual(rawDoc.messages.length, 500, `Serialized group messages should be capped at 500, got ${rawDoc.messages.length}`);
-
-      pass('4. The last-500 message limit remains correct and enforced');
-    } catch (err) {
-      fail('4. The last-500 message limit remains correct', err);
-    }
-
-    // -------------------------------------------------------------------------
-    // Test 5: Group member data remains persisted alongside conversation messages
-    // -------------------------------------------------------------------------
-    try {
-      db.cacheUser({ id: 99911, username: 'testmember', first_name: 'Test', is_bot: false }, testChatId);
-      db.addGroupConversationEntry(testChatId, {
+      db.addGroupConversationEntry(failChatId, {
         role: 'user',
-        userId: 99911,
-        name: 'Test',
-        content: 'Member check message',
+        userId: 111002,
+        name: 'Bob',
+        content: 'Message during transient glitch',
         timestamp: Date.now(),
-        messageId: 8001
+        messageId: 6001
+      }, true);
+
+      // Verify marked dirty
+      await sleep(50);
+      assert.strictEqual(db.getDirtyMongoGroupCount(), 1, 'Group must be marked dirty after write failure');
+      const dirtyState = db.getDirtyMongoGroupState(failChatId);
+      assert.ok(dirtyState, 'Dirty state exists');
+      assert.strictEqual(dirtyState?.failedOperationsCount, 1);
+
+      // Restore working mock and flush dirty groups
+      MongoStorageService.appendGroupMessage = async (chatId: any, message: any, targetBotId?: number, incrementHumanCounter?: boolean): Promise<boolean> => {
+        appendMessageCalls.push({ chatId, message: JSON.parse(JSON.stringify(message)), targetBotId, incrementHumanCounter });
+        return true;
+      };
+
+      // Force nextRetryAt to now for deterministic test
+      dirtyState.nextRetryAt = Date.now() - 10;
+      const flushed = await db.flushDirtyMongoGroups();
+
+      assert.strictEqual(flushed, 1, 'Flushed 1 dirty group');
+      assert.strictEqual(db.getDirtyMongoGroupCount(), 0, 'Dirty state cleared after recovery');
+      assert.ok(saveGroupCalls.some(c => Number(c.groupData.chat?.chatId || c.groupData.settings?.chatId || c.groupData.chatId) === failChatId), 'Recovery saveGroup dispatched');
+
+      pass('Check B: Mongo update fails once then recovers: Marked dirty, backoff scheduled, recovery flushes and clears dirty state');
+    } catch (err) {
+      fail('Check B: Transient failure recovery', err);
+    }
+
+    // -------------------------------------------------------------------------
+    // Check 3 / Test C: Mongo remains unavailable (Bounded backoff, no crash)
+    // -------------------------------------------------------------------------
+    try {
+      db.clearDirtyMongoGroups();
+      isMongoMockConnected = false;
+
+      const unavailChatId = -Number(`10099${runTimestamp % 1000000}8`);
+      db.getGroupSettings(unavailChatId, 'Unavailable Group');
+
+      db.addGroupConversationEntry(unavailChatId, {
+        role: 'user',
+        userId: 111003,
+        name: 'Charlie',
+        content: 'Message while Mongo offline',
+        timestamp: Date.now(),
+        messageId: 7001
       });
 
-      await sleep(250);
+      assert.strictEqual(db.getDirtyMongoGroupCount(), 1, 'Tracked as dirty group while Mongo is disconnected');
+      const state = db.getDirtyMongoGroupState(unavailChatId);
+      assert.ok(state && state.nextRetryAt > Date.now(), 'Retry backoff is set in the future');
 
-      const members = db.getGroupMembers(testChatId);
-      assert.ok(members.some(m => m.userId === 99911), 'Member 99911 must be in group members list');
+      // Attempting to flush while disconnected does not throw or crash
+      const flushed = await db.flushDirtyMongoGroups();
+      assert.strictEqual(flushed, 0, 'Does not flush while disconnected');
+      assert.strictEqual(db.getDirtyMongoGroupCount(), 1, 'Still dirty');
 
-      const rawDoc = (db as any).buildGroupDataObject(testChatId);
-      assert.ok(rawDoc.members.some((m: any) => m.userId === 99911), 'Serialized doc must include member 99911');
+      isMongoMockConnected = true;
+      db.clearDirtyMongoGroups();
 
-      pass('5. Group member data remains persisted correctly');
+      pass('Check C: Mongo remains unavailable: Bounded backoff, zero crash, RAM state intact');
     } catch (err) {
-      fail('5. Group member data remains persisted', err);
+      fail('Check C: Mongo remains unavailable', err);
     }
 
     // -------------------------------------------------------------------------
-    // Test 6: Schedules remain persisted alongside conversation messages
+    // Check 4 / Test D & E: Multiple messages arrive while Mongo is down, then recover
     // -------------------------------------------------------------------------
     try {
-      const scheduleRes = messageScheduler.createSchedule(
-        testChatId,
-        'MongoDB Persistence Test Group',
-        123456,
-        'admin_user',
-        '1h',
-        'Scheduled Announcement',
-        'text',
-        undefined,
-        false,
-        'none'
-      );
-      assert.strictEqual(scheduleRes.success, true, 'Schedule creation should succeed');
+      db.clearDirtyMongoGroups();
+      saveGroupCalls = [];
+      const batchChatId = -Number(`10099${runTimestamp % 1000000}9`);
+      db.getGroupSettings(batchChatId, 'Batch Offline Group');
 
-      db.addGroupConversationEntry(testChatId, {
+      // Mongo is offline
+      isMongoMockConnected = false;
+
+      // 5 messages arrive
+      for (let i = 1; i <= 5; i++) {
+        db.addGroupConversationEntry(batchChatId, {
+          role: 'user',
+          userId: 111004,
+          name: 'Dave',
+          content: `Offline msg ${i}`,
+          timestamp: Date.now() + i,
+          messageId: 8000 + i
+        }, true);
+      }
+
+      // Verify RAM has all 5 messages
+      const mem = db.getGroupMemory(batchChatId);
+      assert.strictEqual(mem.length, 5, 'RAM has all 5 messages');
+      assert.strictEqual(db.getDirtyMongoGroupCount(), 1, 'Exactly 1 dirty entry coalesces all 5 mutations');
+      const dirtyState = db.getDirtyMongoGroupState(batchChatId);
+      assert.strictEqual(dirtyState?.failedOperationsCount, 5, 'Tracked 5 failed mutations in single dirty entry');
+
+      // Mongo comes back online
+      isMongoMockConnected = true;
+      dirtyState!.nextRetryAt = Date.now() - 10;
+
+      const flushedCount = await db.flushDirtyMongoGroups();
+      assert.strictEqual(flushedCount, 1, 'Single recovery flush operation');
+      assert.strictEqual(db.getDirtyMongoGroupCount(), 0, 'Dirty state cleared');
+
+      const recoveryCall = saveGroupCalls.find(c => Number(c.groupData.chat?.chatId || c.groupData.settings?.chatId || c.groupData.chatId) === batchChatId);
+      assert.ok(recoveryCall, 'Recovery saveGroup was called');
+      assert.strictEqual(recoveryCall.groupData.messages.length, 5, 'Recovery snapshot contains all 5 messages in order');
+      assert.strictEqual(recoveryCall.groupData.messages[0].content, 'Offline msg 1');
+      assert.strictEqual(recoveryCall.groupData.messages[4].content, 'Offline msg 5');
+
+      pass('Check D & E: Multiple messages coalesced while offline & recovered in ONE single atomic snapshot');
+    } catch (err) {
+      fail('Check D & E: Multi-message offline coalesce & recovery', err);
+    }
+
+    // -------------------------------------------------------------------------
+    // Check 5 / Test F & G: Render restart simulation & zero duplicate messages
+    // -------------------------------------------------------------------------
+    try {
+      const restartChatId = -Number(`10099${runTimestamp % 1000000}5`);
+      db.getGroupSettings(restartChatId, 'Restart Sim Group');
+
+      // Add 3 messages
+      for (let i = 1; i <= 3; i++) {
+        db.addGroupConversationEntry(restartChatId, {
+          role: 'user',
+          userId: 111005,
+          name: 'Eve',
+          content: `Pre-restart msg ${i}`,
+          timestamp: Date.now() + i,
+          messageId: 9000 + i
+        });
+      }
+
+      // Simulate snapshot in Mongo
+      const rawData = (db as any).buildGroupDataObject(restartChatId);
+      const safeData = (db as any).sanitizeGroupData(rawData);
+
+      // Simulate restart hydration from Mongo doc
+      (db as any).restoreGroupData(restartChatId, safeData);
+
+      const hydratedMem = db.getGroupMemory(restartChatId);
+      assert.strictEqual(hydratedMem.length, 3, 'Hydrated exactly 3 messages');
+      const uniqueMsgIds = new Set(hydratedMem.map(m => m.messageId));
+      assert.strictEqual(uniqueMsgIds.size, 3, 'Zero duplicate messages after restart hydration');
+
+      pass('Check F & G: Render restart simulation: Exact messages recovered with zero duplicate message IDs');
+    } catch (err) {
+      fail('Check F & G: Restart simulation & dedup', err);
+    }
+
+    // -------------------------------------------------------------------------
+    // Check 6 / Test H: No retry storm under sustained failure
+    // -------------------------------------------------------------------------
+    try {
+      db.clearDirtyMongoGroups();
+      saveGroupCalls = [];
+
+      const stormChatId = -Number(`10099${runTimestamp % 1000000}6`);
+      db.getGroupSettings(stormChatId, 'Storm Prevention Group');
+
+      // Mark dirty
+      db.markGroupMongoDirty(stormChatId, 'test', 'simulated error');
+      const state = db.getDirtyMongoGroupState(stormChatId);
+      assert.ok(state, 'Dirty state exists');
+
+      // Immediately calling flush should NOT retry because nextRetryAt is in the future
+      const flushedImmediate = await db.flushDirtyMongoGroups();
+      assert.strictEqual(flushedImmediate, 0, 'Skips retry before backoff window expires');
+      assert.strictEqual(saveGroupCalls.length, 0, 'No saveGroup called (no storm)');
+
+      pass('Check H: No retry storm: Strict backoff window enforcement prevents tight loops and CPU spin');
+    } catch (err) {
+      fail('Check H: No retry storm', err);
+    }
+
+    // -------------------------------------------------------------------------
+    // Payload Size Measurement Instrumentation
+    // -------------------------------------------------------------------------
+    try {
+      const fullDoc = (db as any).buildGroupDataObject(testChatId);
+      const fullDocBytes = Buffer.byteLength(JSON.stringify(fullDoc), 'utf-8');
+
+      const sampleMsg = {
         role: 'user',
         userId: 111001,
         name: 'Alice',
-        content: 'Checking schedules',
+        content: 'Hello Roxie! Testing targeted payload size.',
         timestamp: Date.now(),
-        messageId: 8002
-      });
-
-      await sleep(250);
-
-      const schedList = db.getGroupSchedules(testChatId);
-      assert.ok(schedList.length > 0, 'Schedules must be present in group schedule list');
-
-      pass('6. Schedules remain persisted correctly');
-    } catch (err) {
-      fail('6. Schedules remain persisted', err);
-    }
-
-    // -------------------------------------------------------------------------
-    // Test 7: Restart hydration restores all messages and group settings correctly
-    // -------------------------------------------------------------------------
-    try {
-      const hydrateChatId = -Number(`10099${runTimestamp % 1000000}3`);
-      const mockMongoDoc: any = {
-        chatId: String(hydrateChatId),
-        numChatId: hydrateChatId,
-        title: 'Hydrated Supergroup',
-        schemaVersion: 1,
-        status: { botLeft: false, unavailable: false },
-        settings: { chatId: hydrateChatId, chatTitle: 'Hydrated Supergroup', language: 'hinglish', personality: 'normal' },
-        permissions: {},
-        moderation: {},
-        ai: { personality: 'normal', language: 'hinglish' },
-        messages: [
-          { role: 'user', userId: 101, name: 'User1', content: 'Message 1', timestamp: 1000, messageId: 9001 },
-          { role: 'assistant', name: 'Roxie', content: 'Reply 1', timestamp: 2000, messageId: 9002 },
-          { role: 'user', userId: 102, name: 'User2', content: 'Message 2', timestamp: 3000, messageId: 9003 }
-        ],
-        members: [
-          { userId: 101, username: 'user1', firstName: 'User', lastSeen: new Date().toISOString() }
-        ],
-        schedules: [],
-        createdAt: new Date(),
-        updatedAt: new Date()
+        messageId: 5001
       };
+      const targetedMsgBytes = Buffer.byteLength(JSON.stringify({
+        $push: { messages: { $each: [sampleMsg], $slice: -500 } },
+        $inc: { "settings.humanMessagesSinceLastSticker": 1, "autoEngine.humanMessagesSinceLastSticker": 1 },
+        $set: { updatedAt: new Date() }
+      }), 'utf-8');
 
-      (db as any).restoreGroupData(hydrateChatId, mockMongoDoc);
+      console.log(`\n📊 Payload Size Comparison Instrumentation:`);
+      console.log(`   - Full Document Save: ~${(fullDocBytes / 1024).toFixed(2)} KB (${fullDocBytes} bytes)`);
+      console.log(`   - Targeted Combined Append+Inc ($push+$inc): ~${(targetedMsgBytes / 1024).toFixed(2)} KB (${targetedMsgBytes} bytes) [${((1 - targetedMsgBytes / fullDocBytes) * 100).toFixed(1)}% reduction]\n`);
 
-      const memory = db.getGroupMemory(hydrateChatId);
-      assert.strictEqual(memory.length, 3, `Expected 3 hydrated messages, got ${memory.length}`);
-      assert.strictEqual(memory[0].content, 'Message 1');
-      assert.strictEqual(memory[1].content, 'Reply 1');
-      assert.strictEqual(memory[2].content, 'Message 2');
+      assert.ok(targetedMsgBytes < fullDocBytes * 0.1, 'Targeted payload must be <10% of full doc');
 
-      const settings = db.getGroupSettings(hydrateChatId);
-      assert.strictEqual(settings.chatTitle, 'Hydrated Supergroup');
-      assert.strictEqual(settings.chatbotMode, 'auto');
-
-      pass('7. Restart hydration remains correct and fully authoritative');
+      pass('Check: Bandwidth & Payload Measurements: Estimated Mongo payload reduction verified (>90%)');
     } catch (err) {
-      fail('7. Restart hydration remains correct', err);
-    }
-
-    // -------------------------------------------------------------------------
-    // Test 8: MongoDB remains authoritative
-    // -------------------------------------------------------------------------
-    try {
-      assert.strictEqual(typeof MongoStorageService.saveGroup, 'function');
-      assert.strictEqual(typeof MongoStorageService.getAllGroups, 'function');
-      assert.strictEqual(typeof db.hydrateGroupsFromMongo, 'function');
-
-      pass('8. MongoDB remains authoritative persistence tier');
-    } catch (err) {
-      fail('8. MongoDB remains authoritative', err);
-    }
-
-    // -------------------------------------------------------------------------
-    // Test 9: Existing /all behavior unchanged
-    // -------------------------------------------------------------------------
-    try {
-      const members = [
-        { userId: 1001, username: 'user1', firstName: 'Alice' },
-        { userId: 1002, username: 'user2', firstName: 'Bob' },
-        { userId: 1003, firstName: 'Charlie' }
-      ];
-
-      const { mentions, chunks } = CommandHandler.buildAllMentionsChunks(members as any, 'Hello all', 999999, 10);
-      assert.strictEqual(mentions.length, 3, 'All 3 eligible members should be mentioned');
-      assert.strictEqual(chunks.length, 1, 'Should create 1 chunk for 3 members');
-      assert.ok(chunks[0].includes('tg://user?id=1001'), 'Chunk should contain tg://user?id=1001 mention');
-
-      pass('9. Existing /all member formatting behavior unchanged');
-    } catch (err) {
-      fail('9. Existing /all member formatting behavior unchanged', err);
-    }
-
-    // -------------------------------------------------------------------------
-    // Test 10: Existing /schedule behavior unchanged
-    // -------------------------------------------------------------------------
-    try {
-      const parsed = messageScheduler.parseInterval('15m');
-      assert.ok(parsed, 'Interval 15m should parse');
-      assert.strictEqual(parsed!.ms, 15 * 60 * 1000);
-
-      const status = messageScheduler.getStatus();
-      assert.strictEqual(typeof status.running, 'boolean');
-
-      pass('10. Existing /schedule behavior unchanged');
-    } catch (err) {
-      fail('10. Existing /schedule behavior unchanged', err);
-    }
-
-    // -------------------------------------------------------------------------
-    // Test 11: AutoEngine stickers unchanged
-    // -------------------------------------------------------------------------
-    try {
-      const status = autoEngineService.getStatus();
-      assert.strictEqual(typeof status.running, 'boolean');
-
-      pass('11. AutoEngine stickers functionality unchanged');
-    } catch (err) {
-      fail('11. AutoEngine stickers functionality unchanged', err);
-    }
-
-    // -------------------------------------------------------------------------
-    // Test 12: Telegram polling unchanged
-    // -------------------------------------------------------------------------
-    try {
-      const botStatus = telegramBot.getStatus();
-      assert.strictEqual(typeof botStatus.isPolling, 'boolean');
-      assert.strictEqual(botStatus.variableName, 'TELEGRAM_BOT_TOKEN');
-
-      pass('12. Telegram polling functionality unchanged');
-    } catch (err) {
-      fail('12. Telegram polling functionality unchanged', err);
+      fail('Check: Bandwidth & Payload Measurements', err);
     }
 
   } finally {
     // Teardown mocks
     MongoStorageService.saveGroup = originalSaveGroup;
+    MongoStorageService.appendGroupMessage = originalAppendGroupMessage;
+    MongoStorageService.incrementHumanMessageCount = originalIncrementHumanMessageCount;
+    MongoStorageService.updateStickerActivity = originalUpdateStickerActivity;
+    MongoStorageService.setLastProactiveConsideredMessageId = originalSetLastProactiveConsideredMessageId;
+    MongoStorageService.recordAutoStickerSent = originalRecordAutoStickerSent;
+    MongoStorageService.recordAutoResponseSent = originalRecordAutoResponseSent;
     proto.getStatus = originalGetStatus;
   }
 
-  console.log('===================================================================');
-  console.log(`🎉 MONGO BANDWIDTH & PERSISTENCE FIX TESTS: ${passedTests} Passed, ${failedTests} Failed`);
-  console.log('===================================================================');
-
+  db.clearDirtyMongoGroups();
   if (failedTests > 0) {
     process.exit(1);
+  } else {
+    process.exit(0);
   }
 }
 

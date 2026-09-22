@@ -815,6 +815,20 @@ export class TelegramBotManager {
 
     // Record incoming group message in persistent memory for Group Messages dashboard & real replies
     if (chatId && chatId < 0 && message.message_id) {
+      // Track genuine human conversation activity for activity-gated AutoEngine
+      const isMeaningfulContent = Boolean(
+        (message.text && message.text.trim().length > 0) ||
+        (message.caption && message.caption.trim().length > 0) ||
+        message.sticker ||
+        message.photo ||
+        message.video ||
+        message.animation ||
+        message.voice ||
+        message.audio ||
+        message.document
+      );
+      const shouldIncrementCounter = Boolean(isHuman && isMeaningfulContent && !ChatbotService.isTelegramServiceText(content));
+
       db.addGroupConversationEntry(chatId, {
         role: isHuman ? 'user' : 'assistant',
         userId: message.from?.id,
@@ -831,24 +845,11 @@ export class TelegramBotManager {
         source: isHuman ? 'telegram' : 'bot',
         sender: isHuman ? 'user' : 'bot',
         replyToMessageId: message.reply_to_message?.message_id
-      });
+      }, shouldIncrementCounter);
       this.lastStoredMessageTimestamp = new Date().toISOString();
 
-      // Track genuine human conversation activity for activity-gated AutoEngine
-      const isMeaningfulContent = Boolean(
-        (message.text && message.text.trim().length > 0) ||
-        (message.caption && message.caption.trim().length > 0) ||
-        message.sticker ||
-        message.photo ||
-        message.video ||
-        message.animation ||
-        message.voice ||
-        message.audio ||
-        message.document
-      );
-
-      if (isHuman && isMeaningfulContent && !ChatbotService.isTelegramServiceText(content)) {
-        db.incrementHumanMessageCount(chatId);
+      if (shouldIncrementCounter) {
+        db.incrementHumanMessageCount(chatId, false);
       }
 
       logDebug({

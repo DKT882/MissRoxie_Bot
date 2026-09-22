@@ -80,6 +80,16 @@ export interface UserMemoryRecord {
   lastUpdated: number;
 }
 
+export interface DirtyMongoGroupState {
+  chatId: number;
+  failedOperationsCount: number;
+  firstFailedAt: number;
+  lastFailedAt: number;
+  nextRetryAt: number;
+  retryCount: number;
+  isRetrying?: boolean;
+}
+
 export interface UserLustLevelRecord {
   groupId: number | string;
   userId: number;
@@ -466,8 +476,110 @@ export class StorageManager {
   private lastSaveTimestamps: Map<string, string> = new Map();
   private corruptedRecoveries: Map<string, string> = new Map();
   private pendingSaves: Set<number> = new Set();
+  private dirtyMongoGroups: Map<number, DirtyMongoGroupState> = new Map();
+  private dirtyFlushTimer: NodeJS.Timeout | null = null;
   public lastSaveSuccessful: boolean = true;
   public corruptedFilesCount: number = 0;
+
+  public markGroupMongoDirty(chatId: number | string, operation?: string, reason?: string): void {
+    const numId = Number(chatId);
+    if (isNaN(numId) || numId >= 0) return;
+
+    const now = Date.now();
+    const existing = this.dirtyMongoGroups.get(numId);
+    if (existing) {
+      existing.failedOperationsCount++;
+      existing.lastFailedAt = now;
+      const backoffMs = Math.min(60000, 1000 * Math.pow(2, Math.min(existing.retryCount, 6)));
+      existing.nextRetryAt = now + backoffMs;
+    } else {
+      this.dirtyMongoGroups.set(numId, {
+        chatId: numId,
+        failedOperationsCount: 1,
+        firstFailedAt: now,
+        lastFailedAt: now,
+        nextRetryAt: now + 2000,
+        retryCount: 0
+      });
+    }
+
+    this.scheduleDirtyMongoFlush();
+  }
+
+  public scheduleDirtyMongoFlush(): void {
+    if (this.dirtyFlushTimer || this.dirtyMongoGroups.size === 0) return;
+    this.dirtyFlushTimer = setTimeout(() => {
+      this.dirtyFlushTimer = null;
+      this.flushDirtyMongoGroups().catch((err) => {
+        console.warn('[Storage] Error during dirty Mongo groups flush:', err?.message);
+      });
+    }, 2000);
+  }
+
+  public async flushDirtyMongoGroups(): Promise<number> {
+    if (this.dirtyMongoGroups.size === 0) return 0;
+    if (!mongoManager.getStatus().isConnected) {
+      this.scheduleDirtyMongoFlush();
+      return 0;
+    }
+
+    const now = Date.now();
+    let flushedCount = 0;
+
+    for (const [chatId, state] of Array.from(this.dirtyMongoGroups.entries())) {
+      if (state.isRetrying || now < state.nextRetryAt) {
+        continue;
+      }
+
+      state.isRetrying = true;
+      state.retryCount++;
+
+      try {
+        const rawData = this.buildGroupDataObject(chatId);
+        const safeData = this.sanitizeGroupData(rawData);
+        const targetBotId = this.currentBotId ?? safeData.settings?.botId ?? undefined;
+
+        const saved = await MongoStorageService.saveGroup(safeData, targetBotId, this.currentBotUsername ?? undefined);
+        if (saved) {
+          this.dirtyMongoGroups.delete(chatId);
+          flushedCount++;
+          console.log(`[Storage] Successfully recovered and synchronized dirty group ${chatId} with MongoDB Atlas (${state.failedOperationsCount} accumulated mutations).`);
+        } else {
+          const backoffMs = Math.min(60000, 1000 * Math.pow(2, Math.min(state.retryCount, 6)));
+          state.nextRetryAt = Date.now() + backoffMs;
+          state.isRetrying = false;
+        }
+      } catch (retryErr: any) {
+        const backoffMs = Math.min(60000, 1000 * Math.pow(2, Math.min(state.retryCount, 6)));
+        state.nextRetryAt = Date.now() + backoffMs;
+        state.isRetrying = false;
+        console.warn(`[Storage] Recovery write for dirty group ${chatId} failed (attempt ${state.retryCount}): ${retryErr?.message}`);
+      }
+    }
+
+    if (this.dirtyMongoGroups.size > 0) {
+      this.scheduleDirtyMongoFlush();
+    }
+
+    return flushedCount;
+  }
+
+  public getDirtyMongoGroupCount(): number {
+    return this.dirtyMongoGroups.size;
+  }
+
+  public getDirtyMongoGroupState(chatId: number | string): DirtyMongoGroupState | undefined {
+    const numId = Number(chatId);
+    return this.dirtyMongoGroups.get(numId);
+  }
+
+  public clearDirtyMongoGroups(): void {
+    if (this.dirtyFlushTimer) {
+      clearTimeout(this.dirtyFlushTimer);
+      this.dirtyFlushTimer = null;
+    }
+    this.dirtyMongoGroups.clear();
+  }
 
   private data: DatabaseSchema = {
     settings: {},
@@ -813,7 +925,7 @@ export class StorageManager {
     };
   }
 
-  public saveGroupJsonSync(chatId: number | string): void {
+  public saveGroupJsonSync(chatId: number | string, syncToMongo: boolean = true): void {
     const numChatId = Number(chatId);
     if (isNaN(numChatId) || numChatId >= 0) return; // Supergroups and groups have negative IDs
 
@@ -845,8 +957,8 @@ export class StorageManager {
       this.lastStorageError = null;
       this.lastSaveTimestamps.set(String(numChatId), new Date().toISOString());
 
-      // Async write to MongoDB Atlas if connected (non-blocking, never fails local save)
-      if (mongoManager.getStatus().isConnected) {
+      // Async write to MongoDB Atlas if connected and full sync requested (non-blocking, never fails local save)
+      if (syncToMongo && mongoManager.getStatus().isConnected) {
         MongoStorageService.saveGroup(safeData, this.currentBotId ?? undefined, this.currentBotUsername ?? undefined).catch((mongoErr) => {
           console.warn(`[Storage] Background MongoDB sync failed for group ${numChatId}: ${mongoErr?.message}`);
         });
@@ -1359,7 +1471,7 @@ export class StorageManager {
       if (this.pendingSaves && this.pendingSaves.size > 0) {
         for (const id of this.pendingSaves) {
           if (id < 0) {
-            this.saveGroupJsonSync(id);
+            this.saveGroupJsonSync(id, false);
           } else if (id > 0) {
             this.savePrivateJsonSync(id);
           }
@@ -5258,7 +5370,7 @@ export class StorageManager {
     return [];
   }
 
-  public addGroupConversationEntry(chatId: number | string, entry: GroupConversationMessage): void {
+  public addGroupConversationEntry(chatId: number | string, entry: GroupConversationMessage, incrementHumanCounter: boolean = false): void {
     if (!this.data.groupConversationMemories) this.data.groupConversationMemories = {};
     const key = String(chatId);
     let record = this.data.groupConversationMemories[key];
@@ -5288,6 +5400,20 @@ export class StorageManager {
       this.data.groupMemories[key] = record;
     }
     this.scheduleSave(chatId);
+
+    // Targeted async message append (+ optional atomic counter increment) to MongoDB Atlas
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.appendGroupMessage(chatId, entry, this.currentBotId ?? undefined, incrementHumanCounter)
+        .then((ok) => {
+          if (!ok) this.markGroupMongoDirty(chatId, 'appendGroupMessage', 'matchedCount 0 or write rejected');
+        })
+        .catch((mongoErr) => {
+          console.warn(`[Storage] Background MongoDB targeted message append failed for group ${chatId}: ${mongoErr?.message}`);
+          this.markGroupMongoDirty(chatId, 'appendGroupMessage', mongoErr?.message);
+        });
+    } else {
+      this.markGroupMongoDirty(chatId, 'appendGroupMessage', 'Mongo not connected');
+    }
   }
 
   public isMessageInOtherGroup(messageId: number, targetChatId: number): number | null {
@@ -5682,11 +5808,24 @@ export class StorageManager {
       }
     }
 
-    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
+
+    // Targeted auto response state update in MongoDB Atlas
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.recordAutoResponseSent(numId, this.currentBotId ?? undefined)
+        .then((ok) => {
+          if (!ok) this.markGroupMongoDirty(numId, 'recordAutoResponseSent', 'matchedCount 0 or write rejected');
+        })
+        .catch((mongoErr) => {
+          console.warn(`[Storage] Background MongoDB targeted auto response update failed for group ${numId}: ${mongoErr?.message}`);
+          this.markGroupMongoDirty(numId, 'recordAutoResponseSent', mongoErr?.message);
+        });
+    } else {
+      this.markGroupMongoDirty(numId, 'recordAutoResponseSent', 'Mongo not connected');
+    }
   }
 
-  public incrementHumanMessageCount(chatId: number | string): number {
+  public incrementHumanMessageCount(chatId: number | string, syncToMongo: boolean = true): number {
     const numId = Number(chatId);
     if (numId > 0) return 0;
     const settings = this.getGroupSettings(numId);
@@ -5695,8 +5834,23 @@ export class StorageManager {
     if (settings.autoEngine) {
       settings.autoEngine.humanMessagesSinceLastSticker = newCount;
     }
-    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
+
+    // Targeted atomic counter increment in MongoDB Atlas (if not already combined in appendGroupMessage)
+    if (syncToMongo) {
+      if (mongoManager.getStatus().isConnected) {
+        MongoStorageService.incrementHumanMessageCount(numId, this.currentBotId ?? undefined)
+          .then((ok) => {
+            if (!ok) this.markGroupMongoDirty(numId, 'incrementHumanMessageCount', 'matchedCount 0 or write rejected');
+          })
+          .catch((mongoErr) => {
+            console.warn(`[Storage] Background MongoDB targeted counter increment failed for group ${numId}: ${mongoErr?.message}`);
+            this.markGroupMongoDirty(numId, 'incrementHumanMessageCount', mongoErr?.message);
+          });
+      } else {
+        this.markGroupMongoDirty(numId, 'incrementHumanMessageCount', 'Mongo not connected');
+      }
+    }
     return newCount;
   }
 
@@ -5712,8 +5866,21 @@ export class StorageManager {
     if (numId > 0) return;
     const settings = this.getGroupSettings(numId);
     settings.lastProactiveConsideredMessageId = messageId;
-    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
+
+    // Targeted proactive state update in MongoDB Atlas
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.setLastProactiveConsideredMessageId(numId, messageId, this.currentBotId ?? undefined)
+        .then((ok) => {
+          if (!ok) this.markGroupMongoDirty(numId, 'setLastProactiveConsideredMessageId', 'matchedCount 0 or write rejected');
+        })
+        .catch((mongoErr) => {
+          console.warn(`[Storage] Background MongoDB targeted proactive state update failed for group ${numId}: ${mongoErr?.message}`);
+          this.markGroupMongoDirty(numId, 'setLastProactiveConsideredMessageId', mongoErr?.message);
+        });
+    } else {
+      this.markGroupMongoDirty(numId, 'setLastProactiveConsideredMessageId', 'Mongo not connected');
+    }
   }
 
   public getHumanMessagesSinceLastSticker(chatId: number | string): number {
@@ -5746,8 +5913,21 @@ export class StorageManager {
       settings.autoEngine.humanMessagesSinceLastSticker = 0;
       settings.autoEngine.requiredStickerGap = newGap;
     }
-    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
+
+    // Targeted sticker activity reset in MongoDB Atlas
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.updateStickerActivity(numId, newGap, this.currentBotId ?? undefined)
+        .then((ok) => {
+          if (!ok) this.markGroupMongoDirty(numId, 'updateStickerActivity', 'matchedCount 0 or write rejected');
+        })
+        .catch((mongoErr) => {
+          console.warn(`[Storage] Background MongoDB targeted sticker activity update failed for group ${numId}: ${mongoErr?.message}`);
+          this.markGroupMongoDirty(numId, 'updateStickerActivity', mongoErr?.message);
+        });
+    } else {
+      this.markGroupMongoDirty(numId, 'updateStickerActivity', 'Mongo not connected');
+    }
   }
 
   public checkAutoStickerEligibility(chatId: number | string): { allowed: boolean; remainingSeconds?: number; remainingMessages?: number; reason?: string } {
@@ -5823,8 +6003,22 @@ export class StorageManager {
       }
     }
 
-    this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
+
+    // Targeted auto sticker state update in MongoDB Atlas
+    if (mongoManager.getStatus().isConnected) {
+      const currentGap = settings.requiredStickerGap || 15;
+      MongoStorageService.recordAutoStickerSent(numId, currentGap, this.currentBotId ?? undefined)
+        .then((ok) => {
+          if (!ok) this.markGroupMongoDirty(numId, 'recordAutoStickerSent', 'matchedCount 0 or write rejected');
+        })
+        .catch((mongoErr) => {
+          console.warn(`[Storage] Background MongoDB targeted auto sticker update failed for group ${numId}: ${mongoErr?.message}`);
+          this.markGroupMongoDirty(numId, 'recordAutoStickerSent', mongoErr?.message);
+        });
+    } else {
+      this.markGroupMongoDirty(numId, 'recordAutoStickerSent', 'Mongo not connected');
+    }
   }
 
   public checkAutoEngineEligibility(chatId: number | string, type: 'messages' | 'stickers'): { allowed: boolean; remainingSeconds?: number; reason?: string } {
