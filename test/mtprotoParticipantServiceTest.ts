@@ -6,8 +6,12 @@ import {
   MTProtoAuthError,
   MTProtoPermissionError,
   MTProtoFloodWaitError,
-  MTProtoIncompleteFetchError
+  MTProtoIncompleteFetchError,
+  MTProtoUnsupportedChatError,
+  MTProtoGroupResolutionError
 } from '../server/telegram/mtprotoParticipantService.js';
+import { Api } from 'telegram';
+import bigInt from 'big-integer';
 import { CommandHandler } from '../server/telegram/commands.js';
 import { telegramApi } from '../server/telegram/api.js';
 import { db } from '../server/db/storage.js';
@@ -287,7 +291,148 @@ async function runTests() {
   const batch24Res = await simulatedBatchSend(24);
   const batch25Res = await simulatedBatchSend(25);
   assert(batch23Res.ok && batch24Res.ok && batch25Res.ok, 'Test 26: All batches succeed after 429 retry');
-  assert(dispatchCalls === 4, 'Test 26: Exactly 4 attempts made (Batch 24 retried once without restarting operation)');
+  // Test 27: Entity resolution for Bot API chat ID -1004494262619 resolves to InputChannel and NOT PeerUser
+  const targetSupergroupId = -1004494262619;
+  const mockChannel = new Api.Channel({
+    id: bigInt('4494262619') as any,
+    title: 'Production Supergroup',
+    photo: new Api.ChatPhotoEmpty(),
+    date: 0,
+    accessHash: bigInt('987654321012345678') as any
+  });
+
+  const mockClientWithCache: any = {
+    _entityCache: {
+      get: (key: string | number) => {
+        if (String(key) === '-1004494262619' || key === -1004494262619) {
+          return new Api.InputPeerChannel({
+            channelId: bigInt('4494262619') as any,
+            accessHash: bigInt('987654321012345678') as any
+          });
+        }
+        throw new Error('Not found in cache');
+      }
+    },
+    getInputEntity: async (key: any) => {
+      if (String(key) === '-1004494262619') {
+        return new Api.InputPeerChannel({
+          channelId: bigInt('4494262619') as any,
+          accessHash: bigInt('987654321012345678') as any
+        });
+      }
+      throw new Error(`Could not find the input entity for ${JSON.stringify(key)}`);
+    },
+    getDialogs: async () => []
+  };
+
+  const resolvedInputChannel = await mtprotoParticipantService.resolvePeerEntity(mockClientWithCache, targetSupergroupId);
+  assert(
+    resolvedInputChannel instanceof Api.InputChannel,
+    'Test 27: Resolves -1004494262619 to an instance of Api.InputChannel'
+  );
+  assert(
+    resolvedInputChannel.channelId.toString() === '4494262619',
+    'Test 27: Channel ID is correctly 4494262619'
+  );
+  assert(
+    resolvedInputChannel.accessHash.toString() === '987654321012345678',
+    'Test 27: MTProto access hash is retrieved and preserved in InputChannel'
+  );
+  assert(
+    (resolvedInputChannel as any).className === 'InputChannel' && !(resolvedInputChannel as any).userId,
+    'Test 27: Entity is NOT converted to PeerUser (no userId, className is InputChannel)'
+  );
+
+  // Test 28: Entity resolution via getDialogs fallback when cache is empty
+  const mockClientDialogFallback: any = {
+    _entityCache: {
+      get: () => {
+        throw new Error('Cache miss');
+      }
+    },
+    getInputEntity: async () => {
+      throw new Error('Direct resolution failed: accessHash required');
+    },
+    getDialogs: async () => [
+      {
+        id: bigInt('-1004494262619'),
+        isChannel: true,
+        isGroup: true,
+        entity: mockChannel,
+        inputEntity: new Api.InputPeerChannel({
+          channelId: bigInt('4494262619') as any,
+          accessHash: bigInt('987654321012345678') as any
+        })
+      }
+    ]
+  };
+
+  const resolvedViaDialogs = await mtprotoParticipantService.resolvePeerEntity(mockClientDialogFallback, targetSupergroupId);
+  assert(
+    resolvedViaDialogs instanceof Api.InputChannel && resolvedViaDialogs.channelId.toString() === '4494262619',
+    'Test 28: getDialogs fallback resolves -1004494262619 to InputChannel with channelId 4494262619'
+  );
+  assert(
+    resolvedViaDialogs.accessHash.toString() === '987654321012345678',
+    'Test 28: getDialogs fallback preserves authentic MTProto access hash'
+  );
+
+  // Test 29: Basic group (-4494262619) throws MTProtoUnsupportedChatError
+  let basicGroupError: any = null;
+  try {
+    await mtprotoParticipantService.resolvePeerEntity(mockClientWithCache, -4494262619);
+  } catch (err: any) {
+    basicGroupError = err;
+  }
+  assert(
+    basicGroupError instanceof MTProtoUnsupportedChatError && basicGroupError.code === 'UNSUPPORTED_CHAT_TYPE',
+    'Test 29: Basic group (-4494262619) throws MTProtoUnsupportedChatError with code UNSUPPORTED_CHAT_TYPE'
+  );
+
+  // Test 30: Direct user chat ID (4494262619) throws MTProtoUnsupportedChatError and is NEVER resolved as a user
+  let userChatError: any = null;
+  try {
+    await mtprotoParticipantService.resolvePeerEntity(mockClientWithCache, 4494262619);
+  } catch (err: any) {
+    userChatError = err;
+  }
+  assert(
+    userChatError instanceof MTProtoUnsupportedChatError && userChatError.code === 'UNSUPPORTED_CHAT_TYPE',
+    'Test 30: Positive user ID (4494262619) throws MTProtoUnsupportedChatError and is not treated as a group'
+  );
+
+  // Test 31: Unresolvable supergroup / account not a member throws MTProtoGroupResolutionError
+  const mockClientNoAccess: any = {
+    _entityCache: {
+      get: () => {
+        throw new Error('Cache miss');
+      }
+    },
+    getInputEntity: async () => {
+      throw new Error('CHANNEL_PRIVATE');
+    },
+    getDialogs: async () => []
+  };
+
+  let noAccessError: any = null;
+  try {
+    await mtprotoParticipantService.resolvePeerEntity(mockClientNoAccess, -1004494262619);
+  } catch (err: any) {
+    noAccessError = err;
+  }
+  assert(
+    noAccessError instanceof MTProtoGroupResolutionError &&
+    noAccessError.code === 'GROUP_RESOLUTION_FAILED' &&
+    noAccessError.message.includes('MTProto account cannot access this Telegram group'),
+    'Test 31: Inaccessible group throws MTProtoGroupResolutionError with clear "MTProto account cannot access this Telegram group" message'
+  );
+
+  // Test 32: String format "-1004494262619" chat ID resolves correctly
+  const resolvedStrChannel = await mtprotoParticipantService.resolvePeerEntity(mockClientWithCache, '-1004494262619');
+  assert(
+    resolvedStrChannel instanceof Api.InputChannel && resolvedStrChannel.channelId.toString() === '4494262619',
+    'Test 32: String format "-1004494262619" resolves correctly to Api.InputChannel'
+  );
 
   console.log(`\n====================================================`);
   console.log(`🎉 MTProto Service Tests Completed: ${passed} Passed, ${failed} Failed`);

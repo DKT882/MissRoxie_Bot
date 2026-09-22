@@ -1,4 +1,4 @@
-import { TelegramClient, Api } from 'telegram';
+import { TelegramClient, Api, utils } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { CachedMember, TelegramMessageEntity } from './types.js';
 import { logDebug } from '../observability/logger.js';
@@ -208,44 +208,171 @@ export class MtprotoParticipantService {
   }
 
   /**
-   * Resolves a Bot API chat ID to an MTProto input peer / entity.
+   * Helper: Extracts or constructs a valid Api.InputChannel with accessHash from an MTProto entity.
    */
-  public async resolvePeerEntity(client: TelegramClient, chatId: number): Promise<any> {
-    console.log(`[MTProto] resolving group: ${chatId}`);
+  private toInputChannel(entity: any): Api.InputChannel | null {
+    if (!entity) return null;
 
-    // Standard supergroup ID format from Bot API is -100xxxxxxxxxx
-    const rawIdStr = String(chatId);
-    let targetPeerId: number | string | bigint = chatId;
-
-    if (rawIdStr.startsWith('-100')) {
-      const channelId = rawIdStr.substring(4);
-      targetPeerId = channelId;
-    } else if (rawIdStr.startsWith('-')) {
-      targetPeerId = rawIdStr.substring(1);
+    // 1. Direct Api.InputChannel
+    if (entity instanceof Api.InputChannel) {
+      if (entity.channelId && entity.accessHash != null) {
+        return entity;
+      }
+      return null;
     }
 
-    try {
-      // 1. Try resolving directly via getEntity / getInputEntity
-      const entity = await client.getInputEntity(targetPeerId);
-      return entity;
-    } catch (directErr: any) {
-      logDebug({
-        event: 'MTPROTO_DIRECT_PEER_RESOLVE_FAILED',
-        chatId,
-        error: directErr.message
-      });
+    // 2. Api.InputPeerChannel -> convert to Api.InputChannel
+    if (entity instanceof Api.InputPeerChannel) {
+      if (entity.channelId && entity.accessHash != null) {
+        return new Api.InputChannel({
+          channelId: entity.channelId,
+          accessHash: entity.accessHash
+        });
+      }
+      return null;
+    }
 
-      // 2. If direct resolution fails, refresh dialogs cache and retry
-      try {
-        await client.getDialogs({ limit: 50 });
-        const retryEntity = await client.getInputEntity(targetPeerId);
-        return retryEntity;
-      } catch (retryErr: any) {
-        throw new MTProtoGroupResolutionError(
-          `Failed to resolve Telegram chat ${chatId} on MTProto: ${retryErr.message}`
+    // 3. Api.Channel -> construct Api.InputChannel from channel id & accessHash
+    if (entity instanceof Api.Channel) {
+      if (entity.id && entity.accessHash != null) {
+        return new Api.InputChannel({
+          channelId: entity.id,
+          accessHash: entity.accessHash
+        });
+      }
+      return null;
+    }
+
+    // 4. Try GramJS utils.getInputChannel
+    try {
+      const converted = utils.getInputChannel(entity);
+      if (converted instanceof Api.InputChannel && converted.channelId && converted.accessHash != null) {
+        return converted;
+      }
+    } catch {
+      // Ignore conversion failure
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolves a Bot API chat ID to an MTProto channel entity / Api.InputChannel.
+   * Properly resolves Telegram supergroups (-100...) using the authenticated MTProto session
+   * and retrieves the real MTProto access hash without ever treating the channel ID as a PeerUser.
+   */
+  public async resolvePeerEntity(client: TelegramClient, chatId: number | string): Promise<Api.InputChannel> {
+    const rawIdStr = String(chatId).trim();
+    console.log(`[MTProto] resolving chat=${rawIdStr}`);
+
+    if (!rawIdStr.startsWith('-100')) {
+      if (rawIdStr.startsWith('-')) {
+        throw new MTProtoUnsupportedChatError(
+          `Basic group chat ${rawIdStr} is unsupported for MTProto participant enumeration. MissRoxie requires a Telegram supergroup.`
         );
       }
+      throw new MTProtoUnsupportedChatError(
+        `Chat ID ${rawIdStr} is not a valid Telegram supergroup/channel.`
+      );
     }
+
+    const channelIdStr = rawIdStr.substring(4);
+    let resolvedInputChannel: Api.InputChannel | null = null;
+
+    // 1. Check in-memory entity cache first
+    try {
+      if (client._entityCache) {
+        const cached = client._entityCache.get(rawIdStr);
+        resolvedInputChannel = this.toInputChannel(cached);
+      }
+    } catch {
+      // Not in entity cache
+    }
+
+    // 2. Try direct resolution via client.getInputEntity using marked ID
+    if (!resolvedInputChannel) {
+      try {
+        const entity = await client.getInputEntity(rawIdStr);
+        resolvedInputChannel = this.toInputChannel(entity);
+      } catch (directErr: any) {
+        logDebug({
+          event: 'MTPROTO_DIRECT_PEER_RESOLVE_FAILED',
+          chatId: rawIdStr,
+          error: directErr.message
+        });
+      }
+    }
+
+    // 3. If direct resolution fails or is not in cache, refresh dialogs from MTProto session
+    if (!resolvedInputChannel) {
+      try {
+        const dialogs = await client.getDialogs({ limit: 100 });
+        for (const dialog of dialogs) {
+          const dialogIdStr = dialog.id ? String(dialog.id) : '';
+          const entityIdStr = dialog.entity && 'id' in dialog.entity ? String(dialog.entity.id) : '';
+
+          if (
+            dialogIdStr === rawIdStr ||
+            entityIdStr === channelIdStr ||
+            dialogIdStr === `-${channelIdStr}`
+          ) {
+            if (dialog.entity instanceof Api.Channel || dialog.isChannel) {
+              resolvedInputChannel = this.toInputChannel(dialog.inputEntity || dialog.entity);
+              if (resolvedInputChannel) {
+                break;
+              }
+            } else if (dialog.isGroup && !(dialog.entity instanceof Api.Channel)) {
+              throw new MTProtoUnsupportedChatError(
+                `Chat ${rawIdStr} is a basic group chat, not a supergroup.`
+              );
+            }
+          }
+        }
+      } catch (dialogErr: any) {
+        if (dialogErr instanceof MTProtoUnsupportedChatError) {
+          throw dialogErr;
+        }
+        logDebug({
+          event: 'MTPROTO_DIALOGS_REFRESH_FAILED',
+          chatId: rawIdStr,
+          error: dialogErr.message
+        });
+      }
+    }
+
+    // 4. Retry cache lookup after dialogs refresh if not already resolved
+    if (!resolvedInputChannel) {
+      try {
+        if (client._entityCache) {
+          const cached = client._entityCache.get(rawIdStr);
+          resolvedInputChannel = this.toInputChannel(cached);
+        }
+      } catch {
+        // Cache miss
+      }
+    }
+
+    // 5. Retry getInputEntity with marked ID after dialogs refresh
+    if (!resolvedInputChannel) {
+      try {
+        const retryEntity = await client.getInputEntity(rawIdStr);
+        resolvedInputChannel = this.toInputChannel(retryEntity);
+      } catch {
+        // Still unresolved
+      }
+    }
+
+    // 6. Verify channel entity resolution succeeded and account has access
+    if (!resolvedInputChannel) {
+      throw new MTProtoGroupResolutionError(
+        `Failed to resolve Telegram chat ${rawIdStr} on MTProto: MTProto account cannot access this Telegram group.`
+      );
+    }
+
+    console.log('[MTProto] resolved entity type=Channel');
+    console.log('[MTProto] channel entity resolved successfully');
+
+    return resolvedInputChannel;
   }
 
   /**
@@ -293,7 +420,7 @@ export class MtprotoParticipantService {
       };
     }
 
-    let inputPeer: any;
+    let inputPeer: Api.InputChannel;
     try {
       inputPeer = await this.resolvePeerEntity(client, chatId);
     } catch (err: any) {
@@ -313,6 +440,7 @@ export class MtprotoParticipantService {
     }
 
     console.log(`[ALL] starting full Telegram member fetch chatId=${chatId}`);
+    console.log('[MTProto] fetching participants...');
 
     const userMap = new Map<number, Api.User>();
     let totalReported = 0;
@@ -375,8 +503,25 @@ export class MtprotoParticipantService {
             };
           }
 
-          if (errMsg.includes('CHANNEL_PRIVATE') || errMsg.includes('CHAT_NOT_MODIFIED')) {
-            throw apiErr;
+          if (
+            errMsg.includes('CHANNEL_PRIVATE') ||
+            errMsg.includes('CHAT_NOT_MODIFIED') ||
+            errMsg.includes('USER_NOT_PARTICIPANT') ||
+            errMsg.includes('CHANNEL_INVALID')
+          ) {
+            return {
+              status: 'FETCH_FAILED',
+              telegramTotal: totalReported,
+              fetchedCount: totalFetchedRecords,
+              uniqueCount: userMap.size,
+              excludedCount: 0,
+              eligibleCount: 0,
+              members: [],
+              errorCode: 'ACCESS_DENIED',
+              error: 'MTProto account cannot access this Telegram group.',
+              isComplete: false,
+              diagnosticMessage: `Access error: ${errMsg}`
+            };
           }
 
           throw apiErr;
