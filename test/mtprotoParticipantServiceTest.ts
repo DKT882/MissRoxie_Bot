@@ -206,7 +206,7 @@ async function runTests() {
 
   // Test 20: CHAT_ADMIN_REQUIRED error class
   const permError = new MTProtoPermissionError();
-  assert(permError.code === 'CHAT_ADMIN_REQUIRED' && permError.message.includes('Telegram did not allow'), 'Test 20: MTProtoPermissionError has CHAT_ADMIN_REQUIRED code');
+  assert(permError.code === 'CHAT_ADMIN_REQUIRED' && permError.message.includes('administrator access'), 'Test 20: MTProtoPermissionError has CHAT_ADMIN_REQUIRED code');
 
   // Test 21: Flood wait error handling
   const floodError = new MTProtoFloodWaitError(45);
@@ -291,7 +291,44 @@ async function runTests() {
   const batch24Res = await simulatedBatchSend(24);
   const batch25Res = await simulatedBatchSend(25);
   assert(batch23Res.ok && batch24Res.ok && batch25Res.ok, 'Test 26: All batches succeed after 429 retry');
-  // Test 27: Entity resolution for Bot API chat ID -1004494262619 resolves to InputChannel and NOT PeerUser
+  // Test 27: Bot token configuration succeeds without TELEGRAM_MT_PROTO_SESSION
+  const prevApiId = process.env.TELEGRAM_API_ID;
+  const prevApiHash = process.env.TELEGRAM_API_HASH;
+  const prevBotToken = process.env.TELEGRAM_BOT_TOKEN;
+  const prevSession = process.env.TELEGRAM_MT_PROTO_SESSION;
+
+  try {
+    process.env.TELEGRAM_API_ID = '123456';
+    process.env.TELEGRAM_API_HASH = 'mock_api_hash_32chars_test';
+    process.env.TELEGRAM_BOT_TOKEN = '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11';
+    delete process.env.TELEGRAM_MT_PROTO_SESSION;
+
+    const botConfiguredService = new MtprotoParticipantService();
+    const configStatus = botConfiguredService.getConfigurationStatus();
+    assert(
+      botConfiguredService.isConfigured() === true,
+      'Test 27: MTProto is configured using TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_BOT_TOKEN'
+    );
+    assert(
+      configStatus.hasBotToken === true && configStatus.hasApiId === true && configStatus.hasApiHash === true,
+      'Test 27: Configuration status tracks hasBotToken=true without requiring TELEGRAM_MT_PROTO_SESSION'
+    );
+
+    // Test 28: Missing bot token fails clearly
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    const unconfBotService = new MtprotoParticipantService();
+    assert(
+      unconfBotService.isConfigured() === false,
+      'Test 28: Missing TELEGRAM_BOT_TOKEN returns isConfigured=false'
+    );
+  } finally {
+    process.env.TELEGRAM_API_ID = prevApiId;
+    process.env.TELEGRAM_API_HASH = prevApiHash;
+    process.env.TELEGRAM_BOT_TOKEN = prevBotToken;
+    process.env.TELEGRAM_MT_PROTO_SESSION = prevSession;
+  }
+
+  // Test 29: Entity resolution for Bot API chat ID -1004494262619 resolves to InputChannel and NOT PeerUser
   const targetSupergroupId = -1004494262619;
   const mockChannel = new Api.Channel({
     id: bigInt('4494262619') as any,
@@ -321,63 +358,61 @@ async function runTests() {
         });
       }
       throw new Error(`Could not find the input entity for ${JSON.stringify(key)}`);
-    },
-    getDialogs: async () => []
+    }
   };
 
   const resolvedInputChannel = await mtprotoParticipantService.resolvePeerEntity(mockClientWithCache, targetSupergroupId);
   assert(
     resolvedInputChannel instanceof Api.InputChannel,
-    'Test 27: Resolves -1004494262619 to an instance of Api.InputChannel'
+    'Test 29: Resolves -1004494262619 to an instance of Api.InputChannel'
   );
   assert(
     resolvedInputChannel.channelId.toString() === '4494262619',
-    'Test 27: Channel ID is correctly 4494262619'
+    'Test 29: Channel ID is correctly 4494262619'
   );
   assert(
     resolvedInputChannel.accessHash.toString() === '987654321012345678',
-    'Test 27: MTProto access hash is retrieved and preserved in InputChannel'
+    'Test 29: MTProto access hash is retrieved and preserved in InputChannel'
   );
   assert(
     (resolvedInputChannel as any).className === 'InputChannel' && !(resolvedInputChannel as any).userId,
-    'Test 27: Entity is NOT converted to PeerUser (no userId, className is InputChannel)'
+    'Test 29: Entity is NOT converted to PeerUser (no userId, className is InputChannel)'
   );
 
-  // Test 28: Entity resolution via getDialogs fallback when cache is empty
-  const mockClientDialogFallback: any = {
+  // Test 30: Direct resolution for bot identity without calling messages.getDialogs
+  let getDialogsCalled = false;
+  const mockBotClientDirect: any = {
     _entityCache: {
       get: () => {
         throw new Error('Cache miss');
       }
     },
-    getInputEntity: async () => {
-      throw new Error('Direct resolution failed: accessHash required');
-    },
-    getDialogs: async () => [
-      {
-        id: bigInt('-1004494262619'),
-        isChannel: true,
-        isGroup: true,
-        entity: mockChannel,
-        inputEntity: new Api.InputPeerChannel({
+    getInputEntity: async (key: any) => {
+      if (String(key) === '-1004494262619') {
+        return new Api.InputPeerChannel({
           channelId: bigInt('4494262619') as any,
           accessHash: bigInt('987654321012345678') as any
-        })
+        });
       }
-    ]
+      throw new Error('Entity not found');
+    },
+    getDialogs: async () => {
+      getDialogsCalled = true;
+      throw new Error('BOT_METHOD_INVALID: bots cannot use getDialogs');
+    }
   };
 
-  const resolvedViaDialogs = await mtprotoParticipantService.resolvePeerEntity(mockClientDialogFallback, targetSupergroupId);
+  const directResolved = await mtprotoParticipantService.resolvePeerEntity(mockBotClientDirect, targetSupergroupId);
   assert(
-    resolvedViaDialogs instanceof Api.InputChannel && resolvedViaDialogs.channelId.toString() === '4494262619',
-    'Test 28: getDialogs fallback resolves -1004494262619 to InputChannel with channelId 4494262619'
+    directResolved instanceof Api.InputChannel && directResolved.channelId.toString() === '4494262619',
+    'Test 30: Direct bot resolution resolves to InputChannel with channelId 4494262619'
   );
   assert(
-    resolvedViaDialogs.accessHash.toString() === '987654321012345678',
-    'Test 28: getDialogs fallback preserves authentic MTProto access hash'
+    getDialogsCalled === false,
+    'Test 30: Bot identity does NOT call messages.getDialogs (avoiding BOT_METHOD_INVALID)'
   );
 
-  // Test 29: Basic group (-4494262619) throws MTProtoUnsupportedChatError
+  // Test 31: Basic group (-4494262619) throws MTProtoUnsupportedChatError
   let basicGroupError: any = null;
   try {
     await mtprotoParticipantService.resolvePeerEntity(mockClientWithCache, -4494262619);
@@ -386,10 +421,10 @@ async function runTests() {
   }
   assert(
     basicGroupError instanceof MTProtoUnsupportedChatError && basicGroupError.code === 'UNSUPPORTED_CHAT_TYPE',
-    'Test 29: Basic group (-4494262619) throws MTProtoUnsupportedChatError with code UNSUPPORTED_CHAT_TYPE'
+    'Test 31: Basic group (-4494262619) throws MTProtoUnsupportedChatError with code UNSUPPORTED_CHAT_TYPE'
   );
 
-  // Test 30: Direct user chat ID (4494262619) throws MTProtoUnsupportedChatError and is NEVER resolved as a user
+  // Test 32: Direct user chat ID (4494262619) throws MTProtoUnsupportedChatError and is NEVER resolved as a user
   let userChatError: any = null;
   try {
     await mtprotoParticipantService.resolvePeerEntity(mockClientWithCache, 4494262619);
@@ -398,10 +433,10 @@ async function runTests() {
   }
   assert(
     userChatError instanceof MTProtoUnsupportedChatError && userChatError.code === 'UNSUPPORTED_CHAT_TYPE',
-    'Test 30: Positive user ID (4494262619) throws MTProtoUnsupportedChatError and is not treated as a group'
+    'Test 32: Positive user ID (4494262619) throws MTProtoUnsupportedChatError and is not treated as a group'
   );
 
-  // Test 31: Unresolvable supergroup / account not a member throws MTProtoGroupResolutionError
+  // Test 33: Unresolvable supergroup / bot not a member throws MTProtoGroupResolutionError
   const mockClientNoAccess: any = {
     _entityCache: {
       get: () => {
@@ -410,8 +445,7 @@ async function runTests() {
     },
     getInputEntity: async () => {
       throw new Error('CHANNEL_PRIVATE');
-    },
-    getDialogs: async () => []
+    }
   };
 
   let noAccessError: any = null;
@@ -423,15 +457,40 @@ async function runTests() {
   assert(
     noAccessError instanceof MTProtoGroupResolutionError &&
     noAccessError.code === 'GROUP_RESOLUTION_FAILED' &&
-    noAccessError.message.includes('MTProto account cannot access this Telegram group'),
-    'Test 31: Inaccessible group throws MTProtoGroupResolutionError with clear "MTProto account cannot access this Telegram group" message'
+    noAccessError.message.includes('Roxie bot is not a member or administrator'),
+    'Test 33: Inaccessible group throws MTProtoGroupResolutionError with clear membership/admin diagnostic'
   );
 
-  // Test 32: String format "-1004494262619" chat ID resolves correctly
+  // Test 34: String format "-1004494262619" chat ID resolves correctly
   const resolvedStrChannel = await mtprotoParticipantService.resolvePeerEntity(mockClientWithCache, '-1004494262619');
   assert(
     resolvedStrChannel instanceof Api.InputChannel && resolvedStrChannel.channelId.toString() === '4494262619',
-    'Test 32: String format "-1004494262619" resolves correctly to Api.InputChannel'
+    'Test 34: String format "-1004494262619" resolves correctly to Api.InputChannel'
+  );
+
+  // Test 35: CHAT_ADMIN_REQUIRED error mapped cleanly
+  const mockAdminReqClient: any = {
+    _entityCache: {
+      get: () => {
+        throw new Error('Cache miss');
+      }
+    },
+    getInputEntity: async () => {
+      throw new Error('CHAT_ADMIN_REQUIRED');
+    }
+  };
+
+  let adminReqError: any = null;
+  try {
+    await mtprotoParticipantService.resolvePeerEntity(mockAdminReqClient, -1004494262619);
+  } catch (err: any) {
+    adminReqError = err;
+  }
+  assert(
+    adminReqError instanceof MTProtoPermissionError &&
+    adminReqError.code === 'CHAT_ADMIN_REQUIRED' &&
+    adminReqError.message.includes('Roxie needs administrator access'),
+    'Test 35: CHAT_ADMIN_REQUIRED throws MTProtoPermissionError with "❌ Roxie needs administrator access in this supergroup to enumerate its members."'
   );
 
   console.log(`\n====================================================`);

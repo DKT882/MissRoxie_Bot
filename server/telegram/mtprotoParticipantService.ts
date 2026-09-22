@@ -21,7 +21,7 @@ export interface ParticipantFetchResult {
 
 export class MTProtoNotConfiguredError extends Error {
   public readonly code = 'NOT_CONFIGURED';
-  constructor(message: string = 'MTProto client is not configured on this server.') {
+  constructor(message: string = 'MTProto client is not configured on this server (missing TELEGRAM_API_ID, TELEGRAM_API_HASH, or TELEGRAM_BOT_TOKEN).') {
     super(message);
     this.name = 'MTProtoNotConfiguredError';
   }
@@ -45,7 +45,7 @@ export class MTProtoGroupResolutionError extends Error {
 
 export class MTProtoPermissionError extends Error {
   public readonly code = 'CHAT_ADMIN_REQUIRED';
-  constructor(message: string = 'Telegram did not allow Roxie to retrieve the complete member list for this group.') {
+  constructor(message: string = '❌ Roxie needs administrator access in this supergroup to enumerate its members.') {
     super(message);
     this.name = 'MTProtoPermissionError';
   }
@@ -101,26 +101,26 @@ export class MtprotoParticipantService {
   public isConfigured(): boolean {
     const apiId = process.env.TELEGRAM_API_ID?.trim();
     const apiHash = process.env.TELEGRAM_API_HASH?.trim();
-    const session = process.env.TELEGRAM_MT_PROTO_SESSION?.trim();
-    return Boolean(apiId && apiHash && session && !isNaN(Number(apiId)));
+    const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
+    return Boolean(apiId && apiHash && botToken && !isNaN(Number(apiId)));
   }
 
   public getConfigurationStatus(): {
     isConfigured: boolean;
     hasApiId: boolean;
     hasApiHash: boolean;
-    hasSession: boolean;
+    hasBotToken: boolean;
     isConnected: boolean;
   } {
     const apiId = process.env.TELEGRAM_API_ID?.trim();
     const apiHash = process.env.TELEGRAM_API_HASH?.trim();
-    const session = process.env.TELEGRAM_MT_PROTO_SESSION?.trim();
+    const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 
     return {
       isConfigured: this.isConfigured(),
       hasApiId: Boolean(apiId && !isNaN(Number(apiId))),
       hasApiHash: Boolean(apiHash && apiHash.length > 0),
-      hasSession: Boolean(session && session.length > 0),
+      hasBotToken: Boolean(botToken && botToken.length > 0),
       isConnected: this.isConnected
     };
   }
@@ -153,15 +153,15 @@ export class MtprotoParticipantService {
     this.connectPromise = (async () => {
       if (!this.isConfigured()) {
         throw new MTProtoNotConfiguredError(
-          'MTProto credentials (TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_MT_PROTO_SESSION) are not configured.'
+          'MTProto credentials (TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN) are not configured.'
         );
       }
 
       const apiId = parseInt(process.env.TELEGRAM_API_ID!.trim(), 10);
       const apiHash = process.env.TELEGRAM_API_HASH!.trim();
-      const sessionString = process.env.TELEGRAM_MT_PROTO_SESSION!.trim();
+      const botToken = process.env.TELEGRAM_BOT_TOKEN!.trim();
 
-      const stringSession = new StringSession(sessionString);
+      const stringSession = new StringSession('');
       const client = new TelegramClient(stringSession, apiId, apiHash, {
         connectionRetries: 3,
         autoReconnect: true,
@@ -169,22 +169,25 @@ export class MtprotoParticipantService {
         timeout: 25000
       });
 
-      console.log('[MTProto] Connecting client...');
+      console.log('[MTProto] Connecting client with bot authorization...');
       try {
-        await client.connect();
+        await client.start({
+          botAuthToken: botToken
+        });
         const me = await client.getMe();
         if (!me) {
-          throw new MTProtoAuthError('Telegram client connected but could not retrieve authenticated account.');
+          throw new MTProtoAuthError('Telegram client connected but could not retrieve authenticated bot account.');
         }
         this.client = client;
         this.isConnected = true;
-        console.log('[MTProto] Client authenticated successfully.');
+        const botUsername = (me as any).username || 'MissRoxie_Bot';
+        console.log(`[MTProto] authenticated as bot username=${botUsername}`);
         return client;
       } catch (err: any) {
         this.isConnected = false;
         this.client = null;
-        if (err.message && (err.message.includes('AUTH_KEY') || err.message.includes('SESSION_REVOKED') || err.message.includes('401'))) {
-          throw new MTProtoAuthError(`MTProto session invalid or revoked: ${err.message}`);
+        if (err.message && (err.message.includes('AUTH_KEY') || err.message.includes('SESSION_REVOKED') || err.message.includes('401') || err.message.includes('BOT_TOKEN_INVALID'))) {
+          throw new MTProtoAuthError(`MTProto bot authentication failed or token invalid: ${err.message}`);
         }
         throw err;
       } finally {
@@ -258,8 +261,9 @@ export class MtprotoParticipantService {
 
   /**
    * Resolves a Bot API chat ID to an MTProto channel entity / Api.InputChannel.
-   * Properly resolves Telegram supergroups (-100...) using the authenticated MTProto session
-   * and retrieves the real MTProto access hash without ever treating the channel ID as a PeerUser.
+   * Properly resolves Telegram supergroups (-100...) using the authenticated MTProto bot session
+   * and retrieves the real MTProto access hash without ever treating the channel ID as a PeerUser
+   * and without calling user-only methods like messages.getDialogs.
    */
   public async resolvePeerEntity(client: TelegramClient, chatId: number | string): Promise<Api.InputChannel> {
     const rawIdStr = String(chatId).trim();
@@ -276,7 +280,6 @@ export class MtprotoParticipantService {
       );
     }
 
-    const channelIdStr = rawIdStr.substring(4);
     let resolvedInputChannel: Api.InputChannel | null = null;
 
     // 1. Check in-memory entity cache first
@@ -289,7 +292,7 @@ export class MtprotoParticipantService {
       // Not in entity cache
     }
 
-    // 2. Try direct resolution via client.getInputEntity using marked ID
+    // 2. Direct resolution via client.getInputEntity / channels.GetChannels using marked ID
     if (!resolvedInputChannel) {
       try {
         const entity = await client.getInputEntity(rawIdStr);
@@ -300,47 +303,31 @@ export class MtprotoParticipantService {
           chatId: rawIdStr,
           error: directErr.message
         });
+
+        const errMsg = directErr.message || '';
+        if (errMsg.includes('CHAT_ADMIN_REQUIRED')) {
+          throw new MTProtoPermissionError(
+            '❌ Roxie needs administrator access in this supergroup to enumerate its members.'
+          );
+        }
+        if (
+          errMsg.includes('CHANNEL_INVALID') ||
+          errMsg.includes('CHANNEL_PRIVATE') ||
+          errMsg.includes('USER_NOT_PARTICIPANT')
+        ) {
+          throw new MTProtoGroupResolutionError(
+            `Failed to resolve Telegram chat ${rawIdStr} on MTProto: Roxie bot is not a member or administrator of this supergroup.`
+          );
+        }
+        if (errMsg.includes('BOT_METHOD_INVALID')) {
+          throw new MTProtoGroupResolutionError(
+            `MTProto bot method invalid for chat ${rawIdStr}: ${errMsg}`
+          );
+        }
       }
     }
 
-    // 3. If direct resolution fails or is not in cache, refresh dialogs from MTProto session
-    if (!resolvedInputChannel) {
-      try {
-        const dialogs = await client.getDialogs({ limit: 100 });
-        for (const dialog of dialogs) {
-          const dialogIdStr = dialog.id ? String(dialog.id) : '';
-          const entityIdStr = dialog.entity && 'id' in dialog.entity ? String(dialog.entity.id) : '';
-
-          if (
-            dialogIdStr === rawIdStr ||
-            entityIdStr === channelIdStr ||
-            dialogIdStr === `-${channelIdStr}`
-          ) {
-            if (dialog.entity instanceof Api.Channel || dialog.isChannel) {
-              resolvedInputChannel = this.toInputChannel(dialog.inputEntity || dialog.entity);
-              if (resolvedInputChannel) {
-                break;
-              }
-            } else if (dialog.isGroup && !(dialog.entity instanceof Api.Channel)) {
-              throw new MTProtoUnsupportedChatError(
-                `Chat ${rawIdStr} is a basic group chat, not a supergroup.`
-              );
-            }
-          }
-        }
-      } catch (dialogErr: any) {
-        if (dialogErr instanceof MTProtoUnsupportedChatError) {
-          throw dialogErr;
-        }
-        logDebug({
-          event: 'MTPROTO_DIALOGS_REFRESH_FAILED',
-          chatId: rawIdStr,
-          error: dialogErr.message
-        });
-      }
-    }
-
-    // 4. Retry cache lookup after dialogs refresh if not already resolved
+    // 3. Retry cache lookup after direct resolution attempt
     if (!resolvedInputChannel) {
       try {
         if (client._entityCache) {
@@ -352,20 +339,10 @@ export class MtprotoParticipantService {
       }
     }
 
-    // 5. Retry getInputEntity with marked ID after dialogs refresh
-    if (!resolvedInputChannel) {
-      try {
-        const retryEntity = await client.getInputEntity(rawIdStr);
-        resolvedInputChannel = this.toInputChannel(retryEntity);
-      } catch {
-        // Still unresolved
-      }
-    }
-
-    // 6. Verify channel entity resolution succeeded and account has access
+    // 4. Verify channel entity resolution succeeded and bot has access
     if (!resolvedInputChannel) {
       throw new MTProtoGroupResolutionError(
-        `Failed to resolve Telegram chat ${rawIdStr} on MTProto: MTProto account cannot access this Telegram group.`
+        `Failed to resolve Telegram chat ${rawIdStr} on MTProto: Roxie bot cannot access this supergroup. Please ensure @MissRoxie_Bot is an administrator in the supergroup.`
       );
     }
 
@@ -395,7 +372,7 @@ export class MtprotoParticipantService {
         eligibleCount: 0,
         members: [],
         errorCode: 'NOT_CONFIGURED',
-        error: 'MTProto is not configured (missing TELEGRAM_API_ID, TELEGRAM_API_HASH, or TELEGRAM_MT_PROTO_SESSION).',
+        error: 'MTProto is not configured (missing TELEGRAM_API_ID, TELEGRAM_API_HASH, or TELEGRAM_BOT_TOKEN).',
         isComplete: false,
         diagnosticMessage: 'MTProto credentials not configured on the server.'
       };
@@ -479,9 +456,9 @@ export class MtprotoParticipantService {
               eligibleCount: 0,
               members: [],
               errorCode: 'CHAT_ADMIN_REQUIRED',
-              error: 'Telegram did not allow Roxie to retrieve the complete member list for this group.',
+              error: '❌ Roxie needs administrator access in this supergroup to enumerate its members.',
               isComplete: false,
-              diagnosticMessage: 'Telegram CHAT_ADMIN_REQUIRED: Admin privileges required to view participant list.'
+              diagnosticMessage: 'Telegram CHAT_ADMIN_REQUIRED: Roxie must be an administrator in the supergroup to enumerate members.'
             };
           }
 
@@ -518,7 +495,7 @@ export class MtprotoParticipantService {
               eligibleCount: 0,
               members: [],
               errorCode: 'ACCESS_DENIED',
-              error: 'MTProto account cannot access this Telegram group.',
+              error: 'Roxie bot cannot access this Telegram group (ensure Roxie is added as an administrator).',
               isComplete: false,
               diagnosticMessage: `Access error: ${errMsg}`
             };

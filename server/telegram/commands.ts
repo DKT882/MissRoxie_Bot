@@ -4372,7 +4372,7 @@ export class CommandHandler {
         } else {
           await telegramApi.sendMessage(
             ctx.chatId,
-            '⚠️ MTProto is not configured on this server. Please configure TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_MT_PROTO_SESSION for full group member enumeration.',
+            '⚠️ MTProto is not configured on this server. Please configure TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_BOT_TOKEN for full group member enumeration.',
             { reply_to_message_id: ctx.message.message_id }
           );
           return;

@@ -1,14 +1,14 @@
 # Telegram MTProto Configuration Guide for MissRoxie_Bot
 
-This document explains how to set up and configure Telegram's MTProto client session to enable **True Full Telegram Member Enumeration for `/all`**.
+This document explains how to set up and configure Telegram's MTProto client to enable **True Full Telegram Member Enumeration for `/all`** using Roxie's native bot identity.
 
 ---
 
 ## 1. Why MTProto is Required
 
-Telegram's Bot API does not provide a method to retrieve all non-admin members of a group or supergroup (`getChatAdministrators` only returns administrators, and bots only observe members who join, message, or interact).
+Telegram's Bot API (HTTP) does not provide a method to retrieve non-admin members of a supergroup (`getChatAdministrators` only returns administrators, and bots only observe members who join, message, or interact).
 
-By pairing the primary Bot API bot with a dedicated, on-demand **MTProto Participant Service** (using GramJS), Roxie can call `channels.getParticipants` directly to enumerate all group members (e.g. 537 members → ~54 batches of 10 emoji mentions), including silent users who have never messaged Roxie.
+By pairing the primary Bot API bot with a dedicated, on-demand **MTProto Participant Service** (using GramJS), Roxie calls `channels.getParticipants` directly to enumerate all supergroup members (e.g. 537 members → ~54 batches of 10 emoji mentions), including silent users who have never messaged Roxie.
 
 The primary Bot API bot continues handling all updates, polling, moderation, and command dispatch without interruption.
 
@@ -16,7 +16,7 @@ The primary Bot API bot continues handling all updates, polling, moderation, and
 
 ## 2. Obtaining Telegram API Credentials
 
-1. Log in to [https://my.telegram.org](https://my.telegram.org) with your Telegram phone number.
+1. Log in to [https://my.telegram.org](https://my.telegram.org) with your Telegram account.
 2. Navigate to **API development tools**.
 3. Create a new application (if you have not already):
    - **App title**: e.g., `MissRoxieMTProto`
@@ -28,40 +28,51 @@ The primary Bot API bot continues handling all updates, polling, moderation, and
 
 ---
 
-## 3. Generating the MTProto Session String (One-Time Local Setup)
+## 3. Bot Identity Authentication (No Personal Account Required)
 
-To allow the bot to connect persistently in non-interactive environments (such as Render) without prompting for OTP codes on every restart, generate an authenticated `StringSession` once locally:
+Roxie's MTProto service authenticates directly as `@MissRoxie_Bot` via Telegram MTProto's `auth.importBotAuthorization` using your existing `TELEGRAM_BOT_TOKEN`.
 
-1. Run the local session generator script:
-   ```bash
-   npx tsx scripts/generateMtprotoSession.ts
-   ```
-2. Enter your `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` when prompted.
-3. Enter your phone number (in international format, e.g. `+1234567890`).
-4. Enter the verification code received on Telegram (and your 2FA cloud password if enabled).
-5. The script will output your unique `TELEGRAM_MT_PROTO_SESSION` string.
+* **No personal phone number login required.**
+* **No OTP verification codes required.**
+* **No 2FA cloud password required.**
+* **`TELEGRAM_MT_PROTO_SESSION` is NOT required for `/all`.**
+* The developer's personal account is never required to join or stay in groups.
 
 ---
 
 ## 4. Production Environment Configuration (Render)
 
-Add the following environment variables in your Render Dashboard (**Dashboard → Service → Environment Variables**):
+Ensure the following environment variables are set in your Render Dashboard (**Dashboard → Service → Environment Variables**):
 
 | Variable Name | Type | Description |
 | :--- | :--- | :--- |
-| `TELEGRAM_API_ID` | Integer | Your Telegram App API ID |
-| `TELEGRAM_API_HASH` | String | Your Telegram App API Hash |
-| `TELEGRAM_MT_PROTO_SESSION` | String | The persistent string session generated from Step 3 |
+| `TELEGRAM_BOT_TOKEN` | String | Your Telegram Bot Token from `@BotFather` |
+| `TELEGRAM_API_ID` | Integer | Your Telegram App API ID from `my.telegram.org` |
+| `TELEGRAM_API_HASH` | String | Your Telegram App API Hash from `my.telegram.org` |
 
 > [!WARNING]
 > **Security Notice:**
-> - Never commit `TELEGRAM_API_HASH` or `TELEGRAM_MT_PROTO_SESSION` to git repositories.
-> - Never share your session string; it provides authenticated Telegram access to the session account.
-> - Roxie's logging subsystem is hardened to never output or leak session strings or API hashes in debug logs.
+> - Never commit `TELEGRAM_BOT_TOKEN` or `TELEGRAM_API_HASH` to git repositories.
+> - Roxie's logging subsystem is hardened to never output or leak bot tokens, session strings, or API hashes in debug logs.
 
 ---
 
-## 5. Verification & Diagnostics
+## 5. Supergroup Permissions & Telegram Visibility Rules
+
+To enumerate members in a supergroup:
+
+1. **Roxie Presence**: `@MissRoxie_Bot` must be present in the target supergroup.
+2. **Administrator Privileges**: Telegram MTProto requires that bots calling `channels.getParticipants` must be an **Administrator** in the supergroup.
+   - If Roxie is not an admin, Telegram returns `CHAT_ADMIN_REQUIRED` and Roxie will notify:
+     `❌ Roxie needs administrator access in this supergroup to enumerate its members.`
+3. **Hidden Members ("Hide Members" setting)**:
+   - When a supergroup enables "Hide Members", Telegram permits group administrators (including `@MissRoxie_Bot`) to view and enumerate all members.
+4. **Basic Group Chats**:
+   - Telegram MTProto participant enumeration is supported on supergroups/channels (`-100...` IDs). Basic groups must be converted to supergroups.
+
+---
+
+## 6. Verification & Diagnostics
 
 Once deployed:
 
@@ -69,10 +80,3 @@ Once deployed:
    - Roxie will report the active member source (`MTProto Enumeration (Full)`), eligible member count, and estimated message batches.
 2. Send `/all` or `/all [custom message]`:
    - Roxie enumerates all group participants in memory, deduplicates by Telegram ID, excludes bots/Roxie/deleted accounts, and broadcasts emoji-only mentions in sequential 10-user batches.
-
-### Troubleshooting Telegram Visibility Restrictions
-
-- If a group has **Hidden Members** enabled, Telegram restricts participant access to group administrators.
-- If the MTProto account is not an administrator in a hidden-member group, Roxie will report:
-  `⚠️ Telegram did not allow Roxie to retrieve the complete member list for this group.`
-- Making the MTProto account an administrator in the supergroup grants full member enumeration access.
