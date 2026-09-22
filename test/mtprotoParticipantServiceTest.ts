@@ -172,14 +172,15 @@ async function runTests() {
   assert(emojiEntities.entities[0].offset === 0 && emojiEntities.entities[0].length === 2, 'Test 13: Entity 0 has offset 0 and length 2');
   assert(emojiEntities.entities[1].offset === 2 && emojiEntities.entities[1].length === 2, 'Test 13: Entity 1 has offset 2 and length 2');
 
-  // Test 14: 10-per-message chunking structure
+  // Test 14: 10-per-message chunking structure (custom header applied to ALL chunks)
   const users25: CachedMember[] = Array.from({ length: 25 }, (_, i) =>
     createMember(800 + i, `U${i}`)
   );
   const chunk25 = CommandHandler.buildAllMentionsChunks(users25, 'Announcement Header', undefined, 10);
   assert(chunk25.chunks.length === 3, 'Test 14: 25 users produce exactly 3 chunks');
   assert(chunk25.chunks[0].startsWith('Announcement Header\n\n'), 'Test 14: First chunk includes custom header');
-  assert(!chunk25.chunks[1].includes('Announcement Header'), 'Test 14: Second chunk contains only emojis');
+  assert(chunk25.chunks[1].startsWith('Announcement Header\n\n'), 'Test 14: Second chunk includes custom header');
+  assert(chunk25.chunks[2].startsWith('Announcement Header\n\n'), 'Test 14: Third chunk includes custom header');
 
   // Test 16: Exactly 500 -> 50 messages
   const users500: CachedMember[] = Array.from({ length: 500 }, (_, i) =>
@@ -492,6 +493,31 @@ async function runTests() {
     adminReqError.message.includes('Roxie needs administrator access'),
     'Test 35: CHAT_ADMIN_REQUIRED throws MTProtoPermissionError with "❌ Roxie needs administrator access in this supergroup to enumerate its members."'
   );
+
+  // Test 36: buildEmojiMentionBatches applies custom caption to ALL chunks
+  const users45: CachedMember[] = Array.from({ length: 45 }, (_, i) =>
+    createMember(60000 + i, `Member_${i}`)
+  );
+  const res45 = MtprotoParticipantService.buildEmojiMentionBatches(users45, 'ajao sab', 10);
+  assert(res45.chunks.length === 5, 'Test 36: 45 members produce 5 chunks (10, 10, 10, 10, 5)');
+  for (let c = 0; c < res45.chunks.length; c++) {
+    assert(
+      res45.chunks[c].startsWith('ajao sab\n\n'),
+      `Test 36: Chunk ${c + 1} must start with custom text "ajao sab\\n\\n"`
+    );
+  }
+
+  // Test 37: 537 members with custom caption produce 54 chunks, all with custom caption
+  const res537WithCaption = MtprotoParticipantService.buildEmojiMentionBatches(users537, 'Important Announcement', 10);
+  assert(res537WithCaption.chunks.length === 54, 'Test 37: 537 members produce 54 chunks');
+  const allChunksHaveCaption = res537WithCaption.chunks.every(chunk => chunk.startsWith('Important Announcement\n\n'));
+  assert(allChunksHaveCaption, 'Test 37: All 54 chunks contain "Important Announcement\\n\\n" caption prefix');
+
+  // Test 38: Empty custom text produces chunks with only emoji mentions
+  const resEmptyCaption = MtprotoParticipantService.buildEmojiMentionBatches(users45, '', 10);
+  assert(resEmptyCaption.chunks.length === 5, 'Test 38: 45 members with empty caption produce 5 chunks');
+  const noneHaveNewlines = resEmptyCaption.chunks.every(chunk => !chunk.includes('\n\n') && chunk.startsWith('<a href='));
+  assert(noneHaveNewlines, 'Test 38: Chunks without custom text contain only emoji mentions without leading newlines');
 
   console.log(`\n====================================================`);
   console.log(`🎉 MTProto Service Tests Completed: ${passed} Passed, ${failed} Failed`);

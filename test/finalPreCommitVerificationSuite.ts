@@ -1,3 +1,6 @@
+process.env.NODE_ENV = 'test';
+process.env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'mock_bot_token_for_tests';
+
 import assert from 'assert';
 import { db } from '../server/db/storage.js';
 import { telegramApi } from '../server/telegram/api.js';

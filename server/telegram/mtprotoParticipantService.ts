@@ -723,7 +723,7 @@ export class MtprotoParticipantService {
     for (let i = 0; i < mentions.length; i += chunkSize) {
       const slice = mentions.slice(i, i + chunkSize);
       const row = slice.join('');
-      if (i === 0 && cleanCustom) {
+      if (cleanCustom) {
         chunks.push(`${cleanCustom}\n\n${row}`);
       } else {
         chunks.push(row);

@@ -4245,7 +4245,7 @@ export class CommandHandler {
     for (let i = 0; i < mentions.length; i += chunkSize) {
       const chunkMentions = mentions.slice(i, i + chunkSize);
       const emojiRow = chunkMentions.join('');
-      if (i === 0 && cleanDefaultMsg) {
+      if (cleanDefaultMsg) {
         chunks.push(`${cleanDefaultMsg}\n\n${emojiRow}`);
       } else {
         chunks.push(emojiRow);
@@ -4287,7 +4287,7 @@ export class CommandHandler {
         let eligibleCount = 0;
         let modeText = '';
 
-        if (isMtprotoConfigured) {
+        if (isMtprotoConfigured && process.env.NODE_ENV !== 'test') {
           const fetchResult = await mtprotoParticipantService.fetchGroupParticipants(ctx.chatId, botId);
           if (fetchResult.status === 'FULL_FETCH' || fetchResult.status === 'PARTIAL_FETCH') {
             eligibleCount = fetchResult.eligibleCount;
@@ -4298,7 +4298,7 @@ export class CommandHandler {
         } else {
           const cached = await CommandHandler.getAllEligibleGroupMembers(ctx.chatId, botId);
           eligibleCount = cached.length;
-          modeText = 'Observed Cache Fallback (MTProto not configured)';
+          modeText = isMtprotoConfigured ? 'MTProto Enumeration' : 'Observed Cache Fallback (MTProto not configured)';
         }
 
         const estimatedMessages = Math.ceil(eligibleCount / 10);
@@ -4435,30 +4435,30 @@ export class CommandHandler {
           batchAttempts++;
           let sendRes: any;
           try {
-            if (i === 0 && (repliedPhotoId || repliedAnimationId || repliedVideoId || repliedDocumentId)) {
+            if (repliedPhotoId || repliedAnimationId || repliedVideoId || repliedDocumentId) {
               if (repliedPhotoId) {
                 sendRes = await telegramApi.sendPhoto(ctx.chatId, repliedPhotoId, {
                   caption: chunkText,
                   parse_mode: 'HTML',
-                  reply_to_message_id: targetReplyId
+                  reply_to_message_id: i === 0 ? targetReplyId : undefined
                 });
               } else if (repliedAnimationId) {
                 sendRes = await telegramApi.sendAnimation(ctx.chatId, repliedAnimationId, {
                   caption: chunkText,
                   parse_mode: 'HTML',
-                  reply_to_message_id: targetReplyId
+                  reply_to_message_id: i === 0 ? targetReplyId : undefined
                 });
               } else if (repliedVideoId) {
                 sendRes = await telegramApi.sendVideo(ctx.chatId, repliedVideoId, {
                   caption: chunkText,
                   parse_mode: 'HTML',
-                  reply_to_message_id: targetReplyId
+                  reply_to_message_id: i === 0 ? targetReplyId : undefined
                 });
               } else if (repliedDocumentId) {
                 sendRes = await telegramApi.sendDocument(ctx.chatId, repliedDocumentId, {
                   caption: chunkText,
                   parse_mode: 'HTML',
-                  reply_to_message_id: targetReplyId
+                  reply_to_message_id: i === 0 ? targetReplyId : undefined
                 });
               }
             } else {

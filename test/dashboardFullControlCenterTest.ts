@@ -17,6 +17,10 @@ async function runDashboardFullControlCenterTests() {
   console.log('🧪 Starting Roxie Dashboard Full Control Center Test Suite (35 Tests)');
   console.log('================================================================\n');
 
+  process.env.DASHBOARD_ADMIN_PASSWORD = 'test_admin_password_123';
+  process.env.DASHBOARD_SESSION_SECRET = 'test_session_secret_45678901234567890';
+  authManager.initDefaultOperator();
+
   const testChatId = -100888999111;
   const testUserId = 777123;
   const testOperatorViewer = 'test_viewer_user';
@@ -29,8 +33,12 @@ async function runDashboardFullControlCenterTests() {
   db.updateGroupSettings(testChatId, initialSettings);
 
   // Setup mock session tokens for role-based auth testing
-  (authManager as any).sessions.set('viewer_session_token_123', {
-    sessionId: 'viewer_session_token_123',
+  const viewerRaw = 'viewer_session_token_123';
+  const viewerSig = authManager.signToken(viewerRaw)!;
+  const viewerSigned = `${viewerRaw}.${viewerSig}`;
+  (authManager as any).sessions.set(viewerRaw, {
+    sessionId: viewerSigned,
+    rawSessionId: viewerRaw,
     operatorId: 'op_viewer_1',
     username: testOperatorViewer,
     role: 'VIEWER',
@@ -38,8 +46,12 @@ async function runDashboardFullControlCenterTests() {
     createdAt: new Date().toISOString()
   });
 
-  (authManager as any).sessions.set('admin_session_token_456', {
-    sessionId: 'admin_session_token_456',
+  const adminRaw = 'admin_session_token_456';
+  const adminSig = authManager.signToken(adminRaw)!;
+  const adminSigned = `${adminRaw}.${adminSig}`;
+  (authManager as any).sessions.set(adminRaw, {
+    sessionId: adminSigned,
+    rawSessionId: adminRaw,
     operatorId: 'op_admin_1',
     username: testOperatorAdmin,
     role: 'ADMIN',
@@ -116,7 +128,7 @@ async function runDashboardFullControlCenterTests() {
 
     // Test 3: Operator Auth allows ADMIN session
     const adminAuth = verifyOperatorAuth({
-      headers: { authorization: 'Bearer admin_session_token_456' }
+      headers: { authorization: `Bearer ${adminSigned}` }
     }, 'ADMIN');
     assert.strictEqual(adminAuth.authorized, true);
     assert.strictEqual(adminAuth.status, 200);
@@ -125,7 +137,7 @@ async function runDashboardFullControlCenterTests() {
 
     // Test 4: Operator Auth rejects VIEWER role on mutating actions
     const viewerAuth = verifyOperatorAuth({
-      headers: { authorization: 'Bearer viewer_session_token_123' }
+      headers: { authorization: `Bearer ${viewerSigned}` }
     }, 'MODERATOR');
     assert.strictEqual(viewerAuth.authorized, false);
     assert.strictEqual(viewerAuth.status, 403);

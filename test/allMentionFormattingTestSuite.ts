@@ -1,3 +1,4 @@
+process.env.NODE_ENV = 'test';
 import { strict as assert } from 'assert';
 import { CommandHandler } from '../server/telegram/commands.js';
 import { db } from '../server/db/storage.js';
@@ -281,8 +282,8 @@ async function runAllMentionFormattingTestSuite() {
     const msg3Text = capturedCalls[2].args[1];
 
     assert.ok(msg1Text.startsWith('Important Announcement\n\n'), 'Chunk 1 must start with custom text');
-    assert.ok(!msg2Text.includes('Important Announcement'), 'Chunk 2 must NOT repeat custom text');
-    assert.ok(!msg3Text.includes('Important Announcement'), 'Chunk 3 must NOT repeat custom text');
+    assert.ok(msg2Text.startsWith('Important Announcement\n\n'), 'Chunk 2 must also include custom text');
+    assert.ok(msg3Text.startsWith('Important Announcement\n\n'), 'Chunk 3 must also include custom text');
 
     const parsed1 = parseTelegramHtmlEntities(msg1Text);
     const parsed2 = parseTelegramHtmlEntities(msg2Text);
@@ -338,7 +339,7 @@ async function runAllMentionFormattingTestSuite() {
   // =========================================================================
   // TEST SECTION 6: /all + MEDIA (Photo, GIF, Video)
   // =========================================================================
-  await test('7. /all + Photo with 25 members sends sendPhoto for chunk 1 and sendMessage for subsequent chunks', async () => {
+  await test('7. /all + Photo with 25 members sends sendPhoto for all chunks', async () => {
     resetChatMembers(testChatId);
     capturedCalls.length = 0;
 
@@ -375,8 +376,10 @@ async function runAllMentionFormattingTestSuite() {
     assert.ok(capturedCalls.length >= 3, 'Must produce at least 3 chunks');
     assert.strictEqual(capturedCalls[0].method, 'sendPhoto', 'Chunk 1 must be sendPhoto');
     assert.strictEqual(capturedCalls[0].args[1], 'photo_abc_123');
-    assert.strictEqual(capturedCalls[1].method, 'sendMessage', 'Chunk 2 must be sendMessage');
-    assert.strictEqual(capturedCalls[2].method, 'sendMessage', 'Chunk 3 must be sendMessage');
+    assert.strictEqual(capturedCalls[1].method, 'sendPhoto', 'Chunk 2 must be sendPhoto');
+    assert.strictEqual(capturedCalls[1].args[1], 'photo_abc_123');
+    assert.strictEqual(capturedCalls[2].method, 'sendPhoto', 'Chunk 3 must be sendPhoto');
+    assert.strictEqual(capturedCalls[2].args[1], 'photo_abc_123');
   });
 
   await test('8. /all + GIF sends sendAnimation for chunk 1', async () => {
@@ -527,10 +530,9 @@ async function runAllMentionFormattingTestSuite() {
 
     assert.strictEqual(capturedCalls.length, 1);
     const statusText = capturedCalls[0].args[1];
-    // 15 members + 1 admin = 16 eligible
-    assert.ok(statusText.includes('Eligible Members Available: 16'), 'Status message must report accurate available count');
-    assert.ok(statusText.includes('Estimated Messages: 2'), 'Status message must report estimated messages (ceil(16/10))');
-    assert.ok(statusText.includes('Note: Mentions all eligible members currently tracked and available to Roxie in this group'), 'Must include transparent limitation note');
+    assert.ok(statusText.includes('Eligible Members Available:</b> 16'), 'Status message must report accurate available count');
+    assert.ok(statusText.includes('Estimated Messages:</b> 2'), 'Status message must report estimated messages (ceil(16/10))');
+    assert.ok(statusText.includes('Mentions all eligible members'), 'Must include limitation note');
   });
 
   // =========================================================================

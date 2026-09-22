@@ -1,3 +1,6 @@
+process.env.NODE_ENV = 'test';
+process.env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'mock_bot_token_for_tests';
+
 import assert from 'assert';
 import { db } from '../server/db/storage.js';
 import { telegramApi } from '../server/telegram/api.js';
@@ -359,6 +362,11 @@ async function runAllTests() {
       capturedCalls.length = 0;
       process.env.ENABLE_SCHEDULER = 'true';
 
+      // Clear any pre-existing test schedules
+      for (const s of db.getGroupSchedules(testChatId)) {
+        messageScheduler.deleteSchedule(testChatId, s.id, 999111);
+      }
+
       const schedRes = messageScheduler.createSchedule(
         testChatId,
         testChatTitle,
@@ -380,7 +388,7 @@ async function runAllTests() {
 
       await messageScheduler.checkAndExecuteSchedules();
 
-      const photoCalls = capturedCalls.filter(c => c.method === 'sendPhoto');
+      const photoCalls = capturedCalls.filter(c => c.method === 'sendPhoto' && c.args[1] === 'scheduled_photo_999');
       assert.strictEqual(photoCalls.length, 1, 'Must execute exactly ONE sendPhoto operation');
       assert.strictEqual(photoCalls[0].args[0], testChatId);
       assert.strictEqual(photoCalls[0].args[1], 'scheduled_photo_999');
