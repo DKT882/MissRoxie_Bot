@@ -5,3 +5,4 @@ export * from './telegram/moderation.js';
 export * from './telegram/scheduler.js';
 export * from './telegram/commands.js';
 export * from './telegram/botManager.js';
+export * from './telegram/mtprotoParticipantService.js';

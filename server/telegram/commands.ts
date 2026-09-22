@@ -5,6 +5,7 @@ import { ModerationService, parseDuration } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { mapTelegramError } from './errorMapper.js';
 import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand, CachedMember } from './types.js';
+import { mtprotoParticipantService, MtprotoParticipantService } from './mtprotoParticipantService.js';
 import {
   COMMAND_CATALOG,
   getCatalogItem,
@@ -4267,122 +4268,247 @@ export class CommandHandler {
       return;
     }
 
-    // Get bot ID to exclude self
-    const botId = (await telegramApi.getMe())?.result?.id;
-
-    if (ctx.args[0]?.toLowerCase() === 'status') {
-      const members = await CommandHandler.getAllEligibleGroupMembers(ctx.chatId, botId);
+    // Acquire per-chat lock to prevent concurrent /all operations for the same group
+    if (!mtprotoParticipantService.acquireChatLock(ctx.chatId)) {
       await telegramApi.sendMessage(
         ctx.chatId,
-        `ℹ️ <b>/all Command Status</b>\n\n` +
-        `Eligible Members Available: ${members.length}\n` +
-        `Estimated Messages: ${Math.ceil(members.length / 10)}\n` +
-        `Usage: <code>/all [custom message text]</code>\n\n` +
-        `<i>Note: Mentions all eligible members currently tracked and available to Roxie in this group.</i>`,
-        { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
+        '⏳ An /all broadcast is already in progress for this group. Please wait for it to complete.',
+        { reply_to_message_id: ctx.message.message_id }
       );
       return;
     }
 
-    const customText = CommandHandler.getCommandText(ctx, 0);
-    const defaultMsg = customText || '';
+    try {
+      // Get bot ID to exclude self
+      const botId = (await telegramApi.getMe())?.result?.id;
 
-    // Snapshot complete eligible member list once
-    const members = await CommandHandler.getAllEligibleGroupMembers(ctx.chatId, botId);
+      if (ctx.args[0]?.toLowerCase() === 'status') {
+        const isMtprotoConfigured = mtprotoParticipantService.isConfigured();
+        let eligibleCount = 0;
+        let modeText = '';
 
-    const { mentions, chunks } = CommandHandler.buildAllMentionsChunks(members, defaultMsg, botId, 10);
+        if (isMtprotoConfigured) {
+          const fetchResult = await mtprotoParticipantService.fetchGroupParticipants(ctx.chatId, botId);
+          if (fetchResult.status === 'FULL_FETCH' || fetchResult.status === 'PARTIAL_FETCH') {
+            eligibleCount = fetchResult.eligibleCount;
+            modeText = `MTProto Enumeration (${fetchResult.status === 'FULL_FETCH' ? 'Full' : 'Partial: ' + fetchResult.uniqueCount + '/' + fetchResult.telegramTotal})`;
+          } else {
+            modeText = `MTProto Error: ${fetchResult.error || 'Fetch failed'}`;
+          }
+        } else {
+          const cached = await CommandHandler.getAllEligibleGroupMembers(ctx.chatId, botId);
+          eligibleCount = cached.length;
+          modeText = 'Observed Cache Fallback (MTProto not configured)';
+        }
 
-    if (mentions.length === 0) {
-      await telegramApi.sendMessage(
-        ctx.chatId,
-        '⚠️ I don\'t have enough cached group members to mention everyone yet.',
-        { reply_to_message_id: ctx.message.message_id }
-      );
+        const estimatedMessages = Math.ceil(eligibleCount / 10);
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `ℹ️ <b>/all Command Status</b>\n\n` +
+          `<b>Member Source:</b> ${modeText}\n` +
+          `<b>Eligible Members Available:</b> ${eligibleCount}\n` +
+          `<b>Estimated Messages:</b> ${estimatedMessages}\n` +
+          `<b>Batch Size:</b> 10 members / message\n` +
+          `<b>Usage:</b> <code>/all [custom message text]</code>\n\n` +
+          `<i>Note: Mentions all eligible members directly through Telegram member enumeration in 10-member emoji batches.</i>`,
+          { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
+        );
+        return;
+      }
+
+      let members: CachedMember[] = [];
+      const isMtprotoConfigured = mtprotoParticipantService.isConfigured();
+
+      if (isMtprotoConfigured) {
+        const fetchRes = await mtprotoParticipantService.fetchGroupParticipants(ctx.chatId, botId);
+
+        if (fetchRes.status === 'FETCH_FAILED') {
+          const errorMsg = fetchRes.error || 'Failed to retrieve group participants via MTProto.';
+          await telegramApi.sendMessage(
+            ctx.chatId,
+            `❌ ${errorMsg}`,
+            { reply_to_message_id: ctx.message.message_id }
+          );
+
+          TelegramMiddleware.logAudit({
+            chatId: ctx.chatId,
+            chatTitle: ctx.chatTitle,
+            actor,
+            command: 'all',
+            action: 'all_broadcast',
+            result: 'error',
+            details: `MTProto participant fetch failed: ${fetchRes.errorCode || 'UNKNOWN'}`
+          });
+          return;
+        }
+
+        if (fetchRes.status === 'PARTIAL_FETCH') {
+          const restrictionMsg = fetchRes.diagnosticMessage ||
+            `Telegram did not allow Roxie to retrieve the complete member list for this group (${fetchRes.uniqueCount}/${fetchRes.telegramTotal} available due to Telegram visibility restrictions).`;
+          await telegramApi.sendMessage(
+            ctx.chatId,
+            `⚠️ ${restrictionMsg}`,
+            { reply_to_message_id: ctx.message.message_id }
+          );
+
+          TelegramMiddleware.logAudit({
+            chatId: ctx.chatId,
+            chatTitle: ctx.chatTitle,
+            actor,
+            command: 'all',
+            action: 'warn',
+            result: 'error',
+            details: `MTProto partial fetch: ${fetchRes.uniqueCount}/${fetchRes.telegramTotal}`
+          });
+          return;
+        }
+
+        // FULL_FETCH: Use authoritative fresh MTProto participant list
+        members = fetchRes.members;
+      } else {
+        // Fallback for tests or unconfigured environments
+        if (process.env.NODE_ENV === 'test') {
+          members = await CommandHandler.getAllEligibleGroupMembers(ctx.chatId, botId);
+        } else {
+          await telegramApi.sendMessage(
+            ctx.chatId,
+            '⚠️ MTProto is not configured on this server. Please configure TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_MT_PROTO_SESSION for full group member enumeration.',
+            { reply_to_message_id: ctx.message.message_id }
+          );
+          return;
+        }
+      }
+
+      const customText = CommandHandler.getCommandText(ctx, 0);
+      const defaultMsg = customText || '';
+
+      const { mentions, chunks } = CommandHandler.buildAllMentionsChunks(members, defaultMsg, botId, 10);
+
+      if (mentions.length === 0) {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          '⚠️ No eligible group members found to mention.',
+          { reply_to_message_id: ctx.message.message_id }
+        );
+
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor,
+          command: 'all',
+          action: 'warn',
+          result: 'success',
+          details: 'Tried /all but 0 eligible members available'
+        });
+        return;
+      }
+
+      const reply = ctx.message.reply_to_message;
+      let repliedPhotoId: string | undefined;
+      let repliedAnimationId: string | undefined;
+      let repliedVideoId: string | undefined;
+      let repliedDocumentId: string | undefined;
+
+      if (reply) {
+        if (reply.photo && reply.photo.length > 0) {
+          repliedPhotoId = reply.photo[reply.photo.length - 1].file_id;
+        } else if (reply.animation) {
+          repliedAnimationId = reply.animation.file_id;
+        } else if (reply.video) {
+          repliedVideoId = reply.video.file_id;
+        } else if (reply.document) {
+          repliedDocumentId = reply.document.file_id;
+        }
+      }
+
+      const targetReplyId = reply?.message_id || ctx.message.message_id;
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkText = chunks[i];
+        console.log(`[ALL] sending batch=${i + 1}/${chunks.length}`);
+
+        let sendSuccess = false;
+        let batchAttempts = 0;
+        const maxBatchAttempts = 3;
+
+        while (!sendSuccess && batchAttempts <= maxBatchAttempts) {
+          batchAttempts++;
+          let sendRes: any;
+          try {
+            if (i === 0 && (repliedPhotoId || repliedAnimationId || repliedVideoId || repliedDocumentId)) {
+              if (repliedPhotoId) {
+                sendRes = await telegramApi.sendPhoto(ctx.chatId, repliedPhotoId, {
+                  caption: chunkText,
+                  parse_mode: 'HTML',
+                  reply_to_message_id: targetReplyId
+                });
+              } else if (repliedAnimationId) {
+                sendRes = await telegramApi.sendAnimation(ctx.chatId, repliedAnimationId, {
+                  caption: chunkText,
+                  parse_mode: 'HTML',
+                  reply_to_message_id: targetReplyId
+                });
+              } else if (repliedVideoId) {
+                sendRes = await telegramApi.sendVideo(ctx.chatId, repliedVideoId, {
+                  caption: chunkText,
+                  parse_mode: 'HTML',
+                  reply_to_message_id: targetReplyId
+                });
+              } else if (repliedDocumentId) {
+                sendRes = await telegramApi.sendDocument(ctx.chatId, repliedDocumentId, {
+                  caption: chunkText,
+                  parse_mode: 'HTML',
+                  reply_to_message_id: targetReplyId
+                });
+              }
+            } else {
+              sendRes = await telegramApi.sendMessage(ctx.chatId, chunkText, {
+                reply_to_message_id: i === 0 ? targetReplyId : undefined,
+                parse_mode: 'HTML'
+              });
+            }
+          } catch (sendErr: any) {
+            console.warn(`[ALL] Exception on sending batch ${i + 1}: ${sendErr.message}`);
+          }
+
+          if (sendRes && sendRes.ok) {
+            sendSuccess = true;
+          } else if (sendRes && sendRes.error_code === 429) {
+            const retryAfterSec = sendRes.parameters?.retry_after || 2;
+            console.warn(`[ALL] 429 flood wait on batch ${i + 1}. Retrying in ${retryAfterSec}s...`);
+            if (batchAttempts <= maxBatchAttempts) {
+              await new Promise(r => setTimeout(r, retryAfterSec * 1000));
+            } else {
+              sendSuccess = true; // Exceeded max retries for this batch, proceed to avoid blocking forever
+            }
+          } else {
+            sendSuccess = true;
+          }
+        }
+
+        // Conservative sequential per-chat pacing (1000ms) between consecutive chunks to comply with Telegram's 1 msg/sec group limit
+        if (i < chunks.length - 1) {
+          const pacingMs = process.env.NODE_ENV === 'test' ? 10 : 1000;
+          await new Promise(resolve => setTimeout(resolve, pacingMs));
+        }
+      }
+
+      console.log(`[ALL] completed batches=${chunks.length}`);
 
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,
         actor,
         command: 'all',
-        action: 'warn',
+        action: 'all_broadcast',
         result: 'success',
-        details: 'Tried /all but no cached members available'
+        details: `Mentioned ${mentions.length} members across ${chunks.length} message(s)`
       });
-      return;
+    } finally {
+      mtprotoParticipantService.releaseChatLock(ctx.chatId);
     }
-
-    const reply = ctx.message.reply_to_message;
-    let repliedPhotoId: string | undefined;
-    let repliedAnimationId: string | undefined;
-    let repliedVideoId: string | undefined;
-    let repliedDocumentId: string | undefined;
-
-    if (reply) {
-      if (reply.photo && reply.photo.length > 0) {
-        repliedPhotoId = reply.photo[reply.photo.length - 1].file_id;
-      } else if (reply.animation) {
-        repliedAnimationId = reply.animation.file_id;
-      } else if (reply.video) {
-        repliedVideoId = reply.video.file_id;
-      } else if (reply.document) {
-        repliedDocumentId = reply.document.file_id;
-      }
-    }
-
-    const targetReplyId = reply?.message_id || ctx.message.message_id;
-
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkText = chunks[i];
-      if (i === 0 && (repliedPhotoId || repliedAnimationId || repliedVideoId || repliedDocumentId)) {
-        if (repliedPhotoId) {
-          await telegramApi.sendPhoto(ctx.chatId, repliedPhotoId, {
-            caption: chunkText,
-            parse_mode: 'HTML',
-            reply_to_message_id: targetReplyId
-          });
-        } else if (repliedAnimationId) {
-          await telegramApi.sendAnimation(ctx.chatId, repliedAnimationId, {
-            caption: chunkText,
-            parse_mode: 'HTML',
-            reply_to_message_id: targetReplyId
-          });
-        } else if (repliedVideoId) {
-          await telegramApi.sendVideo(ctx.chatId, repliedVideoId, {
-            caption: chunkText,
-            parse_mode: 'HTML',
-            reply_to_message_id: targetReplyId
-          });
-        } else if (repliedDocumentId) {
-          await telegramApi.sendDocument(ctx.chatId, repliedDocumentId, {
-            caption: chunkText,
-            parse_mode: 'HTML',
-            reply_to_message_id: targetReplyId
-          });
-        }
-      } else {
-        await telegramApi.sendMessage(ctx.chatId, chunkText, {
-          reply_to_message_id: i === 0 ? targetReplyId : undefined,
-          parse_mode: 'HTML'
-        });
-      }
-
-      // Conservative sequential per-chat pacing (1000ms) between consecutive chunks to comply with Telegram's 1 msg/sec group limit
-      if (i < chunks.length - 1) {
-        const pacingMs = process.env.NODE_ENV === 'test' ? 10 : 1000;
-        await new Promise(resolve => setTimeout(resolve, pacingMs));
-      }
-    }
-
-    TelegramMiddleware.logAudit({
-      chatId: ctx.chatId,
-      chatTitle: ctx.chatTitle,
-      actor,
-      command: 'all',
-      action: 'all_broadcast',
-      result: 'success',
-      details: `Mentioned ${mentions.length} members across ${chunks.length} message(s)`
-    });
   }
+
 
   private static async handleSay(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;

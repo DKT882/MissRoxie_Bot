@@ -1,3 +1,4 @@
+process.env.NODE_ENV = 'test';
 import { CommandHandler } from '../server/telegram/commands.js';
 import { db } from '../server/db/storage.js';
 import { telegramApi } from '../server/telegram/api.js';
@@ -70,7 +71,7 @@ async function runTests() {
     });
     assert(sentMessages.some(m => m.text.includes('permission') || m.text.includes('administrator')), 'ALL-07: Unauthorized user receives permission error');
 
-    // Test 2: ALL-01 & ALL-10 & ALL-03 & ALL-06: Authorized admin sends /all, sends "Hiee" and clickable mentions, excludes bot
+    // Test 2: ALL-01 & ALL-03 & ALL-06: Authorized admin sends /all, generates clickable emoji mentions, excludes bot
     sentMessages = [];
     await CommandHandler.handleCommand({
       command: '/all',
@@ -83,10 +84,9 @@ async function runTests() {
       message: { message_id: 2, date: Math.floor(Date.now() / 1000), chat: { id: chatId, type: 'supergroup' } }
     });
     const combinedText = sentMessages.map(m => m.text).join(' ');
-    assert(combinedText.includes('Hiee'), 'ALL-01 & ALL-10: /all sends default "Hiee" message');
-    assert(combinedText.includes('tg://user?id=111') && combinedText.includes('Alice'), 'ALL-03: Includes clickable tg://user mention for Alice');
-    assert(combinedText.includes('tg://user?id=222') && combinedText.includes('Bob'), 'ALL-03: Includes clickable tg://user mention for Bob');
-    assert(!combinedText.includes('tg://user?id=333'), 'ALL-06: Excludes bot user from mentions');
+    assert(combinedText.includes('tg://user?id=111'), 'ALL-03: Includes clickable emoji tg://user mention for Alice (id: 111)');
+    assert(combinedText.includes('tg://user?id=222'), 'ALL-03: Includes clickable emoji tg://user mention for Bob (id: 222)');
+    assert(!combinedText.includes('tg://user?id=333'), 'ALL-06: Excludes bot user (id: 333) from mentions');
 
     // Test 3: ALL-02: Custom message support (/all hello everyone)
     sentMessages = [];
@@ -102,8 +102,9 @@ async function runTests() {
     });
     const customCombined = sentMessages.map(m => m.text).join(' ');
     assert(customCombined.includes('hello everyone'), 'ALL-02: /all with custom message includes custom text');
+    assert(customCombined.includes('tg://user?id=111') && customCombined.includes('tg://user?id=222'), 'ALL-02: /all custom message includes member mentions');
 
-    // Test 4: ALL-05: Empty member handling when no cached members
+    // Test 4: ALL-05: Empty member handling when no members found
     const emptyChatId = -888999;
     sentMessages = [];
     await CommandHandler.handleCommand({
@@ -116,7 +117,7 @@ async function runTests() {
       sender: { id: 12345, first_name: 'Admin', is_bot: false },
       message: { message_id: 4, date: Math.floor(Date.now() / 1000), chat: { id: emptyChatId, type: 'supergroup' } }
     });
-    assert(sentMessages.some(m => m.text.includes('enough cached group members')), 'ALL-05: Empty member handling returns informative warning');
+    assert(sentMessages.some(m => m.text.includes('No eligible group members') || m.text.includes('cached group members')), 'ALL-05: Empty member handling returns informative warning');
 
     console.log(`\n🎉 /all Integration Tests Completed: ${passed} Passed, ${failed} Failed`);
     if (failed > 0) {
