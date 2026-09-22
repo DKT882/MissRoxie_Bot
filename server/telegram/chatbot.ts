@@ -4,6 +4,7 @@ import { db, isSensitiveData, GROUP_MEMORY_LIMIT, GroupConversationEntry, GroupC
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
 import { logDebug } from '../observability/logger.js';
+import { AutoEngineService } from './autoEngineService.js';
 import {
   DEFAULT_STICKERS_BY_MOOD,
   MOOD_FALLBACK_MATRIX,
@@ -2862,9 +2863,10 @@ export class ChatbotService {
       // STEP 4: PRIORITY 3 — PROACTIVE RANDOM OPPORTUNITY ON NEW HUMAN MESSAGE
       // =========================================================================
       if (!isPrivate) {
+        const isProactiveTextEnabled = AutoEngineService.isProactiveTextEnabled();
         const engineConfig: AutoEngineConfig = settings?.autoEngine || ChatbotService.resolveLegacyConfig(settings || {});
         const isEngineEnabled = Boolean(engineConfig?.enabled && engineConfig?.mode !== 'off');
-        const shouldRunMessages = isEngineEnabled && (engineConfig.mode === 'messages_only' || engineConfig.mode === 'messages_and_stickers');
+        const shouldRunMessages = isProactiveTextEnabled && isEngineEnabled && (engineConfig.mode === 'messages_only' || engineConfig.mode === 'messages_and_stickers');
 
         if (shouldRunMessages) {
           const lastConsidered = db.getLastProactiveConsideredMessageId(chatId);

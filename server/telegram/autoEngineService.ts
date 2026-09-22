@@ -54,6 +54,27 @@ export interface ScheduledAutoJob {
 }
 
 export class AutoEngineService {
+  private static proactiveTextEnabledOverride: boolean | null = null;
+
+  public static isProactiveTextEnabled(): boolean {
+    if (AutoEngineService.proactiveTextEnabledOverride !== null) {
+      return AutoEngineService.proactiveTextEnabledOverride;
+    }
+    return process.env.ENABLE_PROACTIVE_TEXT === 'true';
+  }
+
+  public static setProactiveTextEnabled(enabled: boolean | null): void {
+    AutoEngineService.proactiveTextEnabledOverride = enabled;
+  }
+
+  public isProactiveTextEnabled(): boolean {
+    return AutoEngineService.isProactiveTextEnabled();
+  }
+
+  public setProactiveTextEnabled(enabled: boolean | null): void {
+    AutoEngineService.setProactiveTextEnabled(enabled);
+  }
+
   private jobs: Map<string, ScheduledAutoJob> = new Map();
   private activeExecutions: Set<string> = new Set();
   private isRunning: boolean = false;
@@ -293,7 +314,7 @@ export class AutoEngineService {
     const mode = engineConfig.mode;
 
     // Messages sync
-    const shouldRunMessages = (mode === 'messages_only' || mode === 'messages_and_stickers');
+    const shouldRunMessages = this.isProactiveTextEnabled() && (mode === 'messages_only' || mode === 'messages_and_stickers');
     if (shouldRunMessages) {
       const msgConfig = engineConfig.messages;
       const fullDelay = this.calculateDelayMs(msgConfig, 480, 900, 480, 'messages');
@@ -413,6 +434,12 @@ export class AutoEngineService {
     engineConfig: AutoEngineConfig
   ): Promise<void> {
     console.log(`[AUTO_ENGINE] proactive_check (chatId=${chatId})`);
+
+    if (!this.isProactiveTextEnabled()) {
+      console.log(`[AUTO_ENGINE] proactive text suppressed (ENABLE_PROACTIVE_TEXT is disabled) for chat ${chatId}`);
+      this.cancelJob(botId, chatId, 'response');
+      return;
+    }
 
     if (settings.chatbotEnabled === false) {
       const nextDelay = this.calculateDelayMs(engineConfig.messages, 480, 900, 480, 'messages');
@@ -648,6 +675,7 @@ export class AutoEngineService {
     this.customClearTimeout = clearTimeout;
     this.customNow = () => Date.now();
     this.bypassMinimumIntervalForTests = false;
+    AutoEngineService.proactiveTextEnabledOverride = null;
   }
 }
 

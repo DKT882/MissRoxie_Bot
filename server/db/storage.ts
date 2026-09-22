@@ -5287,7 +5287,6 @@ export class StorageManager {
     if (this.data.groupMemories) {
       this.data.groupMemories[key] = record;
     }
-    this.saveGroupJsonSync(chatId);
     this.scheduleSave(chatId);
   }
 
