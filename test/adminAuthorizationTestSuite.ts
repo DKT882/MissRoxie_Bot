@@ -505,6 +505,81 @@ async function runAdminAuthorizationTestSuite() {
   }
 
   // =========================================================================
+  // TEST 19: Request-Scoped Context Authorization Reuse (0ms duplicate checks)
+  // =========================================================================
+  console.log('\n--- TEST 19: Request-Scoped Context Reuse ---');
+  {
+    let getChatAdminsCallCount = 0;
+    let getChatMemberCallCount = 0;
+    const oldGetChatAdmins = telegramApi.getChatAdministrators;
+    const oldGetChatMember = telegramApi.getChatMember;
+    telegramApi.getChatAdministrators = async (cId: number | string) => {
+      getChatAdminsCallCount++;
+      return oldGetChatAdmins(cId);
+    };
+    telegramApi.getChatMember = async (cId: number | string, uId: number) => {
+      getChatMemberCallCount++;
+      return oldGetChatMember(cId, uId);
+    };
+
+    try {
+      TelegramMiddleware.clearMemberCache(chatId);
+      getChatAdminsCallCount = 0;
+      getChatMemberCallCount = 0;
+
+      const singleCtx = makeContext(admin1Id, '/status');
+      // 1st check (e.g. in handleCommand)
+      const auth1 = await TelegramMiddleware.requireAdmin(singleCtx);
+      assert(auth1.allowed === true, 'Test 19.1: First auth check succeeds');
+      assert(getChatAdminsCallCount === 1, 'Test 19.2: First auth check called getChatAdministrators once');
+
+      // 2nd check with same ctx (e.g. defense-in-depth inside handleStatus / resolveActor)
+      const auth2 = await TelegramMiddleware.requireAdmin(singleCtx);
+      const actor2 = await TelegramMiddleware.resolveActor(singleCtx);
+      assert(auth2.allowed === true && actor2.actorRole === 'ADMIN', 'Test 19.3: Second check with same ctx matches');
+      assert(getChatAdminsCallCount === 1, 'Test 19.4: Second check with same ctx reused ctx.auth without duplicate API call');
+      assert(getChatMemberCallCount === 0, 'Test 19.5: Zero getChatMember calls made for admin in list');
+    } finally {
+      telegramApi.getChatAdministrators = oldGetChatAdmins;
+      telegramApi.getChatMember = oldGetChatMember;
+    }
+  }
+
+  // =========================================================================
+  // TEST 20: Fast Non-Admin Resolution (Avoids fallback getChatMember timeout penalty)
+  // =========================================================================
+  console.log('\n--- TEST 20: Fast Non-Admin Resolution ---');
+  {
+    let getChatAdminsCallCount = 0;
+    let getChatMemberCallCount = 0;
+    const oldGetChatAdmins = telegramApi.getChatAdministrators;
+    const oldGetChatMember = telegramApi.getChatMember;
+    telegramApi.getChatAdministrators = async (cId: number | string) => {
+      getChatAdminsCallCount++;
+      return oldGetChatAdmins(cId);
+    };
+    telegramApi.getChatMember = async (cId: number | string, uId: number) => {
+      getChatMemberCallCount++;
+      return oldGetChatMember(cId, uId);
+    };
+
+    try {
+      TelegramMiddleware.clearMemberCache(chatId);
+      getChatAdminsCallCount = 0;
+      getChatMemberCallCount = 0;
+
+      const nonAdminCtx = makeContext(normalMemberId, '/status');
+      const auth = await TelegramMiddleware.requireAdmin(nonAdminCtx, true);
+      assert(auth.allowed === false, 'Test 20.1: Non-admin correctly rejected');
+      assert(getChatAdminsCallCount === 1, 'Test 20.2: Exactly 1 getChatAdministrators call made');
+      assert(getChatMemberCallCount === 0, 'Test 20.3: Zero fallback getChatMember calls made since admin list was definitive');
+    } finally {
+      telegramApi.getChatAdministrators = oldGetChatAdmins;
+      telegramApi.getChatMember = oldGetChatMember;
+    }
+  }
+
+  // =========================================================================
   // FINAL SCORECARD
   // =========================================================================
   console.log('\n====================================================');

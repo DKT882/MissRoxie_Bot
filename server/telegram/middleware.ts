@@ -22,6 +22,8 @@ export interface CommandContext {
   args: string[];
   command: string;
   rawArgs?: string;
+  actor?: ActorResolution;
+  auth?: AdminAuthResult;
 }
 
 export type ResolvedTarget =
@@ -211,12 +213,16 @@ export class TelegramMiddleware {
    * Uses getChatAdministrators() as primary ground-truth admin source.
    */
   public static async resolveActor(ctx: CommandContext): Promise<ActorResolution> {
+    if (ctx.actor) {
+      return ctx.actor;
+    }
+
     // 1. Anonymous Administrator - must strictly match current group chatId
     const senderChatMatches = ctx.message.sender_chat ? ctx.message.sender_chat.id === ctx.chatId : true;
     const isAnon = (ctx.isAnonymousAdmin && senderChatMatches) || this.isAnonymousAdminMessage(ctx.message, ctx.chatId);
 
     if (isAnon && senderChatMatches) {
-      return {
+      const resolved: ActorResolution = {
         actorUserId: 1087968824,
         actorUsername: undefined,
         actorDisplayName: ctx.authorSignature ? `${ctx.authorSignature} (Anonymous Admin)` : 'Anonymous Admin',
@@ -230,6 +236,8 @@ export class TelegramMiddleware {
         actorMember: null,
         customRole: 'NONE'
       };
+      ctx.actor = resolved;
+      return resolved;
     }
 
     const actorUserId = ctx.sender?.id || ctx.message.from?.id || 0;
@@ -237,7 +245,7 @@ export class TelegramMiddleware {
     const actorDisplayName = ctx.adminDisplayName || (actorUsername ? `@${actorUsername}` : (ctx.sender?.first_name || `User ${actorUserId}`));
 
     if (!actorUserId || actorUserId === 0) {
-      return {
+      const resolved: ActorResolution = {
         actorUserId: 0,
         actorDisplayName: 'Unknown User',
         actorRole: 'MEMBER',
@@ -250,26 +258,33 @@ export class TelegramMiddleware {
         actorMember: null,
         customRole: 'NONE'
       };
+      ctx.actor = resolved;
+      return resolved;
     }
 
     // 2. Primary Admin Check: getChatAdministrators()
     let member: TelegramChatMember | null | undefined = null;
+    let fetchedAdmins = false;
     if (this.isGroup(ctx.message)) {
       await this.getChatAdministrators(ctx.chatId);
       const cachedAdmins = this.adminListCache.get(ctx.chatId);
-      member = cachedAdmins?.map.get(actorUserId);
+      if (cachedAdmins) {
+        fetchedAdmins = true;
+        member = cachedAdmins.map.get(actorUserId);
+      }
     }
 
-    // 3. Fallback / Detailed Member Lookup if not found in live admin list
-    if (!member) {
+    // 3. Fallback / Detailed Member Lookup ONLY if getChatAdministrators failed / was not available
+    if (!member && !fetchedAdmins) {
       member = await this.getTargetMember(ctx.chatId, actorUserId);
     }
 
     const customRole = db.getCustomRole(ctx.chatId, actorUserId);
 
+    let resolved: ActorResolution;
     if (member) {
       if (member.status === 'creator') {
-        return {
+        resolved = {
           actorUserId,
           actorUsername,
           actorDisplayName,
@@ -283,9 +298,8 @@ export class TelegramMiddleware {
           actorMember: member,
           customRole
         };
-      }
-      if (member.status === 'administrator') {
-        return {
+      } else if (member.status === 'administrator') {
+        resolved = {
           actorUserId,
           actorUsername,
           actorDisplayName,
@@ -299,41 +313,56 @@ export class TelegramMiddleware {
           actorMember: member,
           customRole
         };
+      } else {
+        resolved = {
+          actorUserId,
+          actorUsername,
+          actorDisplayName,
+          actorRole: customRole === 'MODERATOR' ? 'MODERATOR' : 'MEMBER',
+          actorRank: customRole === 'MODERATOR' ? RoleRank.MODERATOR : RoleRank.MEMBER,
+          isAnonymousAdmin: false,
+          actorStatus: member.status || 'member',
+          canPromoteMembers: false,
+          canRestrictMembers: false,
+          canDeleteMessages: false,
+          actorMember: member,
+          customRole: customRole || 'NONE'
+        };
       }
-    }
-
-    // Check custom bot role
-    if (customRole === 'MODERATOR') {
-      return {
+    } else if (customRole === 'MODERATOR') {
+      resolved = {
         actorUserId,
         actorUsername,
         actorDisplayName,
         actorRole: 'MODERATOR',
         actorRank: RoleRank.MODERATOR,
         isAnonymousAdmin: false,
-        actorStatus: member?.status || 'member',
+        actorStatus: 'member',
         canPromoteMembers: false,
         canRestrictMembers: false,
         canDeleteMessages: false,
-        actorMember: member,
+        actorMember: null,
         customRole: 'MODERATOR'
+      };
+    } else {
+      resolved = {
+        actorUserId,
+        actorUsername,
+        actorDisplayName,
+        actorRole: 'MEMBER',
+        actorRank: RoleRank.MEMBER,
+        isAnonymousAdmin: false,
+        actorStatus: 'member',
+        canPromoteMembers: false,
+        canRestrictMembers: false,
+        canDeleteMessages: false,
+        actorMember: null,
+        customRole: 'NONE'
       };
     }
 
-    return {
-      actorUserId,
-      actorUsername,
-      actorDisplayName,
-      actorRole: 'MEMBER',
-      actorRank: RoleRank.MEMBER,
-      isAnonymousAdmin: false,
-      actorStatus: member?.status || 'member',
-      canPromoteMembers: false,
-      canRestrictMembers: false,
-      canDeleteMessages: false,
-      actorMember: member,
-      customRole: 'NONE'
-    };
+    ctx.actor = resolved;
+    return resolved;
   }
 
   /**
@@ -344,6 +373,10 @@ export class TelegramMiddleware {
     ctx: CommandContext,
     silent: boolean = false
   ): Promise<AdminAuthResult> {
+    if (ctx.auth) {
+      return ctx.auth;
+    }
+
     // 1. Group Check
     if (!this.isGroup(ctx.message)) {
       const reason = '❌ Roxie moderation commands are available only inside groups.';
@@ -352,10 +385,12 @@ export class TelegramMiddleware {
           reply_to_message_id: ctx.message?.message_id
         });
       }
-      return {
+      const res: AdminAuthResult = {
         allowed: false,
         reason
       };
+      ctx.auth = res;
+      return res;
     }
 
     // 2. Resolve Actor
@@ -378,17 +413,21 @@ export class TelegramMiddleware {
           reply_to_message_id: ctx.message?.message_id
         });
       }
-      return {
+      const res: AdminAuthResult = {
         allowed: false,
         reason,
         actor
       };
+      ctx.auth = res;
+      return res;
     }
 
-    return {
+    const res: AdminAuthResult = {
       allowed: true,
       actor
     };
+    ctx.auth = res;
+    return res;
   }
 
   /**
