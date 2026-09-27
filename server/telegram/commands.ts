@@ -807,7 +807,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleAutoMod(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const action = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
@@ -851,7 +851,7 @@ export class CommandHandler {
 
   private static async handleMediaCommand(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const action = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     if (action === 'status') {
@@ -863,7 +863,7 @@ export class CommandHandler {
 
   private static async handleWarnSettings(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const sub = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     if (sub === 'action') {
@@ -882,7 +882,7 @@ export class CommandHandler {
 
   private static async handleSecurity(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const action = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
@@ -923,7 +923,7 @@ export class CommandHandler {
 
   private static async handleCaptchaSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const action = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
@@ -960,7 +960,7 @@ export class CommandHandler {
 
   private static async handleAntiRaidSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const action = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
@@ -997,7 +997,7 @@ export class CommandHandler {
 
   private static async handleChatbot(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const action = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
@@ -1034,7 +1034,7 @@ export class CommandHandler {
 
   private static async handleProtection(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const action = (ctx.args[0] || 'status').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
@@ -1081,7 +1081,7 @@ export class CommandHandler {
 
   private static async handleRoxie(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const action = (ctx.args[0] || 'status').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
@@ -1133,7 +1133,7 @@ export class CommandHandler {
 
   private static async handleRoxieMode(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const rawArg = (ctx.args[0] || '').toLowerCase().trim();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
@@ -1228,7 +1228,7 @@ export class CommandHandler {
 
   private static async handleClearMemory(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     ChatbotService.clearConversation(ctx.chatId);
     const actor = await TelegramMiddleware.resolveActor(ctx);
     TelegramMiddleware.logAudit({
@@ -1356,7 +1356,7 @@ export class CommandHandler {
 
   private static async handleJoinMode(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const mode = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
@@ -1390,7 +1390,7 @@ export class CommandHandler {
 
   private static async handleAutoAccept(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const action = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
@@ -1427,7 +1427,7 @@ export class CommandHandler {
 
   private static async handleAutomation(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const sub = (ctx.args[0] || '').toLowerCase();
     const actor = await TelegramMiddleware.resolveActor(ctx);
     if (sub === 'add') {
@@ -1491,7 +1491,7 @@ export class CommandHandler {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
     const actor = await TelegramMiddleware.resolveActor(ctx);
     if (ctx.command.toLowerCase().includes('setrules')) {
-      if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+      if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
       const text = CommandHandler.getCommandText(ctx, 0);
       if (!text) {
         await telegramApi.sendMessage(ctx.chatId, 'Usage: /setrules <rules text>');
@@ -1509,7 +1509,7 @@ export class CommandHandler {
       });
       await telegramApi.sendMessage(ctx.chatId, '📜 Group rules have been updated successfully.');
     } else if (ctx.command.toLowerCase().includes('clearrules')) {
-      if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+      if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
       db.clearRules(ctx.chatId);
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
@@ -3313,7 +3313,7 @@ export class CommandHandler {
 
   private static async handleResetWarns(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const target = await TelegramMiddleware.resolveTargetUser(ctx);
@@ -3361,7 +3361,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleSetMod(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const target = await TelegramMiddleware.resolveTargetUser(ctx);
@@ -3395,7 +3395,7 @@ export class CommandHandler {
 
   private static async handleDelMod(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const target = await TelegramMiddleware.resolveTargetUser(ctx);
@@ -3432,7 +3432,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleSetWarnLimit(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const current = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
@@ -3481,7 +3481,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleLinksSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
@@ -3524,7 +3524,7 @@ export class CommandHandler {
 
   private static async handleLinkAllow(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     if (ctx.args.length === 0) {
       await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/linkallow &lt;domain.com&gt;</code>');
@@ -3553,7 +3553,7 @@ export class CommandHandler {
 
   private static async handleLinkUnallow(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     if (ctx.args.length === 0) {
       await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/linkunallow &lt;domain.com&gt;</code>');
@@ -3589,7 +3589,7 @@ export class CommandHandler {
 
   private static async handleLinkAllowList(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const domains = db.getLinkWhitelist(ctx.chatId);
     if (domains.length === 0) {
@@ -3617,7 +3617,7 @@ export class CommandHandler {
 
   private static async handleGifsSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
@@ -3657,7 +3657,7 @@ export class CommandHandler {
 
   private static async handleVideosSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
@@ -3697,7 +3697,7 @@ export class CommandHandler {
 
   private static async handleVoiceSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
@@ -3737,7 +3737,7 @@ export class CommandHandler {
 
   private static async handleAudioSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
@@ -3780,7 +3780,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleStickersSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
@@ -3835,7 +3835,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleFree(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const target = await TelegramMiddleware.resolveTargetUser(ctx);
@@ -3873,7 +3873,7 @@ export class CommandHandler {
 
   private static async handleUnfree(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const target = await TelegramMiddleware.resolveTargetUser(ctx);
@@ -3919,7 +3919,7 @@ export class CommandHandler {
 
   private static async handleFreeList(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const freedUsers = db.getFreedUsers(ctx.chatId);
     if (freedUsers.length === 0) {
@@ -3962,7 +3962,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleSchedule(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     if (ctx.args.length < 1) {
       await telegramApi.sendMessage(
@@ -4018,6 +4018,12 @@ export class CommandHandler {
         if (!messageText && reply.caption) {
           messageText = reply.caption;
         }
+      } else if (reply.animation) {
+        contentType = 'animation';
+        mediaFileId = reply.animation.file_id;
+        if (!messageText && reply.caption) {
+          messageText = reply.caption;
+        }
       } else if (reply.video) {
         contentType = 'video';
         mediaFileId = reply.video.file_id;
@@ -4027,12 +4033,6 @@ export class CommandHandler {
       } else if (reply.document) {
         contentType = 'document';
         mediaFileId = reply.document.file_id;
-        if (!messageText && reply.caption) {
-          messageText = reply.caption;
-        }
-      } else if (reply.animation) {
-        contentType = 'animation';
-        mediaFileId = reply.animation.file_id;
         if (!messageText && reply.caption) {
           messageText = reply.caption;
         }
@@ -4076,7 +4076,7 @@ export class CommandHandler {
 
   private static async handleListSchedules(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const schedules = db.getGroupSchedules(ctx.chatId);
     if (schedules.length === 0) {
@@ -4100,7 +4100,7 @@ export class CommandHandler {
 
   private static async handleDeleteSchedule(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     if (ctx.args.length === 0) {
       await telegramApi.sendMessage(ctx.chatId, '⚠️ Please provide the schedule ID: <code>/deleteSchedule &lt;id&gt;</code>');
@@ -4555,7 +4555,7 @@ export class CommandHandler {
 
   private static async handleStopSpam(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
@@ -4579,7 +4579,7 @@ export class CommandHandler {
 
   private static async handleStopAbusive(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
@@ -4604,7 +4604,7 @@ export class CommandHandler {
 
   private static async handleAddAbusive(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const word = ctx.args.join(' ').trim();
     if (!word) {
       await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/addabuse &lt;word/phrase&gt;</code>', { reply_to_message_id: ctx.message.message_id });
@@ -4616,7 +4616,7 @@ export class CommandHandler {
 
   private static async handleRemoveAbusive(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const word = ctx.args.join(' ').trim();
     if (!word) {
       await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/removeabuse &lt;word/phrase&gt;</code>', { reply_to_message_id: ctx.message.message_id });
@@ -4643,7 +4643,7 @@ export class CommandHandler {
 
   private static async handleClearAbusive(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const words = db.getCustomAbusiveWords(ctx.chatId);
     if (words.length === 0) {
       await telegramApi.sendMessage(ctx.chatId, 'ℹ️ Custom abusive word list is already empty.', { reply_to_message_id: ctx.message.message_id });
@@ -4665,7 +4665,7 @@ export class CommandHandler {
 
   private static async handleStopPromotion(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
@@ -4689,7 +4689,7 @@ export class CommandHandler {
 
   private static async handleGifSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const arg = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
 
@@ -4706,7 +4706,7 @@ export class CommandHandler {
 
   private static async handleLinkSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const arg = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
 
@@ -4723,7 +4723,7 @@ export class CommandHandler {
 
   private static async handleImageSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const arg = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
 
@@ -4779,7 +4779,7 @@ export class CommandHandler {
 
   private static async handleFileSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
     const arg = (ctx.args[0] || '').toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
 
@@ -4799,7 +4799,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleDel(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     // Must be replying to a message
     if (!ctx.message.reply_to_message?.message_id) {
@@ -4850,7 +4850,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleClear(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     // Check bot's delete permission
     const botCheck = await TelegramMiddleware.checkBotPermissions(ctx.chatId, 'can_delete_messages');
@@ -5053,7 +5053,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleLock(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const lockType = (ctx.args[0] || '').toLowerCase();
     const validTypes = ['links', 'stickers', 'gifs', 'videos', 'photos', 'audio', 'voice', 'documents', 'polls', 'forwards', 'contacts', 'locations'];
@@ -5089,7 +5089,7 @@ export class CommandHandler {
 
   private static async handleUnlock(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const lockType = (ctx.args[0] || '').toLowerCase();
     const validTypes = ['links', 'stickers', 'gifs', 'videos', 'photos', 'audio', 'voice', 'documents', 'polls', 'forwards', 'contacts', 'locations'];
@@ -5125,7 +5125,7 @@ export class CommandHandler {
 
   private static async handleLocks(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const locks = db.getLocks(ctx.chatId);
     const validTypes = ['links', 'stickers', 'gifs', 'videos', 'photos', 'audio', 'voice', 'documents', 'polls', 'forwards', 'contacts', 'locations'];
@@ -5147,7 +5147,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleFloodSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const current = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
@@ -5234,7 +5234,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleFilterCommand(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     if (ctx.args.length < 2) {
       await telegramApi.sendMessage(
@@ -5269,7 +5269,7 @@ export class CommandHandler {
 
   private static async handleUnfilterCommand(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     if (ctx.args.length === 0) {
       await telegramApi.sendMessage(ctx.chatId, '⚠️ Usage: <code>/unfilter &lt;keyword&gt;</code>');
@@ -5305,7 +5305,7 @@ export class CommandHandler {
 
   private static async handleFiltersList(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const filters = db.getFilters(ctx.chatId);
     const entries = Object.entries(filters);
@@ -5330,7 +5330,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleWelcomeSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
@@ -5392,7 +5392,7 @@ export class CommandHandler {
 
   private static async handleSetWelcome(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     if (ctx.args.length === 0) {
       await telegramApi.sendMessage(
@@ -5430,7 +5430,7 @@ export class CommandHandler {
 
   private static async handleGoodbyeSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
@@ -5474,7 +5474,7 @@ export class CommandHandler {
 
   private static async handleSetGoodbye(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     if (ctx.args.length === 0) {
       await telegramApi.sendMessage(
@@ -5510,7 +5510,7 @@ export class CommandHandler {
 
   private static async handleAutoDeleteJoinLeaveSetting(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const arg = (ctx.args[0] || '').toLowerCase();
@@ -5555,7 +5555,7 @@ export class CommandHandler {
   // ==========================================
   private static async handlePin(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const replyMsg = ctx.message.reply_to_message;
     if (!replyMsg) {
@@ -5600,7 +5600,7 @@ export class CommandHandler {
 
   private static async handleUnpin(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const replyMsg = ctx.message.reply_to_message;
     const messageId = replyMsg ? replyMsg.message_id : undefined;
@@ -5635,7 +5635,7 @@ export class CommandHandler {
 
   private static async handleUnpinAll(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
     const res = await telegramApi.unpinAllChatMessages(ctx.chatId);
@@ -5670,7 +5670,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleSlowMode(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const actor = await TelegramMiddleware.resolveActor(ctx);
 
@@ -5753,7 +5753,7 @@ export class CommandHandler {
   // ==========================================
   private static async handleAdminLog(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
-    if (!(await TelegramMiddleware.requireAdmin(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
 
     const count = parseInt(ctx.args[0] || '8', 10);
     const limit = Math.min(Math.max(count, 1), 25);

@@ -646,6 +646,7 @@ export class TelegramApi {
   public clearChatMemberCache(chatId?: number | string, userId?: number): void {
     if (chatId !== undefined && userId !== undefined) {
       this.chatMemberCache.delete(`${chatId}_${userId}`);
+      this.chatAdminsCache.delete(String(chatId));
     } else if (chatId !== undefined) {
       const prefix = `${chatId}_`;
       for (const k of this.chatMemberCache.keys()) {
@@ -661,19 +662,22 @@ export class TelegramApi {
   }
 
   public async getChatAdministrators(
-    chatId: number | string
+    chatId: number | string,
+    forceFresh: boolean = false
   ): Promise<{ ok: boolean; result?: TelegramChatMember[]; description?: string; error_code?: number }> {
     const key = String(chatId);
-    const cached = this.chatAdminsCache.get(key);
-    if (cached && Date.now() < cached.expiresAt) {
-      if (cached.data) {
-        return { ok: true, result: cached.data };
+    if (!forceFresh) {
+      const cached = this.chatAdminsCache.get(key);
+      if (cached && Date.now() < cached.expiresAt) {
+        if (cached.data) {
+          return { ok: true, result: cached.data };
+        }
+        return {
+          ok: false,
+          description: cached.description || 'Cached negative response',
+          error_code: cached.error_code || 400
+        };
       }
-      return {
-        ok: false,
-        description: cached.description || 'Cached negative response',
-        error_code: cached.error_code || 400
-      };
     }
 
     const res = await this.call<TelegramChatMember[]>('getChatAdministrators', {
@@ -681,13 +685,13 @@ export class TelegramApi {
     }, { timeoutMs: 4000, maxRetries: 1 });
 
     if (res.ok && res.result) {
-      this.chatAdminsCache.set(key, { data: res.result, expiresAt: Date.now() + 60000 });
+      this.chatAdminsCache.set(key, { data: res.result, expiresAt: Date.now() + 30000 });
     } else {
-      // 30-second negative/error cache to prevent repeated failing requests to Telegram
+      // 10-second negative/error cache to prevent repeated failing requests to Telegram
       this.chatAdminsCache.set(key, {
         description: res.description,
         error_code: res.error_code,
-        expiresAt: Date.now() + 30000
+        expiresAt: Date.now() + 10000
       });
     }
     return res;

@@ -126,6 +126,13 @@ async function runSecurityTestSuite() {
     return { ok: false, error_code: 400, description: 'Bad Request: user not found' };
   };
 
+  telegramApi.getChatAdministrators = async (cId: number | string) => {
+    const admins = Object.values(memberStatusMap).filter(
+      m => m.status === 'creator' || m.status === 'administrator'
+    );
+    return { ok: true, result: admins };
+  };
+
   // Seed custom role for customModId
   db.setCustomRole(chatId, customModId, 'MODERATOR');
 
@@ -408,12 +415,13 @@ async function runSecurityTestSuite() {
     const ctxBefore = makeContext(dynamicUserId, '/status');
     const authBefore = await TelegramMiddleware.requireAdmin(ctxBefore);
 
-    // Promote user dynamically in Telegram status map
+    // Promote user dynamically in Telegram status map & invalidate cache
     memberStatusMap[dynamicUserId] = {
       status: 'administrator',
       can_restrict_members: true,
       user: { id: dynamicUserId, is_bot: false, first_name: 'DynamicUser' }
     };
+    TelegramMiddleware.clearMemberCache(chatId, dynamicUserId);
 
     const ctxAfter = makeContext(dynamicUserId, '/status');
     const authAfter = await TelegramMiddleware.requireAdmin(ctxAfter);
@@ -428,19 +436,25 @@ async function runSecurityTestSuite() {
   {
     const brokenUserId = 99999;
     const oldGetChatMember = telegramApi.getChatMember;
+    const oldGetChatAdmins = telegramApi.getChatAdministrators;
     telegramApi.getChatMember = async () => {
-      throw new Error('Network timeout contacting Telegram API');
+      throw new Error('Network timeout contacting Telegram API getChatMember');
+    };
+    telegramApi.getChatAdministrators = async () => {
+      throw new Error('Network timeout contacting Telegram API getChatAdministrators');
     };
 
     let didThrow = false;
     let authRes: any = null;
     try {
+      TelegramMiddleware.clearMemberCache(chatId, brokenUserId);
       const ctx = makeContext(brokenUserId, '/ping');
       authRes = await TelegramMiddleware.requireAdmin(ctx);
     } catch {
       didThrow = true;
     } finally {
       telegramApi.getChatMember = oldGetChatMember;
+      telegramApi.getChatAdministrators = oldGetChatAdmins;
     }
 
     assert(

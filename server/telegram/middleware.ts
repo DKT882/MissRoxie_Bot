@@ -87,10 +87,12 @@ export class TelegramMiddleware {
   }
 
   private static memberCache: Map<string, { member: TelegramChatMember; timestamp: number }> = new Map();
+  private static adminListCache: Map<number, { admins: TelegramChatMember[]; map: Map<number, TelegramChatMember>; timestamp: number }> = new Map();
 
   public static clearMemberCache(chatId?: number, userId?: number): void {
     if (chatId !== undefined && userId !== undefined) {
       this.memberCache.delete(`${chatId}_${userId}`);
+      this.adminListCache.delete(chatId);
       telegramApi.clearChatMemberCache(chatId, userId);
     } else if (chatId !== undefined) {
       const prefix = `${chatId}_`;
@@ -99,15 +101,63 @@ export class TelegramMiddleware {
           this.memberCache.delete(k);
         }
       }
+      this.adminListCache.delete(chatId);
       telegramApi.clearChatMemberCache(chatId);
     } else {
       this.memberCache.clear();
+      this.adminListCache.clear();
       telegramApi.clearChatMemberCache();
     }
   }
 
   public static isOwner(member: TelegramChatMember | null | undefined): boolean {
     return member?.status === 'creator';
+  }
+
+  /**
+   * Primary Telegram Group Administrator Fetcher.
+   * Caches for 30 seconds to optimize bandwidth while guaranteeing freshness.
+   * Safely handles network and API errors.
+   */
+  public static async getChatAdministrators(chatId: number, forceFresh: boolean = false): Promise<TelegramChatMember[]> {
+    if (typeof chatId !== 'number' || isNaN(chatId) || chatId >= 0) {
+      return [];
+    }
+
+    if (!forceFresh) {
+      const cached = this.adminListCache.get(chatId);
+      if (cached && (Date.now() - cached.timestamp < 30 * 1000)) {
+        return cached.admins;
+      }
+    }
+
+    try {
+      const res = await telegramApi.getChatAdministrators(chatId, forceFresh);
+      if (res.ok && Array.isArray(res.result)) {
+        const adminMap = new Map<number, TelegramChatMember>();
+        for (const admin of res.result) {
+          if (admin.user?.id) {
+            adminMap.set(admin.user.id, admin);
+            this.memberCache.set(`${chatId}_${admin.user.id}`, { member: admin, timestamp: Date.now() });
+          }
+        }
+        this.adminListCache.set(chatId, {
+          admins: res.result,
+          map: adminMap,
+          timestamp: Date.now()
+        });
+        return res.result;
+      }
+    } catch {
+      // Safe fallback on network/API failure
+    }
+
+    const staleCached = this.adminListCache.get(chatId);
+    if (staleCached) {
+      return staleCached.admins;
+    }
+
+    return [];
   }
 
   /**
@@ -158,6 +208,7 @@ export class TelegramMiddleware {
    * STEP 1 — CENTRALIZED ACTOR RESOLUTION
    * Evaluates ONLY the actor who executed the command.
    * Completely separated from target resolution.
+   * Uses getChatAdministrators() as primary ground-truth admin source.
    */
   public static async resolveActor(ctx: CommandContext): Promise<ActorResolution> {
     // 1. Anonymous Administrator - must strictly match current group chatId
@@ -201,12 +252,19 @@ export class TelegramMiddleware {
       };
     }
 
-    // Inspect Telegram ChatMember status
-    let member = await this.getTargetMember(ctx.chatId, actorUserId);
-    if (!member || (member.status !== 'creator' && member.status !== 'administrator')) {
-      const freshMember = await this.getTargetMember(ctx.chatId, actorUserId, true);
-      if (freshMember) member = freshMember;
+    // 2. Primary Admin Check: getChatAdministrators()
+    let member: TelegramChatMember | null | undefined = null;
+    if (this.isGroup(ctx.message)) {
+      await this.getChatAdministrators(ctx.chatId);
+      const cachedAdmins = this.adminListCache.get(ctx.chatId);
+      member = cachedAdmins?.map.get(actorUserId);
     }
+
+    // 3. Fallback / Detailed Member Lookup if not found in live admin list
+    if (!member) {
+      member = await this.getTargetMember(ctx.chatId, actorUserId);
+    }
+
     const customRole = db.getCustomRole(ctx.chatId, actorUserId);
 
     if (member) {
@@ -310,6 +368,8 @@ export class TelegramMiddleware {
       actor.actorStatus === 'creator' ||
       actor.actorRole === 'ADMIN' ||
       actor.actorStatus === 'administrator';
+
+    console.log(`[AUTH] chatId=${ctx.chatId} userId=${actor.actorUserId} role=${actor.actorRole} status=${actor.actorStatus} result=${isAuthorized ? 'AUTHORIZED' : 'DENIED'}`);
 
     if (!isAuthorized) {
       const reason = '❌ This bot is available only to group administrators.';
@@ -432,15 +492,51 @@ export class TelegramMiddleware {
     return true;
   }
 
+  /**
+   * ONE Central Authorization Helper for checking if a user ID is a group admin/owner.
+   * Compares strictly by numeric Telegram user ID.
+   * Uses getChatAdministrators() as primary source with getTargetMember fallback.
+   */
+  public static async isUserGroupAdmin(
+    chatId: number,
+    userId: number,
+    forceFresh: boolean = false
+  ): Promise<boolean> {
+    // 1. Validate chat type (group/supergroup)
+    if (typeof chatId !== 'number' || isNaN(chatId) || chatId >= 0) {
+      return false;
+    }
+
+    // 2. Validate numeric Telegram user ID
+    if (typeof userId !== 'number' || isNaN(userId) || userId <= 0 || userId === 1087968824) {
+      return false;
+    }
+
+    // 3. Primary Source: Obtain current Telegram admin list via getChatAdministrators()
+    const admins = await this.getChatAdministrators(chatId, forceFresh);
+    if (admins && admins.length > 0) {
+      const cachedEntry = this.adminListCache.get(chatId);
+      const adminMember = cachedEntry?.map.get(userId);
+      if (adminMember) {
+        return adminMember.status === 'creator' || adminMember.status === 'administrator';
+      }
+    }
+
+    // 4. Secondary Source / Fallback: getTargetMember
+    const member = await this.getTargetMember(chatId, userId, forceFresh);
+    if (member) {
+      return member.status === 'creator' || member.status === 'administrator';
+    }
+
+    return false;
+  }
+
   public static async isAdmin(chatId: number, userId?: number, message?: TelegramMessage): Promise<boolean> {
     if (message && this.isAnonymousAdminMessage(message, chatId)) {
       return true;
     }
-    if (userId && userId !== 1087968824 && userId !== 0) {
-      const member = await this.getTargetMember(chatId, userId);
-      if (member) {
-        return member.status === 'creator' || member.status === 'administrator';
-      }
+    if (typeof userId === 'number' && userId > 0 && userId !== 1087968824) {
+      return this.isUserGroupAdmin(chatId, userId);
     }
     return false;
   }
