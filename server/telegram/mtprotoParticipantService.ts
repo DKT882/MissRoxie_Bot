@@ -423,22 +423,21 @@ export class MtprotoParticipantService {
     let totalReported = 0;
     let totalFetchedRecords = 0;
     const pageSize = 200; // Telegram maximum limit per request
-    let offset = 0;
-    let hasMore = true;
-    let prevUserCount = 0;
-    let loopIterations = 0;
-    const maxIterations = 500; // Safety guard for 100,000+ members
 
-    try {
-      while (hasMore && loopIterations < maxIterations) {
-        loopIterations++;
+    const fetchWithFilter = async (filter: any, maxPages: number = 500): Promise<void> => {
+      let offset = 0;
+      let hasMore = true;
+      let prevCount = 0;
+      let pages = 0;
 
+      while (hasMore && pages < maxPages) {
+        pages++;
         let res: any;
         try {
           res = await client.invoke(
             new Api.channels.GetParticipants({
               channel: inputPeer,
-              filter: new Api.ChannelParticipantsRecent(),
+              filter,
               offset,
               limit: pageSize,
               hash: BigInt(0) as any
@@ -447,37 +446,14 @@ export class MtprotoParticipantService {
         } catch (apiErr: any) {
           const errMsg = apiErr.message || '';
           if (errMsg.includes('CHAT_ADMIN_REQUIRED')) {
-            return {
-              status: 'FETCH_FAILED',
-              telegramTotal: totalReported,
-              fetchedCount: totalFetchedRecords,
-              uniqueCount: userMap.size,
-              excludedCount: 0,
-              eligibleCount: 0,
-              members: [],
-              errorCode: 'CHAT_ADMIN_REQUIRED',
-              error: '❌ Roxie needs administrator access in this supergroup to enumerate its members.',
-              isComplete: false,
-              diagnosticMessage: 'Telegram CHAT_ADMIN_REQUIRED: Roxie must be an administrator in the supergroup to enumerate members.'
-            };
+            throw new MTProtoPermissionError(
+              '❌ Roxie needs administrator access in this supergroup to enumerate its members.'
+            );
           }
 
           if (errMsg.includes('FLOOD_WAIT_') || apiErr.seconds) {
             const waitSec = apiErr.seconds || parseInt(errMsg.replace(/\D/g, ''), 10) || 30;
-            console.warn(`[MTProto] flood wait: ${waitSec}s`);
-            return {
-              status: 'FETCH_FAILED',
-              telegramTotal: totalReported,
-              fetchedCount: totalFetchedRecords,
-              uniqueCount: userMap.size,
-              excludedCount: 0,
-              eligibleCount: 0,
-              members: [],
-              errorCode: 'FLOOD_WAIT',
-              error: `Telegram rate limit: Flood wait of ${waitSec} seconds required.`,
-              isComplete: false,
-              diagnosticMessage: `Flood wait required: ${waitSec}s`
-            };
+            throw new MTProtoFloodWaitError(waitSec);
           }
 
           if (
@@ -486,34 +462,21 @@ export class MtprotoParticipantService {
             errMsg.includes('USER_NOT_PARTICIPANT') ||
             errMsg.includes('CHANNEL_INVALID')
           ) {
-            return {
-              status: 'FETCH_FAILED',
-              telegramTotal: totalReported,
-              fetchedCount: totalFetchedRecords,
-              uniqueCount: userMap.size,
-              excludedCount: 0,
-              eligibleCount: 0,
-              members: [],
-              errorCode: 'ACCESS_DENIED',
-              error: 'Roxie bot cannot access this Telegram group (ensure Roxie is added as an administrator).',
-              isComplete: false,
-              diagnosticMessage: `Access error: ${errMsg}`
-            };
+            throw new MTProtoGroupResolutionError(
+              'Roxie bot cannot access this Telegram group (ensure Roxie is added as an administrator).'
+            );
           }
 
-          throw apiErr;
+          // Non-fatal for sub-queries: break to allow other filters
+          break;
         }
 
         if (res instanceof Api.channels.ChannelParticipants) {
-          totalReported = res.count || totalReported;
+          totalReported = Math.max(totalReported, res.count || 0);
           const users = res.users || [];
           const participants = res.participants || [];
 
           totalFetchedRecords += participants.length || users.length;
-
-          console.log(
-            `[MTProto] page=${loopIterations} fetched=${users.length} total=${totalReported}`
-          );
 
           for (const u of users) {
             if (u instanceof Api.User && u.id) {
@@ -536,23 +499,87 @@ export class MtprotoParticipantService {
           if (
             (totalReported > 0 && offset >= totalReported) ||
             users.length < pageSize ||
-            userMap.size === prevUserCount
+            userMap.size === prevCount
           ) {
             hasMore = false;
             break;
           }
 
-          prevUserCount = userMap.size;
-        } else if (res instanceof Api.channels.ChannelParticipantsNotModified) {
-          hasMore = false;
-          break;
+          prevCount = userMap.size;
         } else {
-          // Other responses or basic group structures
           hasMore = false;
           break;
         }
       }
+    };
+
+    try {
+      // 1. Primary Full Supergroup Directory Search (q: '')
+      await fetchWithFilter(new Api.ChannelParticipantsSearch({ q: '' }));
+
+      // 2. Query Recent Active Participants
+      await fetchWithFilter(new Api.ChannelParticipantsRecent(), 10);
+
+      // 3. Query Administrators
+      await fetchWithFilter(new Api.ChannelParticipantsAdmins(), 10);
+
+      // 4. If supergroup reports more members than empty search returned, perform prefix sweep
+      if (totalReported > userMap.size && totalReported > 20) {
+        const prefixes = 'abcdefghijklmnopqrstuvwxyz0123456789_'.split('');
+        for (const char of prefixes) {
+          if (userMap.size >= totalReported) break;
+          await fetchWithFilter(new Api.ChannelParticipantsSearch({ q: char }), 5);
+        }
+      }
     } catch (fetchErr: any) {
+      if (fetchErr instanceof MTProtoPermissionError) {
+        return {
+          status: 'FETCH_FAILED',
+          telegramTotal: totalReported,
+          fetchedCount: totalFetchedRecords,
+          uniqueCount: userMap.size,
+          excludedCount: 0,
+          eligibleCount: 0,
+          members: [],
+          errorCode: 'CHAT_ADMIN_REQUIRED',
+          error: fetchErr.message,
+          isComplete: false,
+          diagnosticMessage: 'Telegram CHAT_ADMIN_REQUIRED: Roxie must be an administrator in the supergroup to enumerate members.'
+        };
+      }
+
+      if (fetchErr instanceof MTProtoFloodWaitError) {
+        return {
+          status: 'FETCH_FAILED',
+          telegramTotal: totalReported,
+          fetchedCount: totalFetchedRecords,
+          uniqueCount: userMap.size,
+          excludedCount: 0,
+          eligibleCount: 0,
+          members: [],
+          errorCode: 'FLOOD_WAIT',
+          error: fetchErr.message,
+          isComplete: false,
+          diagnosticMessage: `Flood wait required: ${fetchErr.seconds}s`
+        };
+      }
+
+      if (fetchErr instanceof MTProtoGroupResolutionError) {
+        return {
+          status: 'FETCH_FAILED',
+          telegramTotal: totalReported,
+          fetchedCount: totalFetchedRecords,
+          uniqueCount: userMap.size,
+          excludedCount: 0,
+          eligibleCount: 0,
+          members: [],
+          errorCode: 'ACCESS_DENIED',
+          error: fetchErr.message,
+          isComplete: false,
+          diagnosticMessage: fetchErr.message
+        };
+      }
+
       return {
         status: 'FETCH_FAILED',
         telegramTotal: totalReported,

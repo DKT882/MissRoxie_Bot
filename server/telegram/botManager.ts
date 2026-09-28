@@ -13,6 +13,7 @@ import { ReactionService } from './reactionService.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
 import { logDebug } from '../observability/logger.js';
+import { mtprotoParticipantService } from './mtprotoParticipantService.js';
 
 function escapeHtml(text: string): string {
   return text
@@ -227,6 +228,13 @@ export class TelegramBotManager {
 
       // Start autonomous proactive auto response & auto sticker service
       autoEngineService.start(this.botUser?.id);
+
+      // Pre-warm MTProto client connection in background if configured
+      if (mtprotoParticipantService.isConfigured()) {
+        mtprotoParticipantService.getClient().catch((err) => {
+          console.warn('[MTProto] Background initialization warning:', err.message);
+        });
+      }
     } catch (err: any) {
       this.pollingError = err.message;
       this.isRunning = false;

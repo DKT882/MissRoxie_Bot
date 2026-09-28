@@ -519,6 +519,94 @@ async function runTests() {
   const noneHaveNewlines = resEmptyCaption.chunks.every(chunk => !chunk.includes('\n\n') && chunk.startsWith('<a href='));
   assert(noneHaveNewlines, 'Test 38: Chunks without custom text contain only emoji mentions without leading newlines');
 
+  // Test 39: 20 ordinary members + 3 administrators + 1 bot enumeration and batching
+  const ordinaryUsers = Array.from({ length: 20 }, (_, i) =>
+    createMember(1000 + i, `OrdinaryUser${i}`, `ordinary_${i}`)
+  );
+  const adminUsers = [
+    createMember(2001, 'OwnerAdmin', 'owner_admin'),
+    createMember(2002, 'ModAdmin1', 'mod_admin_1'),
+    createMember(2003, 'ModAdmin2', 'mod_admin_2')
+  ];
+  const botUserItem = {
+    userId: 99999,
+    firstName: 'MissRoxieBot',
+    username: 'MissRoxie_Bot',
+    is_bot: true,
+    lastSeen: '2026-09-28T00:00:00.000Z'
+  };
+
+  const mixedPool = [...ordinaryUsers, ...adminUsers, botUserItem as any];
+  const mixedRes = CommandHandler.buildAllMentionsChunks(mixedPool, 'Notice', 99999, 10);
+  assert(
+    mixedRes.mentions.length === 23,
+    'Test 39: 20 ordinary members + 3 admins = 23 mentions (bot correctly excluded)'
+  );
+  assert(
+    mixedRes.chunks.length === 3,
+    'Test 39: 23 members produce exactly 3 batches (10, 10, 3)'
+  );
+  assert(
+    mixedRes.mentions.some(m => m.includes('tg://user?id=1000')) &&
+    mixedRes.mentions.some(m => m.includes('tg://user?id=2001')),
+    'Test 39: Both ordinary members and administrators are present in mention output'
+  );
+
+  // Test 40: 50 ordinary members + 5 admins = 55 members -> 6 batches
+  const users55 = [
+    ...Array.from({ length: 50 }, (_, i) => createMember(3000 + i, `OrdUser${i}`, `ord_${i}`)),
+    ...Array.from({ length: 5 }, (_, i) => createMember(4000 + i, `AdminUser${i}`, `admin_${i}`))
+  ];
+  const res55 = MtprotoParticipantService.buildEmojiMentionBatches(users55, 'Hype', 10);
+  assert(res55.mentions.length === 55, 'Test 40: 55 total members (50 ordinary + 5 admin) produce 55 mentions');
+  assert(res55.chunks.length === 6, 'Test 40: 55 members produce exactly 6 batches');
+
+  // Test 41: Verification that ChannelParticipantsSearch filter collects ordinary members
+  const mockSearchClient: any = {
+    _entityCache: {
+      get: () => new Api.InputPeerChannel({
+        channelId: bigInt('4494262619') as any,
+        accessHash: bigInt('987654321012345678') as any
+      })
+    },
+    invoke: async (req: any) => {
+      if (req instanceof Api.channels.GetParticipants) {
+        // Return 20 ordinary members + 3 admins
+        const users = [
+          ...Array.from({ length: 20 }, (_, i) => new Api.User({
+            id: bigInt(5000 + i) as any,
+            firstName: `Ordinary${i}`,
+            username: `ord_${i}`,
+            bot: false
+          })),
+          new Api.User({ id: bigInt(6001) as any, firstName: 'AdminA', username: 'admin_a', bot: false }),
+          new Api.User({ id: bigInt(6002) as any, firstName: 'AdminB', username: 'admin_b', bot: false }),
+          new Api.User({ id: bigInt(6003) as any, firstName: 'AdminC', username: 'admin_c', bot: false })
+        ];
+        return new Api.channels.ChannelParticipants({
+          count: 23,
+          participants: users.map(u => new Api.ChannelParticipant({ userId: u.id, date: Math.floor(Date.now() / 1000) })),
+          chats: [],
+          users
+        });
+      }
+      throw new Error('Unknown request');
+    }
+  };
+
+  const serviceInstance = new MtprotoParticipantService();
+  serviceInstance.isConfigured = () => true;
+  (serviceInstance as any).client = mockSearchClient;
+  (serviceInstance as any).isConnected = true;
+
+  const mockFetchRes = await serviceInstance.fetchGroupParticipants(-1004494262619, 99999);
+  assert(mockFetchRes.status === 'FULL_FETCH', 'Test 41: Search fetch returns status FULL_FETCH');
+  assert(mockFetchRes.eligibleCount === 23, 'Test 41: Search fetch enumerates all 23 members (20 ordinary + 3 admins)');
+  assert(
+    mockFetchRes.members.some(m => m.userId === 5000) && mockFetchRes.members.some(m => m.userId === 6001),
+    'Test 41: Both ordinary members (id: 5000) and admins (id: 6001) are included in fetch result'
+  );
+
   console.log(`\n====================================================`);
   console.log(`🎉 MTProto Service Tests Completed: ${passed} Passed, ${failed} Failed`);
   console.log(`====================================================`);
