@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoEngineConfig, AutoEngineMode, AutoEnginePreset, AutoEngineChannelConfig, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig } from '../telegram/types.js';
+import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoEngineConfig, AutoEngineMode, AutoEnginePreset, AutoEngineChannelConfig, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig, AUTO_ENGINE_PRESETS } from '../telegram/types.js';
 import { getDefaultStickersStats } from '../telegram/defaultStickers.js';
 import { logDebug } from '../observability/logger.js';
 import { mongoManager } from './mongodb.js';
@@ -242,6 +242,11 @@ export class StorageManager {
   private currentBotId: number | null = null;
   private currentBotUsername: string | null = null;
   private currentBotFirstName: string | null = null;
+  private bypassMinimumIntervalForTests: boolean = false;
+
+  public setBypassMinimumIntervalForTests(bypass: boolean): void {
+    this.bypassMinimumIntervalForTests = bypass;
+  }
 
   private settingsChangeListeners: Array<(chatId: number, settings: GroupSettings, botId: number | null) => void> = [];
   private groupRemovalListeners: Array<(chatId: number, botId: number | null) => void> = [];
@@ -2424,6 +2429,14 @@ export class StorageManager {
         else if (arEnabled && !asEnabled) initialMode = 'messages_only';
         else if (!arEnabled && asEnabled) initialMode = 'stickers_only';
 
+        const arMin = s.autoResponse?.minSeconds;
+        const arMax = s.autoResponse?.maxSeconds;
+        const arIsCustom = (arMin !== undefined && arMin !== 480) || (arMax !== undefined && arMax !== 900);
+        const asMin = s.autoSticker?.minSeconds;
+        const asMax = s.autoSticker?.maxSeconds;
+        const asIsCustom = (asMin !== undefined && asMin !== 600) || (asMax !== undefined && asMax !== 1200);
+
+        const minFloor = this.bypassMinimumIntervalForTests ? 1 : 120;
         s.autoEngine = {
           enabled: initialMode !== 'off',
           mode: initialMode,
@@ -2433,17 +2446,17 @@ export class StorageManager {
           requiredStickerGap: s.requiredStickerGap,
           responseTypeWeights: s.responseTypeWeights,
           messages: {
-            preset: 'normal',
-            minSeconds: Math.max(120, s.autoResponse?.minSeconds || 480),
-            maxSeconds: Math.max(120, s.autoResponse?.maxSeconds || 900),
-            cooldownSeconds: Math.max(120, s.autoResponse?.cooldownSeconds || 480),
+            preset: arIsCustom ? 'custom' : 'normal',
+            minSeconds: Math.max(minFloor, arMin || 480),
+            maxSeconds: Math.max(Math.max(minFloor, arMin || 480), arMax || 900),
+            cooldownSeconds: Math.max(minFloor, s.autoResponse?.cooldownSeconds || 480),
             randomize: true
           },
           stickers: {
-            preset: 'normal',
-            minSeconds: Math.max(120, s.autoSticker?.minSeconds || 600),
-            maxSeconds: Math.max(120, s.autoSticker?.maxSeconds || 1200),
-            cooldownSeconds: Math.max(120, s.autoSticker?.cooldownSeconds || 600),
+            preset: asIsCustom ? 'custom' : 'normal',
+            minSeconds: Math.max(minFloor, asMin || 600),
+            maxSeconds: Math.max(Math.max(minFloor, asMin || 600), asMax || 1200),
+            cooldownSeconds: Math.max(minFloor, s.autoSticker?.cooldownSeconds || 600),
             randomize: true
           }
         };
@@ -2454,6 +2467,26 @@ export class StorageManager {
         if (s.autoEngine.stickerActivityMax === undefined) s.autoEngine.stickerActivityMax = s.stickerActivityMax;
         if (s.autoEngine.requiredStickerGap === undefined) s.autoEngine.requiredStickerGap = s.requiredStickerGap;
         if (s.autoEngine.responseTypeWeights === undefined) s.autoEngine.responseTypeWeights = s.responseTypeWeights;
+
+        const minFloor = this.bypassMinimumIntervalForTests ? 1 : 120;
+        for (const ch of ['messages', 'stickers'] as const) {
+          const cfg = s.autoEngine[ch];
+          if (cfg) {
+            if (cfg.minSeconds !== undefined) cfg.minSeconds = Math.max(minFloor, cfg.minSeconds);
+            if (cfg.maxSeconds !== undefined) cfg.maxSeconds = Math.max(cfg.minSeconds ?? minFloor, cfg.maxSeconds);
+            if (cfg.cooldownSeconds !== undefined) cfg.cooldownSeconds = Math.max(minFloor, cfg.cooldownSeconds);
+
+            if (cfg.preset && cfg.preset !== 'custom' && AUTO_ENGINE_PRESETS[cfg.preset]) {
+              const presetDef = AUTO_ENGINE_PRESETS[cfg.preset][ch];
+              const isCustomTiming = (cfg.minSeconds !== undefined && cfg.minSeconds !== presetDef.minSeconds) ||
+                                     (cfg.maxSeconds !== undefined && cfg.maxSeconds !== presetDef.maxSeconds);
+              if (isCustomTiming) {
+                cfg.preset = 'custom';
+                needsSave = true;
+              }
+            }
+          }
+        }
       }
       if (!s.autoResponse) {
         s.autoResponse = {
@@ -2697,30 +2730,78 @@ export class StorageManager {
       return current; // Avoid redundant disk writes and memory object re-allocation
     }
 
+    const normalizeChannelConfig = (
+      channel: 'messages' | 'stickers',
+      currentCh?: AutoEngineChannelConfig,
+      incomingCh?: Partial<AutoEngineChannelConfig>
+    ): AutoEngineChannelConfig => {
+      const minFloor = this.bypassMinimumIntervalForTests ? 1 : 120;
+      const defaultPreset: AutoEnginePreset = 'normal';
+      const basePreset = incomingCh?.preset ?? currentCh?.preset ?? defaultPreset;
+
+      const rawMin = incomingCh?.minSeconds ?? currentCh?.minSeconds;
+      const rawMax = incomingCh?.maxSeconds ?? currentCh?.maxSeconds;
+      const rawCd = incomingCh?.cooldownSeconds ?? currentCh?.cooldownSeconds;
+
+      if (basePreset === 'custom' || incomingCh?.preset === 'custom') {
+        const minSec = Math.max(minFloor, rawMin ?? (this.bypassMinimumIntervalForTests ? 30 : 120));
+        const maxSec = Math.max(minSec, rawMax ?? (channel === 'messages' ? (this.bypassMinimumIntervalForTests ? 60 : 300) : (this.bypassMinimumIntervalForTests ? 60 : 300)));
+        const cdSec = Math.max(minFloor, rawCd ?? minSec);
+        return {
+          preset: 'custom',
+          minSeconds: minSec,
+          maxSeconds: maxSec,
+          cooldownSeconds: cdSec,
+          randomize: incomingCh?.randomize ?? currentCh?.randomize ?? true
+        };
+      }
+
+      const presetDef = AUTO_ENGINE_PRESETS[basePreset]?.[channel] || AUTO_ENGINE_PRESETS.normal[channel];
+
+      const hasCustomMinMax = (incomingCh?.minSeconds !== undefined && incomingCh.minSeconds !== presetDef.minSeconds) ||
+                              (incomingCh?.maxSeconds !== undefined && incomingCh.maxSeconds !== presetDef.maxSeconds);
+
+      if (hasCustomMinMax && !incomingCh?.preset) {
+        const minSec = Math.max(minFloor, rawMin ?? presetDef.minSeconds);
+        const maxSec = Math.max(minSec, rawMax ?? presetDef.maxSeconds);
+        const cdSec = Math.max(minFloor, rawCd ?? presetDef.cooldownSeconds);
+        return {
+          preset: 'custom',
+          minSeconds: minSec,
+          maxSeconds: maxSec,
+          cooldownSeconds: cdSec,
+          randomize: incomingCh?.randomize ?? currentCh?.randomize ?? true
+        };
+      }
+
+      return {
+        preset: basePreset,
+        minSeconds: Math.max(minFloor, incomingCh?.minSeconds ?? presetDef.minSeconds),
+        maxSeconds: Math.max(Math.max(minFloor, incomingCh?.minSeconds ?? presetDef.minSeconds), incomingCh?.maxSeconds ?? presetDef.maxSeconds),
+        cooldownSeconds: Math.max(minFloor, incomingCh?.cooldownSeconds ?? presetDef.cooldownSeconds),
+        randomize: incomingCh?.randomize ?? currentCh?.randomize ?? true
+      };
+    };
+
+    const baseEngine = current.autoEngine || {
+      enabled: true,
+      mode: 'messages_and_stickers',
+      messages: { preset: 'normal', minSeconds: 480, maxSeconds: 900, cooldownSeconds: 480, randomize: true },
+      stickers: { preset: 'normal', minSeconds: 600, maxSeconds: 1200, cooldownSeconds: 600, randomize: true }
+    };
+
     let mergedAutoEngine: AutoEngineConfig = updates.autoEngine
       ? {
-          ...(current.autoEngine || {
-            enabled: true,
-            mode: 'messages_and_stickers',
-            messages: { preset: 'normal', minSeconds: 480, maxSeconds: 900, cooldownSeconds: 480, randomize: true },
-            stickers: { preset: 'normal', minSeconds: 600, maxSeconds: 1200, cooldownSeconds: 600, randomize: true }
-          }),
+          ...baseEngine,
           ...updates.autoEngine,
-          messages: {
-            ...(current.autoEngine?.messages || { preset: 'normal', minSeconds: 480, maxSeconds: 900, cooldownSeconds: 480, randomize: true }),
-            ...(updates.autoEngine.messages || {})
-          },
-          stickers: {
-            ...(current.autoEngine?.stickers || { preset: 'normal', minSeconds: 600, maxSeconds: 1200, cooldownSeconds: 600, randomize: true }),
-            ...(updates.autoEngine.stickers || {})
-          }
+          messages: normalizeChannelConfig('messages', baseEngine.messages, updates.autoEngine.messages),
+          stickers: normalizeChannelConfig('stickers', baseEngine.stickers, updates.autoEngine.stickers)
         }
-      : (current.autoEngine || {
-          enabled: true,
-          mode: 'messages_and_stickers',
-          messages: { preset: 'normal', minSeconds: 480, maxSeconds: 900, cooldownSeconds: 480, randomize: true },
-          stickers: { preset: 'normal', minSeconds: 600, maxSeconds: 1200, cooldownSeconds: 600, randomize: true }
-        });
+      : {
+          ...baseEngine,
+          messages: normalizeChannelConfig('messages', baseEngine.messages),
+          stickers: normalizeChannelConfig('stickers', baseEngine.stickers)
+        };
 
     let mergedAutoResponse = updates.autoResponse
       ? { ...(current.autoResponse || {}), ...updates.autoResponse }
@@ -2744,20 +2825,20 @@ export class StorageManager {
         mergedAutoResponse.enabled = isEnabled && (mode === 'messages_only' || mode === 'messages_and_stickers');
         mergedAutoResponse.mode = mergedAutoResponse.enabled ? 'random' : 'disabled';
         if (mergedAutoEngine.messages) {
-          if (mergedAutoEngine.messages.minSeconds !== undefined) mergedAutoResponse.minSeconds = mergedAutoEngine.messages.minSeconds;
-          if (mergedAutoEngine.messages.maxSeconds !== undefined) mergedAutoResponse.maxSeconds = mergedAutoEngine.messages.maxSeconds;
-          if (mergedAutoEngine.messages.cooldownSeconds !== undefined) mergedAutoResponse.cooldownSeconds = mergedAutoEngine.messages.cooldownSeconds;
-          if (mergedAutoEngine.messages.randomize !== undefined) mergedAutoResponse.randomize = mergedAutoEngine.messages.randomize;
+          mergedAutoResponse.minSeconds = mergedAutoEngine.messages.minSeconds;
+          mergedAutoResponse.maxSeconds = mergedAutoEngine.messages.maxSeconds;
+          mergedAutoResponse.cooldownSeconds = mergedAutoEngine.messages.cooldownSeconds;
+          mergedAutoResponse.randomize = mergedAutoEngine.messages.randomize;
         }
       }
       if (mergedAutoSticker) {
         mergedAutoSticker.enabled = isEnabled && (mode === 'stickers_only' || mode === 'messages_and_stickers');
         mergedAutoSticker.mode = mergedAutoSticker.enabled ? 'cooldown' : 'disabled';
         if (mergedAutoEngine.stickers) {
-          if (mergedAutoEngine.stickers.minSeconds !== undefined) mergedAutoSticker.minSeconds = mergedAutoEngine.stickers.minSeconds;
-          if (mergedAutoEngine.stickers.maxSeconds !== undefined) mergedAutoSticker.maxSeconds = mergedAutoEngine.stickers.maxSeconds;
-          if (mergedAutoEngine.stickers.cooldownSeconds !== undefined) mergedAutoSticker.cooldownSeconds = mergedAutoEngine.stickers.cooldownSeconds;
-          if (mergedAutoEngine.stickers.randomize !== undefined) mergedAutoSticker.randomize = mergedAutoEngine.stickers.randomize;
+          mergedAutoSticker.minSeconds = mergedAutoEngine.stickers.minSeconds;
+          mergedAutoSticker.maxSeconds = mergedAutoEngine.stickers.maxSeconds;
+          mergedAutoSticker.cooldownSeconds = mergedAutoEngine.stickers.cooldownSeconds;
+          mergedAutoSticker.randomize = mergedAutoEngine.stickers.randomize;
         }
       }
     } else if (updates.autoResponse || updates.autoSticker) {
@@ -2769,21 +2850,28 @@ export class StorageManager {
       else if (!arEnabled && asEnabled) derivedMode = 'stickers_only';
       mergedAutoEngine.mode = derivedMode;
       mergedAutoEngine.enabled = derivedMode !== 'off';
+      const minFloor = this.bypassMinimumIntervalForTests ? 1 : 120;
       if (updates.autoResponse) {
+        const minS = Math.max(minFloor, updates.autoResponse.minSeconds ?? mergedAutoEngine.messages?.minSeconds ?? (this.bypassMinimumIntervalForTests ? 30 : 120));
+        const maxS = Math.max(minS, updates.autoResponse.maxSeconds ?? mergedAutoEngine.messages?.maxSeconds ?? (this.bypassMinimumIntervalForTests ? 60 : 300));
+        const cdS = Math.max(minFloor, updates.autoResponse.cooldownSeconds ?? mergedAutoEngine.messages?.cooldownSeconds ?? minS);
         mergedAutoEngine.messages = {
           preset: 'custom',
-          minSeconds: updates.autoResponse.minSeconds ?? mergedAutoEngine.messages?.minSeconds ?? 120,
-          maxSeconds: updates.autoResponse.maxSeconds ?? mergedAutoEngine.messages?.maxSeconds ?? 300,
-          cooldownSeconds: updates.autoResponse.cooldownSeconds ?? mergedAutoEngine.messages?.cooldownSeconds ?? 120,
+          minSeconds: minS,
+          maxSeconds: maxS,
+          cooldownSeconds: cdS,
           randomize: updates.autoResponse.randomize ?? (updates.autoResponse.mode === 'random') ?? mergedAutoEngine.messages?.randomize ?? true
         };
       }
       if (updates.autoSticker) {
+        const minS = Math.max(minFloor, updates.autoSticker.minSeconds ?? mergedAutoEngine.stickers?.minSeconds ?? (this.bypassMinimumIntervalForTests ? 30 : 120));
+        const maxS = Math.max(minS, updates.autoSticker.maxSeconds ?? mergedAutoEngine.stickers?.maxSeconds ?? (this.bypassMinimumIntervalForTests ? 60 : 300));
+        const cdS = Math.max(minFloor, updates.autoSticker.cooldownSeconds ?? mergedAutoEngine.stickers?.cooldownSeconds ?? minS);
         mergedAutoEngine.stickers = {
           preset: 'custom',
-          minSeconds: updates.autoSticker.minSeconds ?? mergedAutoEngine.stickers?.minSeconds ?? 120,
-          maxSeconds: updates.autoSticker.maxSeconds ?? mergedAutoEngine.stickers?.maxSeconds ?? 300,
-          cooldownSeconds: updates.autoSticker.cooldownSeconds ?? mergedAutoEngine.stickers?.cooldownSeconds ?? 120,
+          minSeconds: minS,
+          maxSeconds: maxS,
+          cooldownSeconds: cdS,
           randomize: updates.autoSticker.randomize ?? (updates.autoSticker.mode === 'random') ?? mergedAutoEngine.stickers?.randomize ?? true
         };
       }
@@ -3376,6 +3464,7 @@ export class StorageManager {
       }));
 
     return {
+      version: '3.0',
       backupVersion: '1.0',
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
@@ -5935,8 +6024,11 @@ export class StorageManager {
     if (numId > 0) return { allowed: true };
 
     const settings = this.getGroupSettings(numId);
-    const cfg = settings.autoSticker;
-    if (!cfg || !cfg.enabled || cfg.mode === 'disabled') {
+    const engineMode = settings.autoEngine?.mode;
+    const isEngineStickers = Boolean(settings.autoEngine?.enabled && (engineMode === 'stickers_only' || engineMode === 'messages_and_stickers'));
+    const isLegacyStickers = Boolean(settings.autoSticker?.enabled && settings.autoSticker.mode !== 'disabled');
+
+    if (!isEngineStickers && !isLegacyStickers) {
       return { allowed: false, reason: 'disabled' };
     }
 

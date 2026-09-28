@@ -8,39 +8,13 @@ import {
   AutoEnginePreset,
   AutoEngineChannelConfig,
   AutoResponseConfig,
-  AutoStickerConfig
+  AutoStickerConfig,
+  AUTO_ENGINE_PRESETS
 } from './types.js';
 
-export const MIN_AUTO_ENGINE_INTERVAL_SECONDS = 120; // 2 minutes hard server-side limit
+export { AUTO_ENGINE_PRESETS };
 
-export const AUTO_ENGINE_PRESETS: Record<
-  AutoEnginePreset,
-  {
-    messages: { minSeconds: number; maxSeconds: number; cooldownSeconds: number };
-    stickers: { minSeconds: number; maxSeconds: number; cooldownSeconds: number };
-  }
-> = {
-  very_low: {
-    messages: { minSeconds: 1800, maxSeconds: 3600, cooldownSeconds: 1800 },
-    stickers: { minSeconds: 1800, maxSeconds: 3600, cooldownSeconds: 1800 }
-  },
-  low: {
-    messages: { minSeconds: 900, maxSeconds: 1800, cooldownSeconds: 900 },
-    stickers: { minSeconds: 1200, maxSeconds: 2400, cooldownSeconds: 1200 }
-  },
-  normal: {
-    messages: { minSeconds: 480, maxSeconds: 900, cooldownSeconds: 480 },
-    stickers: { minSeconds: 600, maxSeconds: 1200, cooldownSeconds: 600 }
-  },
-  high: {
-    messages: { minSeconds: 180, maxSeconds: 480, cooldownSeconds: 180 },
-    stickers: { minSeconds: 300, maxSeconds: 600, cooldownSeconds: 300 }
-  },
-  custom: {
-    messages: { minSeconds: 120, maxSeconds: 300, cooldownSeconds: 120 },
-    stickers: { minSeconds: 120, maxSeconds: 300, cooldownSeconds: 120 }
-  }
-};
+export const MIN_AUTO_ENGINE_INTERVAL_SECONDS = 120; // 2 minutes hard server-side limit
 
 export interface ScheduledAutoJob {
   key: string;
@@ -175,10 +149,17 @@ export class AutoEngineService {
     if (!config) return Math.max(minFloor, defaultCooldown) * 1000;
 
     // Check if config has unified preset
-    if ('preset' in config && config.preset) {
+    if ('preset' in config && config.preset && config.preset !== 'custom') {
       const presetDef = AUTO_ENGINE_PRESETS[config.preset] || AUTO_ENGINE_PRESETS.normal;
       const channelDef = presetDef[channel];
-      if (config.preset !== 'custom') {
+
+      // If legacy state has explicit custom min/max that differs from the predefined preset, honor the custom bounds
+      const rawMin = (config as any).minSeconds;
+      const rawMax = (config as any).maxSeconds;
+      const hasCustomOverride = (rawMin !== undefined && rawMin !== channelDef.minSeconds) ||
+                                (rawMax !== undefined && rawMax !== channelDef.maxSeconds);
+
+      if (!hasCustomOverride) {
         const safeMin = Math.max(minFloor, channelDef.minSeconds);
         const safeMax = Math.max(safeMin, channelDef.maxSeconds);
         const seconds = Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
@@ -187,7 +168,9 @@ export class AutoEngineService {
     }
 
     // Custom or legacy config calculation
-    const isRandom = ('randomize' in config ? config.randomize : false) || ('mode' in config && (config.mode === 'random' || config.randomize));
+    const isRandom = ('randomize' in config && config.randomize !== undefined)
+      ? Boolean(config.randomize)
+      : ('mode' in config ? (config.mode === 'random' || Boolean((config as any).randomize)) : true);
     const rawMin = Number((config as any).minSeconds ?? defaultMin);
     const rawMax = Number((config as any).maxSeconds ?? defaultMax);
     const safeMin = Math.max(minFloor, Math.min(86400, isNaN(rawMin) ? defaultMin : rawMin));
@@ -665,8 +648,10 @@ export class AutoEngineService {
     if (hooks.now) this.customNow = hooks.now;
     if (hooks.bypassMinimumIntervalForTests !== undefined) {
       this.bypassMinimumIntervalForTests = hooks.bypassMinimumIntervalForTests;
+      db.setBypassMinimumIntervalForTests(hooks.bypassMinimumIntervalForTests);
     } else if (hooks.setTimeout) {
       this.bypassMinimumIntervalForTests = true;
+      db.setBypassMinimumIntervalForTests(true);
     }
   }
 
@@ -675,6 +660,7 @@ export class AutoEngineService {
     this.customClearTimeout = clearTimeout;
     this.customNow = () => Date.now();
     this.bypassMinimumIntervalForTests = false;
+    db.setBypassMinimumIntervalForTests(false);
     AutoEngineService.proactiveTextEnabledOverride = null;
   }
 }

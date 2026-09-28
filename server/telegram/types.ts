@@ -396,8 +396,37 @@ export interface GroupSettings {
 export type AutoEngineMode = 'off' | 'messages_only' | 'stickers_only' | 'messages_and_stickers';
 export type AutoEnginePreset = 'very_low' | 'low' | 'normal' | 'high' | 'custom';
 
+export const AUTO_ENGINE_PRESETS: Record<
+  AutoEnginePreset,
+  {
+    messages: { minSeconds: number; maxSeconds: number; cooldownSeconds: number };
+    stickers: { minSeconds: number; maxSeconds: number; cooldownSeconds: number };
+  }
+> = {
+  very_low: {
+    messages: { minSeconds: 1800, maxSeconds: 3600, cooldownSeconds: 1800 },
+    stickers: { minSeconds: 1800, maxSeconds: 3600, cooldownSeconds: 1800 }
+  },
+  low: {
+    messages: { minSeconds: 900, maxSeconds: 1800, cooldownSeconds: 900 },
+    stickers: { minSeconds: 1200, maxSeconds: 2400, cooldownSeconds: 1200 }
+  },
+  normal: {
+    messages: { minSeconds: 480, maxSeconds: 900, cooldownSeconds: 480 },
+    stickers: { minSeconds: 600, maxSeconds: 1200, cooldownSeconds: 600 }
+  },
+  high: {
+    messages: { minSeconds: 180, maxSeconds: 480, cooldownSeconds: 180 },
+    stickers: { minSeconds: 300, maxSeconds: 600, cooldownSeconds: 300 }
+  },
+  custom: {
+    messages: { minSeconds: 120, maxSeconds: 300, cooldownSeconds: 120 },
+    stickers: { minSeconds: 120, maxSeconds: 300, cooldownSeconds: 120 }
+  }
+};
+
 export interface AutoEngineChannelConfig {
-  preset: AutoEnginePreset;
+  preset?: AutoEnginePreset;
   minSeconds?: number; // Server-side enforced: >= 120s
   maxSeconds?: number;
   cooldownSeconds?: number;
