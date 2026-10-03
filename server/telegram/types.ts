@@ -540,6 +540,31 @@ export interface ScheduledPostButton {
   url: string;
 }
 
+export type PostButton = ScheduledPostButton;
+
+export type PostContentType = 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation';
+
+export interface PostPayload {
+  contentType: PostContentType;
+  text?: string;
+  mediaFileId?: string;
+  buttons?: ScheduledPostButton[][];
+  pinAfterSend?: boolean;
+  replyToLatest?: boolean;
+  replyToMessageId?: number;
+  autoDeletePrevious?: boolean;
+  protectContent?: boolean;
+}
+
+export interface SendPostResult {
+  ok: boolean;
+  messageId?: number;
+  chatId: number;
+  error?: string;
+  pinSuccess?: boolean;
+  result?: any;
+}
+
 export interface ScheduledMessage {
   id: string;
   chatId: number;
