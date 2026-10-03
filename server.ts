@@ -15,6 +15,8 @@ import { authManager } from './server/auth/authManager.js';
 import { runDummyDataCleanup } from './server/operations/cleanupDummyData.js';
 import { mongoManager } from './server/db/mongodb.js';
 import { MongoStorageService } from './server/db/mongoStorage.js';
+import { PostSender, sanitizeInlineButtons } from './server/telegram/postSender.js';
+import { PostPayload, PostContentType } from './server/telegram/types.js';
 
 dotenv.config();
 
@@ -1645,6 +1647,203 @@ export async function startServer() {
       if (broadcastId) {
         activeBroadcastLocks.delete(broadcastId);
       }
+    }
+  });
+
+  // --- Dashboard Rich Post Composer APIs (Phase 4) ---
+  app.post('/api/dashboard/posts/send', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const { chatId, payload } = req.body;
+      const numChatId = Number(chatId);
+      if (!numChatId || isNaN(numChatId)) {
+        return res.status(400).json({ error: 'Valid target chatId is required.' });
+      }
+
+      // Blocked dummy legacy destinations
+      if (numChatId === -100111222333 || String(chatId).includes('100111222333')) {
+        return res.status(400).json({ error: 'Target chatId is a blocked legacy test destination.' });
+      }
+
+      // Verify chat existence in database
+      const isGroupConnected = db.getConnectedGroups().some(g => g.chatId === numChatId || Number(g.chatId) === numChatId);
+      if (!isGroupConnected) {
+        return res.status(404).json({ error: 'Target group not found in database.' });
+      }
+      const groupSettings = db.getGroupSettings(numChatId);
+
+      if (!payload || typeof payload !== 'object') {
+        return res.status(400).json({ error: 'Post payload is required.' });
+      }
+
+      const contentType: PostContentType = payload.contentType || 'text';
+      const validTypes: PostContentType[] = ['text', 'photo', 'video', 'animation', 'document'];
+      if (!validTypes.includes(contentType)) {
+        return res.status(400).json({ error: `Unsupported content type: ${contentType}` });
+      }
+
+      const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+      const maxTextLen = contentType === 'text' ? 4096 : 1024;
+      if (text.length > maxTextLen) {
+        return res.status(400).json({ error: `Text/caption exceeds maximum length (${text.length}/${maxTextLen} characters).` });
+      }
+
+      if (contentType === 'text' && !text) {
+        return res.status(400).json({ error: 'Message text cannot be empty for text posts.' });
+      }
+
+      const mediaFileId = typeof payload.mediaFileId === 'string' ? payload.mediaFileId.trim() : undefined;
+      if (contentType !== 'text' && !mediaFileId) {
+        return res.status(400).json({ error: `Media reference (file_id or URL) is required for ${contentType} posts.` });
+      }
+
+      const sanitizedButtons = sanitizeInlineButtons(payload.buttons);
+
+      const postPayload: PostPayload = {
+        contentType,
+        text: text || undefined,
+        mediaFileId: mediaFileId || undefined,
+        buttons: sanitizedButtons,
+        pinAfterSend: Boolean(payload.pinAfterSend),
+        replyToLatest: Boolean(payload.replyToLatest),
+        replyToMessageId: payload.replyToMessageId ? Number(payload.replyToMessageId) : undefined,
+        protectContent: Boolean(payload.protectContent)
+      };
+
+      const sendResult = await PostSender.send(numChatId, postPayload);
+
+      if (sendResult.ok) {
+        db.addLog({
+          chatId: numChatId,
+          chatTitle: groupSettings.chatTitle || `Chat ${numChatId}`,
+          adminUsername: auth.operatorUsername,
+          action: 'broadcast',
+          details: `Sent rich ${contentType.toUpperCase()} post via Dashboard Composer (Telegram msg #${sendResult.messageId || 'unknown'})`
+        });
+
+        // Add to conversation memory if available
+        if (sendResult.messageId) {
+          db.addGroupConversationEntry(numChatId, {
+            role: 'assistant',
+            name: 'Roxie',
+            displayName: 'Roxie (Dashboard Composer)',
+            username: 'MissRoxie_Bot',
+            content: text || `[${contentType.toUpperCase()}]`,
+            timestamp: Date.now(),
+            messageId: sendResult.messageId,
+            chatId: numChatId,
+            mediaType: contentType,
+            mediaFileId: mediaFileId,
+            direction: 'outgoing',
+            source: 'dashboard',
+            sender: 'Roxie'
+          });
+        }
+
+        return res.json({ success: true, result: sendResult });
+      } else {
+        return res.status(502).json({ success: false, error: sendResult.error || 'Telegram delivery failed', result: sendResult });
+      }
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Internal server error in dashboard post composer' });
+    }
+  });
+
+  app.post('/api/dashboard/posts/schedule', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const { chatId, payload, nextRun, timezone, name } = req.body;
+      const numChatId = Number(chatId);
+      if (!numChatId || isNaN(numChatId)) {
+        return res.status(400).json({ error: 'Valid target chatId is required.' });
+      }
+
+      if (numChatId === -100111222333 || String(chatId).includes('100111222333')) {
+        return res.status(400).json({ error: 'Target chatId is a blocked legacy test destination.' });
+      }
+
+      const isGroupConnected = db.getConnectedGroups().some(g => g.chatId === numChatId || Number(g.chatId) === numChatId);
+      if (!isGroupConnected) {
+        return res.status(404).json({ error: 'Target group not found in database.' });
+      }
+      const groupSettings = db.getGroupSettings(numChatId);
+
+      if (!payload || typeof payload !== 'object') {
+        return res.status(400).json({ error: 'Post payload is required.' });
+      }
+
+      const contentType: PostContentType = payload.contentType || 'text';
+      const validTypes: PostContentType[] = ['text', 'photo', 'video', 'animation', 'document'];
+      if (!validTypes.includes(contentType)) {
+        return res.status(400).json({ error: `Unsupported content type: ${contentType}` });
+      }
+
+      const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+      const maxTextLen = contentType === 'text' ? 4096 : 1024;
+      if (text.length > maxTextLen) {
+        return res.status(400).json({ error: `Text/caption exceeds maximum length (${text.length}/${maxTextLen} characters).` });
+      }
+
+      if (contentType === 'text' && !text) {
+        return res.status(400).json({ error: 'Message text cannot be empty for text posts.' });
+      }
+
+      const mediaFileId = typeof payload.mediaFileId === 'string' ? payload.mediaFileId.trim() : undefined;
+      if (contentType !== 'text' && !mediaFileId) {
+        return res.status(400).json({ error: `Media reference is required for ${contentType} posts.` });
+      }
+
+      if (!nextRun || isNaN(new Date(nextRun).getTime())) {
+        return res.status(400).json({ error: 'Valid nextRun ISO date/time string is required.' });
+      }
+
+      const targetNextRunTime = new Date(nextRun).getTime();
+      if (targetNextRunTime <= Date.now()) {
+        return res.status(400).json({ error: 'Scheduled execution time must be in the future.' });
+      }
+
+      const sanitizedButtons = sanitizeInlineButtons(payload.buttons);
+
+      const scheduleRecord = db.addSchedule({
+        chatId: numChatId,
+        chatTitle: groupSettings.chatTitle || `Chat ${numChatId}`,
+        name: name || (text.slice(0, 30) || `Rich ${contentType.toUpperCase()} Schedule`),
+        message: text || `[${contentType.toUpperCase()}]`,
+        messageText: text,
+        scheduleType: 'one_time',
+        nextRun: new Date(nextRun).toISOString(),
+        timezone: timezone || 'UTC',
+        contentType,
+        mediaFileId: mediaFileId || undefined,
+        replyToMessageId: payload.replyToMessageId ? Number(payload.replyToMessageId) : undefined,
+        replyToLatest: Boolean(payload.replyToLatest),
+        autoDeletePrevious: Boolean(payload.autoDeletePrevious),
+        pinAfterSend: Boolean(payload.pinAfterSend),
+        inlineKeyboard: sanitizedButtons,
+        enabled: true,
+        adminUsername: auth.operatorUsername,
+        lastStatus: 'pending'
+      });
+
+      db.addLog({
+        chatId: numChatId,
+        chatTitle: groupSettings.chatTitle || `Chat ${numChatId}`,
+        adminUsername: auth.operatorUsername,
+        action: 'schedule_created',
+        details: `Scheduled rich ${contentType.toUpperCase()} post [${scheduleRecord.id}] via Dashboard Composer for ${scheduleRecord.nextRun}`
+      });
+
+      return res.json({ success: true, schedule: scheduleRecord });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Internal server error in dashboard post scheduler' });
     }
   });
 

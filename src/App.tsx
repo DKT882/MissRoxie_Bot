@@ -57,6 +57,7 @@ import {
   Pin,
   Link2
 } from 'lucide-react';
+import { RichPostComposer } from './components/RichPostComposer';
 
 const LIVE_TESTS = [
   { id: 'LIVE-01', title: 'Bot responds to /ping' },
@@ -2271,6 +2272,7 @@ export default function App() {
               <div className="space-y-1">
                 <div className={`px-3 text-[10px] font-bold uppercase tracking-wider ${themeMutedText}`}>Actions</div>
                 {[
+                  { id: 'rich-post', label: '✨ Rich Post Composer', icon: Sparkles },
                   { id: 'schedules', label: '⏰ Schedules & Rules', icon: Clock, badge: schedulesList.length },
                   { id: 'send-message', label: '📢 Send Message', icon: Send },
                   { id: 'broadcast', label: '📣 Broadcast', icon: Radio }
@@ -2451,6 +2453,12 @@ export default function App() {
                   </div>
 
                   <div className="flex items-center gap-2 w-full md:w-auto">
+                    <button
+                      onClick={() => setActiveNav('rich-post')}
+                      className="flex-1 md:flex-none px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-300" /> Rich Post
+                    </button>
                     <button
                       onClick={() => setActiveNav('broadcast')}
                       className="flex-1 md:flex-none px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm"
@@ -5221,6 +5229,17 @@ export default function App() {
                 )}
               </div>
             </div>
+          )}
+
+          {/* TAB: RICH POST COMPOSER (PHASE 4) */}
+          {activeNav === 'rich-post' && (
+            <RichPostComposer
+              groups={groups}
+              selectedChatId={selectedChatId}
+              theme={theme}
+              onRefresh={refreshCurrentView}
+              botUsername={botInfo?.username || 'MissRoxie_Bot'}
+            />
           )}
 
           {/* TAB: SEND MESSAGE */}
