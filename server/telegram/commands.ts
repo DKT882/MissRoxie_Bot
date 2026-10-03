@@ -259,7 +259,10 @@ interface PermissionEditorSession {
   createdAt: number;
 }
 
+export const ALL_MESSAGE_INTERVAL_MS = 20_000;
+
 export class CommandHandler {
+  public static allMessageIntervalMs: number | null = null;
   private static sayCooldowns: Map<number, number> = new Map();
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
@@ -4536,10 +4539,14 @@ export class CommandHandler {
           }
         }
 
-        // Conservative sequential per-chat pacing (1000ms) between consecutive chunks to comply with Telegram's 1 msg/sec group limit
+        // Fixed interval pacing (20 seconds / 20_000ms) between consecutive /all mention messages
         if (i < chunks.length - 1) {
-          const pacingMs = process.env.NODE_ENV === 'test' ? 10 : 1000;
-          await new Promise(resolve => setTimeout(resolve, pacingMs));
+          const pacingMs = CommandHandler.allMessageIntervalMs !== null
+            ? CommandHandler.allMessageIntervalMs
+            : (process.env.NODE_ENV === 'test' ? 10 : ALL_MESSAGE_INTERVAL_MS);
+          if (pacingMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, pacingMs));
+          }
         }
       }
 

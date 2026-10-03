@@ -143,7 +143,7 @@ async function runAllMentionFormattingTestSuite() {
     // Seed diverse members: normal, no uname, bot, self, anonymous channel, deleted account, duplicates
     db.cacheUser({ id: 101, first_name: 'Alice', username: 'alice_1' }, testChatId);
     db.cacheUser({ id: 102, first_name: 'Bob' }, testChatId); // No username
-    db.cacheUser({ id: 103, first_name: 'SpamBot', username: 'spambot' }, testChatId); // Bot by uname
+    db.cacheUser({ id: 103, first_name: 'SpamBot', username: 'spambot', is_bot: true }, testChatId); // Bot by uname
     db.cacheUser({ id: 7770001, first_name: 'Miss Roxie', username: 'MissRoxie_Bot' }, testChatId); // Self
     db.cacheUser({ id: 1087968824, first_name: 'Group Anonymous' }, testChatId); // Anonymous admin
     db.cacheUser({ id: 104, first_name: 'Deleted Account' }, testChatId); // Deleted account
@@ -221,7 +221,7 @@ async function runAllMentionFormattingTestSuite() {
     }
     // Seed 14 excluded accounts (10 bots, 1 self, 1 anonymous admin, 2 deleted accounts)
     for (let b = 1; b <= 10; b++) {
-      db.cacheUser({ id: 9000 + b, first_name: `Bot ${b}`, username: `bot_${b}_bot` }, testChatId);
+      db.cacheUser({ id: 9000 + b, first_name: `Bot ${b}`, username: `bot_${b}_bot`, is_bot: true }, testChatId);
     }
     db.cacheUser({ id: 7770001, first_name: 'Miss Roxie', username: 'MissRoxie_Bot' }, testChatId);
     db.cacheUser({ id: 1087968824, first_name: 'Anonymous Group' }, testChatId);
