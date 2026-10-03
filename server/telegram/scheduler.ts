@@ -187,6 +187,7 @@ export class MessageScheduler {
           }
           this.executingScheduleIds.add(schedule.id);
 
+          let isDelivered = false;
           try {
             // Read fresh schedule state to avoid stale closure state
             const freshSchedule = db.getScheduleById(schedule.id) || schedule;
@@ -195,7 +196,18 @@ export class MessageScheduler {
             // Immediately advance nextRun in memory/storage so any concurrent check cannot pick it up
             const hasInterval = freshSchedule.intervalMs && freshSchedule.intervalMs > 0 && freshSchedule.scheduleType !== 'one_time';
             const intermediateNextRun = hasInterval ? new Date(now + freshSchedule.intervalMs!).toISOString() : '';
-            db.updateSchedule(freshSchedule.id, { nextRun: intermediateNextRun });
+
+            // Distributed & in-memory atomic claim before Telegram dispatch
+            const claimed = await db.claimScheduleExecution(
+              freshSchedule.id,
+              freshSchedule.nextRun,
+              intermediateNextRun,
+              `instance_${process.pid}_${Math.random().toString(36).slice(2, 6)}`
+            );
+            if (!claimed) {
+              console.log(`[SCHEDULER_CLAIM] Schedule ${freshSchedule.id} was already claimed by another process. Skipping execution.`);
+              continue;
+            }
 
             // If auto-delete is enabled for this schedule, delete its previous message
             if (freshSchedule.autoDeletePrevious && freshSchedule.lastSentMessageId) {
@@ -323,6 +335,7 @@ export class MessageScheduler {
             }
 
             if (sendRes && sendRes.ok && sendRes.result) {
+              isDelivered = true;
               const newSentMessageId = sendRes.result.message_id;
               
               // FEATURE 1: Pin scheduled message after successful delivery
@@ -393,20 +406,33 @@ export class MessageScheduler {
           } catch (err: any) {
             this.failures++;
             metricsTracker.increment('scheduler_failures');
-            const isDeadChat = err.message?.includes('chat not found') || err.message?.includes('chat was deleted') || err.message?.includes('PEER_ID_INVALID') || err.message?.includes('bot was kicked') || err.message?.includes('bot is not a member');
-            if (isDeadChat) {
-              console.warn(`[SCHEDULER] Automatically removing obsolete schedule ${schedule.id} for nonexistent chat ${schedule.chatId}: ${err.message}`);
-              db.deleteSchedule(schedule.chatId, schedule.id);
+            if (isDelivered) {
+              // Message was already delivered! Do NOT revert nextRun or re-execute
+              console.error(`[SCHEDULER] Post-delivery error for schedule ${schedule.id} (message was already delivered):`, err?.message || err);
+              errorTracker.recordError({
+                source: 'SCHEDULER',
+                severity: 'WARN',
+                message: `Post-delivery exception for schedule ${schedule.id}: ${err?.message || err}`,
+                chatId: schedule.chatId
+              });
             } else {
-              console.error(`Error executing schedule ${schedule.id}:`, err.message);
-              db.updateScheduleNextRun(schedule.id, schedule.nextRun || '', 'failure', err.message);
+              const isDeadChat = err.message?.includes('chat not found') || err.message?.includes('chat was deleted') || err.message?.includes('PEER_ID_INVALID') || err.message?.includes('bot was kicked') || err.message?.includes('bot is not a member');
+              if (isDeadChat) {
+                console.warn(`[SCHEDULER] Automatically removing obsolete schedule ${schedule.id} for nonexistent chat ${schedule.chatId}: ${err.message}`);
+                db.deleteSchedule(schedule.chatId, schedule.id);
+              } else {
+                console.error(`Error executing schedule ${schedule.id}:`, err.message);
+                const hasInterval = schedule.intervalMs && schedule.intervalMs > 0 && schedule.scheduleType !== 'one_time';
+                const fallbackNextRun = hasInterval ? new Date(now + schedule.intervalMs!).toISOString() : '';
+                db.updateScheduleNextRun(schedule.id, fallbackNextRun, 'failure', err.message);
+              }
+              errorTracker.recordError({
+                source: 'SCHEDULER',
+                severity: 'ERROR',
+                message: `Failed to execute schedule ${schedule.id}: ${err.message}`,
+                chatId: schedule.chatId
+              });
             }
-            errorTracker.recordError({
-              source: 'SCHEDULER',
-              severity: 'ERROR',
-              message: `Failed to execute schedule ${schedule.id}: ${err.message}`,
-              chatId: schedule.chatId
-            });
           } finally {
             this.executingScheduleIds.delete(schedule.id);
           }

@@ -4698,6 +4698,81 @@ export class StorageManager {
     }
   }
 
+  public async claimScheduleExecution(
+    id: string,
+    expectedNextRun?: string,
+    intermediateNextRun?: string,
+    instanceId: string = 'default_instance'
+  ): Promise<boolean> {
+    const s = this.data.schedules.find((x) => x.id.toUpperCase() === id.toUpperCase());
+    if (!s || s.enabled === false) return false;
+
+    const now = Date.now();
+    // In-memory fast path check: if nextRun was already advanced into the future, fail claim
+    if (s.nextRun) {
+      const currentNextRunTime = new Date(s.nextRun).getTime();
+      if (!isNaN(currentNextRunTime) && currentNextRunTime > now) {
+        return false;
+      }
+    }
+
+    // Distributed MongoDB Atomic Claim (when connected)
+    const mongoDb = mongoManager.getDb();
+    if (mongoDb && mongoManager.getStatus().isConnected) {
+      try {
+        const claimsCol = mongoDb.collection('schedule_claims');
+        const nextRunValue = intermediateNextRun || '';
+        const nowObj = new Date();
+        const leaseExpiry = new Date(now + 60000); // 60-second lease
+
+        const res = await claimsCol.findOneAndUpdate(
+          {
+            _id: s.id as any,
+            $or: [
+              { leaseExpiresAt: { $lt: nowObj } },
+              { expectedNextRun: expectedNextRun || { $exists: false } },
+              { nextRun: expectedNextRun || { $exists: false } }
+            ]
+          },
+          {
+            $set: {
+              claimedAt: nowObj,
+              expectedNextRun: expectedNextRun || '',
+              nextRun: nextRunValue,
+              leaseExpiresAt: leaseExpiry,
+              ownerId: instanceId
+            },
+            $setOnInsert: {
+              createdAt: nowObj
+            }
+          },
+          {
+            upsert: true,
+            returnDocument: 'after'
+          }
+        );
+
+        const doc = (res as any)?.value || res;
+        const wonClaim = Boolean(doc && (doc.ownerId === instanceId || (doc as any).ownerId === instanceId));
+        if (!wonClaim) {
+          return false;
+        }
+      } catch (err: any) {
+        // If unique key duplicate error on upsert race, another worker claimed it
+        if (err.code === 11000) {
+          return false;
+        }
+        console.warn(`[MongoStorage] Notice during atomic schedule claim: ${err?.message}`);
+      }
+    }
+
+    // Advance intermediate nextRun in local storage and save
+    s.nextRun = intermediateNextRun || '';
+    (s as any).lastClaimedAt = new Date().toISOString();
+    this.scheduleSave(s.chatId);
+    return true;
+  }
+
   // --- Moderation Logs ---
   private cleanOldLogs() {
     if (!this.data.logs || !Array.isArray(this.data.logs)) {

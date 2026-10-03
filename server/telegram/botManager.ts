@@ -14,6 +14,7 @@ import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
 import { logDebug } from '../observability/logger.js';
 import { mtprotoParticipantService } from './mtprotoParticipantService.js';
+import { mongoManager } from '../db/mongodb.js';
 
 function escapeHtml(text: string): string {
   return text
@@ -73,6 +74,70 @@ export class TelegramBotManager {
     this.chatQueues.clear();
     this.activeProcessingCount = 0;
     this.globalSlotWaiters = [];
+  }
+
+  public static async acquireOrRenewPollingLease(instanceId: string, ttlMs: number = 30000): Promise<boolean> {
+    const mongoDb = mongoManager.getDb();
+    if (!mongoDb || !mongoManager.getStatus().isConnected) {
+      // If MongoDB is not connected (e.g. single local development process or unit test), allow polling
+      return true;
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + ttlMs);
+    const collection = mongoDb.collection('bot_leases');
+
+    try {
+      const res = await collection.findOneAndUpdate(
+        {
+          _id: 'telegram_polling_leader' as any,
+          $or: [
+            { ownerId: instanceId },
+            { expiresAt: { $lt: now } },
+            { expiresAt: { $exists: false } }
+          ]
+        },
+        {
+          $set: {
+            ownerId: instanceId,
+            expiresAt,
+            lastHeartbeat: now
+          },
+          $setOnInsert: {
+            acquiredAt: now
+          }
+        },
+        {
+          upsert: true,
+          returnDocument: 'after'
+        }
+      );
+
+      const doc = (res as any)?.value || res;
+      return Boolean(doc && (doc.ownerId === instanceId || (doc as any).ownerId === instanceId));
+    } catch (err: any) {
+      if (err.code === 11000) {
+        // Another instance acquired the lease concurrently during upsert race
+        return false;
+      }
+      console.warn(`[POLLING_LEASE] Notice checking polling lease: ${err?.message}`);
+      return false;
+    }
+  }
+
+  public static async releasePollingLease(instanceId?: string | null): Promise<void> {
+    if (!instanceId) return;
+    const mongoDb = mongoManager.getDb();
+    if (!mongoDb || !mongoManager.getStatus().isConnected) return;
+    try {
+      await mongoDb.collection('bot_leases').deleteOne({
+        _id: 'telegram_polling_leader' as any,
+        ownerId: instanceId
+      });
+      console.log(`[POLLING_LEASE] Released polling lease for instance ${instanceId}`);
+    } catch (err: any) {
+      console.warn(`[POLLING_LEASE] Error releasing polling lease: ${err?.message}`);
+    }
   }
 
   public getReconnectCount(): number {
@@ -261,6 +326,14 @@ export class TelegramBotManager {
     let hadError = false;
     while (!this.shouldStop && TelegramBotManager.activeInstanceId === instanceId) {
       try {
+        // Single-consumer distributed lease check
+        const hasLease = await TelegramBotManager.acquireOrRenewPollingLease(instanceId);
+        if (!hasLease) {
+          console.log(`[POLLING_LEASE] Instance ${instanceId} is on standby (another process is active polling leader). Waiting 10s...`);
+          await new Promise((r) => setTimeout(r, 10000));
+          continue;
+        }
+
         this.lastPolledAt = new Date().toISOString();
         this.abortController = new AbortController();
 
@@ -1006,10 +1079,14 @@ export class TelegramBotManager {
   }
 
   public stopPolling() {
+    const instanceToRelease = TelegramBotManager.activeInstanceId;
     this.shouldStop = true;
     TelegramBotManager.activeInstanceId = null;
     if (this.abortController) {
       this.abortController.abort();
+    }
+    if (instanceToRelease) {
+      TelegramBotManager.releasePollingLease(instanceToRelease).catch(() => {});
     }
     messageScheduler.stop();
     autoEngineService.stop();

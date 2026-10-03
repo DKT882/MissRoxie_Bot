@@ -1,6 +1,25 @@
 import { TelegramChatMember, TelegramUser, BotCommand, BotCommandScope } from './types.js';
 import { logDebug } from '../observability/logger.js';
 
+export const NON_IDEMPOTENT_TELEGRAM_METHODS = Object.freeze(new Set([
+  'sendMessage',
+  'sendPhoto',
+  'sendVideo',
+  'sendDocument',
+  'sendAnimation',
+  'sendSticker',
+  'sendAudio',
+  'sendVoice',
+  'sendMediaGroup',
+  'sendLocation',
+  'sendVenue',
+  'sendContact',
+  'sendPoll',
+  'sendDice',
+  'sendInvoice',
+  'sendGame'
+]));
+
 export interface TelegramApiCallOptions {
   maxRetries?: number;
   skipRateLimiter?: boolean;
@@ -265,6 +284,23 @@ export class TelegramApi {
             ok: false,
             error_code: 408,
             description: `Telegram API request timed out after ${timeoutMs}ms`
+          };
+        }
+
+        const isNonIdempotent = NON_IDEMPOTENT_TELEGRAM_METHODS.has(method);
+        if (isNonIdempotent) {
+          console.warn(JSON.stringify({
+            event: 'TELEGRAM_NON_IDEMPOTENT_NETWORK_FAILURE_NO_RETRY',
+            requestId: reqId,
+            method,
+            chatId: rawChatId,
+            elapsedMs,
+            attempt: attempt + 1,
+            description: err.message || 'Network failure on non-idempotent send method (auto-retry suppressed to prevent duplicate messages)'
+          }));
+          return {
+            ok: false,
+            description: err.message || `Network failure on non-idempotent Telegram method ${method}`
           };
         }
 
