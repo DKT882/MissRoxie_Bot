@@ -1,6 +1,7 @@
 import { db } from '../db/storage.js';
 import { telegramApi } from './api.js';
 import { ScheduledMessage, ScheduledPostButton } from './types.js';
+import { PostSender } from './postSender.js';
 import { ModerationService } from './moderation.js';
 import { TelegramMiddleware } from './middleware.js';
 import { metricsTracker } from '../observability/metricsService.js';
@@ -303,85 +304,12 @@ export class MessageScheduler {
               }
             }
 
-            let dynamicReplyId: number | undefined = undefined;
-            if (freshSchedule.replyToLatest) {
-              dynamicReplyId = db.getLatestEligibleMessageId(freshSchedule.chatId);
-            }
+            const payload = PostSender.scheduleToPayload(freshSchedule, textContent);
+            const sendRes = await PostSender.send(freshSchedule.chatId, payload);
 
-            const sendOptions = MessageScheduler.buildSendOptions(freshSchedule, dynamicReplyId);
-
-            let sendRes: any;
-            if (freshSchedule.contentType === 'photo' && freshSchedule.mediaFileId) {
-              sendRes = await telegramApi.sendPhoto(freshSchedule.chatId, freshSchedule.mediaFileId, {
-                caption: textContent,
-                parse_mode: 'HTML',
-                ...sendOptions
-              });
-            } else if (freshSchedule.contentType === 'video' && freshSchedule.mediaFileId) {
-              sendRes = await telegramApi.sendVideo(freshSchedule.chatId, freshSchedule.mediaFileId, {
-                caption: textContent,
-                parse_mode: 'HTML',
-                ...sendOptions
-              });
-            } else if (freshSchedule.contentType === 'document' && freshSchedule.mediaFileId) {
-              sendRes = await telegramApi.sendDocument(freshSchedule.chatId, freshSchedule.mediaFileId, {
-                caption: textContent,
-                parse_mode: 'HTML',
-                ...sendOptions
-              });
-            } else if (freshSchedule.contentType === 'animation' && freshSchedule.mediaFileId) {
-              sendRes = await telegramApi.sendAnimation(freshSchedule.chatId, freshSchedule.mediaFileId, {
-                caption: textContent,
-                parse_mode: 'HTML',
-                ...sendOptions
-              });
-            } else if (freshSchedule.contentType === 'sticker' && freshSchedule.mediaFileId) {
-              sendRes = await telegramApi.sendSticker(freshSchedule.chatId, freshSchedule.mediaFileId, sendOptions);
-            } else {
-              sendRes = await telegramApi.sendMessage(freshSchedule.chatId, textContent, {
-                parse_mode: 'HTML',
-                ...sendOptions
-              });
-            }
-
-            if (sendRes && sendRes.ok && sendRes.result) {
+            if (sendRes && sendRes.ok && sendRes.messageId) {
               isDelivered = true;
-              const newSentMessageId = sendRes.result.message_id;
-              
-              // FEATURE 1: Pin scheduled message after successful delivery
-              if (freshSchedule.pinAfterSend && newSentMessageId) {
-                try {
-                  const botCheck = await TelegramMiddleware.requireBotPermission(freshSchedule.chatId, 'can_pin_messages');
-                  if (botCheck.allowed) {
-                    const pinRes = await telegramApi.pinChatMessage(freshSchedule.chatId, newSentMessageId, true);
-                    if (!pinRes.ok) {
-                      console.error(`[SCHEDULER_PIN_WARNING] Pin failed for message ${newSentMessageId} in chat ${freshSchedule.chatId}: ${pinRes.description}`);
-                      errorTracker.recordError({
-                        source: 'SCHEDULER',
-                        severity: 'WARN',
-                        message: `Pin failed for scheduled message ${freshSchedule.id}: ${pinRes.description}`,
-                        chatId: freshSchedule.chatId
-                      });
-                    }
-                  } else {
-                    console.warn(`[SCHEDULER_PIN_SKIPPED] Bot lacks pin permissions in chat ${freshSchedule.chatId}: ${botCheck.reason}`);
-                    errorTracker.recordError({
-                      source: 'SCHEDULER',
-                      severity: 'WARN',
-                      message: `Bot lacks pin permission for scheduled message ${freshSchedule.id}: ${botCheck.reason}`,
-                      chatId: freshSchedule.chatId
-                    });
-                  }
-                } catch (pinErr: any) {
-                  console.error(`[SCHEDULER_PIN_ERROR] Exception pinning message ${newSentMessageId}: ${pinErr?.message || pinErr}`);
-                  errorTracker.recordError({
-                    source: 'SCHEDULER',
-                    severity: 'WARN',
-                    message: `Exception pinning scheduled message ${freshSchedule.id}: ${pinErr?.message || pinErr}`,
-                    chatId: freshSchedule.chatId
-                  });
-                }
-              }
+              const newSentMessageId = sendRes.messageId;
 
               db.addLog({
                 chatId: freshSchedule.chatId,
@@ -410,7 +338,7 @@ export class MessageScheduler {
                 db.toggleSchedule(freshSchedule.id, false);
               }
             } else {
-              const errMsg = sendRes?.description || 'Telegram send failed';
+              const errMsg = sendRes?.error || (sendRes as any)?.description || 'Telegram send failed';
               throw new Error(errMsg);
             }
           } catch (err: any) {
