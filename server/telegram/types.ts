@@ -535,6 +535,11 @@ export interface ContentPermissionRecord {
   username?: string;
 }
 
+export interface ScheduledPostButton {
+  text: string;
+  url: string;
+}
+
 export interface ScheduledMessage {
   id: string;
   chatId: number;
@@ -558,6 +563,8 @@ export interface ScheduledMessage {
   lastError?: string;
   replyToMessageId?: number;
   autoDeletePrevious?: boolean;
+  pinAfterSend?: boolean;
+  inlineKeyboard?: ScheduledPostButton[][];
   lastSentMessageId?: number;
   mentionMode?: 'none' | 'random_member' | 'all_members';
   lastMentionedUserId?: number;

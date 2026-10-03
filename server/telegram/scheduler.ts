@@ -1,9 +1,20 @@
 import { db } from '../db/storage.js';
 import { telegramApi } from './api.js';
-import { ScheduledMessage } from './types.js';
+import { ScheduledMessage, ScheduledPostButton } from './types.js';
 import { ModerationService } from './moderation.js';
+import { TelegramMiddleware } from './middleware.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
+
+export function isValidHttpUrl(stringUrl?: string): boolean {
+  if (!stringUrl || typeof stringUrl !== 'string') return false;
+  try {
+    const parsed = new URL(stringUrl.trim());
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 const MENTION_EMOJIS = Object.freeze([
   '👤', '😂', '🔥', '😎', '💀', '✨', '⚡', '🎉', '🌟', '🚀',
@@ -30,6 +41,29 @@ export class MessageScheduler {
   // SAFETY: Permanently disabled by default until scheduled broadcast requirements are re-audited
   public static readonly IS_ENABLED_BY_DEFAULT: boolean = false;
   public static readonly MAX_EXECUTABLE_SCHEDULES: number = 50;
+
+  public static buildSendOptions(schedule: ScheduledMessage): {
+    reply_to_message_id?: number;
+    reply_markup?: { inline_keyboard: Array<Array<{ text: string; url: string }>> };
+  } {
+    const options: any = {};
+    if (schedule.replyToMessageId) {
+      options.reply_to_message_id = schedule.replyToMessageId;
+    }
+    if (schedule.inlineKeyboard && Array.isArray(schedule.inlineKeyboard) && schedule.inlineKeyboard.length > 0) {
+      const sanitized = schedule.inlineKeyboard
+        .map(row =>
+          (Array.isArray(row) ? row : [])
+            .filter(btn => btn && typeof btn.text === 'string' && btn.text.trim() && isValidHttpUrl(btn.url))
+            .map(btn => ({ text: btn.text.trim(), url: btn.url.trim() }))
+        )
+        .filter(row => row.length > 0);
+      if (sanitized.length > 0) {
+        options.reply_markup = { inline_keyboard: sanitized };
+      }
+    }
+    return options;
+  }
 
   public getStatus() {
     return {
@@ -252,10 +286,7 @@ export class MessageScheduler {
               }
             }
 
-            const sendOptions: any = {};
-            if (freshSchedule.replyToMessageId) {
-              sendOptions.reply_to_message_id = freshSchedule.replyToMessageId;
-            }
+            const sendOptions = MessageScheduler.buildSendOptions(freshSchedule);
 
             let sendRes: any;
             if (freshSchedule.contentType === 'photo' && freshSchedule.mediaFileId) {
@@ -294,6 +325,41 @@ export class MessageScheduler {
             if (sendRes && sendRes.ok && sendRes.result) {
               const newSentMessageId = sendRes.result.message_id;
               
+              // FEATURE 1: Pin scheduled message after successful delivery
+              if (freshSchedule.pinAfterSend && newSentMessageId) {
+                try {
+                  const botCheck = await TelegramMiddleware.requireBotPermission(freshSchedule.chatId, 'can_pin_messages');
+                  if (botCheck.allowed) {
+                    const pinRes = await telegramApi.pinChatMessage(freshSchedule.chatId, newSentMessageId, true);
+                    if (!pinRes.ok) {
+                      console.error(`[SCHEDULER_PIN_WARNING] Pin failed for message ${newSentMessageId} in chat ${freshSchedule.chatId}: ${pinRes.description}`);
+                      errorTracker.recordError({
+                        source: 'SCHEDULER',
+                        severity: 'WARN',
+                        message: `Pin failed for scheduled message ${freshSchedule.id}: ${pinRes.description}`,
+                        chatId: freshSchedule.chatId
+                      });
+                    }
+                  } else {
+                    console.warn(`[SCHEDULER_PIN_SKIPPED] Bot lacks pin permissions in chat ${freshSchedule.chatId}: ${botCheck.reason}`);
+                    errorTracker.recordError({
+                      source: 'SCHEDULER',
+                      severity: 'WARN',
+                      message: `Bot lacks pin permission for scheduled message ${freshSchedule.id}: ${botCheck.reason}`,
+                      chatId: freshSchedule.chatId
+                    });
+                  }
+                } catch (pinErr: any) {
+                  console.error(`[SCHEDULER_PIN_ERROR] Exception pinning message ${newSentMessageId}: ${pinErr?.message || pinErr}`);
+                  errorTracker.recordError({
+                    source: 'SCHEDULER',
+                    severity: 'WARN',
+                    message: `Exception pinning scheduled message ${freshSchedule.id}: ${pinErr?.message || pinErr}`,
+                    chatId: freshSchedule.chatId
+                  });
+                }
+              }
+
               db.addLog({
                 chatId: freshSchedule.chatId,
                 chatTitle: freshSchedule.chatTitle,
@@ -361,7 +427,9 @@ export class MessageScheduler {
     contentType?: 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation',
     mediaFileId?: string,
     autoDeletePrevious?: boolean,
-    explicitMentionMode?: 'none' | 'random_member' | 'all_members'
+    explicitMentionMode?: 'none' | 'random_member' | 'all_members',
+    pinAfterSend?: boolean,
+    inlineKeyboard?: ScheduledPostButton[][]
   ): { success: boolean; schedule?: ScheduledMessage; error?: string } {
     const parsed = this.parseInterval(intervalStr);
     if (!parsed) {
@@ -402,6 +470,8 @@ export class MessageScheduler {
       intervalFormatted: parsed.formatted,
       nextRun,
       autoDeletePrevious: autoDeletePrevious || false,
+      pinAfterSend: pinAfterSend || false,
+      inlineKeyboard: inlineKeyboard && inlineKeyboard.length > 0 ? inlineKeyboard : undefined,
       mentionMode
     });
 
@@ -411,7 +481,7 @@ export class MessageScheduler {
       adminUserId: adminId,
       adminUsername,
       action: 'schedule_created',
-      details: `Created recurring schedule [${schedule.id}] every ${parsed.formatted}${mentionMode !== 'none' ? ` (mentionMode: ${mentionMode})` : ''}`
+      details: `Created recurring schedule [${schedule.id}] every ${parsed.formatted}${mentionMode !== 'none' ? ` (mentionMode: ${mentionMode})` : ''}${schedule.pinAfterSend ? ' [pin]' : ''}${schedule.inlineKeyboard ? ` [buttons: ${schedule.inlineKeyboard.flat().length}]` : ''}`
     });
 
     return { success: true, schedule };

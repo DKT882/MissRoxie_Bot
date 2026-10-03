@@ -728,9 +728,11 @@ export class TelegramMiddleware {
       | 'can_delete_messages'
       | 'can_promote_members'
       | 'can_manage_chat'
+      | 'can_pin_messages'
       | 'promote_members'
       | 'restrict_members'
       | 'delete_messages'
+      | 'pin_messages'
       | 'manage_chat' = 'can_restrict_members'
   ): Promise<{
     allowed: boolean;
@@ -769,7 +771,8 @@ export class TelegramMiddleware {
     if (
       (normalizedPerm === 'can_restrict_members' && !botMember.can_restrict_members) ||
       (normalizedPerm === 'can_delete_messages' && !botMember.can_delete_messages) ||
-      (normalizedPerm === 'can_promote_members' && !botMember.can_promote_members)
+      (normalizedPerm === 'can_promote_members' && !botMember.can_promote_members) ||
+      (normalizedPerm === 'can_pin_messages' && !botMember.can_pin_messages)
     ) {
       const freshBot = await this.getTargetMember(chatId, botId, true);
       if (freshBot) botMember = freshBot;
@@ -799,7 +802,32 @@ export class TelegramMiddleware {
       };
     }
 
+    if (normalizedPerm === 'can_pin_messages' && !botMember.can_pin_messages) {
+      return {
+        allowed: false,
+        reason: '❌ The bot requires the "Pin Messages" administrator permission to pin messages.',
+        botMember
+      };
+    }
+
     return { allowed: true, botMember };
+  }
+
+  public static async requireBotPermission(
+    chatId: number,
+    permission:
+      | 'can_restrict_members'
+      | 'can_delete_messages'
+      | 'can_promote_members'
+      | 'can_manage_chat'
+      | 'can_pin_messages'
+      | 'promote_members'
+      | 'restrict_members'
+      | 'delete_messages'
+      | 'pin_messages'
+      | 'manage_chat' = 'can_restrict_members'
+  ) {
+    return this.checkBotPermissions(chatId, permission);
   }
 
   /**

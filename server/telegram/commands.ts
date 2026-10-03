@@ -4,7 +4,7 @@ import { db } from '../db/storage.js';
 import { ModerationService, parseDuration } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { mapTelegramError } from './errorMapper.js';
-import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand, CachedMember } from './types.js';
+import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand, CachedMember, ScheduledPostButton } from './types.js';
 import { mtprotoParticipantService, MtprotoParticipantService } from './mtprotoParticipantService.js';
 import {
   COMMAND_CATALOG,
@@ -3967,9 +3967,10 @@ export class CommandHandler {
     if (ctx.args.length < 1) {
       await telegramApi.sendMessage(
         ctx.chatId,
-        `ℹ️ <b>Usage:</b>\n<code>/schedule &lt;time&gt; [delOn|delOff] [message]</code> (or reply to a message/media to schedule it)\n\n` +
+        `ℹ️ <b>Usage:</b>\n<code>/schedule &lt;time&gt; [delOn|delOff] [pin] [message]</code> (or reply to a message/media to schedule it)\n\n` +
         `<b>Examples:</b>\n` +
-        `• <code>/schedule 30m delOn Check out our promo! https://example.com</code>\n` +
+        `• <code>/schedule 30m delOn pin Check out our promo! https://example.com</code>\n` +
+        `• <code>/schedule 1m pin hello</code>\n` +
         `• <code>/schedule 2h delOn</code> (replying to photo/video/sticker/media/text)\n` +
         `• <code>/schedule 1d Daily announcements...</code>`
       );
@@ -3978,39 +3979,66 @@ export class CommandHandler {
 
     const intervalStr = ctx.args[0];
     let autoDeletePrevious = false;
+    let pinAfterSend = false;
     let textStartIndex = 1;
 
-    // Check if second argument is delOn or delOff
-    if (ctx.args.length > 1) {
-      const secondArg = ctx.args[1].toLowerCase();
-      if (secondArg === 'delon') {
+    // Check prefix flags in args[1], args[2], etc.
+    while (textStartIndex < ctx.args.length) {
+      const argLower = ctx.args[textStartIndex].toLowerCase();
+      if (argLower === 'delon') {
         autoDeletePrevious = true;
-        textStartIndex = 2;
-      } else if (secondArg === 'deloff') {
+        textStartIndex++;
+      } else if (argLower === 'deloff') {
         autoDeletePrevious = false;
-        textStartIndex = 2;
+        textStartIndex++;
+      } else if (argLower === 'pin' || argLower === 'pinon') {
+        pinAfterSend = true;
+        textStartIndex++;
+      } else if (argLower === 'pinoff') {
+        pinAfterSend = false;
+        textStartIndex++;
+      } else {
+        break;
       }
     }
 
     let messageText = CommandHandler.getCommandText(ctx, textStartIndex);
 
-    // Also check if delOn/delOff was passed at the very end of messageText
-    if (ctx.args.length > 2 && textStartIndex === 1) {
-      const lastArg = ctx.args[ctx.args.length - 1].toLowerCase();
-      if (lastArg === 'delon') {
-        autoDeletePrevious = true;
-        messageText = messageText.replace(/\s+delon$/i, '').trim();
-      } else if (lastArg === 'deloff') {
-        autoDeletePrevious = false;
-        messageText = messageText.replace(/\s+deloff$/i, '').trim();
+    // Also check and strip trailing flags (delon, deloff, pin) from end of messageText if present
+    const trailingRegex = /\s+(?:delon|deloff|pin|pinon|pinoff)$/i;
+    while (trailingRegex.test(messageText)) {
+      const match = messageText.match(/\s+([^\s]+)$/);
+      if (match) {
+        const flag = match[1].toLowerCase();
+        if (flag === 'delon') autoDeletePrevious = true;
+        else if (flag === 'deloff') autoDeletePrevious = false;
+        else if (flag === 'pin' || flag === 'pinon') pinAfterSend = true;
+        else if (flag === 'pinoff') pinAfterSend = false;
       }
+      messageText = messageText.replace(trailingRegex, '').trimEnd();
     }
 
     let contentType: 'text' | 'photo' | 'video' | 'document' | 'sticker' | 'animation' = 'text';
     let mediaFileId: string | undefined;
+    let inlineKeyboard: ScheduledPostButton[][] | undefined;
 
     const reply = ctx.message.reply_to_message;
     if (reply) {
+      // Extract inline link buttons if present in replied message
+      if (reply.reply_markup?.inline_keyboard && Array.isArray(reply.reply_markup.inline_keyboard)) {
+        const extracted: ScheduledPostButton[][] = reply.reply_markup.inline_keyboard
+          .map((row: any[]) =>
+            (Array.isArray(row) ? row : [])
+              .filter((btn: any) => btn && typeof btn.text === 'string' && btn.text.trim() && btn.url && typeof btn.url === 'string')
+              .map((btn: any) => ({ text: String(btn.text).trim(), url: String(btn.url).trim() }))
+          )
+          .filter((row: any[]) => row.length > 0);
+
+        if (extracted.length > 0) {
+          inlineKeyboard = extracted;
+        }
+      }
+
       if (reply.photo && reply.photo.length > 0) {
         contentType = 'photo';
         const largest = reply.photo[reply.photo.length - 1];
@@ -4055,10 +4083,17 @@ export class CommandHandler {
       messageText,
       contentType,
       mediaFileId,
-      autoDeletePrevious
+      autoDeletePrevious,
+      undefined,
+      pinAfterSend,
+      inlineKeyboard
     );
 
     if (res.success && res.schedule) {
+      const buttonInfo = res.schedule.inlineKeyboard && res.schedule.inlineKeyboard.length > 0
+        ? `<b>Buttons:</b> ${res.schedule.inlineKeyboard.flat().length} link button(s)\n`
+        : '';
+
       await telegramApi.sendMessage(
         ctx.chatId,
         `📅 <b>Message Scheduled Successfully!</b>\n\n` +
@@ -4066,6 +4101,8 @@ export class CommandHandler {
         `<b>Type:</b> ${res.schedule.contentType || 'text'}\n` +
         `<b>Frequency:</b> Every ${res.schedule.intervalFormatted}\n` +
         `<b>Auto-delete Previous:</b> ${res.schedule.autoDeletePrevious ? 'Enabled (delOn)' : 'Disabled (delOff)'}\n` +
+        `<b>Pin Message:</b> ${res.schedule.pinAfterSend ? 'Enabled (pin)' : 'Disabled'}\n` +
+        buttonInfo +
         `<b>Next Run:</b> ${new Date(res.schedule.nextRun).toLocaleTimeString()}\n\n` +
         `<i>Use <code>/listschedules</code> to view all or <code>/deleteschedule ${res.schedule.id}</code> to remove.</i>`
       );
@@ -4085,11 +4122,16 @@ export class CommandHandler {
     }
 
     const list = schedules
-      .map((s, idx) => (
-        `<b>${idx + 1}. [<code>${s.id}</code>] Every ${s.intervalFormatted}${s.autoDeletePrevious ? ' [delOn]' : ''}</b>\n` +
-        `<i>"${escapeHtml(s.message.length > 50 ? s.message.slice(0, 47) + '...' : s.message)}"</i>\n` +
-        `Next: ${new Date(s.nextRun).toLocaleTimeString()} (Runs: ${s.runsCount})\n`
-      ))
+      .map((s, idx) => {
+        const delTag = s.autoDeletePrevious ? ' [delOn]' : '';
+        const pinTag = s.pinAfterSend ? ' [pin]' : '';
+        const btnTag = s.inlineKeyboard && s.inlineKeyboard.length > 0 ? ' [buttons]' : '';
+        return (
+          `<b>${idx + 1}. [<code>${s.id}</code>] Every ${s.intervalFormatted}${delTag}${pinTag}${btnTag}</b>\n` +
+          `<i>"${escapeHtml(s.message.length > 50 ? s.message.slice(0, 47) + '...' : s.message)}"</i>\n` +
+          `Next: ${new Date(s.nextRun).toLocaleTimeString()} (Runs: ${s.runsCount})\n`
+        );
+      })
       .join('\n');
 
     await telegramApi.sendMessage(
@@ -4171,12 +4213,8 @@ export class CommandHandler {
       const lowerUname = cleanUname.toLowerCase();
       const firstName = (m.firstName || '').trim();
 
-      // Exclude bots
-      if (
-        (m as any).is_bot ||
-        lowerUname.includes('bot') ||
-        lowerUname.endsWith('bot')
-      ) {
+      // Exclude bots (via explicit is_bot flag only)
+      if ((m as any).is_bot === true || (m as any).isBot === true) {
         continue;
       }
 
@@ -4220,8 +4258,8 @@ export class CommandHandler {
       const lowerUname = cleanUname.toLowerCase();
       const firstName = (m.firstName || '').trim();
 
-      // Exclude bots
-      if ((m as any).is_bot || lowerUname.includes('bot') || lowerUname.endsWith('bot')) {
+      // Exclude bots (via explicit is_bot flag only)
+      if ((m as any).is_bot === true || (m as any).isBot === true) {
         continue;
       }
 

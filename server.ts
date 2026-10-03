@@ -1664,9 +1664,42 @@ export async function startServer() {
     }
   });
 
+  function sanitizeDashboardInlineKeyboard(rawKeyboard: any): Array<Array<{ text: string; url: string }>> | undefined {
+    if (!rawKeyboard || !Array.isArray(rawKeyboard)) return undefined;
+    const sanitized: Array<Array<{ text: string; url: string }>> = [];
+    for (const row of rawKeyboard) {
+      if (!Array.isArray(row)) continue;
+      const sanitizedRow: Array<{ text: string; url: string }> = [];
+      for (const btn of row) {
+        if (!btn || typeof btn !== 'object') continue;
+        const text = typeof btn.text === 'string' ? btn.text.trim() : '';
+        const url = typeof btn.url === 'string' ? btn.url.trim() : '';
+        if (!text || !url) continue;
+        try {
+          const parsed = new URL(url);
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            continue;
+          }
+        } catch {
+          continue;
+        }
+        sanitizedRow.push({ text, url });
+      }
+      if (sanitizedRow.length > 0) {
+        sanitized.push(sanitizedRow);
+      }
+    }
+    return sanitized.length > 0 ? sanitized : undefined;
+  }
+
   app.post('/api/dashboard/schedules', async (req, res) => {
     try {
-      const { chatId, message, messageText, name, scheduleType, intervalMs, intervalFormatted, nextRun, timezone, contentType, mediaFileId, replyToMessageId, enabled } = req.body;
+      const {
+        chatId, message, messageText, name, scheduleType,
+        intervalMs, intervalFormatted, nextRun, timezone,
+        contentType, mediaFileId, replyToMessageId, enabled,
+        autoDeletePrevious, pinAfterSend, inlineKeyboard
+      } = req.body;
       const numChatId = Number(chatId);
       if (!numChatId || isNaN(numChatId)) {
         return res.status(400).json({ error: 'Valid target chatId is required.' });
@@ -1696,6 +1729,9 @@ export async function startServer() {
         contentType: contentType || 'text',
         mediaFileId: mediaFileId || undefined,
         replyToMessageId: replyToMessageId ? Number(replyToMessageId) : undefined,
+        autoDeletePrevious: Boolean(autoDeletePrevious),
+        pinAfterSend: Boolean(pinAfterSend),
+        inlineKeyboard: sanitizeDashboardInlineKeyboard(inlineKeyboard),
         enabled: enabled !== false,
         adminUsername: (req as any).operator?.username || 'dashboard_admin',
         lastStatus: 'pending'
@@ -1710,9 +1746,18 @@ export async function startServer() {
   app.put('/api/dashboard/schedules/:id', (req, res) => {
     try {
       const id = req.params.id;
-      const updates = req.body;
+      const updates = { ...req.body };
       if (updates.chatId && (Number(updates.chatId) === -100111222333 || String(updates.chatId).includes('100111222333'))) {
         return res.status(400).json({ error: 'Target chatId is a blocked legacy test destination.' });
+      }
+      if (updates.inlineKeyboard !== undefined) {
+        updates.inlineKeyboard = sanitizeDashboardInlineKeyboard(updates.inlineKeyboard);
+      }
+      if (updates.pinAfterSend !== undefined) {
+        updates.pinAfterSend = Boolean(updates.pinAfterSend);
+      }
+      if (updates.autoDeletePrevious !== undefined) {
+        updates.autoDeletePrevious = Boolean(updates.autoDeletePrevious);
       }
       const updated = db.updateSchedule(id, updates);
       if (!updated) {

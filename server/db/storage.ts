@@ -4158,13 +4158,31 @@ export class StorageManager {
           const newSchedule: ScheduledMessage = {
             id: sc.id || Math.random().toString(36).substring(2, 8).toUpperCase(),
             chatId: numId,
+            chatTitle: sc.chatTitle,
             name: sc.name || 'Restored Schedule',
             cron: sc.cron || sc.time || '0 12 * * *',
             message: sc.message || 'Scheduled Message',
+            messageText: sc.messageText || sc.message || '',
+            contentType: sc.contentType || 'text',
+            mediaFileId: sc.mediaFileId,
+            intervalMs: sc.intervalMs,
+            intervalFormatted: sc.intervalFormatted,
+            scheduleType: sc.scheduleType || 'interval',
+            nextRun: sc.nextRun,
+            lastRun: sc.lastRun,
+            lastStatus: sc.lastStatus,
+            lastError: sc.lastError,
+            replyToMessageId: sc.replyToMessageId,
+            autoDeletePrevious: sc.autoDeletePrevious,
+            pinAfterSend: sc.pinAfterSend,
+            inlineKeyboard: sc.inlineKeyboard,
+            lastSentMessageId: sc.lastSentMessageId,
+            mentionMode: sc.mentionMode,
+            lastMentionedUserId: sc.lastMentionedUserId,
             enabled: sc.enabled !== false,
             timezone: sc.timezone || 'Asia/Kolkata',
-            createdAt: new Date().toISOString(),
-            runsCount: 0
+            createdAt: sc.createdAt || new Date().toISOString(),
+            runsCount: typeof sc.runsCount === 'number' ? sc.runsCount : 0
           };
           const existingIdx = this.data.schedules.findIndex(
             s => s.id === newSchedule.id || (s.chatId === numId && s.name.toLowerCase() === newSchedule.name.toLowerCase())

@@ -53,7 +53,9 @@ import {
   Settings2,
   Upload,
   Copy,
-  FileCode
+  FileCode,
+  Pin,
+  Link2
 } from 'lucide-react';
 
 const LIVE_TESTS = [
@@ -290,6 +292,9 @@ export default function App() {
     mediaFileId: string;
     replyToMessageId: string;
     enabled: boolean;
+    pinAfterSend: boolean;
+    autoDeletePrevious: boolean;
+    inlineKeyboard: Array<Array<{ text: string; url: string }>>;
   }>({
     chatId: '',
     name: '',
@@ -302,7 +307,10 @@ export default function App() {
     contentType: 'text',
     mediaFileId: '',
     replyToMessageId: '',
-    enabled: true
+    enabled: true,
+    pinAfterSend: false,
+    autoDeletePrevious: false,
+    inlineKeyboard: []
   });
 
   // Group Automations State
@@ -1587,6 +1595,14 @@ export default function App() {
     if (!newScheduleForm.chatId || !newScheduleForm.message.trim()) return;
     setSchedulesLoading(true);
     try {
+      const cleanedKeyboard = newScheduleForm.inlineKeyboard
+        .map(row =>
+          (Array.isArray(row) ? row : [])
+            .filter(b => b && b.text?.trim() && b.url?.trim())
+            .map(b => ({ text: b.text.trim(), url: b.url.trim() }))
+        )
+        .filter(row => row.length > 0);
+
       const payload: any = {
         chatId: Number(newScheduleForm.chatId),
         name: newScheduleForm.name.trim() || newScheduleForm.message.trim().slice(0, 30),
@@ -1597,7 +1613,10 @@ export default function App() {
         contentType: newScheduleForm.contentType || 'text',
         mediaFileId: newScheduleForm.mediaFileId.trim() || undefined,
         replyToMessageId: newScheduleForm.replyToMessageId ? Number(newScheduleForm.replyToMessageId) : undefined,
-        enabled: newScheduleForm.enabled
+        enabled: newScheduleForm.enabled,
+        pinAfterSend: Boolean(newScheduleForm.pinAfterSend),
+        autoDeletePrevious: Boolean(newScheduleForm.autoDeletePrevious),
+        inlineKeyboard: cleanedKeyboard.length > 0 ? cleanedKeyboard : undefined
       };
 
       if (newScheduleForm.scheduleType === 'interval') {
@@ -4846,7 +4865,10 @@ export default function App() {
                             contentType: 'text',
                             mediaFileId: '',
                             replyToMessageId: '',
-                            enabled: true
+                            enabled: true,
+                            pinAfterSend: false,
+                            autoDeletePrevious: false,
+                            inlineKeyboard: []
                           });
                           setShowCreateScheduleModal(true);
                         }}
@@ -4867,7 +4889,7 @@ export default function App() {
                         {schedulesList.filter(s => s.chatId === activeGroupDetailId).map((s: any) => (
                           <div key={s.id} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs`}>
                             <div className="space-y-1 max-w-xl">
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-300 font-bold">ID: {s.id}</span>
                                 <span className="font-semibold text-sm">{s.name || 'Scheduled Message'}</span>
                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${s.enabled !== false ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-stone-800 text-stone-400'}`}>
@@ -4876,6 +4898,21 @@ export default function App() {
                                 {s.scheduleType && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 uppercase font-semibold">
                                     {s.scheduleType}
+                                  </span>
+                                )}
+                                {s.pinAfterSend && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 font-semibold border border-purple-500/20">
+                                    📌 Pin
+                                  </span>
+                                )}
+                                {s.autoDeletePrevious && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/10 text-rose-400 font-semibold border border-rose-500/20">
+                                    🗑️ delOn
+                                  </span>
+                                )}
+                                {s.inlineKeyboard && s.inlineKeyboard.length > 0 && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/10 text-cyan-400 font-semibold border border-cyan-500/20">
+                                    🔗 {s.inlineKeyboard.flat().length} Button{s.inlineKeyboard.flat().length > 1 ? 's' : ''}
                                   </span>
                                 )}
                               </div>
@@ -4917,7 +4954,10 @@ export default function App() {
                                     contentType: s.contentType || 'text',
                                     mediaFileId: s.mediaFileId || '',
                                     replyToMessageId: s.replyToMessageId ? String(s.replyToMessageId) : '',
-                                    enabled: s.enabled !== false
+                                    enabled: s.enabled !== false,
+                                    pinAfterSend: Boolean(s.pinAfterSend),
+                                    autoDeletePrevious: Boolean(s.autoDeletePrevious),
+                                    inlineKeyboard: Array.isArray(s.inlineKeyboard) ? s.inlineKeyboard.map((row: any[]) => Array.isArray(row) ? row.map(btn => ({ text: btn.text || '', url: btn.url || '' })) : []) : []
                                   });
                                   setShowCreateScheduleModal(true);
                                 }}
@@ -5303,7 +5343,10 @@ export default function App() {
                           contentType: 'text',
                           mediaFileId: '',
                           replyToMessageId: '',
-                          enabled: true
+                          enabled: true,
+                          pinAfterSend: false,
+                          autoDeletePrevious: false,
+                          inlineKeyboard: []
                         });
                         setShowCreateScheduleModal(true);
                       }}
@@ -5370,6 +5413,21 @@ export default function App() {
                                     {s.scheduleType}
                                   </span>
                                 )}
+                                {s.pinAfterSend && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 font-semibold border border-purple-500/20">
+                                    📌 Pin
+                                  </span>
+                                )}
+                                {s.autoDeletePrevious && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/10 text-rose-400 font-semibold border border-rose-500/20">
+                                    🗑️ delOn
+                                  </span>
+                                )}
+                                {s.inlineKeyboard && s.inlineKeyboard.length > 0 && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/10 text-cyan-400 font-semibold border border-cyan-500/20">
+                                    🔗 {s.inlineKeyboard.flat().length} Button{s.inlineKeyboard.flat().length > 1 ? 's' : ''}
+                                  </span>
+                                )}
                               </div>
                               <p className={`line-clamp-2 text-xs ${isDark ? 'text-stone-300' : 'text-slate-700'}`}>{s.message || s.messageText}</p>
                               <div className={`flex flex-wrap items-center gap-3 text-[11px] ${themeMutedText} pt-1`}>
@@ -5412,7 +5470,10 @@ export default function App() {
                                     contentType: s.contentType || 'text',
                                     mediaFileId: s.mediaFileId || '',
                                     replyToMessageId: s.replyToMessageId ? String(s.replyToMessageId) : '',
-                                    enabled: s.enabled !== false
+                                    enabled: s.enabled !== false,
+                                    pinAfterSend: Boolean(s.pinAfterSend),
+                                    autoDeletePrevious: Boolean(s.autoDeletePrevious),
+                                    inlineKeyboard: Array.isArray(s.inlineKeyboard) ? s.inlineKeyboard.map((row: any[]) => Array.isArray(row) ? row.map(btn => ({ text: btn.text || '', url: btn.url || '' })) : []) : []
                                   });
                                   setShowCreateScheduleModal(true);
                                 }}
@@ -6724,8 +6785,165 @@ export default function App() {
                 </div>
               )}
 
-              {/* Enabled Switch */}
-              <div className="flex items-center gap-3 pt-1">
+              {/* Inline Link Buttons (URL Buttons) */}
+              <div className="space-y-2 pt-1 border-t border-stone-800">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="font-semibold block text-xs flex items-center gap-1.5">
+                      <Link2 className="w-3.5 h-3.5 text-blue-400" /> Inline Link Buttons (URL Buttons)
+                    </label>
+                    <span className={`text-[10px] ${themeMutedText}`}>Add clickable URL buttons arranged in customizable rows below the post.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewScheduleForm({
+                        ...newScheduleForm,
+                        inlineKeyboard: [...newScheduleForm.inlineKeyboard, [{ text: '', url: '' }]]
+                      });
+                    }}
+                    className="px-2.5 py-1 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                  >
+                    <Plus className="w-3 h-3" /> Add Row
+                  </button>
+                </div>
+
+                {newScheduleForm.inlineKeyboard.length > 0 && (
+                  <div className="space-y-3 pt-1">
+                    {newScheduleForm.inlineKeyboard.map((row, rIdx) => (
+                      <div key={rIdx} className={`p-3 rounded-xl ${themeInnerCardBg} border ${themeBorder} space-y-2`}>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-[11px] text-stone-400">Row {rIdx + 1} ({row.length} button{row.length > 1 ? 's' : ''})</span>
+                          <div className="flex items-center gap-1.5">
+                            {row.length < 8 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...newScheduleForm.inlineKeyboard];
+                                  updated[rIdx] = [...updated[rIdx], { text: '', url: '' }];
+                                  setNewScheduleForm({ ...newScheduleForm, inlineKeyboard: updated });
+                                }}
+                                className="px-2 py-0.5 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded text-[10px] font-semibold flex items-center gap-1"
+                              >
+                                <Plus className="w-2.5 h-2.5" /> Button
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = newScheduleForm.inlineKeyboard.filter((_, idx) => idx !== rIdx);
+                                setNewScheduleForm({ ...newScheduleForm, inlineKeyboard: updated });
+                              }}
+                              className="p-1 hover:bg-rose-500/20 text-stone-400 hover:text-rose-400 rounded transition-colors"
+                              title="Delete Row"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          {row.map((btn, bIdx) => {
+                            const isInvalidUrl = Boolean(btn.url && !/^https?:\/\/.+/i.test(btn.url.trim()));
+                            return (
+                              <div key={bIdx} className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    placeholder="Button label (e.g. Website)"
+                                    value={btn.text}
+                                    onChange={(e) => {
+                                      const updated = [...newScheduleForm.inlineKeyboard];
+                                      updated[rIdx][bIdx] = { ...updated[rIdx][bIdx], text: e.target.value };
+                                      setNewScheduleForm({ ...newScheduleForm, inlineKeyboard: updated });
+                                    }}
+                                    className={`w-1/3 ${themeCardBg} border ${themeBorder} rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500`}
+                                  />
+                                  <input
+                                    type="url"
+                                    placeholder="https://example.com"
+                                    value={btn.url}
+                                    onChange={(e) => {
+                                      const updated = [...newScheduleForm.inlineKeyboard];
+                                      updated[rIdx][bIdx] = { ...updated[rIdx][bIdx], url: e.target.value };
+                                      setNewScheduleForm({ ...newScheduleForm, inlineKeyboard: updated });
+                                    }}
+                                    className={`flex-1 ${themeCardBg} border ${isInvalidUrl ? 'border-rose-500/50' : themeBorder} rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500`}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = [...newScheduleForm.inlineKeyboard];
+                                      updated[rIdx] = updated[rIdx].filter((_, idx) => idx !== bIdx);
+                                      const cleaned = updated.filter(r => r.length > 0);
+                                      setNewScheduleForm({ ...newScheduleForm, inlineKeyboard: cleaned });
+                                    }}
+                                    className="p-1.5 text-stone-500 hover:text-rose-400 transition-colors"
+                                    title="Remove Button"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                                {isInvalidUrl && (
+                                  <span className="text-[10px] text-rose-400 block pl-1">
+                                    URL must start with http:// or https://
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Button Grid Live Preview */}
+                    {newScheduleForm.inlineKeyboard.some(r => r.some(b => b.text.trim())) && (
+                      <div className="p-3 bg-stone-900/60 rounded-xl border border-dashed border-stone-700 space-y-1.5">
+                        <span className="text-[10px] uppercase tracking-wider font-bold text-stone-400 block">Button Layout Preview:</span>
+                        <div className="space-y-1.5">
+                          {newScheduleForm.inlineKeyboard.map((row, rIdx) => (
+                            <div key={rIdx} className="flex gap-1.5">
+                              {row.filter(b => b.text.trim()).map((b, bIdx) => (
+                                <div key={bIdx} className="flex-1 py-1 px-2 bg-blue-600/20 border border-blue-500/30 rounded text-center text-blue-300 font-semibold text-[11px] truncate flex items-center justify-center gap-1">
+                                  <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-70" />
+                                  <span className="truncate">{b.text}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Delivery & Behavior Toggles */}
+              <div className="space-y-2 pt-2 border-t border-stone-800">
+                <label className="flex items-center gap-2 cursor-pointer font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={newScheduleForm.pinAfterSend}
+                    onChange={(e) => setNewScheduleForm({ ...newScheduleForm, pinAfterSend: e.target.checked })}
+                    className="w-4 h-4 rounded text-blue-600"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <Pin className="w-3.5 h-3.5 text-purple-400" /> Pin message in group after successful delivery
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={newScheduleForm.autoDeletePrevious}
+                    onChange={(e) => setNewScheduleForm({ ...newScheduleForm, autoDeletePrevious: e.target.checked })}
+                    className="w-4 h-4 rounded text-blue-600"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" /> Auto-delete previous scheduled message on new trigger (delOn)
+                  </span>
+                </label>
+
                 <label className="flex items-center gap-2 cursor-pointer font-semibold">
                   <input
                     type="checkbox"
