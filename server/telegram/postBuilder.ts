@@ -1,6 +1,8 @@
 import { telegramApi } from './api.js';
+import { db } from '../db/storage.js';
+import { parseDuration } from './moderation.js';
 import { PostSender, sanitizeInlineButtons } from './postSender.js';
-import { PostPayload, PostContentType, ScheduledPostButton, TelegramMessage, TelegramCallbackQuery } from './types.js';
+import { PostPayload, PostContentType, ScheduledPostButton, TelegramMessage, TelegramCallbackQuery, ScheduledMessage } from './types.js';
 import { CommandContext, TelegramMiddleware } from './middleware.js';
 
 export type PostBuilderState =
@@ -11,7 +13,17 @@ export type PostBuilderState =
   | 'MANAGING_BUTTONS'
   | 'WAITING_FOR_BUTTON_TEXT'
   | 'WAITING_FOR_BUTTON_URL'
-  | 'PREVIEW';
+  | 'PREVIEW'
+  | 'WAITING_FOR_SCHEDULE_TIME'
+  | 'SCHEDULE_CONFIRM';
+
+export interface PostBuilderScheduleTime {
+  ms: number;
+  formatted: string;
+  nextRunIso: string;
+  intervalMs?: number;
+  intervalFormatted?: string;
+}
 
 export interface PostBuilderSession {
   chatId: number;
@@ -23,8 +35,148 @@ export interface PostBuilderSession {
   mediaFileId?: string;
   buttons: ScheduledPostButton[][];
   pendingButtonText?: string;
+  scheduledTime?: PostBuilderScheduleTime;
   createdAt: number;
   updatedAt: number;
+}
+
+export function parseScheduleTime(input: string, baseNowMs: number = Date.now()): {
+  ms: number;
+  formatted: string;
+  nextRunIso: string;
+  intervalMs?: number;
+  intervalFormatted?: string;
+} | { error: string } {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return { error: 'Time input cannot be empty.' };
+  }
+
+  // 1. Relative duration like 30m, 2h, 1d, 2w
+  const intervalMatch = trimmed.toLowerCase().match(/^(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks)$/);
+  if (intervalMatch) {
+    const val = parseInt(intervalMatch[1], 10);
+    const unit = intervalMatch[2].toLowerCase();
+    if (val <= 0) {
+      return { error: 'Duration must be greater than 0.' };
+    }
+    let ms = 0;
+    let formattedUnit = '';
+    if (unit.startsWith('m')) {
+      ms = val * 60 * 1000;
+      formattedUnit = `${val} minute${val > 1 ? 's' : ''}`;
+    } else if (unit.startsWith('h')) {
+      ms = val * 60 * 60 * 1000;
+      formattedUnit = `${val} hour${val > 1 ? 's' : ''}`;
+    } else if (unit.startsWith('d')) {
+      ms = val * 24 * 60 * 60 * 1000;
+      formattedUnit = `${val} day${val > 1 ? 's' : ''}`;
+    } else if (unit.startsWith('w')) {
+      ms = val * 7 * 24 * 60 * 60 * 1000;
+      formattedUnit = `${val} week${val > 1 ? 's' : ''}`;
+    }
+
+    const nextRun = new Date(baseNowMs + ms).toISOString();
+    return {
+      ms,
+      formatted: `in ${formattedUnit}`,
+      nextRunIso: nextRun,
+      intervalMs: ms,
+      intervalFormatted: formattedUnit
+    };
+  }
+
+  // 2. "in X ..." prefix
+  const inMatch = trimmed.toLowerCase().match(/^in\s+(.+)$/);
+  if (inMatch) {
+    const dur = parseDuration(inMatch[1]);
+    if (dur && dur.seconds > 0) {
+      const ms = dur.seconds * 1000;
+      const nextRun = new Date(baseNowMs + ms).toISOString();
+      return {
+        ms,
+        formatted: `in ${dur.formatted}`,
+        nextRunIso: nextRun,
+        intervalMs: ms,
+        intervalFormatted: dur.formatted
+      };
+    }
+  }
+
+  // 3. Exact date format "YYYY-MM-DD HH:mm" or "YYYY-MM-DD"
+  const datePattern = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
+  const matchDate = trimmed.match(datePattern);
+  if (matchDate) {
+    const year = parseInt(matchDate[1], 10);
+    const month = parseInt(matchDate[2], 10) - 1;
+    const day = parseInt(matchDate[3], 10);
+    const hour = matchDate[4] !== undefined ? parseInt(matchDate[4], 10) : 12;
+    const minute = matchDate[5] !== undefined ? parseInt(matchDate[5], 10) : 0;
+    const second = matchDate[6] !== undefined ? parseInt(matchDate[6], 10) : 0;
+
+    if (month < 0 || month > 11 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+      return { error: 'Invalid calendar date or time values.' };
+    }
+
+    const targetDate = new Date(year, month, day, hour, minute, second);
+    if (isNaN(targetDate.getTime())) {
+      return { error: 'Invalid date/time format.' };
+    }
+
+    const diffMs = targetDate.getTime() - baseNowMs;
+    if (diffMs <= 0) {
+      return { error: 'Scheduled time must be in the future.' };
+    }
+
+    return {
+      ms: diffMs,
+      formatted: targetDate.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }),
+      nextRunIso: targetDate.toISOString()
+    };
+  }
+
+  // 4. Time-only format "HH:mm" (e.g. "14:30")
+  const timeOnlyPattern = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
+  const matchTime = trimmed.match(timeOnlyPattern);
+  if (matchTime) {
+    const hour = parseInt(matchTime[1], 10);
+    const minute = parseInt(matchTime[2], 10);
+    const second = matchTime[3] !== undefined ? parseInt(matchTime[3], 10) : 0;
+
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+      return { error: 'Invalid time values (hour must be 00-23, minute 00-59).' };
+    }
+
+    const targetDate = new Date(baseNowMs);
+    targetDate.setHours(hour, minute, second, 0);
+
+    if (targetDate.getTime() <= baseNowMs) {
+      targetDate.setDate(targetDate.getDate() + 1);
+    }
+
+    const diffMs = targetDate.getTime() - baseNowMs;
+    return {
+      ms: diffMs,
+      formatted: `${targetDate.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`,
+      nextRunIso: targetDate.toISOString()
+    };
+  }
+
+  // 5. Generic parseDuration fallback (e.g. "2 hours 30 mins")
+  const dur = parseDuration(trimmed);
+  if (dur && dur.seconds > 0) {
+    const ms = dur.seconds * 1000;
+    const nextRun = new Date(baseNowMs + ms).toISOString();
+    return {
+      ms,
+      formatted: `in ${dur.formatted}`,
+      nextRunIso: nextRun,
+      intervalMs: ms,
+      intervalFormatted: dur.formatted
+    };
+  }
+
+  return { error: 'Unrecognized date/time format. Please use relative formats like <code>30m</code>, <code>2h</code>, <code>1d</code> or <code>YYYY-MM-DD HH:mm</code>.' };
 }
 
 function isValidHttpUrl(stringUrl?: string): boolean {
@@ -215,20 +367,7 @@ export class PostBuilderManager {
       `${session.text ? session.text : '<i>(No text provided)</i>'}\n\n` +
       `🔘 <b>Buttons:</b> ${totalButtons} button(s) in ${buttonRows} row(s)\n` +
       '━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-      'Ready to send? Choose an option below:';
-
-    const controlButtons: ScheduledPostButton[][] = [
-      [
-        { text: '✏️ Edit Text', url: '' }, // placeholder converted below
-        { text: '🔘 Manage Buttons', url: '' }
-      ],
-      [
-        { text: '📤 Send Now', url: '' }
-      ],
-      [
-        { text: '❌ Cancel', url: '' }
-      ]
-    ];
+      'Ready to send or schedule? Choose an option below:';
 
     const inlineKeyboard: any[][] = [];
 
@@ -247,7 +386,8 @@ export class PostBuilderManager {
       { text: '🔘 Manage Buttons', callback_data: 'postb:preview:buttons' }
     ]);
     inlineKeyboard.push([
-      { text: '📤 Send Now', callback_data: 'postb:preview:send' }
+      { text: '📤 Send Now', callback_data: 'postb:preview:send' },
+      { text: '📅 Schedule', callback_data: 'postb:preview:schedule' }
     ]);
     inlineKeyboard.push([
       { text: '❌ Cancel', callback_data: 'postb:cancel' }
@@ -262,6 +402,101 @@ export class PostBuilderManager {
       });
     } else {
       const res = await telegramApi.sendMessage(session.chatId, previewText, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard
+      });
+      if (res.ok && res.result) {
+        session.messageId = res.result.message_id;
+      }
+    }
+  }
+
+  /**
+   * Sends the time input prompt menu for scheduling.
+   */
+  public static async sendScheduleTimeInputMenu(session: PostBuilderSession): Promise<void> {
+    const text = '📅 <b>Schedule Post</b>\n\n' +
+      'Send the time when you want this post to be delivered.\n\n' +
+      '<b>Supported formats:</b>\n' +
+      '• <b>Relative delay:</b> <code>10m</code>, <code>30m</code>, <code>2h</code>, <code>1d</code>\n' +
+      '• <b>Specific time:</b> <code>YYYY-MM-DD HH:mm</code> (e.g. <code>2026-10-15 14:30</code>)\n' +
+      '• <b>Time today/tomorrow:</b> <code>HH:mm</code> (e.g. <code>18:00</code>)\n\n' +
+      '<i>Type your schedule time below or click Back:</i>';
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '⬅️ Back to Preview', callback_data: 'postb:btn:done' }],
+        [{ text: '❌ Cancel', callback_data: 'postb:cancel' }]
+      ]
+    };
+
+    if (session.messageId) {
+      await telegramApi.editMessageText(session.chatId, session.messageId, text, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard
+      });
+    } else {
+      const res = await telegramApi.sendMessage(session.chatId, text, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard
+      });
+      if (res.ok && res.result) {
+        session.messageId = res.result.message_id;
+      }
+    }
+  }
+
+  /**
+   * Sends the schedule confirmation screen before saving to database.
+   */
+  public static async sendScheduleConfirmationMenu(session: PostBuilderSession): Promise<void> {
+    const totalButtons = session.buttons.reduce((sum, row) => sum + row.length, 0);
+    const buttonRows = session.buttons.filter(r => r.length > 0).length;
+    const timeFormatted = session.scheduledTime?.formatted || 'Unknown';
+    const nextRunIso = session.scheduledTime?.nextRunIso || '';
+
+    const text = '📅 <b>Schedule Post Confirmation</b>\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+      `📦 <b>Type:</b> <code>${session.contentType.toUpperCase()}</code>\n` +
+      `📝 <b>Text / Caption:</b>\n` +
+      `${session.text ? session.text : '<i>(No text provided)</i>'}\n\n` +
+      `🔘 <b>Buttons:</b> ${totalButtons} button(s) in ${buttonRows} row(s)\n` +
+      `⏰ <b>Scheduled Delivery:</b> <b>${timeFormatted}</b>\n` +
+      `   <code>${nextRunIso}</code>\n` +
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+      'Ready to schedule this post?';
+
+    const inlineKeyboard: any[][] = [];
+
+    // Attach composed buttons preview if present
+    if (session.buttons && session.buttons.length > 0) {
+      for (const row of session.buttons) {
+        if (row.length > 0) {
+          inlineKeyboard.push(row.map(b => ({ text: `🔗 ${b.text}`, url: b.url })));
+        }
+      }
+    }
+
+    inlineKeyboard.push([
+      { text: '✅ Confirm Schedule', callback_data: 'postb:sched:confirm' }
+    ]);
+    inlineKeyboard.push([
+      { text: '✏️ Change Time', callback_data: 'postb:preview:schedule' },
+      { text: '⬅️ Back to Preview', callback_data: 'postb:btn:done' }
+    ]);
+    inlineKeyboard.push([
+      { text: '❌ Cancel', callback_data: 'postb:cancel' }
+    ]);
+
+    const keyboard = { inline_keyboard: inlineKeyboard };
+
+    if (session.messageId) {
+      await telegramApi.editMessageText(session.chatId, session.messageId, text, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard
+      });
+    } else {
+      const res = await telegramApi.sendMessage(session.chatId, text, {
         parse_mode: 'HTML',
         reply_markup: keyboard
       });
@@ -424,6 +659,106 @@ export class PostBuilderManager {
         };
         if (query.message) {
           await telegramApi.editMessageText(chatId, query.message.message_id, prompt, { parse_mode: 'HTML', reply_markup: keyboard });
+        }
+      }
+      return true;
+    }
+
+    if (action === 'preview:schedule') {
+      if (session.contentType === 'text' && (!session.text || !session.text.trim())) {
+        await telegramApi.answerCallbackQuery(query.id, { text: '❌ Text post cannot be empty. Please edit text.', show_alert: true });
+        return true;
+      }
+      if (session.contentType !== 'text' && !session.mediaFileId) {
+        await telegramApi.answerCallbackQuery(query.id, { text: '❌ Media file is missing. Please re-select media.', show_alert: true });
+        return true;
+      }
+
+      session.state = 'WAITING_FOR_SCHEDULE_TIME';
+      session.updatedAt = Date.now();
+      await this.sendScheduleTimeInputMenu(session);
+      return true;
+    }
+
+    if (action === 'sched:confirm') {
+      if (!session.scheduledTime || session.state !== 'SCHEDULE_CONFIRM') {
+        await telegramApi.answerCallbackQuery(query.id, { text: '⚠️ Schedule time is missing. Please set schedule time.', show_alert: true });
+        session.state = 'WAITING_FOR_SCHEDULE_TIME';
+        session.updatedAt = Date.now();
+        await this.sendScheduleTimeInputMenu(session);
+        return true;
+      }
+
+      if (session.contentType === 'text' && (!session.text || !session.text.trim())) {
+        await telegramApi.answerCallbackQuery(query.id, { text: '❌ Text post cannot be empty.', show_alert: true });
+        return true;
+      }
+      if (session.contentType !== 'text' && !session.mediaFileId) {
+        await telegramApi.answerCallbackQuery(query.id, { text: '❌ Media file is missing.', show_alert: true });
+        return true;
+      }
+
+      try {
+        const trimmedText = (session.text || '').trim();
+        const scheduleRecord = db.addSchedule({
+          chatId: session.chatId,
+          chatTitle: query.message?.chat?.title,
+          adminId: session.userId,
+          adminUsername: query.from?.username,
+          message: trimmedText || (session.contentType ? `[${session.contentType.toUpperCase()}]` : 'Scheduled content'),
+          messageText: trimmedText,
+          contentType: session.contentType,
+          mediaFileId: session.mediaFileId,
+          intervalMs: session.scheduledTime.intervalMs,
+          intervalFormatted: session.scheduledTime.intervalFormatted,
+          scheduleType: session.scheduledTime.intervalMs ? 'interval' : 'one_time',
+          nextRun: session.scheduledTime.nextRunIso,
+          enabled: true,
+          inlineKeyboard: session.buttons && session.buttons.length > 0 ? session.buttons : undefined,
+          autoDeletePrevious: false,
+          pinAfterSend: false,
+          replyToLatest: false,
+          mentionMode: 'none'
+        });
+
+        db.addLog({
+          chatId: session.chatId,
+          chatTitle: query.message?.chat?.title,
+          adminUserId: session.userId,
+          adminUsername: query.from?.username,
+          action: 'schedule_created',
+          details: `Created scheduled rich post [${scheduleRecord.id}] via PostBuilder scheduled for ${session.scheduledTime.formatted}`
+        });
+
+        // Clear session on successful schedule creation
+        this.clearSession(chatId, userId);
+
+        const successMsg = `✅ <b>Post scheduled successfully!</b>\n\n` +
+          `• <b>Schedule ID:</b> <code>${scheduleRecord.id}</code>\n` +
+          `• <b>Scheduled For:</b> <b>${escapeHtml(session.scheduledTime.formatted)}</b>\n` +
+          `• <b>Execution Time:</b> <code>${scheduleRecord.nextRun}</code>\n\n` +
+          `Your post will be automatically delivered by Roxie's scheduler.`;
+
+        if (query.message) {
+          await telegramApi.editMessageText(chatId, query.message.message_id, successMsg, { parse_mode: 'HTML' });
+        } else {
+          await telegramApi.sendMessage(chatId, successMsg, { parse_mode: 'HTML' });
+        }
+      } catch (err: any) {
+        const errorMsg = `❌ <b>Failed to create schedule:</b> ${escapeHtml(err?.message || 'Database error')}\n\nYou can try again or edit your post.`;
+        if (query.message) {
+          await telegramApi.editMessageText(chatId, query.message.message_id, errorMsg, {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Retry Schedule', callback_data: 'postb:sched:confirm' }],
+                [{ text: '👁 Back to Preview', callback_data: 'postb:btn:done' }],
+                [{ text: '❌ Cancel', callback_data: 'postb:cancel' }]
+              ]
+            }
+          });
+        } else {
+          await telegramApi.sendMessage(chatId, errorMsg, { parse_mode: 'HTML' });
         }
       }
       return true;
@@ -660,6 +995,25 @@ export class PostBuilderManager {
       session.state = 'MANAGING_BUTTONS';
       session.updatedAt = Date.now();
       await this.sendButtonManagementMenu(session);
+      return true;
+    }
+
+    // 6. Schedule time input
+    if (session.state === 'WAITING_FOR_SCHEDULE_TIME') {
+      const parsedTime = parseScheduleTime(trimmedText);
+      if ('error' in parsedTime) {
+        await telegramApi.sendMessage(
+          chatId,
+          `⚠️ <b>Invalid Schedule Time</b>\n\n${parsedTime.error}\n\nPlease try again (or /cancel to abort):`,
+          { parse_mode: 'HTML' }
+        );
+        return true;
+      }
+
+      session.scheduledTime = parsedTime;
+      session.state = 'SCHEDULE_CONFIRM';
+      session.updatedAt = Date.now();
+      await this.sendScheduleConfirmationMenu(session);
       return true;
     }
 
