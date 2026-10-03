@@ -2,6 +2,7 @@ import { telegramApi } from './api.js';
 import { TelegramMessage, TelegramUpdate, TelegramUser, TelegramChat, TelegramChatMember, TelegramBotStatus, TelegramRequestContext, TelegramChatJoinRequest } from './types.js';
 import { db } from '../db/storage.js';
 import { CommandHandler, registerBotCommands } from './commands.js';
+import { PostBuilderManager } from './postBuilder.js';
 import { ModerationService } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { autoEngineService } from './autoEngineService.js';
@@ -825,6 +826,15 @@ export class TelegramBotManager {
           message_id: message.message_id,
           is_command: true
         }));
+        return { handled: true, shouldTriggerAi: false };
+      }
+    }
+
+    // Check if sender has an active interactive PostBuilder session
+    if (chatId && userId && PostBuilderManager.hasActiveSession(chatId, userId)) {
+      const builderHandled = await PostBuilderManager.handleIncomingMessage(message);
+      if (builderHandled) {
+        this.recordResponseSent();
         return { handled: true, shouldTriggerAi: false };
       }
     }

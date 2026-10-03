@@ -3,6 +3,7 @@ import { TelegramMiddleware, CommandContext, RoleRank } from './middleware.js';
 import { db } from '../db/storage.js';
 import { ModerationService, parseDuration } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
+import { PostBuilderManager } from './postBuilder.js';
 import { mapTelegramError } from './errorMapper.js';
 import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand, CachedMember, ScheduledPostButton } from './types.js';
 import { mtprotoParticipantService, MtprotoParticipantService } from './mtprotoParticipantService.js';
@@ -305,6 +306,7 @@ export class CommandHandler {
     '/lust', '/lustmod', '/lustmode',
     '/clearmemory',
     '/say', '/announce', '/schedule', '/listschedules', '/deleteschedule',
+    '/post', '/buildpost',
     '/exportconfig', '/importconfig', '/status',
     '/addstickerpack', '/addbulkstickers', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
     '/teststicker', '/stickerpackremove', '/removestickerpack', '/delstickerpack'
@@ -654,6 +656,10 @@ export class CommandHandler {
         return true;
       case '/deleteschedule':
         await this.handleDeleteSchedule(ctx);
+        return true;
+      case '/post':
+      case '/buildpost':
+        await PostBuilderManager.handlePostCommand(ctx);
         return true;
       case '/live':
         await this.handleLive(ctx);
@@ -2926,6 +2932,10 @@ export class CommandHandler {
   public static async handleCallbackQuery(query: TelegramCallbackQuery): Promise<boolean> {
     if (!query.data) {
       return false;
+    }
+
+    if (query.data.startsWith('postb:')) {
+      return await PostBuilderManager.handleCallbackQuery(query);
     }
 
     if (query.data.startsWith('abuse:clear:')) {
