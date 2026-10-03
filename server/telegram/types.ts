@@ -562,6 +562,7 @@ export interface ScheduledMessage {
   lastStatus?: 'success' | 'failure' | 'pending';
   lastError?: string;
   replyToMessageId?: number;
+  replyToLatest?: boolean;
   autoDeletePrevious?: boolean;
   pinAfterSend?: boolean;
   inlineKeyboard?: ScheduledPostButton[][];

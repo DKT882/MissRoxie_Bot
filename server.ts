@@ -1698,7 +1698,7 @@ export async function startServer() {
         chatId, message, messageText, name, scheduleType,
         intervalMs, intervalFormatted, nextRun, timezone,
         contentType, mediaFileId, replyToMessageId, enabled,
-        autoDeletePrevious, pinAfterSend, inlineKeyboard
+        autoDeletePrevious, pinAfterSend, inlineKeyboard, replyToLatest
       } = req.body;
       const numChatId = Number(chatId);
       if (!numChatId || isNaN(numChatId)) {
@@ -1729,6 +1729,7 @@ export async function startServer() {
         contentType: contentType || 'text',
         mediaFileId: mediaFileId || undefined,
         replyToMessageId: replyToMessageId ? Number(replyToMessageId) : undefined,
+        replyToLatest: Boolean(replyToLatest),
         autoDeletePrevious: Boolean(autoDeletePrevious),
         pinAfterSend: Boolean(pinAfterSend),
         inlineKeyboard: sanitizeDashboardInlineKeyboard(inlineKeyboard),
@@ -1755,6 +1756,9 @@ export async function startServer() {
       }
       if (updates.pinAfterSend !== undefined) {
         updates.pinAfterSend = Boolean(updates.pinAfterSend);
+      }
+      if (updates.replyToLatest !== undefined) {
+        updates.replyToLatest = Boolean(updates.replyToLatest);
       }
       if (updates.autoDeletePrevious !== undefined) {
         updates.autoDeletePrevious = Boolean(updates.autoDeletePrevious);

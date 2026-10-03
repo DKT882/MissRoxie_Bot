@@ -293,6 +293,7 @@ export default function App() {
     replyToMessageId: string;
     enabled: boolean;
     pinAfterSend: boolean;
+    replyToLatest: boolean;
     autoDeletePrevious: boolean;
     inlineKeyboard: Array<Array<{ text: string; url: string }>>;
   }>({
@@ -309,6 +310,7 @@ export default function App() {
     replyToMessageId: '',
     enabled: true,
     pinAfterSend: false,
+    replyToLatest: false,
     autoDeletePrevious: false,
     inlineKeyboard: []
   });
@@ -1615,6 +1617,7 @@ export default function App() {
         replyToMessageId: newScheduleForm.replyToMessageId ? Number(newScheduleForm.replyToMessageId) : undefined,
         enabled: newScheduleForm.enabled,
         pinAfterSend: Boolean(newScheduleForm.pinAfterSend),
+        replyToLatest: Boolean(newScheduleForm.replyToLatest),
         autoDeletePrevious: Boolean(newScheduleForm.autoDeletePrevious),
         inlineKeyboard: cleanedKeyboard.length > 0 ? cleanedKeyboard : undefined
       };
@@ -4867,6 +4870,7 @@ export default function App() {
                             replyToMessageId: '',
                             enabled: true,
                             pinAfterSend: false,
+                            replyToLatest: false,
                             autoDeletePrevious: false,
                             inlineKeyboard: []
                           });
@@ -4903,6 +4907,11 @@ export default function App() {
                                 {s.pinAfterSend && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 font-semibold border border-purple-500/20">
                                     📌 Pin
+                                  </span>
+                                )}
+                                {s.replyToLatest && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 font-semibold border border-amber-500/20">
+                                    ↩️ Reply Latest
                                   </span>
                                 )}
                                 {s.autoDeletePrevious && (
@@ -4956,6 +4965,7 @@ export default function App() {
                                     replyToMessageId: s.replyToMessageId ? String(s.replyToMessageId) : '',
                                     enabled: s.enabled !== false,
                                     pinAfterSend: Boolean(s.pinAfterSend),
+                                    replyToLatest: Boolean(s.replyToLatest),
                                     autoDeletePrevious: Boolean(s.autoDeletePrevious),
                                     inlineKeyboard: Array.isArray(s.inlineKeyboard) ? s.inlineKeyboard.map((row: any[]) => Array.isArray(row) ? row.map(btn => ({ text: btn.text || '', url: btn.url || '' })) : []) : []
                                   });
@@ -5345,6 +5355,7 @@ export default function App() {
                           replyToMessageId: '',
                           enabled: true,
                           pinAfterSend: false,
+                          replyToLatest: false,
                           autoDeletePrevious: false,
                           inlineKeyboard: []
                         });
@@ -5418,6 +5429,11 @@ export default function App() {
                                     📌 Pin
                                   </span>
                                 )}
+                                {s.replyToLatest && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 font-semibold border border-amber-500/20">
+                                    ↩️ Reply Latest
+                                  </span>
+                                )}
                                 {s.autoDeletePrevious && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/10 text-rose-400 font-semibold border border-rose-500/20">
                                     🗑️ delOn
@@ -5472,6 +5488,7 @@ export default function App() {
                                     replyToMessageId: s.replyToMessageId ? String(s.replyToMessageId) : '',
                                     enabled: s.enabled !== false,
                                     pinAfterSend: Boolean(s.pinAfterSend),
+                                    replyToLatest: Boolean(s.replyToLatest),
                                     autoDeletePrevious: Boolean(s.autoDeletePrevious),
                                     inlineKeyboard: Array.isArray(s.inlineKeyboard) ? s.inlineKeyboard.map((row: any[]) => Array.isArray(row) ? row.map(btn => ({ text: btn.text || '', url: btn.url || '' })) : []) : []
                                   });
@@ -6929,6 +6946,18 @@ export default function App() {
                   />
                   <span className="flex items-center gap-1.5">
                     <Pin className="w-3.5 h-3.5 text-purple-400" /> Pin message in group after successful delivery
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={newScheduleForm.replyToLatest}
+                    onChange={(e) => setNewScheduleForm({ ...newScheduleForm, replyToLatest: e.target.checked })}
+                    className="w-4 h-4 rounded text-blue-600"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <Reply className="w-3.5 h-3.5 text-amber-400" /> Reply to latest message in chat (replyOn)
                   </span>
                 </label>
 

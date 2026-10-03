@@ -3967,10 +3967,10 @@ export class CommandHandler {
     if (ctx.args.length < 1) {
       await telegramApi.sendMessage(
         ctx.chatId,
-        `ℹ️ <b>Usage:</b>\n<code>/schedule &lt;time&gt; [delOn|delOff] [pin] [message]</code> (or reply to a message/media to schedule it)\n\n` +
+        `ℹ️ <b>Usage:</b>\n<code>/schedule &lt;time&gt; [delOn|delOff] [pin] [replyOn|replyOff] [message]</code> (or reply to a message/media to schedule it)\n\n` +
         `<b>Examples:</b>\n` +
-        `• <code>/schedule 30m delOn pin Check out our promo! https://example.com</code>\n` +
-        `• <code>/schedule 1m pin hello</code>\n` +
+        `• <code>/schedule 30m delOn pin replyOn Check out our promo! https://example.com</code>\n` +
+        `• <code>/schedule 1m replyOn hello</code>\n` +
         `• <code>/schedule 2h delOn</code> (replying to photo/video/sticker/media/text)\n` +
         `• <code>/schedule 1d Daily announcements...</code>`
       );
@@ -3980,6 +3980,7 @@ export class CommandHandler {
     const intervalStr = ctx.args[0];
     let autoDeletePrevious = false;
     let pinAfterSend = false;
+    let replyToLatest = false;
     let textStartIndex = 1;
 
     // Check prefix flags in args[1], args[2], etc.
@@ -3997,6 +3998,12 @@ export class CommandHandler {
       } else if (argLower === 'pinoff') {
         pinAfterSend = false;
         textStartIndex++;
+      } else if (argLower === 'replyon') {
+        replyToLatest = true;
+        textStartIndex++;
+      } else if (argLower === 'replyoff') {
+        replyToLatest = false;
+        textStartIndex++;
       } else {
         break;
       }
@@ -4004,8 +4011,8 @@ export class CommandHandler {
 
     let messageText = CommandHandler.getCommandText(ctx, textStartIndex);
 
-    // Also check and strip trailing flags (delon, deloff, pin) from end of messageText if present
-    const trailingRegex = /\s+(?:delon|deloff|pin|pinon|pinoff)$/i;
+    // Also check and strip trailing flags (delon, deloff, pin, replyon, replyoff) from end of messageText if present
+    const trailingRegex = /\s+(?:delon|deloff|pin|pinon|pinoff|replyon|replyoff)$/i;
     while (trailingRegex.test(messageText)) {
       const match = messageText.match(/\s+([^\s]+)$/);
       if (match) {
@@ -4014,6 +4021,8 @@ export class CommandHandler {
         else if (flag === 'deloff') autoDeletePrevious = false;
         else if (flag === 'pin' || flag === 'pinon') pinAfterSend = true;
         else if (flag === 'pinoff') pinAfterSend = false;
+        else if (flag === 'replyon') replyToLatest = true;
+        else if (flag === 'replyoff') replyToLatest = false;
       }
       messageText = messageText.replace(trailingRegex, '').trimEnd();
     }
@@ -4086,7 +4095,8 @@ export class CommandHandler {
       autoDeletePrevious,
       undefined,
       pinAfterSend,
-      inlineKeyboard
+      inlineKeyboard,
+      replyToLatest
     );
 
     if (res.success && res.schedule) {
@@ -4102,6 +4112,7 @@ export class CommandHandler {
         `<b>Frequency:</b> Every ${res.schedule.intervalFormatted}\n` +
         `<b>Auto-delete Previous:</b> ${res.schedule.autoDeletePrevious ? 'Enabled (delOn)' : 'Disabled (delOff)'}\n` +
         `<b>Pin Message:</b> ${res.schedule.pinAfterSend ? 'Enabled (pin)' : 'Disabled'}\n` +
+        `<b>Reply to Latest:</b> ${res.schedule.replyToLatest ? 'Enabled (replyOn)' : 'Disabled'}\n` +
         buttonInfo +
         `<b>Next Run:</b> ${new Date(res.schedule.nextRun).toLocaleTimeString()}\n\n` +
         `<i>Use <code>/listschedules</code> to view all or <code>/deleteschedule ${res.schedule.id}</code> to remove.</i>`
@@ -4125,9 +4136,10 @@ export class CommandHandler {
       .map((s, idx) => {
         const delTag = s.autoDeletePrevious ? ' [delOn]' : '';
         const pinTag = s.pinAfterSend ? ' [pin]' : '';
+        const replyTag = s.replyToLatest ? ' [replyOn]' : '';
         const btnTag = s.inlineKeyboard && s.inlineKeyboard.length > 0 ? ' [buttons]' : '';
         return (
-          `<b>${idx + 1}. [<code>${s.id}</code>] Every ${s.intervalFormatted}${delTag}${pinTag}${btnTag}</b>\n` +
+          `<b>${idx + 1}. [<code>${s.id}</code>] Every ${s.intervalFormatted}${delTag}${pinTag}${replyTag}${btnTag}</b>\n` +
           `<i>"${escapeHtml(s.message.length > 50 ? s.message.slice(0, 47) + '...' : s.message)}"</i>\n` +
           `Next: ${new Date(s.nextRun).toLocaleTimeString()} (Runs: ${s.runsCount})\n`
         );

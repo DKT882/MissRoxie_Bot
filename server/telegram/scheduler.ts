@@ -42,12 +42,17 @@ export class MessageScheduler {
   public static readonly IS_ENABLED_BY_DEFAULT: boolean = false;
   public static readonly MAX_EXECUTABLE_SCHEDULES: number = 50;
 
-  public static buildSendOptions(schedule: ScheduledMessage): {
+  public static buildSendOptions(schedule: ScheduledMessage, dynamicReplyId?: number): {
     reply_to_message_id?: number;
     reply_markup?: { inline_keyboard: Array<Array<{ text: string; url: string }>> };
   } {
     const options: any = {};
-    if (schedule.replyToMessageId) {
+    if (schedule.replyToLatest) {
+      const resolvedReplyId = dynamicReplyId !== undefined ? dynamicReplyId : db.getLatestEligibleMessageId(schedule.chatId);
+      if (resolvedReplyId !== undefined && resolvedReplyId > 0) {
+        options.reply_to_message_id = resolvedReplyId;
+      }
+    } else if (schedule.replyToMessageId) {
       options.reply_to_message_id = schedule.replyToMessageId;
     }
     if (schedule.inlineKeyboard && Array.isArray(schedule.inlineKeyboard) && schedule.inlineKeyboard.length > 0) {
@@ -298,7 +303,12 @@ export class MessageScheduler {
               }
             }
 
-            const sendOptions = MessageScheduler.buildSendOptions(freshSchedule);
+            let dynamicReplyId: number | undefined = undefined;
+            if (freshSchedule.replyToLatest) {
+              dynamicReplyId = db.getLatestEligibleMessageId(freshSchedule.chatId);
+            }
+
+            const sendOptions = MessageScheduler.buildSendOptions(freshSchedule, dynamicReplyId);
 
             let sendRes: any;
             if (freshSchedule.contentType === 'photo' && freshSchedule.mediaFileId) {
@@ -455,7 +465,8 @@ export class MessageScheduler {
     autoDeletePrevious?: boolean,
     explicitMentionMode?: 'none' | 'random_member' | 'all_members',
     pinAfterSend?: boolean,
-    inlineKeyboard?: ScheduledPostButton[][]
+    inlineKeyboard?: ScheduledPostButton[][],
+    replyToLatest?: boolean
   ): { success: boolean; schedule?: ScheduledMessage; error?: string } {
     const parsed = this.parseInterval(intervalStr);
     if (!parsed) {
@@ -497,6 +508,7 @@ export class MessageScheduler {
       nextRun,
       autoDeletePrevious: autoDeletePrevious || false,
       pinAfterSend: pinAfterSend || false,
+      replyToLatest: replyToLatest || false,
       inlineKeyboard: inlineKeyboard && inlineKeyboard.length > 0 ? inlineKeyboard : undefined,
       mentionMode
     });
@@ -507,7 +519,7 @@ export class MessageScheduler {
       adminUserId: adminId,
       adminUsername,
       action: 'schedule_created',
-      details: `Created recurring schedule [${schedule.id}] every ${parsed.formatted}${mentionMode !== 'none' ? ` (mentionMode: ${mentionMode})` : ''}${schedule.pinAfterSend ? ' [pin]' : ''}${schedule.inlineKeyboard ? ` [buttons: ${schedule.inlineKeyboard.flat().length}]` : ''}`
+      details: `Created recurring schedule [${schedule.id}] every ${parsed.formatted}${mentionMode !== 'none' ? ` (mentionMode: ${mentionMode})` : ''}${schedule.pinAfterSend ? ' [pin]' : ''}${schedule.replyToLatest ? ' [replyLatest]' : ''}${schedule.inlineKeyboard ? ` [buttons: ${schedule.inlineKeyboard.flat().length}]` : ''}`
     });
 
     return { success: true, schedule };

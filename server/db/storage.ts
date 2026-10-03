@@ -4173,6 +4173,7 @@ export class StorageManager {
             lastStatus: sc.lastStatus,
             lastError: sc.lastError,
             replyToMessageId: sc.replyToMessageId,
+            replyToLatest: sc.replyToLatest,
             autoDeletePrevious: sc.autoDeletePrevious,
             pinAfterSend: sc.pinAfterSend,
             inlineKeyboard: sc.inlineKeyboard,
@@ -4948,6 +4949,55 @@ export class StorageManager {
     }
 
     return Array.from(result).sort((a, b) => a - b);
+  }
+
+  /**
+   * Resolves the latest message ID available in the chat at runtime.
+   * Checks both tracked incoming messages and group conversation memory.
+   */
+  public getLatestEligibleMessageId(chatId: number | string): number | undefined {
+    const numId = typeof chatId === 'string' ? parseInt(chatId, 10) : chatId;
+    const strId = String(chatId);
+
+    let latestTrackedMsgId: number | undefined;
+    let latestTrackedTime = 0;
+
+    // 1. Check trackedMessages (most recent is at the end)
+    const tracked = this.trackedMessages[numId];
+    if (tracked && tracked.length > 0) {
+      for (let i = tracked.length - 1; i >= 0; i--) {
+        const msg = tracked[i];
+        if (msg && typeof msg.messageId === 'number' && msg.messageId > 0) {
+          latestTrackedMsgId = msg.messageId;
+          latestTrackedTime = (msg.date || 0) * 1000;
+          break;
+        }
+      }
+    }
+
+    let latestMemoryMsgId: number | undefined;
+    let latestMemoryTime = 0;
+
+    // 2. Check groupConversationMemories / groupMemories (most recent is at the end)
+    const memory = this.getGroupMemory(strId);
+    if (memory && memory.length > 0) {
+      for (let i = memory.length - 1; i >= 0; i--) {
+        const entry = memory[i];
+        if (entry && typeof entry.messageId === 'number' && entry.messageId > 0) {
+          latestMemoryMsgId = entry.messageId;
+          latestMemoryTime = entry.timestamp || 0;
+          break;
+        }
+      }
+    }
+
+    if (latestTrackedMsgId !== undefined && latestMemoryMsgId !== undefined) {
+      if (latestTrackedTime > latestMemoryTime) return latestTrackedMsgId;
+      if (latestMemoryTime > latestTrackedTime) return latestMemoryMsgId;
+      return latestTrackedMsgId;
+    }
+
+    return latestTrackedMsgId !== undefined ? latestTrackedMsgId : latestMemoryMsgId;
   }
 
   public getStats() {
