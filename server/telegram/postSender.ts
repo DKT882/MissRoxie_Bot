@@ -83,11 +83,18 @@ export function validateMediaReference(ref?: string): { valid: boolean; error?: 
 
 export function sanitizeInlineButtons(buttons?: ScheduledPostButton[][]): ScheduledPostButton[][] | undefined {
   if (!buttons || !Array.isArray(buttons) || buttons.length === 0) return undefined;
+  const allowedStyles = new Set<string>(['primary', 'success', 'danger']);
   const sanitized = buttons
     .map(row =>
       (Array.isArray(row) ? row : [])
         .filter(btn => btn && typeof btn.text === 'string' && btn.text.trim() && isValidHttpUrl(btn.url))
-        .map(btn => ({ text: btn.text.trim(), url: btn.url.trim() }))
+        .map(btn => {
+          const cleanBtn: ScheduledPostButton = { text: btn.text.trim(), url: btn.url.trim() };
+          if (btn.style && allowedStyles.has(btn.style)) {
+            cleanBtn.style = btn.style;
+          }
+          return cleanBtn;
+        })
     )
     .filter(row => row.length > 0);
   return sanitized.length > 0 ? sanitized : undefined;
@@ -143,6 +150,7 @@ export class PostSender {
 
       const textContent = payload.text || '';
       const contentType = payload.contentType || 'text';
+      let effectiveContentType = contentType;
 
       // 3. Resolve Media Reference / Buffer
       let resolvedMedia: string | { buffer: Buffer | Uint8Array; filename: string; contentType?: string } | undefined = undefined;
@@ -159,6 +167,10 @@ export class PostSender {
               filename: item.filename,
               contentType: item.mimeType
             };
+            // Reliable GIF detection via MIME type or file extension
+            if (item.mimeType === 'image/gif' || item.filename.toLowerCase().endsWith('.gif')) {
+              effectiveContentType = 'animation';
+            }
           } else {
             return {
               ok: false,
@@ -168,6 +180,11 @@ export class PostSender {
           }
         } else if (payload.mediaBuffer) {
           resolvedMedia = payload.mediaBuffer;
+          const mime = (resolvedMedia.contentType || '').toLowerCase();
+          const fname = (resolvedMedia.filename || '').toLowerCase();
+          if (mime === 'image/gif' || fname.endsWith('.gif')) {
+            effectiveContentType = 'animation';
+          }
         } else {
           const mediaCheck = validateMediaReference(payload.mediaFileId);
           if (!mediaCheck.valid) {
@@ -178,37 +195,48 @@ export class PostSender {
             };
           }
           resolvedMedia = mediaCheck.normalized;
+          if (typeof resolvedMedia === 'string') {
+            const clean = resolvedMedia.toLowerCase();
+            if (clean.endsWith('.gif') || clean.includes('.gif?') || clean.includes('.gif#')) {
+              effectiveContentType = 'animation';
+            }
+          }
         }
+      }
+
+      // Explicit animation type takes precedence
+      if (contentType === 'animation') {
+        effectiveContentType = 'animation';
       }
 
       let sendRes: any;
 
-      // 4. Dispatch to Telegram based on contentType via TelegramApi
-      if (contentType === 'photo' && resolvedMedia) {
+      // 4. Dispatch to Telegram based on effectiveContentType via TelegramApi
+      if (effectiveContentType === 'photo' && resolvedMedia) {
         sendRes = await telegramApi.sendPhoto(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'video' && resolvedMedia) {
+      } else if (effectiveContentType === 'video' && resolvedMedia) {
         sendRes = await telegramApi.sendVideo(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'document' && resolvedMedia) {
-        sendRes = await telegramApi.sendDocument(chatId, resolvedMedia, {
-          caption: textContent,
-          parse_mode: 'HTML',
-          ...options
-        });
-      } else if (contentType === 'animation' && resolvedMedia) {
+      } else if (effectiveContentType === 'animation' && resolvedMedia) {
         sendRes = await telegramApi.sendAnimation(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'sticker' && typeof resolvedMedia === 'string') {
+      } else if (effectiveContentType === 'document' && resolvedMedia) {
+        sendRes = await telegramApi.sendDocument(chatId, resolvedMedia, {
+          caption: textContent,
+          parse_mode: 'HTML',
+          ...options
+        });
+      } else if (effectiveContentType === 'sticker' && typeof resolvedMedia === 'string') {
         sendRes = await telegramApi.sendSticker(chatId, resolvedMedia, options);
       } else {
         sendRes = await telegramApi.sendMessage(chatId, textContent, {

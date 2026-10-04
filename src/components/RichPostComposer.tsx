@@ -26,10 +26,13 @@ import {
 
 export type ComposerContentType = 'text' | 'photo' | 'video' | 'animation' | 'document';
 
+export type PostButtonStyle = 'primary' | 'success' | 'danger';
+
 export interface ComposerButton {
   id: string;
   text: string;
   url: string;
+  style?: PostButtonStyle;
 }
 
 export interface RichPostComposerProps {
@@ -199,6 +202,11 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const isGif = file.type === 'image/gif' || file.name.toLowerCase().endsWith('.gif');
+    if (isGif && contentType !== 'animation') {
+      setContentType('animation');
+    }
+
     // Set immediate local visual preview
     const localUrl = URL.createObjectURL(file);
     setMediaPreviewUrl(localUrl);
@@ -209,7 +217,8 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await fetch(`/api/dashboard/posts/upload-media?type=${contentType}`, {
+      const targetType = isGif ? 'animation' : contentType;
+      const res = await fetch(`/api/dashboard/posts/upload-media?type=${targetType}`, {
         method: 'POST',
         body: formData
       });
@@ -346,13 +355,13 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     ]);
   }, []);
 
-  const handleUpdateButton = useCallback((rowIndex: number, btnIndex: number, field: 'text' | 'url', val: string) => {
+  const handleUpdateButton = useCallback((rowIndex: number, btnIndex: number, field: 'text' | 'url' | 'style', val: any) => {
     setButtonGrid(prev => {
       const next = prev.map(r => [...r]);
       if (next[rowIndex] && next[rowIndex][btnIndex]) {
         next[rowIndex][btnIndex] = {
           ...next[rowIndex][btnIndex],
-          [field]: val
+          [field]: val || undefined
         };
       }
       return next;
@@ -383,29 +392,44 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
         row
           .filter(b => b.text.trim() && isValidHttpUrl(b.url))
           .map(b => {
-            try {
-              const parsed = new URL(b.url.trim());
-              return { text: b.text.trim(), url: parsed.href };
-            } catch {
-              return { text: b.text.trim(), url: b.url.trim() };
+            const btnObj: { text: string; url: string; style?: PostButtonStyle } = {
+              text: b.text.trim(),
+              url: (() => {
+                try {
+                  return new URL(b.url.trim()).href;
+                } catch {
+                  return b.url.trim();
+                }
+              })()
+            };
+            if (b.style) {
+              btnObj.style = b.style;
             }
+            return btnObj;
           })
       )
       .filter(row => row.length > 0);
 
     const mediaId = uploadedMediaId ? `upload:${uploadedMediaId}` : (mediaFileId.trim() || undefined);
 
+    let effectiveContentType = contentType;
+    if (uploadedFileName && (uploadedFileName.toLowerCase().endsWith('.gif') || uploadedFileName.toLowerCase().includes('.gif'))) {
+      effectiveContentType = 'animation';
+    } else if (mediaFileId && (mediaFileId.toLowerCase().endsWith('.gif') || mediaFileId.toLowerCase().includes('.gif'))) {
+      effectiveContentType = 'animation';
+    }
+
     return {
-      contentType,
+      contentType: effectiveContentType,
       text: text.trim() || undefined,
-      mediaFileId: contentType !== 'text' ? mediaId : undefined,
-      mediaUploadId: contentType !== 'text' ? (uploadedMediaId || undefined) : undefined,
+      mediaFileId: effectiveContentType !== 'text' ? mediaId : undefined,
+      mediaUploadId: effectiveContentType !== 'text' ? (uploadedMediaId || undefined) : undefined,
       buttons: formattedButtons.length > 0 ? formattedButtons : undefined,
       pinAfterSend,
       replyToLatest,
       protectContent
     };
-  }, [contentType, text, mediaFileId, uploadedMediaId, buttonGrid, pinAfterSend, replyToLatest, protectContent]);
+  }, [contentType, text, mediaFileId, uploadedMediaId, uploadedFileName, buttonGrid, pinAfterSend, replyToLatest, protectContent]);
 
   // Send Now Handler
   const handleConfirmSendNow = async () => {
@@ -958,7 +982,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                               type="text"
                               value={btn.text}
                               onChange={e => handleUpdateButton(rIdx, bIdx, 'text', e.target.value)}
-                              placeholder="Button Text (e.g. Website)"
+                              placeholder="Button Text"
                               maxLength={64}
                               className={`sm:w-1/3 px-2.5 py-1.5 rounded-lg text-xs border ${themeInputBg} outline-none`}
                             />
@@ -977,6 +1001,18 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400 absolute right-2" />
                               )}
                             </div>
+
+                            <select
+                              value={btn.style || ''}
+                              onChange={e => handleUpdateButton(rIdx, bIdx, 'style', e.target.value)}
+                              className={`sm:w-28 px-2 py-1.5 rounded-lg text-xs border ${themeInputBg} outline-none font-medium`}
+                              title="Telegram Button Style"
+                            >
+                              <option value="">Default</option>
+                              <option value="primary">Primary 🔵</option>
+                              <option value="success">Success 🟢</option>
+                              <option value="danger">Danger 🔴</option>
+                            </select>
 
                             <button
                               type="button"
@@ -1122,25 +1158,40 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                 <div className="space-y-1.5 max-w-[92%]">
                   {buttonGrid.map((row, rIdx) => (
                     <div key={`prev_row_${rIdx}`} className="flex items-center gap-1.5">
-                      {row.map(btn => (
-                        <a
-                          key={btn.id}
-                          href={isValidHttpUrl(btn.url) ? btn.url : undefined}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={e => {
-                            if (!isValidHttpUrl(btn.url)) e.preventDefault();
-                          }}
-                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-medium text-center truncate flex items-center justify-center gap-1.5 shadow-sm transition-opacity hover:opacity-90 ${
-                            isDark
-                              ? 'bg-[#27354a] text-blue-300 border border-blue-500/20'
-                              : 'bg-white text-blue-600 border border-blue-200'
-                          }`}
-                        >
-                          <span className="truncate">{btn.text || 'Untitled Button'}</span>
-                          <ExternalLink className="w-3 h-3 shrink-0 opacity-70" />
-                        </a>
-                      ))}
+                      {row.map(btn => {
+                        let styleClass = isDark
+                          ? 'bg-[#27354a] text-blue-300 border border-blue-500/20'
+                          : 'bg-white text-blue-600 border border-blue-200';
+                        if (btn.style === 'primary') {
+                          styleClass = isDark
+                            ? 'bg-blue-600/30 text-blue-300 border border-blue-500/50'
+                            : 'bg-blue-100 text-blue-800 border border-blue-300';
+                        } else if (btn.style === 'success') {
+                          styleClass = isDark
+                            ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50'
+                            : 'bg-emerald-100 text-emerald-800 border border-emerald-300';
+                        } else if (btn.style === 'danger') {
+                          styleClass = isDark
+                            ? 'bg-red-600/30 text-red-300 border border-red-500/50'
+                            : 'bg-red-100 text-red-800 border border-red-300';
+                        }
+
+                        return (
+                          <a
+                            key={btn.id}
+                            href={isValidHttpUrl(btn.url) ? btn.url : undefined}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={e => {
+                              if (!isValidHttpUrl(btn.url)) e.preventDefault();
+                            }}
+                            className={`flex-1 py-2 px-3 rounded-xl text-xs font-medium text-center truncate flex items-center justify-center gap-1.5 shadow-sm transition-opacity hover:opacity-90 ${styleClass}`}
+                          >
+                            <span className="truncate">{btn.text || 'Untitled Button'}</span>
+                            <ExternalLink className="w-3 h-3 shrink-0 opacity-70" />
+                          </a>
+                        );
+                      })}
                     </div>
                   ))}
                 </div>
@@ -1152,7 +1203,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
           <div className="p-3 rounded-xl bg-stone-900/60 border border-stone-800 text-[11px] text-stone-400 flex items-start gap-2">
             <Shield className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
             <p>
-              <strong className="text-stone-300">Telegram Client Theme Notice:</strong> Message bubble and button colors are rendered according to each subscriber's Telegram app theme. Telegram Bot API does not support custom button or bubble background colors.
+              <strong className="text-stone-300">Telegram Bot API Button Styles:</strong> Buttons support official Telegram styles (Primary, Success, Danger). Per-message bubble/background colors are not provided by the Telegram Bot API and are rendered per client theme.
             </p>
           </div>
         </div>

@@ -535,9 +535,12 @@ export interface ContentPermissionRecord {
   username?: string;
 }
 
+export type PostButtonStyle = 'primary' | 'success' | 'danger';
+
 export interface ScheduledPostButton {
   text: string;
   url: string;
+  style?: PostButtonStyle;
 }
 
 export type PostButton = ScheduledPostButton;

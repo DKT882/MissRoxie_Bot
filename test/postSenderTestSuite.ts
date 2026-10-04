@@ -436,6 +436,132 @@ async function runTests() {
     assert(invalidSendRes.ok === false && invalidSendRes.error?.includes('Local browser files'), 'PostSender.send returns ok=false on local_preview_');
     assert(capturedCalls.length === 0, 'No Telegram API calls were dispatched for invalid media');
 
+    // ----------------------------------------------------------------
+    // Test 23: Button style sanitization and preservation
+    // ----------------------------------------------------------------
+    console.log('\n--- Test 23: Button Style Sanitization & Preservation ---');
+    capturedCalls = [];
+    const styledBtnPayload: PostPayload = {
+      contentType: 'text',
+      text: 'Styled button actions',
+      buttons: [
+        [
+          { text: 'Primary Button', url: 'https://example.com/primary', style: 'primary' },
+          { text: 'Success Button', url: 'https://example.com/success', style: 'success' },
+          { text: 'Danger Button', url: 'https://example.com/danger', style: 'danger' }
+        ]
+      ]
+    };
+    await PostSender.send(chatId, styledBtnPayload);
+    const markup23 = capturedCalls[0].args[2].reply_markup;
+    assert(Boolean(markup23 && markup23.inline_keyboard), 'reply_markup attached for styled buttons');
+    assert(markup23.inline_keyboard[0].length === 3, 'All 3 styled buttons preserved');
+    assert(markup23.inline_keyboard[0][0].style === 'primary', 'Primary style preserved on button 0');
+    assert(markup23.inline_keyboard[0][1].style === 'success', 'Success style preserved on button 1');
+    assert(markup23.inline_keyboard[0][2].style === 'danger', 'Danger style preserved on button 2');
+
+    // ----------------------------------------------------------------
+    // Test 24: Invalid button style stripped gracefully
+    // ----------------------------------------------------------------
+    console.log('\n--- Test 24: Invalid Button Style Stripped ---');
+    capturedCalls = [];
+    const invalidStylePayload: PostPayload = {
+      contentType: 'text',
+      text: 'Buttons with invalid style values',
+      buttons: [
+        [
+          { text: 'Valid Style', url: 'https://example.com/valid', style: 'primary' },
+          { text: 'Invalid Style', url: 'https://example.com/invalid', style: 'rainbow' as any },
+          { text: 'Hex Color Style', url: 'https://example.com/hex', style: '#ff0000' as any }
+        ]
+      ]
+    };
+    await PostSender.send(chatId, invalidStylePayload);
+    const markup24 = capturedCalls[0].args[2].reply_markup;
+    assert(markup24.inline_keyboard[0].length === 3, 'All 3 buttons preserved');
+    assert(markup24.inline_keyboard[0][0].style === 'primary', 'Valid primary style preserved');
+    assert(markup24.inline_keyboard[0][1].style === undefined, 'Invalid style "rainbow" stripped');
+    assert(markup24.inline_keyboard[0][2].style === undefined, 'Arbitrary hex style "#ff0000" stripped');
+
+    // ----------------------------------------------------------------
+    // Test 25: Multi-row button styles correctly preserved
+    // ----------------------------------------------------------------
+    console.log('\n--- Test 25: Multi-row Button Styles ---');
+    capturedCalls = [];
+    const multiRowStyledPayload: PostPayload = {
+      contentType: 'text',
+      text: 'Multi-row styled buttons',
+      buttons: [
+        [
+          { text: 'Buy Now', url: 'https://example.com/buy', style: 'success' },
+          { text: 'Cancel', url: 'https://example.com/cancel', style: 'danger' }
+        ],
+        [
+          { text: 'More Info', url: 'https://example.com/info', style: 'primary' },
+          { text: 'Default Link', url: 'https://example.com/link' }
+        ]
+      ]
+    };
+    await PostSender.send(chatId, multiRowStyledPayload);
+    const markup25 = capturedCalls[0].args[2].reply_markup;
+    assert(markup25.inline_keyboard.length === 2, '2 rows present');
+    assert(markup25.inline_keyboard[0][0].style === 'success', 'Row 1 Col 1 has success style');
+    assert(markup25.inline_keyboard[0][1].style === 'danger', 'Row 1 Col 2 has danger style');
+    assert(markup25.inline_keyboard[1][0].style === 'primary', 'Row 2 Col 1 has primary style');
+    assert(markup25.inline_keyboard[1][1].style === undefined, 'Row 2 Col 2 has undefined (default) style');
+
+    // ----------------------------------------------------------------
+    // Test 26: Automatic GIF detection via MIME type sends via sendAnimation
+    // ----------------------------------------------------------------
+    console.log('\n--- Test 26: GIF MIME Auto-Detection routes to sendAnimation ---');
+    capturedCalls = [];
+    const gifMimePayload: PostPayload = {
+      contentType: 'document', // User selected document but uploaded GIF
+      mediaBuffer: {
+        buffer: Buffer.from('GIF89a sample binary'),
+        filename: 'animation_test.dat',
+        contentType: 'image/gif'
+      },
+      text: 'MIME GIF Caption'
+    };
+    const res26 = await PostSender.send(chatId, gifMimePayload);
+    assert(res26.ok === true, 'GIF sent successfully');
+    assert(capturedCalls.length === 1 && capturedCalls[0].method === 'sendAnimation', 'Dispatched through sendAnimation, NOT sendDocument');
+    assert(capturedCalls[0].args[2].caption === 'MIME GIF Caption', 'Caption preserved');
+
+    // ----------------------------------------------------------------
+    // Test 27: Automatic GIF detection via filename extension routes to sendAnimation
+    // ----------------------------------------------------------------
+    console.log('\n--- Test 27: GIF File Extension Auto-Detection routes to sendAnimation ---');
+    capturedCalls = [];
+    const gifExtPayload: PostPayload = {
+      contentType: 'photo', // User selected photo but uploaded .gif
+      mediaBuffer: {
+        buffer: Buffer.from('GIF89a sample binary'),
+        filename: 'funny_meme.gif',
+        contentType: 'application/octet-stream'
+      },
+      text: 'Extension GIF Caption'
+    };
+    const res27 = await PostSender.send(chatId, gifExtPayload);
+    assert(res27.ok === true, 'GIF sent successfully');
+    assert(capturedCalls.length === 1 && capturedCalls[0].method === 'sendAnimation', 'Dispatched through sendAnimation, NOT sendPhoto');
+
+    // ----------------------------------------------------------------
+    // Test 28: Automatic GIF detection via HTTPS URL ending in .gif
+    // ----------------------------------------------------------------
+    console.log('\n--- Test 28: HTTPS URL .gif Auto-Detection routes to sendAnimation ---');
+    capturedCalls = [];
+    const gifUrlPayload: PostPayload = {
+      contentType: 'photo',
+      mediaFileId: 'https://media.giphy.com/media/sample123/giphy.gif',
+      text: 'Giphy Animation URL'
+    };
+    const res28 = await PostSender.send(chatId, gifUrlPayload);
+    assert(res28.ok === true, 'HTTPS GIF sent successfully');
+    assert(capturedCalls.length === 1 && capturedCalls[0].method === 'sendAnimation', 'Dispatched through sendAnimation for HTTPS .gif URL');
+
+
   } finally {
     telegramApi.sendMessage = originalSendMessage;
     telegramApi.sendPhoto = originalSendPhoto;

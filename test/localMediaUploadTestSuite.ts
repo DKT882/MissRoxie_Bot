@@ -273,6 +273,40 @@ async function runLocalMediaUploadTestSuite() {
     assert(gifRes.telegramFileId === 'CgACAgIAAxkBAAI_animation_file_id', 'PostSender extracts animation telegramFileId');
     assert(apiCalls.some(c => c.method === 'sendAnimation' && c.isFormData === true), 'TelegramApi.sendAnimation received multipart FormData payload');
 
+    // 3.4b Uploaded GIF with contentType='document' automatically detected as animation
+    apiCalls.length = 0;
+    const autoGifPayload: PostPayload = {
+      contentType: 'document',
+      text: 'Auto-detected GIF via upload',
+      mediaUploadId: storedGif.id
+    };
+    const autoGifRes = await PostSender.send(testChatId, autoGifPayload);
+    assert(autoGifRes.ok === true, 'Auto-detected GIF sends successfully');
+    assert(apiCalls.some(c => c.method === 'sendAnimation' && c.isFormData === true), 'Auto-detected uploaded GIF routed to sendAnimation instead of sendDocument');
+
+    // 3.4c Uploaded photo with styled inline buttons
+    apiCalls.length = 0;
+    const styledUploadPayload: PostPayload = {
+      contentType: 'photo',
+      text: 'Photo with styled buttons',
+      mediaUploadId: storedPhoto.id,
+      buttons: [
+        [
+          { text: 'Buy', url: 'https://example.com/buy', style: 'success' },
+          { text: 'Info', url: 'https://example.com/info', style: 'primary' },
+          { text: 'Report', url: 'https://example.com/report', style: 'danger' }
+        ]
+      ]
+    };
+    const styledUploadRes = await PostSender.send(testChatId, styledUploadPayload);
+    assert(styledUploadRes.ok === true, 'Uploaded photo with styled buttons delivered successfully');
+    const lastCall = apiCalls.find(c => c.method === 'sendPhoto');
+    const replyMarkup = lastCall?.args?.options?.reply_markup;
+    assert(Boolean(replyMarkup && replyMarkup.inline_keyboard), 'reply_markup present on uploaded media message');
+    assert(replyMarkup.inline_keyboard[0][0].style === 'success', 'Uploaded media preserved button 0 success style');
+    assert(replyMarkup.inline_keyboard[0][1].style === 'primary', 'Uploaded media preserved button 1 primary style');
+    assert(replyMarkup.inline_keyboard[0][2].style === 'danger', 'Uploaded media preserved button 2 danger style');
+
     // 3.5 Error handling: Non-existent upload ID
     const invalidUploadRes = await PostSender.send(testChatId, {
       contentType: 'photo',

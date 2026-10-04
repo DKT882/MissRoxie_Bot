@@ -616,6 +616,69 @@ async function runDashboardRichPostComposerTestSuite() {
   const invalidCheck3 = isValidHttpUrl('javascript:alert(1)');
   assert(invalidCheck3 === false, '16d. isValidHttpUrl rejects javascript: pseudo-protocol');
 
+  // --- Test 17: Button Styles in Dashboard Composer Payload & Schedule ---
+  console.log('\n--- Test 17: Button Styles in Dashboard Composer Payload & Schedule ---');
+  apiCalls.length = 0;
+  const res17 = await simulateDashboardSend({
+    body: {
+      chatId: testChatId,
+      payload: {
+        contentType: 'text',
+        text: 'Dashboard styled actions',
+        buttons: [
+          [
+            { text: '🔵 Primary Action', url: 'https://example.com/prime', style: 'primary' },
+            { text: '🟢 Success Action', url: 'https://example.com/ok', style: 'success' }
+          ],
+          [
+            { text: '🔴 Danger Action', url: 'https://example.com/del', style: 'danger' }
+          ]
+        ]
+      }
+    }
+  });
+  assert(res17.status === 200 && res17.body.success === true, '17a. Send Now with styled buttons succeeds');
+  const sentButtons = apiCalls[0].args.options.reply_markup.inline_keyboard;
+  assert(sentButtons.length === 2, '17b. Preserved 2 rows of styled buttons');
+  assert(sentButtons[0][0].style === 'primary', '17c. Row 1 Col 1 has primary style');
+  assert(sentButtons[0][1].style === 'success', '17d. Row 1 Col 2 has success style');
+  assert(sentButtons[1][0].style === 'danger', '17e. Row 2 Col 1 has danger style');
+
+  // Schedule with styled buttons
+  const res17b = await simulateDashboardSchedule({
+    body: {
+      chatId: testChatId,
+      nextRun: futureIso,
+      payload: {
+        contentType: 'text',
+        text: 'Scheduled styled post',
+        buttons: [
+          [{ text: 'Styled Btn', url: 'https://example.com/styled', style: 'primary' }]
+        ]
+      }
+    }
+  });
+  assert(res17b.status === 200 && res17b.body.success === true, '17f. Schedule with styled buttons succeeds');
+  const schedRecord = res17b.body.schedule as ScheduledMessage;
+  assert(schedRecord.inlineKeyboard && schedRecord.inlineKeyboard[0][0].style === 'primary', '17g. Schedule preserved button style in DB record');
+  db.deleteSchedule(testChatId, schedRecord.id);
+
+  // --- Test 18: GIF URL / File ID Auto-Routing to sendAnimation ---
+  console.log('\n--- Test 18: GIF URL Auto-Routing to sendAnimation ---');
+  apiCalls.length = 0;
+  const res18 = await simulateDashboardSend({
+    body: {
+      chatId: testChatId,
+      payload: {
+        contentType: 'photo', // user selected photo type with GIF URL
+        mediaFileId: 'https://media1.giphy.com/media/test1234/200.gif',
+        text: 'Animated GIF reaction'
+      }
+    }
+  });
+  assert(res18.status === 200 && res18.body.success === true, '18a. GIF URL post succeeds');
+  assert(apiCalls.length === 1 && apiCalls[0].method === 'sendAnimation', '18b. GIF URL routed to sendAnimation instead of sendPhoto');
+
   // Restore API methods
   (telegramApi as any).sendMessage = origSendMessage;
   (telegramApi as any).sendPhoto = origSendPhoto;
