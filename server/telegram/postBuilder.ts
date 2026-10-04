@@ -1,7 +1,7 @@
 import { telegramApi } from './api.js';
 import { db } from '../db/storage.js';
 import { parseDuration } from './moderation.js';
-import { PostSender, sanitizeInlineButtons } from './postSender.js';
+import { PostSender, sanitizeInlineButtons, isValidHttpUrl } from './postSender.js';
 import { PostPayload, PostContentType, ScheduledPostButton, TelegramMessage, TelegramCallbackQuery, ScheduledMessage } from './types.js';
 import { CommandContext, TelegramMiddleware } from './middleware.js';
 
@@ -177,16 +177,6 @@ export function parseScheduleTime(input: string, baseNowMs: number = Date.now())
   }
 
   return { error: 'Unrecognized date/time format. Please use relative formats like <code>30m</code>, <code>2h</code>, <code>1d</code> or <code>YYYY-MM-DD HH:mm</code>.' };
-}
-
-function isValidHttpUrl(stringUrl?: string): boolean {
-  if (!stringUrl || typeof stringUrl !== 'string') return false;
-  try {
-    const parsed = new URL(stringUrl.trim());
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 function escapeHtml(text: string): string {

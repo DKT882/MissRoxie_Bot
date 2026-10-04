@@ -48,12 +48,61 @@ export interface RichPostComposerProps {
 
 function isValidHttpUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
   try {
-    const parsed = new URL(url.trim());
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
+    const hostname = parsed.hostname?.toLowerCase();
+    if (!hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+      return false;
+    }
+    if (!hostname.includes('.')) {
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }
+}
+
+function validateMediaReference(ref?: string): { valid: boolean; error?: string } {
+  if (!ref || typeof ref !== 'string') {
+    return { valid: false, error: 'Media reference (file_id or HTTPS URL) is required.' };
+  }
+  const trimmed = ref.trim();
+  if (!trimmed) {
+    return { valid: false, error: 'Media reference cannot be empty.' };
+  }
+  if (
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('data:') ||
+    trimmed.startsWith('file:') ||
+    trimmed.startsWith('local_preview_')
+  ) {
+    return {
+      valid: false,
+      error: 'Local browser files cannot be delivered directly to Telegram. Please enter a valid Telegram file_id or a public https:// URL.'
+    };
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    if (!isValidHttpUrl(trimmed)) {
+      return {
+        valid: false,
+        error: 'Invalid media URL. Must be a valid public http:// or https:// address (e.g. https://example.com/image.jpg).'
+      };
+    }
+    return { valid: true };
+  }
+  if (trimmed.length < 5 || trimmed.includes(' ') || trimmed.includes('\\')) {
+    return {
+      valid: false,
+      error: 'Invalid Telegram file_id format.'
+    };
+  }
+  return { valid: true };
 }
 
 export const RichPostComposer: React.FC<RichPostComposerProps> = ({
@@ -140,8 +189,11 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     if (contentType === 'text' && !text.trim()) {
       errors.push('Message text is required for text posts.');
     }
-    if (contentType !== 'text' && !mediaFileId.trim()) {
-      errors.push(`Media file_id or URL is required for ${contentType} posts.`);
+    if (contentType !== 'text') {
+      const mediaVal = validateMediaReference(mediaFileId);
+      if (!mediaVal.valid) {
+        errors.push(mediaVal.error || `Media file_id or URL is required for ${contentType} posts.`);
+      }
     }
     if (isOverCharLimit) {
       errors.push(`Content exceeds maximum allowed length (${text.length}/${maxChars} chars).`);
@@ -253,7 +305,14 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       .map(row =>
         row
           .filter(b => b.text.trim() && isValidHttpUrl(b.url))
-          .map(b => ({ text: b.text.trim(), url: b.url.trim() }))
+          .map(b => {
+            try {
+              const parsed = new URL(b.url.trim());
+              return { text: b.text.trim(), url: parsed.href };
+            } catch {
+              return { text: b.text.trim(), url: b.url.trim() };
+            }
+          })
       )
       .filter(row => row.length > 0);
 
@@ -546,7 +605,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
 
                 {/* Local preview URL generator helper */}
                 <div className="flex items-center gap-2 text-[11px] text-stone-400">
-                  <span>Or test with an image URL / file:</span>
+                  <span>Or test layout with local file:</span>
                   <input
                     type="file"
                     accept={
@@ -563,14 +622,23 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                       if (file) {
                         const localUrl = URL.createObjectURL(file);
                         setMediaPreviewUrl(localUrl);
-                        if (!mediaFileId) {
-                          setMediaFileId(`local_preview_${file.name}`);
-                        }
                       }
                     }}
                     className="text-[11px] file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-[10px] file:font-semibold file:bg-stone-800 file:text-stone-300 hover:file:bg-stone-700 cursor-pointer"
                   />
                 </div>
+
+                {mediaPreviewUrl && (!mediaFileId.trim() || !validateMediaReference(mediaFileId).valid) && (
+                  <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Local Browser Preview Active</p>
+                      <p className="opacity-90">
+                        This local file is displayed in the live preview for layout verification. To send this post, enter a public <code className="bg-stone-900 px-1 py-0.5 rounded font-mono">https://</code> URL or a Telegram <code className="bg-stone-900 px-1 py-0.5 rounded font-mono">file_id</code> in the field above.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -902,6 +970,14 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Telegram Theme & Styling Disclaimer */}
+          <div className="p-3 rounded-xl bg-stone-900/60 border border-stone-800 text-[11px] text-stone-400 flex items-start gap-2">
+            <Shield className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
+            <p>
+              <strong className="text-stone-300">Telegram Client Theme Notice:</strong> Message bubble and button colors are rendered according to each subscriber's Telegram app theme. Telegram Bot API does not support custom button or bubble background colors.
+            </p>
           </div>
         </div>
       </div>

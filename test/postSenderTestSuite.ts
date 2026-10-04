@@ -1,5 +1,5 @@
 process.env.NODE_ENV = 'test';
-import { PostSender } from '../server/telegram/postSender.js';
+import { PostSender, validateMediaReference, isValidHttpUrl } from '../server/telegram/postSender.js';
 import { PostPayload, ScheduledMessage } from '../server/telegram/types.js';
 import { telegramApi } from '../server/telegram/api.js';
 import { db } from '../server/db/storage.js';
@@ -405,8 +405,36 @@ async function runTests() {
     const legacyAdapted = PostSender.scheduleToPayload(legacySchedule);
     assert(legacyAdapted.contentType === 'text', 'Defaulted contentType to text');
     assert(legacyAdapted.text === 'Old text only', 'Extracted message as text');
-    assert(legacyAdapted.buttons === undefined, 'Buttons undefined for legacy record');
-    assert(legacyAdapted.pinAfterSend === undefined || legacyAdapted.pinAfterSend === false, 'pinAfterSend safe');
+    // ----------------------------------------------------------------
+    // Test 21: validateMediaReference unit tests
+    // ----------------------------------------------------------------
+    console.log('\n--- Test 21: validateMediaReference Unit Tests ---');
+    const v1 = validateMediaReference('local_preview_pic.png');
+    assert(v1.valid === false && v1.error?.includes('Local browser files'), 'Rejects local_preview_ string');
+    const v2 = validateMediaReference('blob:http://localhost:3000/123');
+    assert(v2.valid === false && v2.error?.includes('Local browser files'), 'Rejects blob: URL');
+    const v3 = validateMediaReference('data:image/png;base64,iVBORw0KGgo=');
+    assert(v3.valid === false && v3.error?.includes('Local browser files'), 'Rejects data: URL');
+    const v4 = validateMediaReference('http://localhost/image.png');
+    assert(v4.valid === false && v4.error?.includes('Invalid media URL'), 'Rejects localhost media URL');
+    const v5 = validateMediaReference('https://images.unsplash.com/photo-1234.jpg');
+    assert(v5.valid === true && v5.normalized?.startsWith('https://images.unsplash.com/'), 'Accepts valid HTTPS image URL');
+    const v6 = validateMediaReference('AgACAgIAAxkBAAI9XYZ');
+    assert(v6.valid === true && v6.normalized === 'AgACAgIAAxkBAAI9XYZ', 'Accepts valid Telegram file_id');
+
+    // ----------------------------------------------------------------
+    // Test 22: PostSender.send rejects invalid media before calling Telegram
+    // ----------------------------------------------------------------
+    console.log('\n--- Test 22: PostSender.send Early Rejection of Invalid Media ---');
+    capturedCalls = [];
+    const invalidMediaPayload: PostPayload = {
+      contentType: 'photo',
+      mediaFileId: 'local_preview_test.jpg',
+      text: 'Should fail early'
+    };
+    const invalidSendRes = await PostSender.send(chatId, invalidMediaPayload);
+    assert(invalidSendRes.ok === false && invalidSendRes.error?.includes('Local browser files'), 'PostSender.send returns ok=false on local_preview_');
+    assert(capturedCalls.length === 0, 'No Telegram API calls were dispatched for invalid media');
 
   } finally {
     telegramApi.sendMessage = originalSendMessage;

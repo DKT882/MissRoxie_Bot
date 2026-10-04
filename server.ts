@@ -15,7 +15,7 @@ import { authManager } from './server/auth/authManager.js';
 import { runDummyDataCleanup } from './server/operations/cleanupDummyData.js';
 import { mongoManager } from './server/db/mongodb.js';
 import { MongoStorageService } from './server/db/mongoStorage.js';
-import { PostSender, sanitizeInlineButtons } from './server/telegram/postSender.js';
+import { PostSender, sanitizeInlineButtons, validateMediaReference } from './server/telegram/postSender.js';
 import { PostPayload, PostContentType } from './server/telegram/types.js';
 
 dotenv.config();
@@ -1696,9 +1696,13 @@ export async function startServer() {
         return res.status(400).json({ error: 'Message text cannot be empty for text posts.' });
       }
 
-      const mediaFileId = typeof payload.mediaFileId === 'string' ? payload.mediaFileId.trim() : undefined;
-      if (contentType !== 'text' && !mediaFileId) {
-        return res.status(400).json({ error: `Media reference (file_id or URL) is required for ${contentType} posts.` });
+      let normalizedMediaId: string | undefined = undefined;
+      if (contentType !== 'text') {
+        const mediaCheck = validateMediaReference(payload.mediaFileId);
+        if (!mediaCheck.valid) {
+          return res.status(400).json({ error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` });
+        }
+        normalizedMediaId = mediaCheck.normalized;
       }
 
       const sanitizedButtons = sanitizeInlineButtons(payload.buttons);
@@ -1706,7 +1710,7 @@ export async function startServer() {
       const postPayload: PostPayload = {
         contentType,
         text: text || undefined,
-        mediaFileId: mediaFileId || undefined,
+        mediaFileId: normalizedMediaId,
         buttons: sanitizedButtons,
         pinAfterSend: Boolean(payload.pinAfterSend),
         replyToLatest: Boolean(payload.replyToLatest),
@@ -1737,7 +1741,7 @@ export async function startServer() {
             messageId: sendResult.messageId,
             chatId: numChatId,
             mediaType: contentType,
-            mediaFileId: mediaFileId,
+            mediaFileId: normalizedMediaId,
             direction: 'outgoing',
             source: 'dashboard',
             sender: 'Roxie'
@@ -1796,9 +1800,13 @@ export async function startServer() {
         return res.status(400).json({ error: 'Message text cannot be empty for text posts.' });
       }
 
-      const mediaFileId = typeof payload.mediaFileId === 'string' ? payload.mediaFileId.trim() : undefined;
-      if (contentType !== 'text' && !mediaFileId) {
-        return res.status(400).json({ error: `Media reference is required for ${contentType} posts.` });
+      let scheduledMediaId: string | undefined = undefined;
+      if (contentType !== 'text') {
+        const mediaCheck = validateMediaReference(payload.mediaFileId);
+        if (!mediaCheck.valid) {
+          return res.status(400).json({ error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` });
+        }
+        scheduledMediaId = mediaCheck.normalized;
       }
 
       if (!nextRun || isNaN(new Date(nextRun).getTime())) {
@@ -1822,7 +1830,7 @@ export async function startServer() {
         nextRun: new Date(nextRun).toISOString(),
         timezone: timezone || 'UTC',
         contentType,
-        mediaFileId: mediaFileId || undefined,
+        mediaFileId: scheduledMediaId,
         replyToMessageId: payload.replyToMessageId ? Number(payload.replyToMessageId) : undefined,
         replyToLatest: Boolean(payload.replyToLatest),
         autoDeletePrevious: Boolean(payload.autoDeletePrevious),

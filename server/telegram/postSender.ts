@@ -4,14 +4,70 @@ import { TelegramMiddleware } from './middleware.js';
 import { PostPayload, SendPostResult, ScheduledMessage, ScheduledPostButton } from './types.js';
 import { errorTracker } from '../observability/errorService.js';
 
-function isValidHttpUrl(stringUrl?: string): boolean {
+export function isValidHttpUrl(stringUrl?: string): boolean {
   if (!stringUrl || typeof stringUrl !== 'string') return false;
+  const trimmed = stringUrl.trim();
+  if (!trimmed) return false;
   try {
-    const parsed = new URL(stringUrl.trim());
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
+    const hostname = parsed.hostname?.toLowerCase();
+    if (!hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+      return false;
+    }
+    // Must contain a valid domain (e.g. example.com, t.me) with a dot
+    if (!hostname.includes('.')) {
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }
+}
+
+export function validateMediaReference(ref?: string): { valid: boolean; error?: string; normalized?: string } {
+  if (!ref || typeof ref !== 'string') {
+    return { valid: false, error: 'Media reference (file_id or HTTPS URL) is required.' };
+  }
+  const trimmed = ref.trim();
+  if (!trimmed) {
+    return { valid: false, error: 'Media reference cannot be empty.' };
+  }
+  if (
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('data:') ||
+    trimmed.startsWith('file:') ||
+    trimmed.startsWith('local_preview_')
+  ) {
+    return {
+      valid: false,
+      error: 'Local browser files or blob/data URLs cannot be delivered to Telegram. Please provide a valid Telegram file_id or a public https:// URL.'
+    };
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    if (!isValidHttpUrl(trimmed)) {
+      return {
+        valid: false,
+        error: 'Invalid media URL. Media links must be a valid public http:// or https:// address (e.g. https://example.com/image.jpg).'
+      };
+    }
+    try {
+      const parsed = new URL(trimmed);
+      return { valid: true, normalized: parsed.href };
+    } catch {
+      return { valid: false, error: 'Malformed media URL format.' };
+    }
+  }
+  // If not HTTP/HTTPS URL, must be a Telegram file_id
+  if (trimmed.length < 5 || trimmed.includes(' ') || trimmed.includes('\\')) {
+    return {
+      valid: false,
+      error: 'Invalid Telegram file_id format. File IDs cannot contain spaces or invalid characters.'
+    };
+  }
+  return { valid: true, normalized: trimmed };
 }
 
 export function sanitizeInlineButtons(buttons?: ScheduledPostButton[][]): ScheduledPostButton[][] | undefined {
@@ -76,35 +132,49 @@ export class PostSender {
 
       const textContent = payload.text || '';
       const contentType = payload.contentType || 'text';
+      let mediaFileId: string | undefined = payload.mediaFileId;
+
+      if (contentType !== 'text') {
+        const mediaCheck = validateMediaReference(payload.mediaFileId);
+        if (!mediaCheck.valid) {
+          return {
+            ok: false,
+            chatId,
+            error: mediaCheck.error || `Invalid media reference for ${contentType} post.`
+          };
+        }
+        mediaFileId = mediaCheck.normalized;
+      }
+
       let sendRes: any;
 
       // 3. Dispatch to Telegram based on contentType via TelegramApi
-      if (contentType === 'photo' && payload.mediaFileId) {
-        sendRes = await telegramApi.sendPhoto(chatId, payload.mediaFileId, {
+      if (contentType === 'photo' && mediaFileId) {
+        sendRes = await telegramApi.sendPhoto(chatId, mediaFileId, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'video' && payload.mediaFileId) {
-        sendRes = await telegramApi.sendVideo(chatId, payload.mediaFileId, {
+      } else if (contentType === 'video' && mediaFileId) {
+        sendRes = await telegramApi.sendVideo(chatId, mediaFileId, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'document' && payload.mediaFileId) {
-        sendRes = await telegramApi.sendDocument(chatId, payload.mediaFileId, {
+      } else if (contentType === 'document' && mediaFileId) {
+        sendRes = await telegramApi.sendDocument(chatId, mediaFileId, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'animation' && payload.mediaFileId) {
-        sendRes = await telegramApi.sendAnimation(chatId, payload.mediaFileId, {
+      } else if (contentType === 'animation' && mediaFileId) {
+        sendRes = await telegramApi.sendAnimation(chatId, mediaFileId, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'sticker' && payload.mediaFileId) {
-        sendRes = await telegramApi.sendSticker(chatId, payload.mediaFileId, options);
+      } else if (contentType === 'sticker' && mediaFileId) {
+        sendRes = await telegramApi.sendSticker(chatId, mediaFileId, options);
       } else {
         sendRes = await telegramApi.sendMessage(chatId, textContent, {
           parse_mode: 'HTML',

@@ -1,7 +1,7 @@
 process.env.NODE_ENV = 'test';
 import { db } from '../server/db/storage.js';
 import { telegramApi } from '../server/telegram/api.js';
-import { PostSender } from '../server/telegram/postSender.js';
+import { PostSender, validateMediaReference, sanitizeInlineButtons, isValidHttpUrl } from '../server/telegram/postSender.js';
 import { ScheduledMessage, PostPayload } from '../server/telegram/types.js';
 
 let passed = 0;
@@ -134,25 +134,21 @@ async function runDashboardRichPostComposerTestSuite() {
       return { status: 400, body: { error: 'Message text cannot be empty for text posts.' } };
     }
 
-    const mediaFileId = typeof payload.mediaFileId === 'string' ? payload.mediaFileId.trim() : undefined;
-    if (contentType !== 'text' && !mediaFileId) {
-      return { status: 400, body: { error: `Media reference (file_id or URL) is required for ${contentType} posts.` } };
+    let normalizedMediaId: string | undefined = undefined;
+    if (contentType !== 'text') {
+      const mediaCheck = validateMediaReference(payload.mediaFileId);
+      if (!mediaCheck.valid) {
+        return { status: 400, body: { error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` } };
+      }
+      normalizedMediaId = mediaCheck.normalized;
     }
 
-    const sanitizedButtons = payload.buttons && Array.isArray(payload.buttons)
-      ? payload.buttons
-          .map((row: any[]) =>
-            (Array.isArray(row) ? row : [])
-              .filter(b => b && typeof b.text === 'string' && b.text.trim() && typeof b.url === 'string' && (b.url.startsWith('http://') || b.url.startsWith('https://')))
-              .map(b => ({ text: b.text.trim(), url: b.url.trim() }))
-          )
-          .filter((row: any[]) => row.length > 0)
-      : undefined;
+    const sanitizedButtons = sanitizeInlineButtons(payload.buttons);
 
     const postPayload: PostPayload = {
       contentType,
       text: text || undefined,
-      mediaFileId: mediaFileId || undefined,
+      mediaFileId: normalizedMediaId,
       buttons: sanitizedButtons,
       pinAfterSend: Boolean(payload.pinAfterSend),
       replyToLatest: Boolean(payload.replyToLatest),
@@ -222,9 +218,13 @@ async function runDashboardRichPostComposerTestSuite() {
       return { status: 400, body: { error: 'Message text cannot be empty for text posts.' } };
     }
 
-    const mediaFileId = typeof payload.mediaFileId === 'string' ? payload.mediaFileId.trim() : undefined;
-    if (contentType !== 'text' && !mediaFileId) {
-      return { status: 400, body: { error: `Media reference is required for ${contentType} posts.` } };
+    let scheduledMediaId: string | undefined = undefined;
+    if (contentType !== 'text') {
+      const mediaCheck = validateMediaReference(payload.mediaFileId);
+      if (!mediaCheck.valid) {
+        return { status: 400, body: { error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` } };
+      }
+      scheduledMediaId = mediaCheck.normalized;
     }
 
     if (!nextRun || isNaN(new Date(nextRun).getTime())) {
@@ -236,15 +236,7 @@ async function runDashboardRichPostComposerTestSuite() {
       return { status: 400, body: { error: 'Scheduled execution time must be in the future.' } };
     }
 
-    const sanitizedButtons = payload.buttons && Array.isArray(payload.buttons)
-      ? payload.buttons
-          .map((row: any[]) =>
-            (Array.isArray(row) ? row : [])
-              .filter(b => b && typeof b.text === 'string' && b.text.trim() && typeof b.url === 'string' && (b.url.startsWith('http://') || b.url.startsWith('https://')))
-              .map(b => ({ text: b.text.trim(), url: b.url.trim() }))
-          )
-          .filter((row: any[]) => row.length > 0)
-      : undefined;
+    const sanitizedButtons = sanitizeInlineButtons(payload.buttons);
 
     const scheduleRecord = db.addSchedule({
       chatId: numChatId,
@@ -256,7 +248,7 @@ async function runDashboardRichPostComposerTestSuite() {
       nextRun: new Date(nextRun).toISOString(),
       timezone: timezone || 'UTC',
       contentType,
-      mediaFileId: mediaFileId || undefined,
+      mediaFileId: scheduledMediaId,
       replyToMessageId: payload.replyToMessageId ? Number(payload.replyToMessageId) : undefined,
       replyToLatest: Boolean(payload.replyToLatest),
       autoDeletePrevious: Boolean(payload.autoDeletePrevious),
@@ -495,11 +487,101 @@ async function runDashboardRichPostComposerTestSuite() {
   assert(apiCalls.length === 2, '12b. Dispatched sendPhoto and pinChatMessage');
   assert(apiCalls[0].method === 'sendPhoto' && apiCalls[0].args.photo === 'scheduled_photo_999', '12c. Used scheduled photo');
   assert(apiCalls[0].args.options.caption === 'Scheduled promo banner', '12d. Used scheduled caption');
-  assert(apiCalls[0].args.options.reply_markup.inline_keyboard[0][0].url === 'https://promo.example.com', '12e. Attached scheduled button');
+  assert(apiCalls[0].args.options.reply_markup.inline_keyboard[0][0].url.startsWith('https://promo.example.com'), '12e. Attached scheduled button');
 
   // --- Test 13: Clean up test schedule ---
   db.deleteSchedule(testChatId, createdSchedule.id);
   assert(db.getScheduleById(createdSchedule.id) === undefined, '13. Test schedule cleaned up from storage');
+
+  // --- Test 14: Rejection of Local Preview / Blob / Data URL Media References (BUG FIX VERIFICATION) ---
+  console.log('\n--- Test 14: Rejection of Local Browser File / Blob / Data URLs ---');
+  const res14a = await simulateDashboardSend({
+    body: {
+      chatId: testChatId,
+      payload: {
+        contentType: 'photo',
+        mediaFileId: 'local_preview_my_image.png',
+        text: 'Photo with local preview name'
+      }
+    }
+  });
+  assert(res14a.status === 400 && res14a.body.error.includes('Local browser files'), '14a. Rejects local_preview_ filename with helpful 400 error');
+
+  const res14b = await simulateDashboardSend({
+    body: {
+      chatId: testChatId,
+      payload: {
+        contentType: 'video',
+        mediaFileId: 'blob:http://localhost:3000/1234-5678',
+        text: 'Video with blob URL'
+      }
+    }
+  });
+  assert(res14b.status === 400 && res14b.body.error.includes('Local browser files'), '14b. Rejects blob: URL with 400 error');
+
+  const res14c = await simulateDashboardSend({
+    body: {
+      chatId: testChatId,
+      payload: {
+        contentType: 'animation',
+        mediaFileId: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+        text: 'GIF with data URL'
+      }
+    }
+  });
+  assert(res14c.status === 400 && res14c.body.error.includes('Local browser files'), '14c. Rejects data: URL with 400 error');
+
+  const res14d = await simulateDashboardSchedule({
+    body: {
+      chatId: testChatId,
+      nextRun: futureIso,
+      payload: {
+        contentType: 'photo',
+        mediaFileId: 'local_preview_photo.jpg',
+        text: 'Scheduled local preview'
+      }
+    }
+  });
+  assert(res14d.status === 400 && res14d.body.error.includes('Local browser files'), '14d. Scheduler rejects local_preview_ filename with 400 error');
+
+  // --- Test 15: Acceptance of Valid Public HTTPS URLs and Telegram File IDs ---
+  console.log('\n--- Test 15: Acceptance and Normalization of Valid Public Media URLs and File IDs ---');
+  apiCalls.length = 0;
+  const res15a = await simulateDashboardSend({
+    body: {
+      chatId: testChatId,
+      payload: {
+        contentType: 'photo',
+        mediaFileId: 'https://images.unsplash.com/photo-1546527868-ccb7ee7dfa6a?auto=format',
+        text: 'Valid public URL photo'
+      }
+    }
+  });
+  assert(res15a.status === 200 && res15a.body.success === true, '15a. Accepts valid public HTTPS photo URL');
+  assert(apiCalls[0].method === 'sendPhoto' && apiCalls[0].args.photo.startsWith('https://images.unsplash.com/'), '15b. TelegramApi received normalized HTTPS URL');
+
+  const res15c = await simulateDashboardSend({
+    body: {
+      chatId: testChatId,
+      payload: {
+        contentType: 'video',
+        mediaFileId: 'BAACAgIAAxkBAAI9...',
+        text: 'Valid telegram file_id video'
+      }
+    }
+  });
+  assert(res15c.status === 200 && res15c.body.success === true, '15c. Accepts valid Telegram file_id');
+
+  // --- Test 16: Button URL Validation & Sanitization ---
+  console.log('\n--- Test 16: Button URL Sanitization ---');
+  const validCheck1 = isValidHttpUrl('https://example.com/path');
+  assert(validCheck1 === true, '16a. isValidHttpUrl accepts valid HTTPS URL');
+  const invalidCheck1 = isValidHttpUrl('http://localhost:3000');
+  assert(invalidCheck1 === false, '16b. isValidHttpUrl rejects localhost');
+  const invalidCheck2 = isValidHttpUrl('https://test');
+  assert(invalidCheck2 === false, '16c. isValidHttpUrl rejects single-word hostname without TLD');
+  const invalidCheck3 = isValidHttpUrl('javascript:alert(1)');
+  assert(invalidCheck3 === false, '16d. isValidHttpUrl rejects javascript: pseudo-protocol');
 
   // Restore API methods
   (telegramApi as any).sendMessage = origSendMessage;
