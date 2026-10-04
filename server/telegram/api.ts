@@ -96,7 +96,8 @@ export class TelegramApi {
     body?: Record<string, any>,
     options?: TelegramApiCallOptions
   ): Promise<{ ok: boolean; result?: T; description?: string; error_code?: number; parameters?: { retry_after?: number }; skipped?: boolean }> {
-    const rawChatId = body?.chat_id;
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+    const rawChatId = isFormData ? (body as FormData).get('chat_id') : body?.chat_id;
     const numChatId = Number(rawChatId);
     const isDummyTarget = numChatId === -100111222333 ||
       numChatId === -100888777 ||
@@ -161,7 +162,7 @@ export class TelegramApi {
           const totalDescChars = rawCommands.reduce((sum: number, c: any) => sum + (c?.description?.length || 0), 0);
           const maxDescLen = rawCommands.reduce((max: number, c: any) => Math.max(max, c?.description?.length || 0), 0);
           const avgDescLen = rawCommands.length > 0 ? Number((totalDescChars / rawCommands.length).toFixed(1)) : 0;
-          const serializedBody = body ? JSON.stringify(body) : '';
+          const serializedBody = body ? (isFormData ? '[FormData]' : JSON.stringify(body)) : '';
 
           console.log(JSON.stringify({
             event: 'TELEGRAM_HTTP_PRE_FETCH_PAYLOAD',
@@ -194,8 +195,8 @@ export class TelegramApi {
 
         const res = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: body ? JSON.stringify(body) : undefined,
+          headers: isFormData ? undefined : { 'Content-Type': 'application/json' },
+          body: isFormData ? (body as any) : (body ? JSON.stringify(body) : undefined),
           signal: reqSignal
         });
 
@@ -838,22 +839,42 @@ export class TelegramApi {
 
   public async sendPhoto(
     chatId: number | string,
-    photo: string,
+    photo: string | { buffer: Buffer | Uint8Array; filename: string; contentType?: string },
     options?: {
       caption?: string;
       parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
       reply_to_message_id?: number;
       reply_markup?: any;
+      protect_content?: boolean;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    const res = await this.call('sendPhoto', {
-      chat_id: chatId,
-      photo,
-      caption: options?.caption,
-      parse_mode: options?.parse_mode || 'HTML',
-      reply_to_message_id: options?.reply_to_message_id,
-      reply_markup: options?.reply_markup
-    });
+    let bodyPayload: any;
+    if (typeof photo === 'object' && photo && 'buffer' in photo) {
+      const formData = new FormData();
+      formData.append('chat_id', String(chatId));
+      const blob = new Blob([photo.buffer], { type: photo.contentType || 'image/jpeg' });
+      formData.append('photo', blob, photo.filename || 'photo.jpg');
+      if (options?.caption) formData.append('caption', options.caption);
+      if (options?.parse_mode) formData.append('parse_mode', options.parse_mode);
+      if (options?.reply_to_message_id) formData.append('reply_to_message_id', String(options.reply_to_message_id));
+      if (options?.protect_content) formData.append('protect_content', 'true');
+      if (options?.reply_markup) {
+        formData.append('reply_markup', typeof options.reply_markup === 'string' ? options.reply_markup : JSON.stringify(options.reply_markup));
+      }
+      bodyPayload = formData;
+    } else {
+      bodyPayload = {
+        chat_id: chatId,
+        photo,
+        caption: options?.caption,
+        parse_mode: options?.parse_mode || 'HTML',
+        reply_to_message_id: options?.reply_to_message_id,
+        reply_markup: options?.reply_markup,
+        protect_content: options?.protect_content
+      };
+    }
+
+    const res = await this.call('sendPhoto', bodyPayload);
     if (res.ok) {
       logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendPhoto' });
     } else {
@@ -864,22 +885,42 @@ export class TelegramApi {
 
   public async sendVideo(
     chatId: number | string,
-    video: string,
+    video: string | { buffer: Buffer | Uint8Array; filename: string; contentType?: string },
     options?: {
       caption?: string;
       parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
       reply_to_message_id?: number;
       reply_markup?: any;
+      protect_content?: boolean;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    const res = await this.call('sendVideo', {
-      chat_id: chatId,
-      video,
-      caption: options?.caption,
-      parse_mode: options?.parse_mode || 'HTML',
-      reply_to_message_id: options?.reply_to_message_id,
-      reply_markup: options?.reply_markup
-    });
+    let bodyPayload: any;
+    if (typeof video === 'object' && video && 'buffer' in video) {
+      const formData = new FormData();
+      formData.append('chat_id', String(chatId));
+      const blob = new Blob([video.buffer], { type: video.contentType || 'video/mp4' });
+      formData.append('video', blob, video.filename || 'video.mp4');
+      if (options?.caption) formData.append('caption', options.caption);
+      if (options?.parse_mode) formData.append('parse_mode', options.parse_mode);
+      if (options?.reply_to_message_id) formData.append('reply_to_message_id', String(options.reply_to_message_id));
+      if (options?.protect_content) formData.append('protect_content', 'true');
+      if (options?.reply_markup) {
+        formData.append('reply_markup', typeof options.reply_markup === 'string' ? options.reply_markup : JSON.stringify(options.reply_markup));
+      }
+      bodyPayload = formData;
+    } else {
+      bodyPayload = {
+        chat_id: chatId,
+        video,
+        caption: options?.caption,
+        parse_mode: options?.parse_mode || 'HTML',
+        reply_to_message_id: options?.reply_to_message_id,
+        reply_markup: options?.reply_markup,
+        protect_content: options?.protect_content
+      };
+    }
+
+    const res = await this.call('sendVideo', bodyPayload);
     if (res.ok) {
       logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendVideo' });
     } else {
@@ -890,22 +931,42 @@ export class TelegramApi {
 
   public async sendDocument(
     chatId: number | string,
-    document: string,
+    document: string | { buffer: Buffer | Uint8Array; filename: string; contentType?: string },
     options?: {
       caption?: string;
       parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
       reply_to_message_id?: number;
       reply_markup?: any;
+      protect_content?: boolean;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    const res = await this.call('sendDocument', {
-      chat_id: chatId,
-      document,
-      caption: options?.caption,
-      parse_mode: options?.parse_mode || 'HTML',
-      reply_to_message_id: options?.reply_to_message_id,
-      reply_markup: options?.reply_markup
-    });
+    let bodyPayload: any;
+    if (typeof document === 'object' && document && 'buffer' in document) {
+      const formData = new FormData();
+      formData.append('chat_id', String(chatId));
+      const blob = new Blob([document.buffer], { type: document.contentType || 'application/octet-stream' });
+      formData.append('document', blob, document.filename || 'document.pdf');
+      if (options?.caption) formData.append('caption', options.caption);
+      if (options?.parse_mode) formData.append('parse_mode', options.parse_mode);
+      if (options?.reply_to_message_id) formData.append('reply_to_message_id', String(options.reply_to_message_id));
+      if (options?.protect_content) formData.append('protect_content', 'true');
+      if (options?.reply_markup) {
+        formData.append('reply_markup', typeof options.reply_markup === 'string' ? options.reply_markup : JSON.stringify(options.reply_markup));
+      }
+      bodyPayload = formData;
+    } else {
+      bodyPayload = {
+        chat_id: chatId,
+        document,
+        caption: options?.caption,
+        parse_mode: options?.parse_mode || 'HTML',
+        reply_to_message_id: options?.reply_to_message_id,
+        reply_markup: options?.reply_markup,
+        protect_content: options?.protect_content
+      };
+    }
+
+    const res = await this.call('sendDocument', bodyPayload);
     if (res.ok) {
       logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendDocument' });
     } else {
@@ -916,22 +977,42 @@ export class TelegramApi {
 
   public async sendAnimation(
     chatId: number | string,
-    animation: string,
+    animation: string | { buffer: Buffer | Uint8Array; filename: string; contentType?: string },
     options?: {
       caption?: string;
       parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
       reply_to_message_id?: number;
       reply_markup?: any;
+      protect_content?: boolean;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
-    const res = await this.call('sendAnimation', {
-      chat_id: chatId,
-      animation,
-      caption: options?.caption,
-      parse_mode: options?.parse_mode || 'HTML',
-      reply_to_message_id: options?.reply_to_message_id,
-      reply_markup: options?.reply_markup
-    });
+    let bodyPayload: any;
+    if (typeof animation === 'object' && animation && 'buffer' in animation) {
+      const formData = new FormData();
+      formData.append('chat_id', String(chatId));
+      const blob = new Blob([animation.buffer], { type: animation.contentType || 'image/gif' });
+      formData.append('animation', blob, animation.filename || 'animation.gif');
+      if (options?.caption) formData.append('caption', options.caption);
+      if (options?.parse_mode) formData.append('parse_mode', options.parse_mode);
+      if (options?.reply_to_message_id) formData.append('reply_to_message_id', String(options.reply_to_message_id));
+      if (options?.protect_content) formData.append('protect_content', 'true');
+      if (options?.reply_markup) {
+        formData.append('reply_markup', typeof options.reply_markup === 'string' ? options.reply_markup : JSON.stringify(options.reply_markup));
+      }
+      bodyPayload = formData;
+    } else {
+      bodyPayload = {
+        chat_id: chatId,
+        animation,
+        caption: options?.caption,
+        parse_mode: options?.parse_mode || 'HTML',
+        reply_to_message_id: options?.reply_to_message_id,
+        reply_markup: options?.reply_markup,
+        protect_content: options?.protect_content
+      };
+    }
+
+    const res = await this.call('sendAnimation', bodyPayload);
     if (res.ok) {
       logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendAnimation' });
     } else {

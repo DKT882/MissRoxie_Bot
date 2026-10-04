@@ -3,6 +3,7 @@ import { db } from '../db/storage.js';
 import { TelegramMiddleware } from './middleware.js';
 import { PostPayload, SendPostResult, ScheduledMessage, ScheduledPostButton } from './types.js';
 import { errorTracker } from '../observability/errorService.js';
+import { mediaUploadStore } from './mediaUploadStore.js';
 
 export function isValidHttpUrl(stringUrl?: string): boolean {
   if (!stringUrl || typeof stringUrl !== 'string') return false;
@@ -29,12 +30,22 @@ export function isValidHttpUrl(stringUrl?: string): boolean {
 
 export function validateMediaReference(ref?: string): { valid: boolean; error?: string; normalized?: string } {
   if (!ref || typeof ref !== 'string') {
-    return { valid: false, error: 'Media reference (file_id or HTTPS URL) is required.' };
+    return { valid: false, error: 'Media reference (file_id, HTTPS URL, or uploaded media) is required.' };
   }
   const trimmed = ref.trim();
   if (!trimmed) {
     return { valid: false, error: 'Media reference cannot be empty.' };
   }
+
+  // Check if it's an uploaded media reference
+  if (trimmed.startsWith('upl_') || trimmed.startsWith('upload:')) {
+    const uploadId = trimmed.startsWith('upload:') ? trimmed.substring(7) : trimmed;
+    if (mediaUploadStore.hasMedia(uploadId)) {
+      return { valid: true, normalized: trimmed };
+    }
+    return { valid: true, normalized: trimmed };
+  }
+
   if (
     trimmed.startsWith('blob:') ||
     trimmed.startsWith('data:') ||
@@ -43,7 +54,7 @@ export function validateMediaReference(ref?: string): { valid: boolean; error?: 
   ) {
     return {
       valid: false,
-      error: 'Local browser files or blob/data URLs cannot be delivered to Telegram. Please provide a valid Telegram file_id or a public https:// URL.'
+      error: 'Local browser files or blob/data URLs cannot be delivered directly to Telegram. Please select and upload your local file through the composer upload button, or provide a valid Telegram file_id or public https:// URL.'
     };
   }
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
@@ -132,49 +143,73 @@ export class PostSender {
 
       const textContent = payload.text || '';
       const contentType = payload.contentType || 'text';
-      let mediaFileId: string | undefined = payload.mediaFileId;
+
+      // 3. Resolve Media Reference / Buffer
+      let resolvedMedia: string | { buffer: Buffer | Uint8Array; filename: string; contentType?: string } | undefined = undefined;
 
       if (contentType !== 'text') {
-        const mediaCheck = validateMediaReference(payload.mediaFileId);
-        if (!mediaCheck.valid) {
-          return {
-            ok: false,
-            chatId,
-            error: mediaCheck.error || `Invalid media reference for ${contentType} post.`
-          };
+        const uploadId = payload.mediaUploadId ||
+          (payload.mediaFileId?.startsWith('upl_') ? payload.mediaFileId : (payload.mediaFileId?.startsWith('upload:') ? payload.mediaFileId.substring(7) : undefined));
+
+        if (uploadId) {
+          const item = mediaUploadStore.getMedia(uploadId);
+          if (item) {
+            resolvedMedia = {
+              buffer: item.buffer,
+              filename: item.filename,
+              contentType: item.mimeType
+            };
+          } else {
+            return {
+              ok: false,
+              chatId,
+              error: `Uploaded media file (${uploadId}) expired or not found. Please re-upload the file.`
+            };
+          }
+        } else if (payload.mediaBuffer) {
+          resolvedMedia = payload.mediaBuffer;
+        } else {
+          const mediaCheck = validateMediaReference(payload.mediaFileId);
+          if (!mediaCheck.valid) {
+            return {
+              ok: false,
+              chatId,
+              error: mediaCheck.error || `Invalid media reference for ${contentType} post.`
+            };
+          }
+          resolvedMedia = mediaCheck.normalized;
         }
-        mediaFileId = mediaCheck.normalized;
       }
 
       let sendRes: any;
 
-      // 3. Dispatch to Telegram based on contentType via TelegramApi
-      if (contentType === 'photo' && mediaFileId) {
-        sendRes = await telegramApi.sendPhoto(chatId, mediaFileId, {
+      // 4. Dispatch to Telegram based on contentType via TelegramApi
+      if (contentType === 'photo' && resolvedMedia) {
+        sendRes = await telegramApi.sendPhoto(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'video' && mediaFileId) {
-        sendRes = await telegramApi.sendVideo(chatId, mediaFileId, {
+      } else if (contentType === 'video' && resolvedMedia) {
+        sendRes = await telegramApi.sendVideo(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'document' && mediaFileId) {
-        sendRes = await telegramApi.sendDocument(chatId, mediaFileId, {
+      } else if (contentType === 'document' && resolvedMedia) {
+        sendRes = await telegramApi.sendDocument(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'animation' && mediaFileId) {
-        sendRes = await telegramApi.sendAnimation(chatId, mediaFileId, {
+      } else if (contentType === 'animation' && resolvedMedia) {
+        sendRes = await telegramApi.sendAnimation(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
-      } else if (contentType === 'sticker' && mediaFileId) {
-        sendRes = await telegramApi.sendSticker(chatId, mediaFileId, options);
+      } else if (contentType === 'sticker' && typeof resolvedMedia === 'string') {
+        sendRes = await telegramApi.sendSticker(chatId, resolvedMedia, options);
       } else {
         sendRes = await telegramApi.sendMessage(chatId, textContent, {
           parse_mode: 'HTML',
@@ -192,9 +227,24 @@ export class PostSender {
       }
 
       const newSentMessageId = sendRes.result.message_id;
+
+      // Extract Telegram file_id if present in result
+      let telegramFileId: string | undefined = undefined;
+      if (sendRes.result?.photo && Array.isArray(sendRes.result.photo) && sendRes.result.photo.length > 0) {
+        telegramFileId = sendRes.result.photo[sendRes.result.photo.length - 1].file_id;
+      } else if (sendRes.result?.video?.file_id) {
+        telegramFileId = sendRes.result.video.file_id;
+      } else if (sendRes.result?.document?.file_id) {
+        telegramFileId = sendRes.result.document.file_id;
+      } else if (sendRes.result?.animation?.file_id) {
+        telegramFileId = sendRes.result.animation.file_id;
+      } else if (sendRes.result?.sticker?.file_id) {
+        telegramFileId = sendRes.result.sticker.file_id;
+      }
+
       let pinSuccess: boolean | undefined = undefined;
 
-      // 4. Pin newly sent message if requested
+      // 5. Pin newly sent message if requested
       if (payload.pinAfterSend && newSentMessageId) {
         try {
           const botCheck = await TelegramMiddleware.requireBotPermission(chatId, 'can_pin_messages');
@@ -239,6 +289,7 @@ export class PostSender {
         messageId: newSentMessageId,
         chatId,
         pinSuccess,
+        telegramFileId,
         result: sendRes.result
       };
     } catch (err: any) {

@@ -220,6 +220,26 @@ async function runDashboardRichPostComposerTestSuite() {
 
     let scheduledMediaId: string | undefined = undefined;
     if (contentType !== 'text') {
+      const isLocalUpload = Boolean(
+        payload.mediaUploadId ||
+        (payload.mediaFileId && (
+          payload.mediaFileId.startsWith('upl_') ||
+          payload.mediaFileId.startsWith('upload:') ||
+          payload.mediaFileId.startsWith('blob:') ||
+          payload.mediaFileId.startsWith('data:') ||
+          payload.mediaFileId.startsWith('local_preview_')
+        ))
+      );
+
+      if (isLocalUpload) {
+        return {
+          status: 400,
+          body: {
+            error: 'Local media cannot be scheduled on the current hosting setup. Use a Telegram file_id or public HTTPS media URL for scheduled posts.'
+          }
+        };
+      }
+
       const mediaCheck = validateMediaReference(payload.mediaFileId);
       if (!mediaCheck.valid) {
         return { status: 400, body: { error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` } };
@@ -542,7 +562,20 @@ async function runDashboardRichPostComposerTestSuite() {
       }
     }
   });
-  assert(res14d.status === 400 && res14d.body.error.includes('Local browser files'), '14d. Scheduler rejects local_preview_ filename with 400 error');
+  assert(res14d.status === 400 && res14d.body.error.includes('Local media cannot be scheduled'), '14d. Scheduler rejects local_preview_ filename with hosting notice');
+
+  const res14e = await simulateDashboardSchedule({
+    body: {
+      chatId: testChatId,
+      nextRun: futureIso,
+      payload: {
+        contentType: 'photo',
+        mediaUploadId: 'upl_12345678_abcdef',
+        text: 'Scheduled local upload'
+      }
+    }
+  });
+  assert(res14e.status === 400 && res14e.body.error === 'Local media cannot be scheduled on the current hosting setup. Use a Telegram file_id or public HTTPS media URL for scheduled posts.', '14e. Scheduler rejects uploaded media with exact hosting message');
 
   // --- Test 15: Acceptance of Valid Public HTTPS URLs and Telegram File IDs ---
   console.log('\n--- Test 15: Acceptance and Normalization of Valid Public Media URLs and File IDs ---');

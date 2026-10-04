@@ -20,7 +20,8 @@ import {
   X,
   RotateCcw,
   Check,
-  Clock
+  Clock,
+  Upload
 } from 'lucide-react';
 
 export type ComposerContentType = 'text' | 'photo' | 'video' | 'animation' | 'document';
@@ -68,13 +69,19 @@ function isValidHttpUrl(url: string): boolean {
   }
 }
 
-function validateMediaReference(ref?: string): { valid: boolean; error?: string } {
+function validateMediaReference(ref?: string, hasUploadedMedia?: boolean): { valid: boolean; error?: string } {
+  if (hasUploadedMedia) {
+    return { valid: true };
+  }
   if (!ref || typeof ref !== 'string') {
-    return { valid: false, error: 'Media reference (file_id or HTTPS URL) is required.' };
+    return { valid: false, error: 'Media reference (uploaded file, Telegram file_id, or HTTPS URL) is required.' };
   }
   const trimmed = ref.trim();
   if (!trimmed) {
     return { valid: false, error: 'Media reference cannot be empty.' };
+  }
+  if (trimmed.startsWith('upl_') || trimmed.startsWith('upload:')) {
+    return { valid: true };
   }
   if (
     trimmed.startsWith('blob:') ||
@@ -84,7 +91,7 @@ function validateMediaReference(ref?: string): { valid: boolean; error?: string 
   ) {
     return {
       valid: false,
-      error: 'Local browser files cannot be delivered directly to Telegram. Please enter a valid Telegram file_id or a public https:// URL.'
+      error: 'Local browser file preview has not been uploaded to backend yet. Please choose a local file using the upload button or enter a valid Telegram file_id or https:// URL.'
     };
   }
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
@@ -131,6 +138,13 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   const [pinAfterSend, setPinAfterSend] = useState<boolean>(false);
   const [replyToLatest, setReplyToLatest] = useState<boolean>(false);
   const [protectContent, setProtectContent] = useState<boolean>(false);
+
+  // Local Media Upload State
+  const [uploadedMediaId, setUploadedMediaId] = useState<string | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [uploadedFileSize, setUploadedFileSize] = useState<number | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'uploaded' | 'error'>('idle');
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // 2D Button Grid State: rows of buttons
   const [buttonGrid, setButtonGrid] = useState<ComposerButton[][]>([]);
@@ -180,6 +194,51 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   const maxChars = contentType === 'text' ? 4096 : 1024;
   const isOverCharLimit = text.length > maxChars;
 
+  // Local File Upload Handler
+  const handleLocalFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Set immediate local visual preview
+    const localUrl = URL.createObjectURL(file);
+    setMediaPreviewUrl(localUrl);
+    setUploadStatus('uploading');
+    setUploadError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`/api/dashboard/posts/upload-media?type=${contentType}`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to upload local media file.');
+      }
+
+      setUploadedMediaId(data.mediaUploadId);
+      setUploadedFileName(data.filename || file.name);
+      setUploadedFileSize(data.size || file.size);
+      setUploadStatus('uploaded');
+      setUploadError(null);
+    } catch (err: any) {
+      setUploadStatus('error');
+      setUploadError(err.message || 'File upload failed. Please try again.');
+    }
+  };
+
+  const handleClearUploadedFile = () => {
+    setUploadedMediaId(null);
+    setUploadedFileName(null);
+    setUploadedFileSize(null);
+    setUploadStatus('idle');
+    setUploadError(null);
+    setMediaPreviewUrl('');
+  };
+
   // Validation Checks
   const validationErrors = useMemo(() => {
     const errors: string[] = [];
@@ -190,9 +249,13 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       errors.push('Message text is required for text posts.');
     }
     if (contentType !== 'text') {
-      const mediaVal = validateMediaReference(mediaFileId);
-      if (!mediaVal.valid) {
-        errors.push(mediaVal.error || `Media file_id or URL is required for ${contentType} posts.`);
+      if (uploadStatus === 'uploading') {
+        errors.push('Media file is currently uploading. Please wait.');
+      } else {
+        const mediaVal = validateMediaReference(mediaFileId, Boolean(uploadedMediaId));
+        if (!mediaVal.valid) {
+          errors.push(mediaVal.error || `Media file_id, URL, or local upload is required for ${contentType} posts.`);
+        }
       }
     }
     if (isOverCharLimit) {
@@ -210,9 +273,23 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       });
     });
     return errors;
-  }, [targetChatId, contentType, text, mediaFileId, isOverCharLimit, maxChars, buttonGrid]);
+  }, [targetChatId, contentType, text, mediaFileId, uploadedMediaId, uploadStatus, isOverCharLimit, maxChars, buttonGrid]);
 
   const isFormValid = validationErrors.length === 0;
+
+  const isLocalMediaActive = useMemo(() => {
+    if (contentType === 'text') return false;
+    return Boolean(
+      uploadedMediaId ||
+      (mediaFileId && (
+        mediaFileId.startsWith('upl_') ||
+        mediaFileId.startsWith('upload:') ||
+        mediaFileId.startsWith('blob:') ||
+        mediaFileId.startsWith('data:') ||
+        mediaFileId.startsWith('local_preview_')
+      ))
+    );
+  }, [contentType, uploadedMediaId, mediaFileId]);
 
   // Scheduled date computation
   const computedScheduleTime = useMemo(() => {
@@ -316,16 +393,19 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       )
       .filter(row => row.length > 0);
 
+    const mediaId = uploadedMediaId ? `upload:${uploadedMediaId}` : (mediaFileId.trim() || undefined);
+
     return {
       contentType,
       text: text.trim() || undefined,
-      mediaFileId: contentType !== 'text' ? mediaFileId.trim() : undefined,
+      mediaFileId: contentType !== 'text' ? mediaId : undefined,
+      mediaUploadId: contentType !== 'text' ? (uploadedMediaId || undefined) : undefined,
       buttons: formattedButtons.length > 0 ? formattedButtons : undefined,
       pinAfterSend,
       replyToLatest,
       protectContent
     };
-  }, [contentType, text, mediaFileId, buttonGrid, pinAfterSend, replyToLatest, protectContent]);
+  }, [contentType, text, mediaFileId, uploadedMediaId, buttonGrid, pinAfterSend, replyToLatest, protectContent]);
 
   // Send Now Handler
   const handleConfirmSendNow = async () => {
@@ -371,9 +451,33 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     }
   };
 
+  // Open Schedule Dialog Handler
+  const handleOpenScheduleModal = () => {
+    if (isLocalMediaActive) {
+      setNotification({
+        type: 'error',
+        title: 'Local Media Cannot Be Scheduled',
+        message: 'Local media cannot be scheduled on the current hosting setup. Use a Telegram file_id or public HTTPS media URL for scheduled posts.'
+      });
+      return;
+    }
+    setShowScheduleModal(true);
+  };
+
   // Schedule Handler
   const handleConfirmSchedule = async () => {
     if (!isFormValid || !computedScheduleTime || !computedScheduleTime.isFuture || isSubmitting) return;
+
+    if (isLocalMediaActive) {
+      setNotification({
+        type: 'error',
+        title: 'Scheduling Not Supported for Local Media',
+        message: 'Local media cannot be scheduled on the current hosting setup. Use a Telegram file_id or public HTTPS media URL for scheduled posts.'
+      });
+      setShowScheduleModal(false);
+      return;
+    }
+
     setIsSubmitting(true);
     setNotification(null);
 
@@ -422,6 +526,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setText('');
     setMediaFileId('');
     setMediaPreviewUrl('');
+    handleClearUploadedFile();
     setButtonGrid([]);
     setPinAfterSend(false);
     setReplyToLatest(false);
@@ -430,7 +535,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setNotification(null);
   };
 
-  const isDirty = Boolean(text.trim() || mediaFileId.trim() || buttonGrid.length > 0);
+  const isDirty = Boolean(text.trim() || mediaFileId.trim() || uploadedMediaId || buttonGrid.length > 0);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -465,7 +570,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
 
           <button
             type="button"
-            onClick={() => setShowScheduleModal(true)}
+            onClick={handleOpenScheduleModal}
             disabled={!isFormValid || isSubmitting}
             className={`px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 shadow-sm`}
           >
@@ -583,63 +688,134 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
 
           {/* Section 3: Media Input (if not text) */}
           {contentType !== 'text' && (
-            <div className="space-y-3 p-4 rounded-xl border border-dashed border-stone-700 bg-stone-950/40">
-              <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center justify-between">
-                <span>3. Media Reference ({contentType.toUpperCase()})</span>
-                <span className="text-[10px] font-normal text-stone-400">Telegram file_id or HTTPS URL</span>
-              </label>
+            <div className="space-y-4 p-4 rounded-xl border border-stone-800 bg-stone-950/40">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5 text-blue-400" />
+                  <span>3. Media ({contentType.toUpperCase()})</span>
+                </label>
+                <span className="text-[10px] text-stone-400">
+                  {contentType === 'photo' && 'Max 10 MB (JPEG, PNG, WEBP)'}
+                  {contentType === 'video' && 'Max 50 MB (MP4, MOV, MKV)'}
+                  {contentType === 'animation' && 'Max 15 MB (GIF, MP4)'}
+                  {contentType === 'document' && 'Max 50 MB (All safe documents)'}
+                </span>
+              </div>
 
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={mediaFileId}
-                  onChange={e => {
-                    setMediaFileId(e.target.value);
-                    if (isValidHttpUrl(e.target.value)) {
-                      setMediaPreviewUrl(e.target.value);
-                    }
-                  }}
-                  placeholder={`Paste Telegram ${contentType} file_id or https://... image/video link`}
-                  className={`w-full px-3 py-2 rounded-xl text-xs border ${themeInputBg} outline-none font-mono`}
-                />
-
-                {/* Local preview URL generator helper */}
-                <div className="flex items-center gap-2 text-[11px] text-stone-400">
-                  <span>Or test layout with local file:</span>
-                  <input
-                    type="file"
-                    accept={
-                      contentType === 'photo'
-                        ? 'image/*'
-                        : contentType === 'video'
-                        ? 'video/*'
-                        : contentType === 'animation'
-                        ? 'image/gif,video/mp4'
-                        : '*/*'
-                    }
-                    onChange={e => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const localUrl = URL.createObjectURL(file);
-                        setMediaPreviewUrl(localUrl);
-                      }
-                    }}
-                    className="text-[11px] file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-[10px] file:font-semibold file:bg-stone-800 file:text-stone-300 hover:file:bg-stone-700 cursor-pointer"
-                  />
+              {/* Local File Upload Box */}
+              <div className={`p-3.5 rounded-xl border ${uploadedMediaId ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-stone-800 bg-stone-900/40'} space-y-2.5`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5 text-blue-400" />
+                    Upload from Computer:
+                  </span>
+                  {uploadedMediaId && (
+                    <button
+                      type="button"
+                      onClick={handleClearUploadedFile}
+                      className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 font-semibold"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      Remove File
+                    </button>
+                  )}
                 </div>
 
-                {mediaPreviewUrl && (!mediaFileId.trim() || !validateMediaReference(mediaFileId).valid) && (
-                  <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] flex items-start gap-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-semibold">Local Browser Preview Active</p>
-                      <p className="opacity-90">
-                        This local file is displayed in the live preview for layout verification. To send this post, enter a public <code className="bg-stone-900 px-1 py-0.5 rounded font-mono">https://</code> URL or a Telegram <code className="bg-stone-900 px-1 py-0.5 rounded font-mono">file_id</code> in the field above.
-                      </p>
+                {uploadStatus === 'idle' && !uploadedMediaId && (
+                  <div>
+                    <input
+                      type="file"
+                      id="local-media-file-input"
+                      accept={
+                        contentType === 'photo'
+                          ? 'image/jpeg,image/png,image/webp,image/*'
+                          : contentType === 'video'
+                          ? 'video/mp4,video/quicktime,video/x-matroska,video/*'
+                          : contentType === 'animation'
+                          ? 'image/gif,video/mp4'
+                          : '*/*'
+                      }
+                      onChange={handleLocalFileSelect}
+                      className="text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer text-stone-400"
+                    />
+                  </div>
+                )}
+
+                {uploadStatus === 'uploading' && (
+                  <div className="flex items-center gap-2 p-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs">
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Uploading file to Roxie media store...</span>
+                  </div>
+                )}
+
+                {uploadStatus === 'uploaded' && uploadedMediaId && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="font-semibold truncate">{uploadedFileName || 'Uploaded File'}</span>
+                        {uploadedFileSize && (
+                          <span className="text-[11px] opacity-80 shrink-0 font-mono">
+                            ({(uploadedFileSize / (1024 * 1024)).toFixed(2)} MB)
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                        Ready for Send Now
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-400 px-1">
+                      ⚡ Local media is delivered immediately via <strong>Send Now</strong>. To schedule a post for later, use a Telegram file_id or public HTTPS URL.
+                    </p>
+                  </div>
+                )}
+
+                {uploadStatus === 'error' && (
+                  <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs space-y-2">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                      <p>{uploadError || 'Upload failed. Please try a different file.'}</p>
+                    </div>
+                    <div className="pt-1">
+                      <input
+                        type="file"
+                        accept={
+                          contentType === 'photo'
+                            ? 'image/*'
+                            : contentType === 'video'
+                            ? 'video/*'
+                            : contentType === 'animation'
+                            ? 'image/gif,video/mp4'
+                            : '*/*'
+                        }
+                        onChange={handleLocalFileSelect}
+                        className="text-xs file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-[11px] file:font-semibold file:bg-stone-800 file:text-stone-300 hover:file:bg-stone-700 cursor-pointer text-stone-400"
+                      />
                     </div>
                   </div>
                 )}
               </div>
+
+              {/* Manual URL or file_id alternative */}
+              {!uploadedMediaId && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between text-[11px] text-stone-400">
+                    <span>Or enter Telegram file_id / Public HTTPS URL:</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={mediaFileId}
+                    onChange={e => {
+                      setMediaFileId(e.target.value);
+                      if (isValidHttpUrl(e.target.value)) {
+                        setMediaPreviewUrl(e.target.value);
+                      }
+                    }}
+                    placeholder={`Paste Telegram ${contentType} file_id or https://... address`}
+                    className={`w-full px-3 py-2 rounded-xl text-xs border ${themeInputBg} outline-none font-mono`}
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -1105,6 +1281,19 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               </div>
             )}
 
+            {/* Local Media Warning in Schedule Modal */}
+            {isLocalMediaActive && (
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Local Media Cannot Be Scheduled</p>
+                  <p className="mt-0.5 text-[11px] opacity-90">
+                    Local media cannot be scheduled on the current hosting setup. Use a Telegram file_id or public HTTPS media URL for scheduled posts.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="button"
@@ -1117,7 +1306,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmSchedule}
-                disabled={!computedScheduleTime || !computedScheduleTime.isFuture || isSubmitting}
+                disabled={!computedScheduleTime || !computedScheduleTime.isFuture || isSubmitting || isLocalMediaActive}
                 className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2"
               >
                 {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}

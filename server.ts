@@ -17,6 +17,7 @@ import { mongoManager } from './server/db/mongodb.js';
 import { MongoStorageService } from './server/db/mongoStorage.js';
 import { PostSender, sanitizeInlineButtons, validateMediaReference } from './server/telegram/postSender.js';
 import { PostPayload, PostContentType } from './server/telegram/types.js';
+import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
 
 dotenv.config();
 
@@ -1650,7 +1651,132 @@ export async function startServer() {
     }
   });
 
-  // --- Dashboard Rich Post Composer APIs (Phase 4) ---
+  // Helper function to parse incoming media files (supports JSON base64, multipart form-data, and raw streams)
+  async function parseIncomingMediaFile(req: express.Request): Promise<{ buffer: Buffer; filename: string; mimeType: string } | { error: string; status: number }> {
+    const contentTypeHeader = (req.headers['content-type'] || '').toLowerCase();
+
+    // 1. JSON payload with base64 data
+    if (req.body && typeof req.body === 'object' && (req.body.data || req.body.fileBase64 || req.body.base64 || req.body.file)) {
+      const rawData = String(req.body.data || req.body.fileBase64 || req.body.base64 || req.body.file);
+      const filename = req.body.filename || req.body.name || 'uploaded_media';
+      let mimeType = req.body.mimeType || req.body.contentType || 'application/octet-stream';
+      let base64Content = rawData;
+
+      if (rawData.startsWith('data:')) {
+        const commaIdx = rawData.indexOf(',');
+        if (commaIdx !== -1) {
+          const meta = rawData.substring(5, commaIdx);
+          const matchMime = meta.match(/^([^;]+)/);
+          if (matchMime) mimeType = matchMime[1];
+          base64Content = rawData.substring(commaIdx + 1);
+        }
+      }
+
+      try {
+        const buffer = Buffer.from(base64Content, 'base64');
+        return { buffer, filename, mimeType };
+      } catch {
+        return { error: 'Invalid base64 payload received', status: 400 };
+      }
+    }
+
+    // 2. Stream / Buffer parsing from request body
+    const chunks: Buffer[] = [];
+    if (req.body && Buffer.isBuffer(req.body)) {
+      chunks.push(req.body);
+    } else if (typeof (req as any).on === 'function') {
+      await new Promise<void>((resolve, reject) => {
+        req.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        req.on('end', () => resolve());
+        req.on('error', err => reject(err));
+      });
+    }
+
+    if (chunks.length === 0) {
+      return { error: 'No media file data received in request', status: 400 };
+    }
+
+    const rawBuffer = Buffer.concat(chunks);
+
+    // 2a. Multipart/form-data boundary parsing
+    if (contentTypeHeader.includes('multipart/form-data')) {
+      const boundaryMatch = req.headers['content-type']?.match(/boundary=([^;]+)/i);
+      if (!boundaryMatch) {
+        return { error: 'Malformed multipart form-data: missing boundary', status: 400 };
+      }
+      const boundary = boundaryMatch[1].trim().replace(/^"|"$/g, '');
+      const boundaryBuffer = Buffer.from(`--${boundary}`);
+
+      let start = rawBuffer.indexOf(boundaryBuffer);
+      while (start !== -1) {
+        const nextBoundary = rawBuffer.indexOf(boundaryBuffer, start + boundaryBuffer.length);
+        if (nextBoundary === -1) break;
+
+        const partBuffer = rawBuffer.subarray(start + boundaryBuffer.length, nextBoundary);
+        const headerEnd = partBuffer.indexOf(Buffer.from('\r\n\r\n'));
+        if (headerEnd !== -1) {
+          const headerStr = partBuffer.subarray(0, headerEnd).toString('utf8');
+          const fileContent = partBuffer.subarray(headerEnd + 4);
+          // Trim trailing \r\n if present
+          const cleanContent = fileContent.length >= 2 && fileContent[fileContent.length - 2] === 13 && fileContent[fileContent.length - 1] === 10
+            ? fileContent.subarray(0, fileContent.length - 2)
+            : fileContent;
+
+          const dispositionMatch = headerStr.match(/Content-Disposition:\s*form-data;[^;\r\n]*;\s*filename="?([^"\r\n]+)"?/i);
+          const mimeMatch = headerStr.match(/Content-Type:\s*([^\r\n;]+)/i);
+
+          if (dispositionMatch) {
+            const filename = dispositionMatch[1];
+            const mimeType = mimeMatch ? mimeMatch[1].trim() : 'application/octet-stream';
+            return { buffer: cleanContent, filename, mimeType };
+          }
+        }
+        start = nextBoundary;
+      }
+      return { error: 'No file field found in multipart payload', status: 400 };
+    }
+
+    // 2b. Raw binary with custom headers
+    const filename = (req.headers['x-filename'] as string) || (req.query.filename as string) || 'upload_file';
+    const mimeType = contentTypeHeader.split(';')[0].trim() || 'application/octet-stream';
+    return { buffer: rawBuffer, filename: decodeURIComponent(filename), mimeType };
+  }
+
+  // --- Dashboard Rich Post Composer APIs (Phase 4 & Local Media Upload) ---
+  app.post('/api/dashboard/posts/upload-media', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const parseResult = await parseIncomingMediaFile(req);
+      if ('error' in parseResult) {
+        return res.status(parseResult.status).json({ error: parseResult.error });
+      }
+
+      const { buffer, filename, mimeType } = parseResult;
+      const expectedType = (req.query.type as string) || (req.body?.type as string) || undefined;
+
+      const validation = mediaUploadStore.validateFile({ buffer, filename, mimeType }, expectedType);
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.error || 'Invalid uploaded file' });
+      }
+
+      const storedItem = mediaUploadStore.storeMedia(buffer, filename, validation.normalizedMimeType || mimeType);
+
+      return res.json({
+        success: true,
+        mediaUploadId: storedItem.id,
+        filename: storedItem.filename,
+        mimeType: storedItem.mimeType,
+        size: storedItem.size
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to process media upload' });
+    }
+  });
+
   app.post('/api/dashboard/posts/send', async (req, res) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');
@@ -1697,12 +1823,26 @@ export async function startServer() {
       }
 
       let normalizedMediaId: string | undefined = undefined;
+      let mediaUploadId: string | undefined = undefined;
+
       if (contentType !== 'text') {
-        const mediaCheck = validateMediaReference(payload.mediaFileId);
-        if (!mediaCheck.valid) {
-          return res.status(400).json({ error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` });
+        const uploadCandidate = payload.mediaUploadId ||
+          (payload.mediaFileId?.startsWith('upl_') ? payload.mediaFileId : (payload.mediaFileId?.startsWith('upload:') ? payload.mediaFileId.substring(7) : undefined));
+
+        if (uploadCandidate) {
+          const item = mediaUploadStore.getMedia(uploadCandidate);
+          if (!item) {
+            return res.status(400).json({ error: `Uploaded media file (${uploadCandidate}) has expired or is invalid. Please re-upload the file.` });
+          }
+          mediaUploadId = item.id;
+          normalizedMediaId = `upload:${item.id}`;
+        } else {
+          const mediaCheck = validateMediaReference(payload.mediaFileId);
+          if (!mediaCheck.valid) {
+            return res.status(400).json({ error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` });
+          }
+          normalizedMediaId = mediaCheck.normalized;
         }
-        normalizedMediaId = mediaCheck.normalized;
       }
 
       const sanitizedButtons = sanitizeInlineButtons(payload.buttons);
@@ -1711,6 +1851,7 @@ export async function startServer() {
         contentType,
         text: text || undefined,
         mediaFileId: normalizedMediaId,
+        mediaUploadId,
         buttons: sanitizedButtons,
         pinAfterSend: Boolean(payload.pinAfterSend),
         replyToLatest: Boolean(payload.replyToLatest),
@@ -1741,7 +1882,7 @@ export async function startServer() {
             messageId: sendResult.messageId,
             chatId: numChatId,
             mediaType: contentType,
-            mediaFileId: normalizedMediaId,
+            mediaFileId: sendResult.telegramFileId || normalizedMediaId,
             direction: 'outgoing',
             source: 'dashboard',
             sender: 'Roxie'
@@ -1802,6 +1943,23 @@ export async function startServer() {
 
       let scheduledMediaId: string | undefined = undefined;
       if (contentType !== 'text') {
+        const isLocalUpload = Boolean(
+          payload.mediaUploadId ||
+          (payload.mediaFileId && (
+            payload.mediaFileId.startsWith('upl_') ||
+            payload.mediaFileId.startsWith('upload:') ||
+            payload.mediaFileId.startsWith('blob:') ||
+            payload.mediaFileId.startsWith('data:') ||
+            payload.mediaFileId.startsWith('local_preview_')
+          ))
+        );
+
+        if (isLocalUpload) {
+          return res.status(400).json({
+            error: 'Local media cannot be scheduled on the current hosting setup. Use a Telegram file_id or public HTTPS media URL for scheduled posts.'
+          });
+        }
+
         const mediaCheck = validateMediaReference(payload.mediaFileId);
         if (!mediaCheck.valid) {
           return res.status(400).json({ error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` });

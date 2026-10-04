@@ -548,6 +548,8 @@ export interface PostPayload {
   contentType: PostContentType;
   text?: string;
   mediaFileId?: string;
+  mediaUploadId?: string;
+  mediaBuffer?: { buffer: Buffer | Uint8Array; filename: string; contentType?: string };
   buttons?: ScheduledPostButton[][];
   pinAfterSend?: boolean;
   replyToLatest?: boolean;
@@ -562,6 +564,7 @@ export interface SendPostResult {
   chatId: number;
   error?: string;
   pinSuccess?: boolean;
+  telegramFileId?: string;
   result?: any;
 }
 
