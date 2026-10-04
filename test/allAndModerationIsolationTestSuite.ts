@@ -7,7 +7,7 @@ import { ModerationService } from '../server/telegram/moderation.js';
 import { SmartProtectionService } from '../server/telegram/smartProtection.js';
 import { mtprotoParticipantService } from '../server/telegram/mtprotoParticipantService.js';
 import { TelegramMessage, TelegramUser } from '../server/telegram/types.js';
-import { CommandContext } from '../server/telegram/middleware.js';
+import { CommandContext, TelegramMiddleware } from '../server/telegram/middleware.js';
 
 async function runTestSuite() {
   console.log('====================================================');
@@ -106,7 +106,9 @@ async function runTestSuite() {
   mtprotoParticipantService.releaseChatLock(chatB);
   mtprotoParticipantService.releaseChatLock(chatA);
 
-  // Test 1.4: /all execution with mock members in Chat A
+  // Test 1.4: /all execution with mock members in fresh Chat A
+  const uniqueChatA = -100999555111;
+  db.updateGroupSettings(uniqueChatA, { warnLimit: 3, warnAction: 'mute' });
   const membersList = Array.from({ length: 25 }, (_, i) => ({
     id: 3000 + i,
     firstName: `Member${i}`,
@@ -114,7 +116,7 @@ async function runTestSuite() {
   }));
 
   for (const m of membersList) {
-    db.cacheUser({ id: m.id, first_name: m.firstName, username: m.username, is_bot: false }, chatA);
+    db.cacheUser({ id: m.id, first_name: m.firstName, username: m.username, is_bot: false }, uniqueChatA);
   }
 
   sentMessages = [];
@@ -122,7 +124,7 @@ async function runTestSuite() {
 
   const allCmdCtx: CommandContext = {
     command: '/all',
-    chatId: chatA,
+    chatId: uniqueChatA,
     chatTitle: 'Test Group A',
     sender: adminUser,
     isAnonymousAdmin: false,
@@ -130,7 +132,7 @@ async function runTestSuite() {
     message: {
       message_id: 501,
       date: Math.floor(Date.now() / 1000),
-      chat: { id: chatA, type: 'supergroup', title: 'Test Group A' },
+      chat: { id: uniqueChatA, type: 'supergroup', title: 'Test Group A' },
       from: adminUser,
       text: '/all Team Meeting Announcement'
     },
@@ -141,7 +143,7 @@ async function runTestSuite() {
 
   assert(sentMessages.length === 3, `Test 1.4: 25 members produced exactly 3 mention messages (got ${sentMessages.length})`);
   assert(sentMessages.every(m => m.text.includes('Team Meeting Announcement')), 'Test 1.5: All /all batches include custom announcement text');
-  assert(!mtprotoParticipantService.isChatLocked(chatA), 'Test 1.6: Chat A lock released cleanly after worker completion');
+  assert(!mtprotoParticipantService.isChatLocked(uniqueChatA), 'Test 1.6: Chat A lock released cleanly after worker completion');
 
   // Test 1.7: 429 Retry handling with retry_after
   let attemptCount = 0;
@@ -256,120 +258,314 @@ async function runTestSuite() {
   telegramApi.restrictChatMember = origRestrict;
 
   // ----------------------------------------------------
-  // SECTION 3: LINK PROTECTION WARNING ESCALATION (3 WARNINGS = 1 HOUR MUTE)
+  // SECTION 3: LINK PROTECTION = IMMEDIATE PERMANENT MUTE
   // ----------------------------------------------------
-  console.log('\n--- SECTION 3: LINK PROTECTION WARNING ESCALATION ---');
+  console.log('\n--- SECTION 3: LINK PROTECTION = IMMEDIATE PERMANENT MUTE ---');
 
-  db.resetUserWarnings(chatA, targetUser2.id);
   restrictCalls = [];
   banCalls = [];
   sentMessages = [];
+
+  const linkViolator: TelegramUser = { id: 2020, first_name: 'LinkSpammer', username: 'link_spammer', is_bot: false };
+  db.cacheUser(linkViolator, chatA);
 
   const linkMsg: TelegramMessage = {
     message_id: 701,
     date: Math.floor(Date.now() / 1000),
     chat: { id: chatA, type: 'supergroup', title: 'Test Group A' },
-    from: targetUser2,
-    text: 'Check this link: https://unauthorized-spam-link.com'
+    from: linkViolator,
+    text: 'Join our channel now: https://t.me/spam_group_invite'
   };
 
-  // Link Violation 1
-  await ModerationService.handleLinkProtection(linkMsg);
-  let user2Warns = db.getUserWarnings(chatA, targetUser2.id);
-  assert(user2Warns.length === 1, `Test 3.1: Link Violation 1 recorded (length=${user2Warns.length})`);
-  assert(restrictCalls.length === 0, 'Test 3.2: Link Violation 1 does NOT mute user');
+  // Test 3.1: Link violation immediately permanently mutes
+  const intercepted = await ModerationService.handleLinkProtection(linkMsg);
+  assert(intercepted === true, 'Test 3.1: Link violation intercepted and processed');
+  assert(restrictCalls.length === 1, 'Test 3.2: Link violation immediately triggers restrictChatMember');
+  assert(restrictCalls[0].userId === linkViolator.id, 'Test 3.3: Correct violator user was restricted');
+  assert(restrictCalls[0].options?.until_date === undefined, 'Test 3.4: Link mute is PERMANENT (until_date is undefined)');
+  assert(banCalls.length === 0, 'Test 3.5: Link violation NEVER calls banChatMember');
 
-  // Link Violation 2
-  await ModerationService.handleLinkProtection(linkMsg);
-  user2Warns = db.getUserWarnings(chatA, targetUser2.id);
-  assert(user2Warns.length === 2, `Test 3.3: Link Violation 2 recorded (length=${user2Warns.length})`);
-  assert(restrictCalls.length === 0, 'Test 3.4: Link Violation 2 does NOT mute user');
+  // Test 3.6: Link violation does NOT record a temporary action in storage
+  const tempActions = db.getActiveTempActions(chatA);
+  assert(!tempActions.some(t => t.userId === linkViolator.id), 'Test 3.6: Permanent link mute is NOT recorded as a temporary action');
 
-  // Link Violation 3 (Threshold -> 1-Hour Mute)
-  const preLinkMuteTimeSec = Math.floor(Date.now() / 1000);
-  await ModerationService.handleLinkProtection(linkMsg);
+  // Test 3.7: Owner / Admin exemption
+  const ownerUser: TelegramUser = { id: 1000, first_name: 'GroupOwner', username: 'group_owner', is_bot: false };
+  telegramApi.getChatMember = async (_chatId: number, userId: number) => {
+    if (userId === ownerUser.id) {
+      return { ok: true, result: { status: 'creator', user: ownerUser } } as any;
+    }
+    return { ok: true, result: { status: 'member', user: linkViolator } } as any;
+  };
 
-  assert(restrictCalls.length === 1, 'Test 3.5: Link Violation 3 executes 1-hour mute');
-  assert(banCalls.length === 0, 'Test 3.6: Link Violation 3 NEVER calls banChatMember');
-
-  const linkMuteCall = restrictCalls[0];
-  const linkMuteDuration = linkMuteCall.options.until_date - preLinkMuteTimeSec;
-  assert(linkMuteDuration >= 3590 && linkMuteDuration <= 3610, `Test 3.7: Link mute duration is exactly 1 hour (${linkMuteDuration}s)`);
-
-  user2Warns = db.getUserWarnings(chatA, targetUser2.id);
-  assert(user2Warns.length === 0, 'Test 3.8: Link violation warnings reset after 1-hour mute');
-
-  // Test 3.9: Link protection failed mute does NOT reset warnings
-  const linkFailUser: TelegramUser = { id: 2010, first_name: 'LinkFail', username: 'link_fail', is_bot: false };
-  db.cacheUser(linkFailUser, chatA);
-  db.resetUserWarnings(chatA, linkFailUser.id);
-  db.addWarning({ chatId: chatA, userId: linkFailUser.id, adminId: botId, reason: 'Link 1' });
-  db.addWarning({ chatId: chatA, userId: linkFailUser.id, adminId: botId, reason: 'Link 2' });
-
-  telegramApi.restrictChatMember = async () => ({ ok: false, description: 'CHAT_ADMIN_REQUIRED', error_code: 400 } as any);
-  await ModerationService.handleLinkProtection({
-    ...linkMsg,
-    from: linkFailUser,
-    message_id: 799
-  });
-
-  const linkFailWarns = db.getUserWarnings(chatA, linkFailUser.id);
-  assert(linkFailWarns.length === 3, `Test 3.9: Failed link mute does NOT reset warnings (warnings remain at ${linkFailWarns.length})`);
-  telegramApi.restrictChatMember = origRestrict;
-
-  // ----------------------------------------------------
-  // SECTION 4: SMART PROTECTION WARNING ESCALATION (3 WARNINGS = 1 HOUR MUTE)
-  // ----------------------------------------------------
-  console.log('\n--- SECTION 4: SMART PROTECTION WARNING ESCALATION ---');
-
-  const smartTarget: TelegramUser = { id: 2003, first_name: 'SmartViolator', username: 'smart_violator', is_bot: false };
-  db.cacheUser(smartTarget, chatA);
-  db.resetUserWarnings(chatA, smartTarget.id);
-  SmartProtectionService.reset();
   restrictCalls = [];
-  banCalls = [];
-
-  const smartMsg: TelegramMessage = {
-    message_id: 801,
+  const ownerLinkMsg: TelegramMessage = {
+    message_id: 702,
     date: Math.floor(Date.now() / 1000),
     chat: { id: chatA, type: 'supergroup', title: 'Test Group A' },
-    from: smartTarget,
-    text: 'Repeat text spam message 123'
+    from: ownerUser,
+    text: 'Official group link: https://t.me/official_channel'
+  };
+  const ownerIntercepted = await ModerationService.handleLinkProtection(ownerLinkMsg);
+  assert(ownerIntercepted === false, 'Test 3.7: Group owner link message is bypassed (not deleted/muted)');
+  assert(restrictCalls.length === 0, 'Test 3.8: Owner was not restricted');
+
+  // ----------------------------------------------------
+  // SECTION 4: GRANULAR PERMISSION CHECKS PER COMMAND
+  // ----------------------------------------------------
+  console.log('\n--- SECTION 4: GRANULAR PERMISSION CHECKS PER COMMAND ---');
+
+  TelegramMiddleware.clearMemberCache();
+
+  const regularMember: TelegramUser = { id: 4001, first_name: 'RegularMember', username: 'reg_member', is_bot: false };
+  const adminWithoutRestrict: TelegramUser = { id: 4002, first_name: 'AdminNoRestrict', username: 'admin_no_rest', is_bot: false };
+  const adminWithRestrict: TelegramUser = { id: 4003, first_name: 'AdminWithRestrict', username: 'admin_rest', is_bot: false };
+
+  db.cacheUser(regularMember, chatA);
+  db.cacheUser(adminWithoutRestrict, chatA);
+  db.cacheUser(adminWithRestrict, chatA);
+
+  telegramApi.getChatMember = async (_chatId: number, userId: number) => {
+    if (userId === botId) {
+      return { ok: true, result: { status: 'administrator', user: { id: botId, is_bot: true, first_name: 'Miss Roxie', username: 'MissRoxie_Bot' }, can_restrict_members: true, can_delete_messages: true } } as any;
+    }
+    if (userId === adminWithRestrict.id) {
+      return { ok: true, result: { status: 'administrator', user: adminWithRestrict, can_restrict_members: true, can_delete_messages: true } } as any;
+    }
+    if (userId === adminWithoutRestrict.id) {
+      return { ok: true, result: { status: 'administrator', user: adminWithoutRestrict, can_restrict_members: false, can_delete_messages: true } } as any;
+    }
+    if (userId === regularMember.id) {
+      return { ok: true, result: { status: 'member', user: regularMember } } as any;
+    }
+    return { ok: true, result: { status: 'member', user: targetUser1 } } as any;
   };
 
-  // Smart protection flood simulation
-  db.updateGroupSettings(chatA, { protectionEnabled: true, protectionFloodCount: 2, protectionFloodWindow: 10, warnLimit: 3, warnAction: 'mute' });
+  telegramApi.getChatAdministrators = async (_chatId: number) => ({
+    ok: true,
+    result: [
+      { status: 'administrator', user: { id: botId, is_bot: true, first_name: 'Miss Roxie', username: 'MissRoxie_Bot' }, can_restrict_members: true, can_delete_messages: true },
+      { status: 'administrator', user: adminWithRestrict, can_restrict_members: true, can_delete_messages: true },
+      { status: 'administrator', user: adminWithoutRestrict, can_restrict_members: false, can_delete_messages: true }
+    ]
+  } as any);
 
-  // Violation 1
-  await SmartProtectionService.handleMessage(smartMsg);
-  await SmartProtectionService.handleMessage({ ...smartMsg, message_id: 802 });
-  let smartWarns = db.getUserWarnings(chatA, smartTarget.id);
-  assert(smartWarns.length === 1, `Test 4.1: Smart Protection warning 1 recorded (length=${smartWarns.length})`);
-  assert(restrictCalls.length === 0, 'Test 4.2: Smart Protection warning 1 does NOT mute');
+  // Test 4.1: /mute by regular member -> REJECTED
+  sentMessages = [];
+  restrictCalls = [];
+  await CommandHandler.handleCommand({
+    command: '/mute',
+    chatId: chatA,
+    chatTitle: 'Test Group A',
+    sender: regularMember,
+    isAnonymousAdmin: false,
+    adminDisplayName: 'RegularMember',
+    message: { message_id: 801, date: Math.floor(Date.now() / 1000), chat: { id: chatA, type: 'supergroup' }, from: regularMember, text: `/mute ${targetUser1.id}` },
+    args: [`${targetUser1.id}`]
+  });
+  assert(restrictCalls.length === 0, 'Test 4.1: /mute by regular member rejected (0 restrict calls)');
+  assert(sentMessages[0]?.text.includes('group administrators'), 'Test 4.2: Regular member receives admin requirement notice');
 
-  // Violation 2
-  SmartProtectionService.reset();
-  await SmartProtectionService.handleMessage({ ...smartMsg, message_id: 803 });
-  await SmartProtectionService.handleMessage({ ...smartMsg, message_id: 804 });
-  smartWarns = db.getUserWarnings(chatA, smartTarget.id);
-  assert(smartWarns.length === 2, `Test 4.3: Smart Protection warning 2 recorded (length=${smartWarns.length})`);
-  assert(restrictCalls.length === 0, 'Test 4.4: Smart Protection warning 2 does NOT mute (5-min mute removed)');
+  // Test 4.3: /mute by admin WITHOUT can_restrict_members -> REJECTED
+  sentMessages = [];
+  restrictCalls = [];
+  await CommandHandler.handleCommand({
+    command: '/mute',
+    chatId: chatA,
+    chatTitle: 'Test Group A',
+    sender: adminWithoutRestrict,
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminNoRestrict',
+    message: { message_id: 802, date: Math.floor(Date.now() / 1000), chat: { id: chatA, type: 'supergroup' }, from: adminWithoutRestrict, text: `/mute ${targetUser1.id}` },
+    args: [`${targetUser1.id}`]
+  });
+  assert(restrictCalls.length === 0, 'Test 4.3: /mute by admin without can_restrict_members rejected');
+  assert(sentMessages[0]?.text.includes('Restrict Members') || sentMessages[0]?.text.includes('Ban Users'), 'Test 4.4: Admin without restrict permission receives specific permission notice');
 
-  // Violation 3 (Threshold -> 1-Hour Mute)
-  SmartProtectionService.reset();
-  const preSmartMuteTime = Math.floor(Date.now() / 1000);
-  await SmartProtectionService.handleMessage({ ...smartMsg, message_id: 805 });
-  await SmartProtectionService.handleMessage({ ...smartMsg, message_id: 806 });
+  // Test 4.5: /ban by admin WITHOUT can_restrict_members -> REJECTED
+  sentMessages = [];
+  banCalls = [];
+  await CommandHandler.handleCommand({
+    command: '/ban',
+    chatId: chatA,
+    chatTitle: 'Test Group A',
+    sender: adminWithoutRestrict,
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminNoRestrict',
+    message: { message_id: 803, date: Math.floor(Date.now() / 1000), chat: { id: chatA, type: 'supergroup' }, from: adminWithoutRestrict, text: `/ban ${targetUser1.id}` },
+    args: [`${targetUser1.id}`]
+  });
+  assert(banCalls.length === 0, 'Test 4.5: /ban by admin without can_restrict_members rejected');
 
-  assert(restrictCalls.length === 1, 'Test 4.5: Smart Protection warning 3 triggers 1-hour mute');
-  assert(banCalls.length === 0, 'Test 4.6: Smart Protection warning 3 NEVER calls banChatMember');
+  // Test 4.6: /warn by admin WITHOUT can_restrict_members -> REJECTED
+  sentMessages = [];
+  const preWarnCount = db.getUserWarnings(chatA, targetUser1.id).length;
+  await CommandHandler.handleCommand({
+    command: '/warn',
+    chatId: chatA,
+    chatTitle: 'Test Group A',
+    sender: adminWithoutRestrict,
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminNoRestrict',
+    message: { message_id: 804, date: Math.floor(Date.now() / 1000), chat: { id: chatA, type: 'supergroup' }, from: adminWithoutRestrict, text: `/warn ${targetUser1.id} spam` },
+    args: [`${targetUser1.id}`, 'spam']
+  });
+  assert(db.getUserWarnings(chatA, targetUser1.id).length === preWarnCount, 'Test 4.6: /warn by admin without can_restrict_members rejected (warnings unchanged)');
 
-  const smartMuteCall = restrictCalls[0];
-  const smartMuteDuration = smartMuteCall.options.until_date - preSmartMuteTime;
-  assert(smartMuteDuration >= 3590 && smartMuteDuration <= 3610, `Test 4.7: Smart protection mute duration is 1 hour (${smartMuteDuration}s)`);
+  // ----------------------------------------------------
+  // SECTION 5: MODERATION COMMAND DURATION & REASON PARSING
+  // ----------------------------------------------------
+  console.log('\n--- SECTION 5: MODERATION COMMAND DURATION & REASON PARSING ---');
 
-  smartWarns = db.getUserWarnings(chatA, smartTarget.id);
-  assert(smartWarns.length === 0, 'Test 4.8: Smart protection warnings reset after 1-hour mute');
+  TelegramMiddleware.clearMemberCache();
+
+  // Reset API handlers to allow adminWithRestrict
+  telegramApi.getChatAdministrators = async (_chatId: number) => ({
+    ok: true,
+    result: [
+      { status: 'administrator', user: { id: botId, is_bot: true, first_name: 'Miss Roxie', username: 'MissRoxie_Bot' }, can_restrict_members: true, can_delete_messages: true },
+      { status: 'administrator', user: adminWithRestrict, can_restrict_members: true, can_delete_messages: true }
+    ]
+  } as any);
+
+  telegramApi.getChatMember = async (_chatId: number, userId: number) => {
+    if (userId === botId) {
+      return { ok: true, result: { status: 'administrator', user: { id: botId, is_bot: true, first_name: 'Miss Roxie', username: 'MissRoxie_Bot' }, can_restrict_members: true, can_delete_messages: true } } as any;
+    }
+    if (userId === adminWithRestrict.id) {
+      return { ok: true, result: { status: 'administrator', user: adminWithRestrict, can_restrict_members: true, can_delete_messages: true } } as any;
+    }
+    return { ok: true, result: { status: 'member', user: targetUser1 } } as any;
+  };
+
+  // Test 5.1: /mute @user => permanent mute (no duration, no reason)
+  restrictCalls = [];
+  sentMessages = [];
+  db.removeTempAction(chatA, targetUser1.id, 'tmute');
+  await CommandHandler.handleCommand({
+    command: '/mute',
+    chatId: chatA,
+    chatTitle: 'Test Group A',
+    sender: adminWithRestrict,
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminWithRestrict',
+    message: { message_id: 901, date: Math.floor(Date.now() / 1000), chat: { id: chatA, type: 'supergroup' }, from: adminWithRestrict, text: `/mute @violator_1` },
+    args: ['@violator_1']
+  });
+  assert(restrictCalls.length === 1, 'Test 5.1: /mute @user executed restrictChatMember');
+  assert(restrictCalls[0].options?.until_date === undefined, 'Test 5.2: /mute @user without duration is PERMANENT (until_date undefined)');
+  assert(db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length === 0, 'Test 5.3: Permanent /mute does NOT add temporary action');
+
+  // Test 5.4: /mute @user 1h => 1-hour temporary mute
+  restrictCalls = [];
+  sentMessages = [];
+  const preMuteTime54 = Math.floor(Date.now() / 1000);
+  await CommandHandler.handleCommand({
+    command: '/mute',
+    chatId: chatA,
+    chatTitle: 'Test Group A',
+    sender: adminWithRestrict,
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminWithRestrict',
+    message: { message_id: 902, date: Math.floor(Date.now() / 1000), chat: { id: chatA, type: 'supergroup' }, from: adminWithRestrict, text: `/mute @violator_1 1h` },
+    args: ['@violator_1', '1h']
+  });
+  assert(restrictCalls.length === 1, 'Test 5.4: /mute @user 1h executed');
+  assert(restrictCalls[0].options?.until_date !== undefined, 'Test 5.5: /mute @user 1h has until_date');
+  const dur54 = restrictCalls[0].options.until_date - preMuteTime54;
+  assert(dur54 >= 3590 && dur54 <= 3610, `Test 5.6: 1h mute duration is 3600s (got ${dur54}s)`);
+  const activeMutes54 = db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id && t.action === 'tmute');
+  assert(activeMutes54.length === 1, 'Test 5.7: Temporary /mute records temp action in DB');
+
+  // Test 5.8: /mute @user 1h reason_xyz => 1-hour mute with reason
+  restrictCalls = [];
+  sentMessages = [];
+  await CommandHandler.handleCommand({
+    command: '/mute',
+    chatId: chatA,
+    chatTitle: 'Test Group A',
+    sender: adminWithRestrict,
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminWithRestrict',
+    message: { message_id: 903, date: Math.floor(Date.now() / 1000), chat: { id: chatA, type: 'supergroup' }, from: adminWithRestrict, text: `/mute @violator_1 1h repeated spam links` },
+    args: ['@violator_1', '1h', 'repeated', 'spam', 'links']
+  });
+  assert(restrictCalls.length === 1, 'Test 5.8: /mute @user 1h reason executed');
+  assert(sentMessages[0]?.text.includes('repeated spam links'), 'Test 5.9: Mute message includes multi-word reason');
+
+  // Test 5.10: /mute @user reason_xyz => permanent mute with reason
+  restrictCalls = [];
+  sentMessages = [];
+  db.removeTempAction(chatA, targetUser1.id, 'tmute');
+  await CommandHandler.handleCommand({
+    command: '/mute',
+    chatId: chatA,
+    chatTitle: 'Test Group A',
+    sender: adminWithRestrict,
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminWithRestrict',
+    message: { message_id: 904, date: Math.floor(Date.now() / 1000), chat: { id: chatA, type: 'supergroup' }, from: adminWithRestrict, text: `/mute @violator_1 spamming memes` },
+    args: ['@violator_1', 'spamming', 'memes']
+  });
+  assert(restrictCalls[0]?.options?.until_date === undefined, 'Test 5.10: /mute @user reason_xyz is PERMANENT (until_date undefined)');
+  assert(sentMessages[0]?.text.includes('spamming memes'), 'Test 5.11: Permanent mute message includes reason');
+  assert(db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length === 0, 'Test 5.12: Permanent mute with reason does not create tempAction');
+
+  // Test 5.13: /ban @user => permanent ban
+  banCalls = [];
+  sentMessages = [];
+  db.removeTempAction(chatA, targetUser1.id, 'tban');
+  await CommandHandler.handleCommand({
+    command: '/ban',
+    chatId: chatA,
+    chatTitle: 'Test Group A',
+    sender: adminWithRestrict,
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminWithRestrict',
+    message: { message_id: 905, date: Math.floor(Date.now() / 1000), chat: { id: chatA, type: 'supergroup' }, from: adminWithRestrict, text: `/ban @violator_1` },
+    args: ['@violator_1']
+  });
+  assert(banCalls.length === 1, 'Test 5.13: /ban @user executed');
+  assert(banCalls[0].options === undefined || banCalls[0].options?.until_date === undefined, 'Test 5.14: /ban @user is PERMANENT');
+
+  // Test 5.15: /ban @user 7d severe violation => 7-day temporary ban with reason
+  banCalls = [];
+  sentMessages = [];
+  const preBanTime = Math.floor(Date.now() / 1000);
+  await CommandHandler.handleCommand({
+    command: '/ban',
+    chatId: chatA,
+    chatTitle: 'Test Group A',
+    sender: adminWithRestrict,
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminWithRestrict',
+    message: { message_id: 906, date: Math.floor(Date.now() / 1000), chat: { id: chatA, type: 'supergroup' }, from: adminWithRestrict, text: `/ban @violator_1 7d severe violation` },
+    args: ['@violator_1', '7d', 'severe', 'violation']
+  });
+  assert(banCalls.length === 1, 'Test 5.15: /ban @user 7d executed');
+  const banDur = banCalls[0].options.until_date - preBanTime;
+  assert(banDur >= 7 * 86400 - 10 && banDur <= 7 * 86400 + 10, `Test 5.16: 7d ban duration is ~604800s (got ${banDur}s)`);
+  assert(sentMessages[0]?.text.includes('severe violation'), 'Test 5.17: Temporary ban message includes reason');
+  const activeBans = db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id && t.action === 'tban');
+  assert(activeBans.length === 1, 'Test 5.18: Temporary ban is tracked in DB');
+
+  // ----------------------------------------------------
+  // SECTION 6: DURATION PARSER EDGE CASES
+  // ----------------------------------------------------
+  console.log('\n--- SECTION 6: DURATION PARSER EDGE CASES ---');
+
+  const { parseDuration: testParseDur } = await import('../server/telegram/moderation.js');
+
+  assert(testParseDur('30s')?.seconds === 30, 'Test 6.1: parseDuration("30s") = 30s');
+  assert(testParseDur('10m')?.seconds === 600, 'Test 6.2: parseDuration("10m") = 600s');
+  assert(testParseDur('1h')?.seconds === 3600, 'Test 6.3: parseDuration("1h") = 3600s');
+  assert(testParseDur('2d')?.seconds === 172800, 'Test 6.4: parseDuration("2d") = 172800s');
+  assert(testParseDur('1h30m')?.seconds === 5400, 'Test 6.5: parseDuration("1h30m") = 5400s');
+  assert(testParseDur('0s') === null, 'Test 6.6: parseDuration("0s") rejected (null)');
+  assert(testParseDur('-5m') === null, 'Test 6.7: parseDuration("-5m") rejected (null)');
+  assert(testParseDur('10meters') === null, 'Test 6.8: parseDuration("10meters") rejected (null)');
+  assert(testParseDur('invalid_text') === null, 'Test 6.9: parseDuration("invalid_text") rejected (null)');
+  assert(testParseDur('') === null, 'Test 6.10: parseDuration("") rejected (null)');
 
   console.log('\n====================================================');
   console.log(`🎉 TEST SUMMARY: ${passed} Passed, ${failed} Failed`);

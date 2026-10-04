@@ -1,7 +1,7 @@
 import { telegramApi } from './api.js';
 import { TelegramMiddleware, CommandContext, RoleRank, ActorResolution } from './middleware.js';
 import { db } from '../db/storage.js';
-import { ModerationService, parseDuration } from './moderation.js';
+import { ModerationService, parseDuration, parseModerationArgs } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { PostBuilderManager } from './postBuilder.js';
 import { mapTelegramError } from './errorMapper.js';
@@ -1642,32 +1642,23 @@ export class CommandHandler {
     if (!actor || !target) return;
 
     const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
-    const timeArg = isTargetInArgs ? ctx.args[1] : ctx.args[0];
-    const duration = timeArg ? parseDuration(timeArg) : null;
-
-    let untilDateSec: number | undefined = undefined;
-    let reasonArgs: string[];
-    if (duration) {
-      untilDateSec = Math.floor(Date.now() / 1000) + duration.seconds;
-      reasonArgs = isTargetInArgs ? ctx.args.slice(2) : ctx.args.slice(1);
-    } else {
-      reasonArgs = isTargetInArgs ? ctx.args.slice(1) : ctx.args;
-    }
-    const reason = reasonArgs.join(' ') || (duration ? 'Temporary ban' : 'Admin ban');
+    const { duration, untilDateSec, reason: parsedReason } = parseModerationArgs(ctx.args, isTargetInArgs);
+    const reason = parsedReason || (duration ? 'Temporary ban' : 'Admin ban');
     const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
 
     const res = await ModerationService.executeBan(ctx.chatId, target.targetUserId, untilDateSec);
 
     if (res.ok) {
-      if (untilDateSec) {
+      if (untilDateSec && duration) {
         db.addTempAction({
           chatId: ctx.chatId,
           chatTitle: ctx.chatTitle,
           userId: target.targetUserId,
           username: target.targetUsername,
+          userFirstName: target.targetUser?.first_name,
           action: 'tban',
-          durationSeconds: duration!.seconds,
-          durationFormatted: duration!.formatted,
+          durationSeconds: duration.seconds,
+          durationFormatted: duration.formatted,
           expiresAt: untilDateSec,
           reason,
           adminId: actor.actorUserId,
@@ -1688,7 +1679,7 @@ export class CommandHandler {
 
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🔨 <b>${targetTag} has been banned${duration ? ` for ${duration.formatted}` : ''}.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`,
+        `🔨 <b>${targetTag} has been banned${duration ? ` for ${duration.formatted}` : ''}.</b>${parsedReason ? `\nReason: <i>${escapeHtml(parsedReason)}</i>` : ''}`,
         { reply_to_message_id: ctx.message.message_id }
       );
     } else {
@@ -1806,32 +1797,23 @@ export class CommandHandler {
     if (!actor || !target) return;
 
     const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
-    const timeArg = isTargetInArgs ? ctx.args[1] : ctx.args[0];
-    const duration = timeArg ? parseDuration(timeArg) : null;
-
-    let untilDateSec: number | undefined = undefined;
-    let reasonArgs: string[];
-    if (duration) {
-      untilDateSec = Math.floor(Date.now() / 1000) + duration.seconds;
-      reasonArgs = isTargetInArgs ? ctx.args.slice(2) : ctx.args.slice(1);
-    } else {
-      reasonArgs = isTargetInArgs ? ctx.args.slice(1) : ctx.args;
-    }
-    const reason = reasonArgs.join(' ') || (duration ? 'Temporary mute' : 'Admin mute');
+    const { duration, untilDateSec, reason: parsedReason } = parseModerationArgs(ctx.args, isTargetInArgs);
+    const reason = parsedReason || (duration ? 'Temporary mute' : 'Admin mute');
     const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
 
     const res = await ModerationService.executeMute(ctx.chatId, target.targetUserId, untilDateSec);
 
     if (res.ok) {
-      if (untilDateSec) {
+      if (untilDateSec && duration) {
         db.addTempAction({
           chatId: ctx.chatId,
           chatTitle: ctx.chatTitle,
           userId: target.targetUserId,
           username: target.targetUsername,
+          userFirstName: target.targetUser?.first_name,
           action: 'tmute',
-          durationSeconds: duration!.seconds,
-          durationFormatted: duration!.formatted,
+          durationSeconds: duration.seconds,
+          durationFormatted: duration.formatted,
           expiresAt: untilDateSec,
           reason,
           adminId: actor.actorUserId,
@@ -1852,7 +1834,7 @@ export class CommandHandler {
 
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🔇 <b>${targetTag} has been muted${duration ? ` for ${duration.formatted}` : ''}.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`,
+        `🔇 <b>${targetTag} has been muted${duration ? ` for ${duration.formatted}` : ''}.</b>${parsedReason ? `\nReason: <i>${escapeHtml(parsedReason)}</i>` : ''}`,
         { reply_to_message_id: ctx.message.message_id }
       );
     } else {
@@ -1971,10 +1953,9 @@ export class CommandHandler {
     if (!actor || !target) return;
 
     const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
-    const timeArg = isTargetInArgs ? ctx.args[1] : ctx.args[0];
-    const duration = timeArg ? parseDuration(timeArg) : null;
+    const { duration, untilDateSec, reason: parsedReason } = parseModerationArgs(ctx.args, isTargetInArgs);
 
-    if (!duration) {
+    if (!duration || !untilDateSec) {
       await telegramApi.sendMessage(
         ctx.chatId,
         `⚠️ <b>Invalid or missing duration.</b>\n\n` +
@@ -1987,11 +1968,9 @@ export class CommandHandler {
       return;
     }
 
-    const reasonArgs = isTargetInArgs ? ctx.args.slice(2) : ctx.args.slice(1);
-    const reason = reasonArgs.join(' ') || 'Temporary mute';
+    const reason = parsedReason || 'Temporary mute';
     const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
 
-    const untilDateSec = Math.floor(Date.now() / 1000) + duration.seconds;
     const res = await ModerationService.executeMute(ctx.chatId, target.targetUserId, untilDateSec);
 
     if (res.ok) {
@@ -2000,6 +1979,7 @@ export class CommandHandler {
         chatTitle: ctx.chatTitle,
         userId: target.targetUserId,
         username: target.targetUsername,
+        userFirstName: target.targetUser?.first_name,
         action: 'tmute',
         durationSeconds: duration.seconds,
         durationFormatted: duration.formatted,
@@ -2023,7 +2003,7 @@ export class CommandHandler {
 
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🔇 <b>${targetTag} has been muted for ${duration.formatted}.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`,
+        `🔇 <b>${targetTag} has been muted for ${duration.formatted}.</b>${parsedReason ? `\nReason: <i>${escapeHtml(parsedReason)}</i>` : ''}`,
         { reply_to_message_id: ctx.message.message_id }
       );
     } else {
@@ -2074,10 +2054,9 @@ export class CommandHandler {
     if (!actor || !target) return;
 
     const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
-    const timeArg = isTargetInArgs ? ctx.args[1] : ctx.args[0];
-    const duration = timeArg ? parseDuration(timeArg) : null;
+    const { duration, untilDateSec, reason: parsedReason } = parseModerationArgs(ctx.args, isTargetInArgs);
 
-    if (!duration) {
+    if (!duration || !untilDateSec) {
       await telegramApi.sendMessage(
         ctx.chatId,
         `⚠️ <b>Invalid or missing duration.</b>\n\n` +
@@ -2090,11 +2069,9 @@ export class CommandHandler {
       return;
     }
 
-    const reasonArgs = isTargetInArgs ? ctx.args.slice(2) : ctx.args.slice(1);
-    const reason = reasonArgs.join(' ') || 'Temporary ban';
+    const reason = parsedReason || 'Temporary ban';
     const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
 
-    const untilDateSec = Math.floor(Date.now() / 1000) + duration.seconds;
     const res = await ModerationService.executeBan(ctx.chatId, target.targetUserId, untilDateSec);
 
     if (res.ok) {
@@ -2103,6 +2080,7 @@ export class CommandHandler {
         chatTitle: ctx.chatTitle,
         userId: target.targetUserId,
         username: target.targetUsername,
+        userFirstName: target.targetUser?.first_name,
         action: 'tban',
         durationSeconds: duration.seconds,
         durationFormatted: duration.formatted,
@@ -2126,7 +2104,7 @@ export class CommandHandler {
 
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🔨 <b>${targetTag} has been banned for ${duration.formatted}.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`,
+        `🔨 <b>${targetTag} has been banned for ${duration.formatted}.</b>${parsedReason ? `\nReason: <i>${escapeHtml(parsedReason)}</i>` : ''}`,
         { reply_to_message_id: ctx.message.message_id }
       );
     } else {
@@ -2186,12 +2164,31 @@ export class CommandHandler {
       db.untrackMessages(ctx.chatId, [replyMsgId, ctx.message.message_id]);
     }
 
-    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Admin dban';
+    const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
+    const { duration, untilDateSec, reason: parsedReason } = parseModerationArgs(ctx.args, isTargetInArgs);
+    const reason = parsedReason || (duration ? 'Temporary dban' : 'Admin dban');
     const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
 
-    const res = await ModerationService.executeBan(ctx.chatId, target.targetUserId);
+    const res = await ModerationService.executeBan(ctx.chatId, target.targetUserId, untilDateSec);
 
     if (res.ok) {
+      if (untilDateSec && duration) {
+        db.addTempAction({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          userId: target.targetUserId,
+          username: target.targetUsername,
+          userFirstName: target.targetUser?.first_name,
+          action: 'tban',
+          durationSeconds: duration.seconds,
+          durationFormatted: duration.formatted,
+          expiresAt: untilDateSec,
+          reason,
+          adminId: actor.actorUserId,
+          adminUsername: actor.actorUsername
+        });
+      }
+
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,
@@ -2205,7 +2202,7 @@ export class CommandHandler {
 
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🔨 <b>${targetTag} has been banned and their message was deleted.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`
+        `🔨 <b>${targetTag} has been banned${duration ? ` for ${duration.formatted}` : ''} and their message was deleted.</b>${parsedReason ? `\nReason: <i>${escapeHtml(parsedReason)}</i>` : ''}`
       );
     } else {
       const friendlyError = mapTelegramError('dban', res.description, res.error_code);
@@ -2261,12 +2258,31 @@ export class CommandHandler {
       db.untrackMessages(ctx.chatId, [replyMsgId, ctx.message.message_id]);
     }
 
-    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Admin dmute';
+    const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
+    const { duration, untilDateSec, reason: parsedReason } = parseModerationArgs(ctx.args, isTargetInArgs);
+    const reason = parsedReason || (duration ? 'Temporary dmute' : 'Admin dmute');
     const targetTag = target.targetUsername ? `@${target.targetUsername}` : (target.targetUser?.first_name || `User ${target.targetUserId}`);
 
-    const res = await ModerationService.executeMute(ctx.chatId, target.targetUserId);
+    const res = await ModerationService.executeMute(ctx.chatId, target.targetUserId, untilDateSec);
 
     if (res.ok) {
+      if (untilDateSec && duration) {
+        db.addTempAction({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          userId: target.targetUserId,
+          username: target.targetUsername,
+          userFirstName: target.targetUser?.first_name,
+          action: 'tmute',
+          durationSeconds: duration.seconds,
+          durationFormatted: duration.formatted,
+          expiresAt: untilDateSec,
+          reason,
+          adminId: actor.actorUserId,
+          adminUsername: actor.actorUsername
+        });
+      }
+
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,
@@ -2280,7 +2296,7 @@ export class CommandHandler {
 
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🔇 <b>${targetTag} has been muted and their message was deleted.</b>${reason ? `\nReason: <i>${escapeHtml(reason)}</i>` : ''}`
+        `🔇 <b>${targetTag} has been muted${duration ? ` for ${duration.formatted}` : ''} and their message was deleted.</b>${parsedReason ? `\nReason: <i>${escapeHtml(parsedReason)}</i>` : ''}`
       );
     } else {
       const friendlyError = mapTelegramError('dmute', res.description, res.error_code);
@@ -2410,10 +2426,29 @@ export class CommandHandler {
     await Promise.allSettled(toDelete.map((id) => telegramApi.deleteMessage(ctx.chatId, id)));
     db.untrackMessages(ctx.chatId, toDelete);
 
-    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Silent ban';
-    const res = await ModerationService.executeBan(ctx.chatId, target.targetUserId);
+    const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
+    const { duration, untilDateSec, reason: parsedReason } = parseModerationArgs(ctx.args, isTargetInArgs);
+    const reason = parsedReason || (duration ? 'Temporary sban' : 'Silent ban');
+    const res = await ModerationService.executeBan(ctx.chatId, target.targetUserId, untilDateSec);
 
     if (res.ok) {
+      if (untilDateSec && duration) {
+        db.addTempAction({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          userId: target.targetUserId,
+          username: target.targetUsername,
+          userFirstName: target.targetUser?.first_name,
+          action: 'tban',
+          durationSeconds: duration.seconds,
+          durationFormatted: duration.formatted,
+          expiresAt: untilDateSec,
+          reason,
+          adminId: actor.actorUserId,
+          adminUsername: actor.actorUsername
+        });
+      }
+
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,
@@ -2423,7 +2458,7 @@ export class CommandHandler {
         action: 'sban',
         result: 'success',
         reason,
-        details: 'Silent ban executed (messages deleted, no public notice)'
+        details: `Silent ban executed (messages deleted, no public notice)${duration ? ` [${duration.formatted}]` : ''}`
       });
     } else {
       TelegramMiddleware.logAudit({
@@ -2475,10 +2510,29 @@ export class CommandHandler {
     await Promise.allSettled(toDelete.map((id) => telegramApi.deleteMessage(ctx.chatId, id)));
     db.untrackMessages(ctx.chatId, toDelete);
 
-    const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Silent mute';
-    const res = await ModerationService.executeMute(ctx.chatId, target.targetUserId);
+    const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
+    const { duration, untilDateSec, reason: parsedReason } = parseModerationArgs(ctx.args, isTargetInArgs);
+    const reason = parsedReason || (duration ? 'Temporary smute' : 'Silent mute');
+    const res = await ModerationService.executeMute(ctx.chatId, target.targetUserId, untilDateSec);
 
     if (res.ok) {
+      if (untilDateSec && duration) {
+        db.addTempAction({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          userId: target.targetUserId,
+          username: target.targetUsername,
+          userFirstName: target.targetUser?.first_name,
+          action: 'tmute',
+          durationSeconds: duration.seconds,
+          durationFormatted: duration.formatted,
+          expiresAt: untilDateSec,
+          reason,
+          adminId: actor.actorUserId,
+          adminUsername: actor.actorUsername
+        });
+      }
+
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
         chatTitle: ctx.chatTitle,
@@ -2488,7 +2542,7 @@ export class CommandHandler {
         action: 'smute',
         result: 'success',
         reason,
-        details: 'Silent mute executed (messages deleted, no public notice)'
+        details: `Silent mute executed (messages deleted, no public notice)${duration ? ` [${duration.formatted}]` : ''}`
       });
     } else {
       TelegramMiddleware.logAudit({

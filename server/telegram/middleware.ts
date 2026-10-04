@@ -883,6 +883,14 @@ export class TelegramMiddleware {
           actor
         };
       }
+
+      if (actor.actorRole === 'ADMIN' && !actor.isAnonymousAdmin && actor.canRestrictMembers === false) {
+        return {
+          allowed: false,
+          reason: '❌ You need the "Ban Users" (Restrict Members) administrator permission to perform this action.',
+          actor
+        };
+      }
     } else {
       // General moderation actions: kick, ban, unban, mute, unmute, tmute, tban, dban, dmute, dkick, sban, smute, skick
       if (actor.actorRank < RoleRank.ADMIN) {

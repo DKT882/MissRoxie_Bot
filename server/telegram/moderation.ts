@@ -39,17 +39,22 @@ export const UNMUTED_PERMISSIONS: ChatPermissions = {
 };
 
 export function parseDuration(input: string): { seconds: number; formatted: string } | null {
-  if (!input) return null;
-  const regex = /(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks|mo|month|months|y|yr|yrs|year|years)/gi;
-  let match;
+  if (!input || typeof input !== 'string') return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const compoundRegex = /(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks|mo|month|months|y|yr|yrs|year|years)/gi;
+
   let totalSeconds = 0;
-  let found = false;
+  let matchCount = 0;
+  let match: RegExpExecArray | null;
 
-  while ((match = regex.exec(input)) !== null) {
-    found = true;
+  while ((match = compoundRegex.exec(trimmed)) !== null) {
+    matchCount++;
     const value = parseInt(match[1], 10);
-    const unit = match[2].toLowerCase();
+    if (isNaN(value) || value <= 0 || value > 100000) return null;
 
+    const unit = match[2].toLowerCase();
     if (unit.startsWith('mo')) {
       totalSeconds += value * 30 * 86400;
     } else if (unit.startsWith('s')) {
@@ -67,7 +72,17 @@ export function parseDuration(input: string): { seconds: number; formatted: stri
     }
   }
 
-  if (!found || totalSeconds <= 0) {
+  if (matchCount === 0 || totalSeconds <= 0) {
+    return null;
+  }
+
+  // Reject if leftover non-whitespace characters exist (e.g. "10meters", "1h-foo")
+  const leftover = trimmed.replace(/(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks|mo|month|months|y|yr|yrs|year|years)/gi, '').trim();
+  if (leftover.length > 0) {
+    return null;
+  }
+
+  if (totalSeconds > 100 * 365 * 86400) {
     return null;
   }
 
@@ -75,6 +90,40 @@ export function parseDuration(input: string): { seconds: number; formatted: stri
     seconds: totalSeconds,
     formatted: formatDuration(totalSeconds)
   };
+}
+
+export interface ParsedModerationArgs {
+  duration: { seconds: number; formatted: string } | null;
+  untilDateSec?: number;
+  reason?: string;
+}
+
+export function parseModerationArgs(
+  args: string[],
+  isTargetInArgs: boolean
+): ParsedModerationArgs {
+  const remaining = isTargetInArgs ? args.slice(1) : args.slice(0);
+  if (!remaining || remaining.length === 0) {
+    return { duration: null, reason: undefined };
+  }
+
+  const firstToken = remaining[0].trim();
+  const parsedDur = parseDuration(firstToken);
+
+  if (parsedDur) {
+    const reasonText = remaining.slice(1).join(' ').trim();
+    return {
+      duration: parsedDur,
+      untilDateSec: Math.floor(Date.now() / 1000) + parsedDur.seconds,
+      reason: reasonText || undefined
+    };
+  } else {
+    const reasonText = remaining.join(' ').trim();
+    return {
+      duration: null,
+      reason: reasonText || undefined
+    };
+  }
 }
 
 export function formatDuration(seconds: number): string {
@@ -397,17 +446,6 @@ export class ModerationService {
     const username = message.from.username ? `@${message.from.username}` : (message.from.first_name || `User ${message.from.id}`);
     const reason = 'Posting unauthorized links';
 
-    // Issue a warning to the user using standard storage
-    const { totalWarnings } = db.addWarning({
-      chatId,
-      userId: message.from.id,
-      userUsername: message.from.username,
-      userFirstName: message.from.first_name,
-      adminId: botId,
-      adminUsername: meRes?.result?.username || 'System',
-      reason
-    });
-
     db.addLog({
       chatId,
       chatTitle: message.chat.title,
@@ -419,76 +457,43 @@ export class ModerationService {
       reason: `${reason} in group`
     });
 
-    // Warning threshold -> 1-Hour Mute (3600 seconds)
-    const warnLimit = settings.warnLimit || 3;
-    if (totalWarnings >= warnLimit) {
-      const untilDate = Math.floor(Date.now() / 1000) + 3600;
-      const muteRes = await this.executeMute(chatId, message.from.id, untilDate);
+    // Requirement 1: Immediate Permanent Mute (no until_date / expiration)
+    const muteRes = await this.executeMute(chatId, message.from.id);
 
-      if (muteRes.ok) {
-        db.resetUserWarnings(chatId, message.from.id);
-        db.addTempAction({
-          chatId,
-          chatTitle: message.chat.title,
-          userId: message.from.id,
-          username: message.from.username,
-          userFirstName: message.from.first_name,
-          action: 'tmute',
-          durationSeconds: 3600,
-          durationFormatted: '1 hour',
-          expiresAt: untilDate,
-          reason: `Warning limit reached (${warnLimit}/${warnLimit}): 1-hour mute for ${reason}`,
-          adminId: botId,
-          adminUsername: 'Bot/AutoMod'
-        });
-        db.addLog({
-          chatId,
-          chatTitle: message.chat.title,
-          targetUserId: message.from.id,
-          targetUsername: message.from.username,
-          adminUserId: botId,
-          adminUsername: 'Bot/AutoMod',
-          action: 'mute',
-          reason: `Warning limit reached (${warnLimit}/${warnLimit}): 1-hour mute for ${reason}`
-        });
+    if (muteRes.ok) {
+      db.addLog({
+        chatId,
+        chatTitle: message.chat.title,
+        targetUserId: message.from.id,
+        targetUsername: message.from.username,
+        adminUserId: botId,
+        adminUsername: 'Bot/AutoMod',
+        action: 'mute',
+        reason: `${reason} (permanent mute)`
+      });
 
-        const sentNotice = await telegramApi.sendMessage(
-          chatId,
-          `🚫 <b>Warning limit reached (${warnLimit}/${warnLimit}).</b>\n\n` +
-          `👤 ${username} has been muted for <b>1 hour</b>.\n` +
-          `<i>${warnLimit} warnings = 1 hour mute.</i>`
-        ).catch(() => null);
-        if (sentNotice?.ok && sentNotice.result?.message_id) {
-          const noticeId = sentNotice.result.message_id;
-          setTimeout(() => {
-            telegramApi.deleteMessage(chatId, noticeId).catch(() => {});
-            db.untrackMessages(chatId, [noticeId]);
-          }, 10000);
-        }
-      } else {
-        const sentErr = await telegramApi.sendMessage(
-          chatId,
-          `⚠️ <b>Failed to mute ${username}:</b> ${muteRes.description || 'Permission issue'}`
-        ).catch(() => null);
-        if (sentErr?.ok && sentErr.result?.message_id) {
-          const errId = sentErr.result.message_id;
-          setTimeout(() => {
-            telegramApi.deleteMessage(chatId, errId).catch(() => {});
-            db.untrackMessages(chatId, [errId]);
-          }, 10000);
-        }
-      }
-    } else {
-      const sentWarn = await telegramApi.sendMessage(
+      const sentNotice = await telegramApi.sendMessage(
         chatId,
         `🚫 <b>Links are not allowed in this group.</b>\n\n` +
-        `👤 ${username} received warning <b>${totalWarnings}/${warnLimit}</b>.`
+        `👤 <b>${username}</b> has been <b>permanently muted</b> for posting unauthorized links.`
       ).catch(() => null);
-      if (sentWarn?.ok && sentWarn.result?.message_id) {
-        const warnId = sentWarn.result.message_id;
+      if (sentNotice?.ok && sentNotice.result?.message_id) {
+        const noticeId = sentNotice.result.message_id;
         setTimeout(() => {
-          telegramApi.deleteMessage(chatId, warnId).catch(() => {});
-          db.untrackMessages(chatId, [warnId]);
+          telegramApi.deleteMessage(chatId, noticeId).catch(() => {});
+          db.untrackMessages(chatId, [noticeId]);
+        }, 10000);
+      }
+    } else {
+      const sentErr = await telegramApi.sendMessage(
+        chatId,
+        `⚠️ <b>Failed to mute ${username}:</b> ${muteRes.description || 'Permission issue'}`
+      ).catch(() => null);
+      if (sentErr?.ok && sentErr.result?.message_id) {
+        const errId = sentErr.result.message_id;
+        setTimeout(() => {
+          telegramApi.deleteMessage(chatId, errId).catch(() => {});
+          db.untrackMessages(chatId, [errId]);
         }, 10000);
       }
     }
