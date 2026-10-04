@@ -290,7 +290,7 @@ export interface GroupSettings {
   chatTitle?: string;
   // Warnings
   warnLimit: number; // default 3
-  warnAction: 'ban' | 'mute' | 'kick' | 'warn_only'; // default 'ban'
+  warnAction: 'ban' | 'mute' | 'kick' | 'warn_only'; // default 'mute'
   warnExpireSeconds?: number; // 0 = permanent
   // Anti-Flood
   floodEnabled: boolean; // default false

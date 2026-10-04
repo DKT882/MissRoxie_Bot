@@ -1078,7 +1078,7 @@ export class StorageManager {
     const mergedSettings: GroupSettings = {
       chatId,
       warnLimit: 3,
-      warnAction: 'ban',
+      warnAction: 'mute',
       warnExpireSeconds: 0,
       floodEnabled: false,
       floodCount: 8,
@@ -2247,7 +2247,7 @@ export class StorageManager {
         botUsername: this.currentBotUsername || undefined,
         chatTitle: chatTitle || undefined,
         warnLimit: 3,
-        warnAction: 'ban',
+        warnAction: 'mute',
         warnExpireSeconds: 0,
         floodEnabled: false,
         floodCount: 8,
@@ -2362,7 +2362,7 @@ export class StorageManager {
       let needsSave = false;
 
       // Ensure all phase 2 & 3 fields are populated if loaded from older format
-      if (s.warnAction === undefined) { s.warnAction = 'ban'; needsSave = true; }
+      if (s.warnAction === undefined) { s.warnAction = 'mute'; needsSave = true; }
       if (s.warnExpireSeconds === undefined) { s.warnExpireSeconds = 0; needsSave = true; }
       if (s.floodEnabled === undefined) { s.floodEnabled = false; needsSave = true; }
       if (s.floodCount === undefined) { s.floodCount = 8; needsSave = true; }
@@ -3480,7 +3480,7 @@ export class StorageManager {
         slowModeSeconds: s.slowModeSeconds ?? 0,
         notes: s.notes || '',
         warnLimit: s.warnLimit ?? 3,
-        warnAction: s.warnAction || 'ban',
+        warnAction: s.warnAction || 'mute',
         warnExpireSeconds: s.warnExpireSeconds ?? 0,
         autoAcceptEnabled: Boolean(s.autoAcceptEnabled),
         captchaEnabled: Boolean(s.captchaEnabled),

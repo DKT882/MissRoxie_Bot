@@ -140,25 +140,13 @@ export class SmartProtectionService {
     }
 
     if (totalWarnings >= warnLimit) {
-      actionTaken = settings.warnAction || 'ban';
+      actionTaken = settings.warnAction || 'mute';
       await ModerationService.executeWarningThresholdAction(
         chatId,
         message.from,
         message.chat.title,
         `Smart Protection threshold reached (${detectionType}: ${reason})`
       );
-    } else if (totalWarnings === 2) {
-      actionTaken = 'mute';
-      const untilDate = Math.floor(now / 1000) + 300; // 5 min mute
-      await ModerationService.executeMute(chatId, userId, untilDate);
-      if (shouldNotify) {
-        await telegramApi.sendMessage(
-          chatId,
-          `🛡️ <b>Smart User Protection Escalation</b>\n\n` +
-          `👤 <b>${username}</b> received warning <b>${totalWarnings}/${warnLimit}</b> and has been <b>muted for 5 minutes</b>.\n` +
-          `<b>Violation:</b> <code>${detectionType}</code>`
-        );
-      }
     } else {
       actionTaken = 'warn';
       if (shouldNotify) {
@@ -179,7 +167,7 @@ export class SmartProtectionService {
       targetUsername: message.from.username,
       adminUserId: botId,
       adminUsername: 'RoxieSmartProtection',
-      action: totalWarnings >= warnLimit ? 'auto_ban' : (actionTaken === 'mute' ? 'mute' : 'warn'),
+      action: totalWarnings >= warnLimit ? (actionTaken === 'ban' ? 'auto_ban' : 'mute') : 'warn',
       result: 'success',
       reason: `Smart protection detection type [${detectionType}] triggered action [${actionTaken}]: ${reason}`
     });

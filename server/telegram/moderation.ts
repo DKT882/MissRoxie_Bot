@@ -207,8 +207,9 @@ export class ModerationService {
     reason: string = 'Repeated rule violations'
   ): Promise<void> {
     const settings = db.getGroupSettings(chatId, chatTitle);
-    const action = settings.warnAction || 'ban';
+    const action = settings.warnAction || 'mute';
     const username = user.username ? `@${user.username}` : user.first_name;
+    const warnLimit = settings.warnLimit || 3;
 
     if (action === 'ban') {
       const res = await telegramApi.banChatMember(chatId, user.id);
@@ -224,7 +225,7 @@ export class ModerationService {
         });
         await telegramApi.sendMessage(
           chatId,
-          `🚨 <b>Warning limit reached (${settings.warnLimit}/${settings.warnLimit}).</b>\n\n` +
+          `🚨 <b>Warning limit reached (${warnLimit}/${warnLimit}).</b>\n\n` +
           `👤 <b>${username}</b> has been <b>banned</b> from the group.\n\n` +
           `<b>Reason:</b>\n${reason}`
         );
@@ -235,21 +236,36 @@ export class ModerationService {
         );
       }
     } else if (action === 'mute') {
-      const res = await this.executeMute(chatId, user.id);
+      const untilDateSec = Math.floor(Date.now() / 1000) + 3600; // Exactly 1 hour
+      const res = await this.executeMute(chatId, user.id, untilDateSec);
       if (res.ok) {
         db.resetUserWarnings(chatId, user.id);
+        db.addTempAction({
+          chatId,
+          chatTitle,
+          userId: user.id,
+          username: user.username,
+          userFirstName: user.first_name,
+          action: 'tmute',
+          durationSeconds: 3600,
+          durationFormatted: '1 hour',
+          expiresAt: untilDateSec,
+          reason: `Warning limit reached (${warnLimit}/${warnLimit}): 1-hour mute for ${reason}`,
+          adminId: 0,
+          adminUsername: 'Bot/AutoMod'
+        });
         db.addLog({
           chatId,
           chatTitle,
           targetUserId: user.id,
           targetUsername: user.username,
           action: 'mute',
-          reason: `Warning limit reached: ${reason}`
+          reason: `Warning limit reached (${warnLimit}/${warnLimit}): 1-hour mute for ${reason}`
         });
         await telegramApi.sendMessage(
           chatId,
-          `🚨 <b>Warning limit reached (${settings.warnLimit}/${settings.warnLimit}).</b>\n\n` +
-          `👤 <b>${username}</b> has been <b>muted</b> in the group.\n\n` +
+          `🚨 <b>Warning limit reached (${warnLimit}/${warnLimit}).</b>\n\n` +
+          `👤 <b>${username}</b> has been <b>muted for 1 hour</b>.\n\n` +
           `<b>Reason:</b>\n${reason}`
         );
       } else {
@@ -272,7 +288,7 @@ export class ModerationService {
         });
         await telegramApi.sendMessage(
           chatId,
-          `🚨 <b>Warning limit reached (${settings.warnLimit}/${settings.warnLimit}).</b>\n\n` +
+          `🚨 <b>Warning limit reached (${warnLimit}/${warnLimit}).</b>\n\n` +
           `👤 <b>${username}</b> has been <b>kicked</b> from the group.\n\n` +
           `<b>Reason:</b>\n${reason}`
         );
@@ -286,7 +302,7 @@ export class ModerationService {
       // warn_only
       await telegramApi.sendMessage(
         chatId,
-        `⚠️ <b>Warning limit reached (${settings.warnLimit}/${settings.warnLimit}).</b>\n\n` +
+        `⚠️ <b>Warning limit reached (${warnLimit}/${warnLimit}).</b>\n\n` +
         `👤 <b>${username}</b> has accumulated maximum warnings.\n\n` +
         `<i>Group warning action is set to warn_only.</i>`
       );
@@ -403,28 +419,44 @@ export class ModerationService {
       reason: `${reason} in group`
     });
 
-    // 5th warning threshold -> 1-Hour Mute (3600 seconds)
-    if (totalWarnings >= 5) {
+    // Warning threshold -> 1-Hour Mute (3600 seconds)
+    const warnLimit = settings.warnLimit || 3;
+    if (totalWarnings >= warnLimit) {
       const untilDate = Math.floor(Date.now() / 1000) + 3600;
       const muteRes = await this.executeMute(chatId, message.from.id, untilDate);
-      db.resetUserWarnings(chatId, message.from.id);
-      db.addLog({
-        chatId,
-        chatTitle: message.chat.title,
-        targetUserId: message.from.id,
-        targetUsername: message.from.username,
-        adminUserId: botId,
-        adminUsername: 'Bot/AutoMod',
-        action: 'mute',
-        reason: `Warning limit reached (5/5): 1-hour mute for ${reason}`
-      });
 
       if (muteRes.ok) {
+        db.resetUserWarnings(chatId, message.from.id);
+        db.addTempAction({
+          chatId,
+          chatTitle: message.chat.title,
+          userId: message.from.id,
+          username: message.from.username,
+          userFirstName: message.from.first_name,
+          action: 'tmute',
+          durationSeconds: 3600,
+          durationFormatted: '1 hour',
+          expiresAt: untilDate,
+          reason: `Warning limit reached (${warnLimit}/${warnLimit}): 1-hour mute for ${reason}`,
+          adminId: botId,
+          adminUsername: 'Bot/AutoMod'
+        });
+        db.addLog({
+          chatId,
+          chatTitle: message.chat.title,
+          targetUserId: message.from.id,
+          targetUsername: message.from.username,
+          adminUserId: botId,
+          adminUsername: 'Bot/AutoMod',
+          action: 'mute',
+          reason: `Warning limit reached (${warnLimit}/${warnLimit}): 1-hour mute for ${reason}`
+        });
+
         const sentNotice = await telegramApi.sendMessage(
           chatId,
-          `🚫 <b>Warning limit reached (5/5).</b>\n\n` +
+          `🚫 <b>Warning limit reached (${warnLimit}/${warnLimit}).</b>\n\n` +
           `👤 ${username} has been muted for <b>1 hour</b>.\n` +
-          `<i>5 warnings = 1 hour mute.</i>`
+          `<i>${warnLimit} warnings = 1 hour mute.</i>`
         ).catch(() => null);
         if (sentNotice?.ok && sentNotice.result?.message_id) {
           const noticeId = sentNotice.result.message_id;
@@ -450,7 +482,7 @@ export class ModerationService {
       const sentWarn = await telegramApi.sendMessage(
         chatId,
         `🚫 <b>Links are not allowed in this group.</b>\n\n` +
-        `👤 ${username} received warning <b>${totalWarnings}/5</b>.`
+        `👤 ${username} received warning <b>${totalWarnings}/${warnLimit}</b>.`
       ).catch(() => null);
       if (sentWarn?.ok && sentWarn.result?.message_id) {
         const warnId = sentWarn.result.message_id;

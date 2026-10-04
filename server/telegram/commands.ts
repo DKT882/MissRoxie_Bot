@@ -1,5 +1,5 @@
 import { telegramApi } from './api.js';
-import { TelegramMiddleware, CommandContext, RoleRank } from './middleware.js';
+import { TelegramMiddleware, CommandContext, RoleRank, ActorResolution } from './middleware.js';
 import { db } from '../db/storage.js';
 import { ModerationService, parseDuration } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
@@ -3455,7 +3455,7 @@ export class CommandHandler {
         ctx.chatId,
         `ℹ️ <b>Warning Threshold Settings:</b>\n` +
         `• Threshold Limit: <b>${current.warnLimit}</b> warnings\n` +
-        `• Threshold Action: <b>${(current.warnAction || 'ban').toUpperCase()}</b>\n\n` +
+        `• Threshold Action: <b>${(current.warnAction || 'mute').toUpperCase()}</b>\n\n` +
         `Usage: <code>/setwarnlimit &lt;limit&gt; [ban|mute|kick|warn_only]</code>\n` +
         `Example: <code>/setwarnlimit 3 mute</code>`
       );
@@ -3470,7 +3470,7 @@ export class CommandHandler {
 
     const validActions = ['ban', 'mute', 'kick', 'warn_only'];
     const actionArg = (ctx.args[1] || '').toLowerCase();
-    const action = validActions.includes(actionArg) ? (actionArg as 'ban' | 'mute' | 'kick' | 'warn_only') : (current.warnAction || 'ban');
+    const action = validActions.includes(actionArg) ? (actionArg as 'ban' | 'mute' | 'kick' | 'warn_only') : (current.warnAction || 'mute');
 
     db.updateGroupSettings(ctx.chatId, { warnLimit: limit, warnAction: action });
     TelegramMiddleware.logAudit({
@@ -4341,6 +4341,7 @@ export class CommandHandler {
       return;
     }
 
+    let workerDispatched = false;
     try {
       // Get bot ID to exclude self
       const botId = (await telegramApi.getMe())?.result?.id;
@@ -4486,6 +4487,53 @@ export class CommandHandler {
 
       const targetReplyId = reply?.message_id || ctx.message.message_id;
 
+      workerDispatched = true;
+      const workerPromise = CommandHandler.executeAllBroadcastWorker(
+        ctx.chatId,
+        ctx.chatTitle,
+        actor,
+        chunks,
+        targetReplyId,
+        {
+          repliedPhotoId,
+          repliedAnimationId,
+          repliedVideoId,
+          repliedDocumentId
+        },
+        mentions.length
+      );
+
+      if (process.env.NODE_ENV === 'test') {
+        await workerPromise;
+      } else {
+        // In production: Dispatch asynchronously so the message processing queue
+        // and global concurrency slot are immediately freed for real-time operations in this chat & other chats.
+        workerPromise.catch((err) => {
+          console.error(`[ALL] Background broadcast worker unhandled exception:`, err);
+        });
+      }
+    } finally {
+      if (!workerDispatched) {
+        mtprotoParticipantService.releaseChatLock(ctx.chatId);
+      }
+    }
+  }
+
+  private static async executeAllBroadcastWorker(
+    chatId: number,
+    chatTitle: string | undefined,
+    actor: ActorResolution,
+    chunks: string[],
+    targetReplyId: number,
+    mediaInfo: {
+      repliedPhotoId?: string;
+      repliedAnimationId?: string;
+      repliedVideoId?: string;
+      repliedDocumentId?: string;
+    },
+    mentionsCount: number
+  ): Promise<void> {
+    try {
       for (let i = 0; i < chunks.length; i++) {
         const chunkText = chunks[i];
         console.log(`[ALL] sending batch=${i + 1}/${chunks.length}`);
@@ -4498,34 +4546,34 @@ export class CommandHandler {
           batchAttempts++;
           let sendRes: any;
           try {
-            if (repliedPhotoId || repliedAnimationId || repliedVideoId || repliedDocumentId) {
-              if (repliedPhotoId) {
-                sendRes = await telegramApi.sendPhoto(ctx.chatId, repliedPhotoId, {
+            if (mediaInfo.repliedPhotoId || mediaInfo.repliedAnimationId || mediaInfo.repliedVideoId || mediaInfo.repliedDocumentId) {
+              if (mediaInfo.repliedPhotoId) {
+                sendRes = await telegramApi.sendPhoto(chatId, mediaInfo.repliedPhotoId, {
                   caption: chunkText,
                   parse_mode: 'HTML',
                   reply_to_message_id: i === 0 ? targetReplyId : undefined
                 });
-              } else if (repliedAnimationId) {
-                sendRes = await telegramApi.sendAnimation(ctx.chatId, repliedAnimationId, {
+              } else if (mediaInfo.repliedAnimationId) {
+                sendRes = await telegramApi.sendAnimation(chatId, mediaInfo.repliedAnimationId, {
                   caption: chunkText,
                   parse_mode: 'HTML',
                   reply_to_message_id: i === 0 ? targetReplyId : undefined
                 });
-              } else if (repliedVideoId) {
-                sendRes = await telegramApi.sendVideo(ctx.chatId, repliedVideoId, {
+              } else if (mediaInfo.repliedVideoId) {
+                sendRes = await telegramApi.sendVideo(chatId, mediaInfo.repliedVideoId, {
                   caption: chunkText,
                   parse_mode: 'HTML',
                   reply_to_message_id: i === 0 ? targetReplyId : undefined
                 });
-              } else if (repliedDocumentId) {
-                sendRes = await telegramApi.sendDocument(ctx.chatId, repliedDocumentId, {
+              } else if (mediaInfo.repliedDocumentId) {
+                sendRes = await telegramApi.sendDocument(chatId, mediaInfo.repliedDocumentId, {
                   caption: chunkText,
                   parse_mode: 'HTML',
                   reply_to_message_id: i === 0 ? targetReplyId : undefined
                 });
               }
             } else {
-              sendRes = await telegramApi.sendMessage(ctx.chatId, chunkText, {
+              sendRes = await telegramApi.sendMessage(chatId, chunkText, {
                 reply_to_message_id: i === 0 ? targetReplyId : undefined,
                 parse_mode: 'HTML'
               });
@@ -4563,16 +4611,18 @@ export class CommandHandler {
       console.log(`[ALL] completed batches=${chunks.length}`);
 
       TelegramMiddleware.logAudit({
-        chatId: ctx.chatId,
-        chatTitle: ctx.chatTitle,
+        chatId,
+        chatTitle,
         actor,
         command: 'all',
         action: 'all_broadcast',
         result: 'success',
-        details: `Mentioned ${mentions.length} members across ${chunks.length} message(s)`
+        details: `Mentioned ${mentionsCount} members across ${chunks.length} message(s)`
       });
+    } catch (workerErr: any) {
+      console.error(`[ALL] Worker error in chatId=${chatId}:`, workerErr);
     } finally {
-      mtprotoParticipantService.releaseChatLock(ctx.chatId);
+      mtprotoParticipantService.releaseChatLock(chatId);
     }
   }
 
@@ -5937,7 +5987,7 @@ export class CommandHandler {
         await telegramApi.sendMessage(
           ctx.chatId,
           `⚠️ <b>Moderation Configuration</b>\n\n` +
-          `• Warn Limit: <b>${settings.warnLimit || 3}</b> warnings ➔ <b>${(settings.warnAction || 'ban').toUpperCase()}</b>\n` +
+          `• Warn Limit: <b>${settings.warnLimit || 3}</b> warnings ➔ <b>${(settings.warnAction || 'mute').toUpperCase()}</b>\n` +
           `• Mute / Expire Duration: <b>${settings.warnExpireSeconds || 300}s</b>\n` +
           `• Slow Mode: <b>${settings.slowModeSeconds ? settings.slowModeSeconds + 's' : 'OFF'}</b>\n\n` +
           `<i>Usage: /settings moderation warn_limit <num> | warn_action <ban|mute|kick|warn_only> | mute_duration <secs></i>`
@@ -6086,7 +6136,7 @@ export class CommandHandler {
       `🛡️ <b>Protection:</b> <b>${settings.protectionEnabled !== false ? 'ON' : 'OFF'}</b> (<code>/settings protection</code>)\n` +
       `🤖 <b>AI Chatbot:</b> <b>${settings.chatbotEnabled !== false ? 'ON' : 'OFF'}</b> (<code>/settings chatbot</code>)\n` +
       `👋 <b>Welcome & Automation:</b> <b>${settings.welcomeEnabled ? 'ON' : 'OFF'}</b> (<code>/settings welcome</code>)\n` +
-      `⚠️ <b>Moderation:</b> <b>${settings.warnLimit} warns = ${(settings.warnAction || 'ban').toUpperCase()}</b> (<code>/settings moderation</code>)\n\n` +
+      `⚠️ <b>Moderation:</b> <b>${settings.warnLimit} warns = ${(settings.warnAction || 'mute').toUpperCase()}</b> (<code>/settings moderation</code>)\n\n` +
       `• Links Whitelist: ${allowedDomains} domains\n` +
       `• Media Exemptions: ${freedUsers} users\n` +
       `• Active Locks: ${activeLocks.length > 0 ? activeLocks.join(', ') : 'None'}\n\n` +
@@ -6118,7 +6168,7 @@ export class CommandHandler {
         `• Photo Protection: <b>${settings.mediaProtection ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
         `• Sticker Protection: <b>${settings.stickerProtection ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
         `• Anti-Flood: <b>${settings.floodEnabled ? 'ON 🛡️' : 'OFF 🔓'}</b>\n` +
-        `• Warn Limit: <b>${settings.warnLimit} warns = ${(settings.warnAction || 'ban').toUpperCase()}</b>\n` +
+        `• Warn Limit: <b>${settings.warnLimit} warns = ${(settings.warnAction || 'mute').toUpperCase()}</b>\n` +
         `• Active Schedules: <b>${schedules}</b>\n`;
     }
 
