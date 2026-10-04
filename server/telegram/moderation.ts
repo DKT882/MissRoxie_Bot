@@ -457,45 +457,18 @@ export class ModerationService {
       reason: `${reason} in group`
     });
 
-    // Requirement 1: Immediate Permanent Mute (no until_date / expiration)
-    const muteRes = await this.executeMute(chatId, message.from.id);
+    const sentNotice = await telegramApi.sendMessage(
+      chatId,
+      `🚫 <b>Link Deleted</b>\n\n` +
+      `👤 ${username}, your link was deleted because links are not allowed here.`
+    ).catch(() => null);
 
-    if (muteRes.ok) {
-      db.addLog({
-        chatId,
-        chatTitle: message.chat.title,
-        targetUserId: message.from.id,
-        targetUsername: message.from.username,
-        adminUserId: botId,
-        adminUsername: 'Bot/AutoMod',
-        action: 'mute',
-        reason: `${reason} (permanent mute)`
-      });
-
-      const sentNotice = await telegramApi.sendMessage(
-        chatId,
-        `🚫 <b>Links are not allowed in this group.</b>\n\n` +
-        `👤 <b>${username}</b> has been <b>permanently muted</b> for posting unauthorized links.`
-      ).catch(() => null);
-      if (sentNotice?.ok && sentNotice.result?.message_id) {
-        const noticeId = sentNotice.result.message_id;
-        setTimeout(() => {
-          telegramApi.deleteMessage(chatId, noticeId).catch(() => {});
-          db.untrackMessages(chatId, [noticeId]);
-        }, 10000);
-      }
-    } else {
-      const sentErr = await telegramApi.sendMessage(
-        chatId,
-        `⚠️ <b>Failed to mute ${username}:</b> ${muteRes.description || 'Permission issue'}`
-      ).catch(() => null);
-      if (sentErr?.ok && sentErr.result?.message_id) {
-        const errId = sentErr.result.message_id;
-        setTimeout(() => {
-          telegramApi.deleteMessage(chatId, errId).catch(() => {});
-          db.untrackMessages(chatId, [errId]);
-        }, 10000);
-      }
+    if (sentNotice?.ok && sentNotice.result?.message_id) {
+      const noticeId = sentNotice.result.message_id;
+      setTimeout(() => {
+        telegramApi.deleteMessage(chatId, noticeId).catch(() => {});
+        db.untrackMessages(chatId, [noticeId]);
+      }, 10000);
     }
 
     return true;

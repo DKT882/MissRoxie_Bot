@@ -258,18 +258,26 @@ async function runTestSuite() {
   telegramApi.restrictChatMember = origRestrict;
 
   // ----------------------------------------------------
-  // SECTION 3: LINK PROTECTION = IMMEDIATE PERMANENT MUTE
+  // SECTION 3: LINK PROTECTION (DELETE & NOTIFY ONLY — NO MUTE / NO BAN / NO WARN)
   // ----------------------------------------------------
-  console.log('\n--- SECTION 3: LINK PROTECTION = IMMEDIATE PERMANENT MUTE ---');
+  console.log('\n--- SECTION 3: LINK PROTECTION (DELETE & NOTIFY ONLY — NO MUTE / NO BAN / NO WARN) ---');
+
+  let deletedMessages: number[] = [];
+  telegramApi.deleteMessage = async (_chatId: number, messageId: number) => {
+    deletedMessages.push(messageId);
+    return { ok: true, result: true } as any;
+  };
 
   restrictCalls = [];
   banCalls = [];
   sentMessages = [];
+  deletedMessages = [];
 
   const linkViolator: TelegramUser = { id: 2020, first_name: 'LinkSpammer', username: 'link_spammer', is_bot: false };
   db.cacheUser(linkViolator, chatA);
+  db.resetUserWarnings(chatA, linkViolator.id);
 
-  const linkMsg: TelegramMessage = {
+  const linkMsg1: TelegramMessage = {
     message_id: 701,
     date: Math.floor(Date.now() / 1000),
     chat: { id: chatA, type: 'supergroup', title: 'Test Group A' },
@@ -277,19 +285,32 @@ async function runTestSuite() {
     text: 'Join our channel now: https://t.me/spam_group_invite'
   };
 
-  // Test 3.1: Link violation immediately permanently mutes
-  const intercepted = await ModerationService.handleLinkProtection(linkMsg);
-  assert(intercepted === true, 'Test 3.1: Link violation intercepted and processed');
-  assert(restrictCalls.length === 1, 'Test 3.2: Link violation immediately triggers restrictChatMember');
-  assert(restrictCalls[0].userId === linkViolator.id, 'Test 3.3: Correct violator user was restricted');
-  assert(restrictCalls[0].options?.until_date === undefined, 'Test 3.4: Link mute is PERMANENT (until_date is undefined)');
-  assert(banCalls.length === 0, 'Test 3.5: Link violation NEVER calls banChatMember');
+  // Test 3.1: Link violation intercepted and deleted
+  const intercepted1 = await ModerationService.handleLinkProtection(linkMsg1);
+  assert(intercepted1 === true, 'Test 3.1: Link violation intercepted');
+  assert(deletedMessages.includes(701), 'Test 3.2: Link message was deleted via deleteMessage');
+  assert(restrictCalls.length === 0, 'Test 3.3: Link violation does NOT mute user (restrictChatMember calls = 0)');
+  assert(banCalls.length === 0, 'Test 3.4: Link violation does NOT ban user (banChatMember calls = 0)');
+  assert(db.getUserWarnings(chatA, linkViolator.id).length === 0, 'Test 3.5: Link violation does NOT add a warning (warnings = 0)');
+  assert(db.getActiveTempActions(chatA).filter(t => t.userId === linkViolator.id).length === 0, 'Test 3.6: Link violation does NOT create a temporary action');
+  assert(sentMessages.length >= 1 && (sentMessages[0]?.text.includes('link was deleted') || sentMessages[0]?.text.includes('Link Deleted')), 'Test 3.7: Link deletion notification dispatched mentioning user');
 
-  // Test 3.6: Link violation does NOT record a temporary action in storage
-  const tempActions = db.getActiveTempActions(chatA);
-  assert(!tempActions.some(t => t.userId === linkViolator.id), 'Test 3.6: Permanent link mute is NOT recorded as a temporary action');
+  // Test 3.8: Multiple links sent by same user are deleted without accumulating warnings or escalating
+  const linkMsg2: TelegramMessage = {
+    message_id: 702,
+    date: Math.floor(Date.now() / 1000),
+    chat: { id: chatA, type: 'supergroup', title: 'Test Group A' },
+    from: linkViolator,
+    text: 'Check out this website: https://example.com/promo'
+  };
+  const intercepted2 = await ModerationService.handleLinkProtection(linkMsg2);
+  assert(intercepted2 === true, 'Test 3.8: Second link violation intercepted');
+  assert(deletedMessages.includes(702), 'Test 3.9: Second link message was deleted');
+  assert(restrictCalls.length === 0, 'Test 3.10: Multiple links still do NOT mute user');
+  assert(banCalls.length === 0, 'Test 3.11: Multiple links still do NOT ban user');
+  assert(db.getUserWarnings(chatA, linkViolator.id).length === 0, 'Test 3.12: Multiple links do NOT accumulate warnings');
 
-  // Test 3.7: Owner / Admin exemption
+  // Test 3.13: Owner / Admin exemption
   const ownerUser: TelegramUser = { id: 1000, first_name: 'GroupOwner', username: 'group_owner', is_bot: false };
   telegramApi.getChatMember = async (_chatId: number, userId: number) => {
     if (userId === ownerUser.id) {
@@ -299,16 +320,18 @@ async function runTestSuite() {
   };
 
   restrictCalls = [];
+  deletedMessages = [];
   const ownerLinkMsg: TelegramMessage = {
-    message_id: 702,
+    message_id: 703,
     date: Math.floor(Date.now() / 1000),
     chat: { id: chatA, type: 'supergroup', title: 'Test Group A' },
     from: ownerUser,
     text: 'Official group link: https://t.me/official_channel'
   };
   const ownerIntercepted = await ModerationService.handleLinkProtection(ownerLinkMsg);
-  assert(ownerIntercepted === false, 'Test 3.7: Group owner link message is bypassed (not deleted/muted)');
-  assert(restrictCalls.length === 0, 'Test 3.8: Owner was not restricted');
+  assert(ownerIntercepted === false, 'Test 3.13: Group owner link message is bypassed (not deleted/not muted)');
+  assert(!deletedMessages.includes(703), 'Test 3.14: Owner message was not deleted');
+  assert(restrictCalls.length === 0, 'Test 3.15: Owner was not restricted');
 
   // ----------------------------------------------------
   // SECTION 4: GRANULAR PERMISSION CHECKS PER COMMAND
@@ -441,7 +464,7 @@ async function runTestSuite() {
   // Test 5.1: /mute @user => permanent mute (no duration, no reason)
   restrictCalls = [];
   sentMessages = [];
-  db.removeTempAction(chatA, targetUser1.id, 'tmute');
+  const preTemp51 = db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length;
   await CommandHandler.handleCommand({
     command: '/mute',
     chatId: chatA,
@@ -454,12 +477,13 @@ async function runTestSuite() {
   });
   assert(restrictCalls.length === 1, 'Test 5.1: /mute @user executed restrictChatMember');
   assert(restrictCalls[0].options?.until_date === undefined, 'Test 5.2: /mute @user without duration is PERMANENT (until_date undefined)');
-  assert(db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length === 0, 'Test 5.3: Permanent /mute does NOT add temporary action');
+  assert(db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length === preTemp51, 'Test 5.3: Permanent /mute does NOT add temporary action');
 
   // Test 5.4: /mute @user 1h => 1-hour temporary mute
   restrictCalls = [];
   sentMessages = [];
   const preMuteTime54 = Math.floor(Date.now() / 1000);
+  const preTemp54 = db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length;
   await CommandHandler.handleCommand({
     command: '/mute',
     chatId: chatA,
@@ -476,6 +500,7 @@ async function runTestSuite() {
   assert(dur54 >= 3590 && dur54 <= 3610, `Test 5.6: 1h mute duration is 3600s (got ${dur54}s)`);
   const activeMutes54 = db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id && t.action === 'tmute');
   assert(activeMutes54.length === 1, 'Test 5.7: Temporary /mute records temp action in DB');
+  assert(activeMutes54[0].durationSeconds === 3600, 'Test 5.7b: Temporary /mute records 3600s duration');
 
   // Test 5.8: /mute @user 1h reason_xyz => 1-hour mute with reason
   restrictCalls = [];
@@ -496,7 +521,7 @@ async function runTestSuite() {
   // Test 5.10: /mute @user reason_xyz => permanent mute with reason
   restrictCalls = [];
   sentMessages = [];
-  db.removeTempAction(chatA, targetUser1.id, 'tmute');
+  const preTemp510 = db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length;
   await CommandHandler.handleCommand({
     command: '/mute',
     chatId: chatA,
@@ -509,12 +534,12 @@ async function runTestSuite() {
   });
   assert(restrictCalls[0]?.options?.until_date === undefined, 'Test 5.10: /mute @user reason_xyz is PERMANENT (until_date undefined)');
   assert(sentMessages[0]?.text.includes('spamming memes'), 'Test 5.11: Permanent mute message includes reason');
-  assert(db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length === 0, 'Test 5.12: Permanent mute with reason does not create tempAction');
+  assert(db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length === preTemp510, 'Test 5.12: Permanent mute with reason does not create tempAction');
 
   // Test 5.13: /ban @user => permanent ban
   banCalls = [];
   sentMessages = [];
-  db.removeTempAction(chatA, targetUser1.id, 'tban');
+  const preTemp513 = db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length;
   await CommandHandler.handleCommand({
     command: '/ban',
     chatId: chatA,
@@ -527,11 +552,13 @@ async function runTestSuite() {
   });
   assert(banCalls.length === 1, 'Test 5.13: /ban @user executed');
   assert(banCalls[0].options === undefined || banCalls[0].options?.until_date === undefined, 'Test 5.14: /ban @user is PERMANENT');
+  assert(db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length === preTemp513, 'Test 5.14b: Permanent /ban does NOT add temp action');
 
   // Test 5.15: /ban @user 7d severe violation => 7-day temporary ban with reason
   banCalls = [];
   sentMessages = [];
   const preBanTime = Math.floor(Date.now() / 1000);
+  const preTemp515 = db.getActiveTempActions(chatA).filter(t => t.userId === targetUser1.id).length;
   await CommandHandler.handleCommand({
     command: '/ban',
     chatId: chatA,
