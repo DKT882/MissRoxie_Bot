@@ -185,6 +185,17 @@ export interface TelegramChatJoinRequest {
   invite_link?: any;
 }
 
+export interface TelegramChatMemberUpdated {
+  chat: TelegramChat;
+  from: TelegramUser;
+  date: number;
+  old_chat_member: TelegramChatMember;
+  new_chat_member: TelegramChatMember;
+  invite_link?: any;
+  via_chat_folder_invite_link?: boolean;
+  via_join_request?: boolean;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
@@ -193,6 +204,9 @@ export interface TelegramUpdate {
   edited_channel_post?: TelegramMessage;
   callback_query?: TelegramCallbackQuery;
   chat_join_request?: TelegramChatJoinRequest;
+  chat_member?: TelegramChatMemberUpdated;
+  my_chat_member?: TelegramChatMemberUpdated;
+  message_reaction?: any;
 }
 
 export interface BotCommand {

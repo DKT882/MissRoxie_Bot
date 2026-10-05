@@ -1070,6 +1070,12 @@ export class TelegramBotManager {
       db.scheduleSave(chatId);
     }
 
+    // 1. Strict Bot-Add Protection: only group creator/owner may add bots
+    const botProtectionResult = await ModerationService.handleBotAddProtection(chatId, chatMemberUpdate);
+    if (botProtectionResult.banned) {
+      return; // Added bot was banned, abort further join flows (welcome/captcha/anti-raid)
+    }
+
     // Member joined via invite link, join request, or direct addition
     if (newStatus === 'member' && oldStatus !== 'member' && user) {
       const me = await telegramApi.getMe().catch(() => null);

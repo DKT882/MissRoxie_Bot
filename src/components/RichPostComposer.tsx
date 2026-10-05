@@ -152,6 +152,9 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   // 2D Button Grid State: rows of buttons
   const [buttonGrid, setButtonGrid] = useState<ComposerButton[][]>([]);
 
+  // UI Preview-Only Theme Selector (Client theme preview simulation)
+  const [previewTheme, setPreviewTheme] = useState<'default' | 'dark' | 'light' | 'midnight' | 'emerald'>('default');
+
   // Dialog & Action States
   const [showSendModal, setShowSendModal] = useState<boolean>(false);
   const [showScheduleModal, setShowScheduleModal] = useState<boolean>(false);
@@ -1054,13 +1057,37 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             <h3 className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center gap-1.5">
               <span>Live Telegram Preview</span>
             </h3>
-            <span className="text-[10px] text-stone-400">What subscribers will see</span>
+            <div className="flex items-center gap-1.5 text-[10px] text-stone-400">
+              <span className="hidden sm:inline">Theme:</span>
+              <select
+                value={previewTheme}
+                onChange={e => setPreviewTheme(e.target.value as any)}
+                className="bg-stone-900 border border-stone-700 text-stone-300 rounded px-1.5 py-0.5 text-[10px] outline-none"
+                title="UI Preview Only: Simulate how buttons & posts look in different Telegram client themes."
+              >
+                <option value="default">Default Slate</option>
+                <option value="dark">Dark Obsidian</option>
+                <option value="light">Classic Light</option>
+                <option value="midnight">Midnight Navy</option>
+                <option value="emerald">Forest Emerald</option>
+              </select>
+            </div>
           </div>
 
           {/* Telegram Phone / Chat Bubble Container */}
           <div
             className={`rounded-2xl border ${themeBorder} overflow-hidden shadow-lg ${
-              isDark ? 'bg-[#0f172a]' : 'bg-[#e2e8f0]'
+              previewTheme === 'light'
+                ? 'bg-[#e2e8f0]'
+                : previewTheme === 'dark'
+                ? 'bg-[#09090b]'
+                : previewTheme === 'midnight'
+                ? 'bg-[#030712]'
+                : previewTheme === 'emerald'
+                ? 'bg-[#022c22]'
+                : isDark
+                ? 'bg-[#0f172a]'
+                : 'bg-[#e2e8f0]'
             }`}
           >
             {/* Telegram Header */}
@@ -1087,7 +1114,17 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             <div className="p-4 space-y-3">
               <div
                 className={`max-w-[92%] rounded-2xl p-3.5 space-y-2.5 shadow-md ${
-                  isDark ? 'bg-[#1e293b] text-stone-100' : 'bg-white text-stone-900'
+                  previewTheme === 'light'
+                    ? 'bg-white text-stone-900 border border-stone-200'
+                    : previewTheme === 'dark'
+                    ? 'bg-[#18181b] text-stone-100 border border-stone-800'
+                    : previewTheme === 'midnight'
+                    ? 'bg-[#111827] text-stone-100 border border-stone-800'
+                    : previewTheme === 'emerald'
+                    ? 'bg-[#064e3b] text-emerald-50 border border-emerald-800'
+                    : isDark
+                    ? 'bg-[#1e293b] text-stone-100'
+                    : 'bg-white text-stone-900'
                 }`}
               >
                 {/* Reply Indicator if enabled */}

@@ -16,7 +16,7 @@ import { runDummyDataCleanup } from './server/operations/cleanupDummyData.js';
 import { mongoManager } from './server/db/mongodb.js';
 import { MongoStorageService } from './server/db/mongoStorage.js';
 import { PostSender, sanitizeInlineButtons, validateMediaReference } from './server/telegram/postSender.js';
-import { PostPayload, PostContentType } from './server/telegram/types.js';
+import { PostPayload, PostContentType, ScheduledPostButton } from './server/telegram/types.js';
 import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
 
 dotenv.config();
@@ -2029,32 +2029,8 @@ export async function startServer() {
     }
   });
 
-  function sanitizeDashboardInlineKeyboard(rawKeyboard: any): Array<Array<{ text: string; url: string }>> | undefined {
-    if (!rawKeyboard || !Array.isArray(rawKeyboard)) return undefined;
-    const sanitized: Array<Array<{ text: string; url: string }>> = [];
-    for (const row of rawKeyboard) {
-      if (!Array.isArray(row)) continue;
-      const sanitizedRow: Array<{ text: string; url: string }> = [];
-      for (const btn of row) {
-        if (!btn || typeof btn !== 'object') continue;
-        const text = typeof btn.text === 'string' ? btn.text.trim() : '';
-        const url = typeof btn.url === 'string' ? btn.url.trim() : '';
-        if (!text || !url) continue;
-        try {
-          const parsed = new URL(url);
-          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-            continue;
-          }
-        } catch {
-          continue;
-        }
-        sanitizedRow.push({ text, url });
-      }
-      if (sanitizedRow.length > 0) {
-        sanitized.push(sanitizedRow);
-      }
-    }
-    return sanitized.length > 0 ? sanitized : undefined;
+  function sanitizeDashboardInlineKeyboard(rawKeyboard: any): ScheduledPostButton[][] | undefined {
+    return sanitizeInlineButtons(rawKeyboard);
   }
 
   app.post('/api/dashboard/schedules', async (req, res) => {

@@ -1,5 +1,5 @@
 import { telegramApi } from './api.js';
-import { TelegramMessage, TelegramUser, ChatPermissions, TempActionRecord, CaptchaSession } from './types.js';
+import { TelegramMessage, TelegramUser, TelegramChat, TelegramChatMember, ChatPermissions, TempActionRecord, CaptchaSession } from './types.js';
 import { db } from '../db/storage.js';
 import { TelegramMiddleware } from './middleware.js';
 import { ContentPolicyEngine } from './policyEngine.js';
@@ -161,9 +161,14 @@ export class ModerationService {
   private static floodActionCooldowns: Map<string, number> = new Map();
   private static inFlightWelcomes: Set<string> = new Set();
   private static welcomedUsersCache: Map<string, number> = new Map();
+  private static recentBotBans: Map<string, number> = new Map();
 
   public static clearReportCooldowns(): void {
     this.reportCooldowns.clear();
+  }
+
+  public static clearRecentBotBans(): void {
+    this.recentBotBans.clear();
   }
 
   /**
@@ -581,6 +586,131 @@ export class ModerationService {
     }
 
     return false;
+  }
+
+  /**
+   * Strict Bot-Add Protection.
+   * ONLY the group creator/owner is permitted to add bots.
+   * If any non-owner (normal member, admin, moderator, or unknown actor) adds a bot,
+   * the newly added bot is banned immediately.
+   */
+  public static async handleBotAddProtection(
+    chatId: number,
+    chatMemberUpdate: {
+      chat: TelegramChat;
+      from?: TelegramUser;
+      date?: number;
+      old_chat_member?: TelegramChatMember;
+      new_chat_member?: TelegramChatMember;
+    }
+  ): Promise<{ handled: boolean; banned?: boolean; allowed?: boolean; error?: string }> {
+    if (!chatMemberUpdate || !chatMemberUpdate.chat || chatId >= 0) {
+      return { handled: false };
+    }
+
+    const targetUser = chatMemberUpdate.new_chat_member?.user;
+    if (!targetUser || !targetUser.is_bot) {
+      return { handled: false };
+    }
+
+    // Never ban Roxie itself
+    const me = await telegramApi.getMe().catch(() => null);
+    if (me?.result?.id && targetUser.id === me.result.id) {
+      return { handled: false };
+    }
+
+    // Never ban Telegram service accounts (e.g. 777000 or anonymous admin proxy 1087968824)
+    if (targetUser.id === 777000 || targetUser.id === 1087968824) {
+      return { handled: false };
+    }
+
+    const oldStatus = chatMemberUpdate.old_chat_member?.status;
+    const newStatus = chatMemberUpdate.new_chat_member?.status;
+
+    // Detect if this is a fresh join / addition into the group
+    const wasInChat = oldStatus === 'member' || oldStatus === 'administrator' || oldStatus === 'creator' || oldStatus === 'restricted';
+    const isNowInChat = newStatus === 'member' || newStatus === 'administrator' || newStatus === 'restricted';
+
+    if (!isNowInChat || wasInChat) {
+      // Not a new bot addition (e.g. leaving, demotion, permission update of already present bot)
+      return { handled: false };
+    }
+
+    // Idempotency & Deduplication Guard: prevent duplicate bans on duplicate updates
+    const cacheKey = `${chatId}:${targetUser.id}`;
+    const now = Date.now();
+    const lastBanned = this.recentBotBans.get(cacheKey) || 0;
+    if (now - lastBanned < 60000) {
+      return { handled: true, banned: true };
+    }
+
+    // Determine the actor
+    const actor = chatMemberUpdate.from;
+
+    // Check if actor is authoritatively the Telegram group creator / owner
+    let isActorOwner = false;
+    if (actor && actor.id) {
+      try {
+        const admins = await TelegramMiddleware.getChatAdministrators(chatId, false);
+        const creator = admins.find(a => a.status === 'creator');
+        if (creator && creator.user && creator.user.id === actor.id) {
+          isActorOwner = true;
+        } else {
+          const actorMember = await TelegramMiddleware.getTargetMember(chatId, actor.id, true);
+          if (actorMember && actorMember.status === 'creator') {
+            isActorOwner = true;
+          }
+        }
+      } catch (err) {
+        console.warn(`[BotProtection] Failed to fetch group owner for chat ${chatId}:`, err);
+      }
+    }
+
+    if (isActorOwner) {
+      return { handled: true, allowed: true, banned: false };
+    }
+
+    // Non-owner added the bot -> Ban immediately
+    this.recentBotBans.set(cacheKey, now);
+    // Cleanup old keys in cache
+    if (this.recentBotBans.size > 500) {
+      for (const [k, ts] of this.recentBotBans.entries()) {
+        if (now - ts > 300000) this.recentBotBans.delete(k);
+      }
+    }
+
+    try {
+      const banRes = await telegramApi.banChatMember(chatId, targetUser.id);
+      if (banRes.ok) {
+        db.addLog({
+          chatId,
+          chatTitle: chatMemberUpdate.chat.title || `Chat ${chatId}`,
+          targetUserId: targetUser.id,
+          targetUsername: targetUser.username,
+          adminUsername: actor?.username || (actor?.id ? `user_${actor.id}` : 'unknown'),
+          action: 'auto_ban',
+          reason: `Unauthorized bot addition: only group owner may add bots (actor: ${actor?.username ? '@' + actor.username : actor?.id ? `ID ${actor.id}` : 'unknown'})`
+        });
+
+        const botName = targetUser.username ? `@${targetUser.username}` : (targetUser.first_name || `Bot ${targetUser.id}`);
+        const actorName = actor?.username ? `@${actor.username}` : (actor?.first_name || 'A non-owner user');
+
+        await telegramApi.sendMessage(
+          chatId,
+          `🚨 <b>UNAUTHORIZED BOT BLOCKED</b>\n\n` +
+          `🤖 <b>${escapeHtml(botName)}</b> was added by <b>${escapeHtml(actorName)}</b> and has been <b>banned immediately</b>.\n\n` +
+          `🔒 <b>Security Policy:</b> Only the group owner/creator is authorized to add bots to this group.`
+        ).catch(() => {});
+
+        return { handled: true, banned: true };
+      } else {
+        console.error(`[BotProtection] Telegram ban failed for bot ${targetUser.id} in chat ${chatId}: ${banRes.description}`);
+        return { handled: true, banned: false, error: banRes.description };
+      }
+    } catch (err: any) {
+      console.error(`[BotProtection] Exception banning bot ${targetUser.id} in chat ${chatId}:`, err.message);
+      return { handled: true, banned: false, error: err.message };
+    }
   }
 
   /**

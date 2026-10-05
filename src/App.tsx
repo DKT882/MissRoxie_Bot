@@ -296,7 +296,7 @@ export default function App() {
     pinAfterSend: boolean;
     replyToLatest: boolean;
     autoDeletePrevious: boolean;
-    inlineKeyboard: Array<Array<{ text: string; url: string }>>;
+    inlineKeyboard: Array<Array<{ text: string; url: string; style?: 'primary' | 'success' | 'danger' }>>;
   }>({
     chatId: '',
     name: '',
@@ -1602,7 +1602,16 @@ export default function App() {
         .map(row =>
           (Array.isArray(row) ? row : [])
             .filter(b => b && b.text?.trim() && b.url?.trim())
-            .map(b => ({ text: b.text.trim(), url: b.url.trim() }))
+            .map(b => {
+              const item: { text: string; url: string; style?: 'primary' | 'success' | 'danger' } = {
+                text: b.text.trim(),
+                url: b.url.trim()
+              };
+              if (b.style && ['primary', 'success', 'danger'].includes(b.style)) {
+                item.style = b.style;
+              }
+              return item;
+            })
         )
         .filter(row => row.length > 0);
 
@@ -4975,7 +4984,7 @@ export default function App() {
                                     pinAfterSend: Boolean(s.pinAfterSend),
                                     replyToLatest: Boolean(s.replyToLatest),
                                     autoDeletePrevious: Boolean(s.autoDeletePrevious),
-                                    inlineKeyboard: Array.isArray(s.inlineKeyboard) ? s.inlineKeyboard.map((row: any[]) => Array.isArray(row) ? row.map(btn => ({ text: btn.text || '', url: btn.url || '' })) : []) : []
+                                    inlineKeyboard: Array.isArray(s.inlineKeyboard) ? s.inlineKeyboard.map((row: any[]) => Array.isArray(row) ? row.map(btn => ({ text: btn.text || '', url: btn.url || '', style: btn.style && ['primary', 'success', 'danger'].includes(btn.style) ? btn.style : undefined })) : []) : []
                                   });
                                   setShowCreateScheduleModal(true);
                                 }}
@@ -5509,7 +5518,7 @@ export default function App() {
                                     pinAfterSend: Boolean(s.pinAfterSend),
                                     replyToLatest: Boolean(s.replyToLatest),
                                     autoDeletePrevious: Boolean(s.autoDeletePrevious),
-                                    inlineKeyboard: Array.isArray(s.inlineKeyboard) ? s.inlineKeyboard.map((row: any[]) => Array.isArray(row) ? row.map(btn => ({ text: btn.text || '', url: btn.url || '' })) : []) : []
+                                    inlineKeyboard: Array.isArray(s.inlineKeyboard) ? s.inlineKeyboard.map((row: any[]) => Array.isArray(row) ? row.map(btn => ({ text: btn.text || '', url: btn.url || '', style: btn.style && ['primary', 'success', 'danger'].includes(btn.style) ? btn.style : undefined })) : []) : []
                                   });
                                   setShowCreateScheduleModal(true);
                                 }}
@@ -6883,7 +6892,7 @@ export default function App() {
                             const isInvalidUrl = Boolean(btn.url && !/^https?:\/\/.+/i.test(btn.url.trim()));
                             return (
                               <div key={bIdx} className="space-y-1">
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                                   <input
                                     type="text"
                                     placeholder="Button label (e.g. Website)"
@@ -6893,7 +6902,7 @@ export default function App() {
                                       updated[rIdx][bIdx] = { ...updated[rIdx][bIdx], text: e.target.value };
                                       setNewScheduleForm({ ...newScheduleForm, inlineKeyboard: updated });
                                     }}
-                                    className={`w-1/3 ${themeCardBg} border ${themeBorder} rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500`}
+                                    className={`sm:w-1/3 ${themeCardBg} border ${themeBorder} rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500`}
                                   />
                                   <input
                                     type="url"
@@ -6906,6 +6915,25 @@ export default function App() {
                                     }}
                                     className={`flex-1 ${themeCardBg} border ${isInvalidUrl ? 'border-rose-500/50' : themeBorder} rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500`}
                                   />
+                                  <select
+                                    value={btn.style || ''}
+                                    onChange={(e) => {
+                                      const updated = [...newScheduleForm.inlineKeyboard];
+                                      const val = e.target.value as 'primary' | 'success' | 'danger' | '';
+                                      updated[rIdx][bIdx] = {
+                                        ...updated[rIdx][bIdx],
+                                        style: val ? val : undefined
+                                      };
+                                      setNewScheduleForm({ ...newScheduleForm, inlineKeyboard: updated });
+                                    }}
+                                    className={`sm:w-28 ${themeCardBg} border ${themeBorder} rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium`}
+                                    title="Telegram Button Style"
+                                  >
+                                    <option value="">Default</option>
+                                    <option value="primary">Primary 🔵</option>
+                                    <option value="success">Success 🟢</option>
+                                    <option value="danger">Danger 🔴</option>
+                                  </select>
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -6939,12 +6967,22 @@ export default function App() {
                         <div className="space-y-1.5">
                           {newScheduleForm.inlineKeyboard.map((row, rIdx) => (
                             <div key={rIdx} className="flex gap-1.5">
-                              {row.filter(b => b.text.trim()).map((b, bIdx) => (
-                                <div key={bIdx} className="flex-1 py-1 px-2 bg-blue-600/20 border border-blue-500/30 rounded text-center text-blue-300 font-semibold text-[11px] truncate flex items-center justify-center gap-1">
-                                  <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-70" />
-                                  <span className="truncate">{b.text}</span>
-                                </div>
-                              ))}
+                              {row.filter(b => b.text.trim()).map((b, bIdx) => {
+                                let styleClass = 'bg-blue-600/20 border-blue-500/30 text-blue-300';
+                                if (b.style === 'primary') {
+                                  styleClass = 'bg-blue-600/40 border-blue-500/60 text-blue-200';
+                                } else if (b.style === 'success') {
+                                  styleClass = 'bg-emerald-600/30 border-emerald-500/50 text-emerald-300';
+                                } else if (b.style === 'danger') {
+                                  styleClass = 'bg-red-600/30 border-red-500/50 text-red-300';
+                                }
+                                return (
+                                  <div key={bIdx} className={`flex-1 py-1.5 px-2.5 border rounded-lg text-center font-semibold text-[11px] truncate flex items-center justify-center gap-1 ${styleClass}`}>
+                                    <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-70" />
+                                    <span className="truncate">{b.text}</span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           ))}
                         </div>
