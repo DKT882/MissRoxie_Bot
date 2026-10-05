@@ -2354,7 +2354,9 @@ export class StorageManager {
           lastStickerTimestamp: 0
         },
         stickerPacks: {},
-        welcomeDm: { enabled: false, text: 'You joined {groupname} 🎉' },
+        groupWelcome: { enabled: false, mode: 'simple', contentType: 'text', text: 'Welcome {user} to {chat}!' },
+        groupGoodbye: { enabled: false, mode: 'simple', contentType: 'text', text: 'Goodbye {user}!' },
+        welcomeDm: { enabled: false, mode: 'simple', contentType: 'text', text: 'You joined {groupname} 🎉' },
         updatedAt: new Date().toISOString()
       };
       this.scheduleSave(chatId);
@@ -2390,7 +2392,28 @@ export class StorageManager {
       if (!s.welcomeMessage) { s.welcomeMessage = 'Welcome {user} to {chat}!'; needsSave = true; }
       if (s.goodbyeEnabled === undefined) { s.goodbyeEnabled = false; needsSave = true; }
       if (!s.goodbyeMessage) { s.goodbyeMessage = 'Goodbye {user}!'; needsSave = true; }
-      if (s.welcomeDm === undefined) { s.welcomeDm = { enabled: false, text: 'You joined {groupname} 🎉' }; }
+      if (s.groupWelcome === undefined) {
+        s.groupWelcome = {
+          enabled: Boolean(s.welcomeEnabled),
+          mode: 'simple',
+          contentType: 'text',
+          text: s.welcomeMessage || 'Welcome {user} to {chat}!'
+        };
+        needsSave = true;
+      }
+      if (s.groupGoodbye === undefined) {
+        s.groupGoodbye = {
+          enabled: Boolean(s.goodbyeEnabled),
+          mode: 'simple',
+          contentType: 'text',
+          text: s.goodbyeMessage || 'Goodbye {user}!'
+        };
+        needsSave = true;
+      }
+      if (s.welcomeDm === undefined) {
+        s.welcomeDm = { enabled: false, mode: 'simple', contentType: 'text', text: 'You joined {groupname} 🎉' };
+        needsSave = true;
+      }
       if (s.slowModeSeconds === undefined) { s.slowModeSeconds = 0; needsSave = true; }
       if (s.automodEnabled === undefined) { s.automodEnabled = false; needsSave = true; }
       if (s.mediaAction === undefined) { s.mediaAction = 'delete'; needsSave = true; }
@@ -2891,9 +2914,49 @@ export class StorageManager {
     mergedAutoEngine.stickerActivityMax = updatedMax;
     mergedAutoEngine.responseTypeWeights = updatedWeights;
 
+    // Synchronize groupWelcome / groupGoodbye with legacy mirrors
+    let effectiveGroupWelcome = updates.groupWelcome !== undefined ? updates.groupWelcome : current.groupWelcome;
+    let effectiveGroupGoodbye = updates.groupGoodbye !== undefined ? updates.groupGoodbye : current.groupGoodbye;
+    let effectiveWelcomeEnabled = updates.welcomeEnabled !== undefined ? updates.welcomeEnabled : current.welcomeEnabled;
+    let effectiveWelcomeMessage = updates.welcomeMessage !== undefined ? updates.welcomeMessage : current.welcomeMessage;
+    let effectiveGoodbyeEnabled = updates.goodbyeEnabled !== undefined ? updates.goodbyeEnabled : current.goodbyeEnabled;
+    let effectiveGoodbyeMessage = updates.goodbyeMessage !== undefined ? updates.goodbyeMessage : current.goodbyeMessage;
+
+    if (updates.groupWelcome) {
+      effectiveWelcomeEnabled = Boolean(updates.groupWelcome.enabled);
+      if (updates.groupWelcome.text !== undefined) {
+        effectiveWelcomeMessage = updates.groupWelcome.text;
+      }
+    } else if (updates.welcomeEnabled !== undefined || updates.welcomeMessage !== undefined) {
+      effectiveGroupWelcome = {
+        ...(effectiveGroupWelcome || { mode: 'simple', contentType: 'text' }),
+        enabled: effectiveWelcomeEnabled,
+        text: effectiveWelcomeMessage || 'Welcome {user} to {chat}!'
+      };
+    }
+
+    if (updates.groupGoodbye) {
+      effectiveGoodbyeEnabled = Boolean(updates.groupGoodbye.enabled);
+      if (updates.groupGoodbye.text !== undefined) {
+        effectiveGoodbyeMessage = updates.groupGoodbye.text;
+      }
+    } else if (updates.goodbyeEnabled !== undefined || updates.goodbyeMessage !== undefined) {
+      effectiveGroupGoodbye = {
+        ...(effectiveGroupGoodbye || { mode: 'simple', contentType: 'text' }),
+        enabled: effectiveGoodbyeEnabled,
+        text: effectiveGoodbyeMessage || 'Goodbye {user}!'
+      };
+    }
+
     const updated = {
       ...current,
       ...updates,
+      welcomeEnabled: effectiveWelcomeEnabled,
+      welcomeMessage: effectiveWelcomeMessage,
+      goodbyeEnabled: effectiveGoodbyeEnabled,
+      goodbyeMessage: effectiveGoodbyeMessage,
+      groupWelcome: effectiveGroupWelcome,
+      groupGoodbye: effectiveGroupGoodbye,
       humanMessagesSinceLastSticker: updatedHumanCount,
       requiredStickerGap: updatedStickerGap,
       stickerActivityMin: updatedMin,

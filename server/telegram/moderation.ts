@@ -1,5 +1,5 @@
 import { telegramApi } from './api.js';
-import { TelegramMessage, TelegramUser, TelegramChat, TelegramChatMember, ChatPermissions, TempActionRecord, CaptchaSession, PostPayload, ScheduledPostButton, WelcomeDmConfig } from './types.js';
+import { TelegramMessage, TelegramUser, TelegramChat, TelegramChatMember, ChatPermissions, TempActionRecord, CaptchaSession, PostPayload, ScheduledPostButton, WelcomeDmConfig, RichMessageConfig } from './types.js';
 import { db } from '../db/storage.js';
 import { TelegramMiddleware } from './middleware.js';
 import { ContentPolicyEngine } from './policyEngine.js';
@@ -162,6 +162,8 @@ export class ModerationService {
   private static floodActionCooldowns: Map<string, number> = new Map();
   private static inFlightWelcomes: Set<string> = new Set();
   private static welcomedUsersCache: Map<string, number> = new Map();
+  private static inFlightGoodbyes: Set<string> = new Set();
+  private static goodbyeUsersCache: Map<string, number> = new Map();
   private static recentBotBans: Map<string, number> = new Map();
   private static inFlightWelcomeDms: Set<string> = new Set();
   private static welcomedDmUsersCache: Map<string, number> = new Map();
@@ -175,6 +177,15 @@ export class ModerationService {
   }
 
   public static clearWelcomedDmCache(): void {
+    this.welcomedDmUsersCache.clear();
+    this.inFlightWelcomeDms.clear();
+  }
+
+  public static clearWelcomeAndGoodbyeCaches(): void {
+    this.welcomedUsersCache.clear();
+    this.inFlightWelcomes.clear();
+    this.goodbyeUsersCache.clear();
+    this.inFlightGoodbyes.clear();
     this.welcomedDmUsersCache.clear();
     this.inFlightWelcomeDms.clear();
   }
@@ -1098,7 +1109,126 @@ export class ModerationService {
   }
 
   /**
-   * Send Welcome Greeting to a specific member with deduplication and placeholder formatting.
+   * Safe Dynamic Template Substitution for Rich Messages (Welcome, Goodbye, Welcome DM, etc.)
+   * Placeholders:
+   * {user} -> User display name (e.g. "First Last" or "@username" or "User 12345")
+   * {username} -> "@username" if available, else display name fallback
+   * {first_name} -> first_name if available, else display name fallback
+   * {last_name} -> last_name if available, else ""
+   * {user_id} -> String(user.id)
+   * {id} -> String(user.id)
+   * {groupname} -> Current Telegram group title (e.g. "My Group")
+   * {group_id} -> String(chatId)
+   * {chat} -> Current Telegram group title
+   * {chat_title} -> Current Telegram group title
+   * {name} -> display name
+   * {mention} -> HTML mention link
+   */
+  public static formatRichMessageText(
+    template: string,
+    user: TelegramUser,
+    chatTitle: string,
+    chatId: number
+  ): string {
+    const rawTemplate = template !== undefined && template !== null && template.trim() !== ''
+      ? template
+      : 'Welcome {user} to {groupname}!';
+
+    const firstName = user.first_name || (user.username ? `@${user.username}` : (user.id ? `User ${user.id}` : 'User'));
+    const lastName = user.last_name || '';
+    const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ') ||
+      (user.username ? `@${user.username}` : (user.id ? `User ${user.id}` : 'User'));
+    const username = user.username ? `@${user.username}` : displayName;
+    const title = chatTitle || 'the group';
+    const userIdStr = user.id ? String(user.id) : '0';
+    const groupIdStr = String(chatId);
+    const mention = user.id ? `<a href="tg://user?id=${user.id}">${escapeHtml(displayName)}</a>` : displayName;
+
+    let formatted = rawTemplate
+      .replace(/{groupname}/gi, title)
+      .replace(/{group_id}/gi, groupIdStr)
+      .replace(/{chat_title}/gi, title)
+      .replace(/{chat}/gi, title)
+      .replace(/{first_name}/gi, firstName)
+      .replace(/{last_name}/gi, lastName)
+      .replace(/{username}/gi, username)
+      .replace(/{mention}/gi, mention)
+      .replace(/{user_id}/gi, userIdStr)
+      .replace(/{id}/gi, userIdStr)
+      .replace(/{user}/gi, displayName)
+      .replace(/{name}/gi, displayName);
+
+    if (!formatted.trim()) {
+      formatted = `Welcome ${displayName} to ${title}!`;
+    }
+    return formatted;
+  }
+
+  /**
+   * Format button template placeholders safely for Rich Messages.
+   */
+  public static formatRichMessageButtons(
+    buttons: ScheduledPostButton[][] | undefined,
+    user: TelegramUser,
+    chatTitle: string,
+    chatId: number
+  ): ScheduledPostButton[][] | undefined {
+    if (!buttons || !Array.isArray(buttons) || buttons.length === 0) return undefined;
+    const sanitized = sanitizeInlineButtons(buttons);
+    if (!sanitized) return undefined;
+
+    const result: ScheduledPostButton[][] = [];
+    for (const row of sanitized) {
+      const rowBtns: ScheduledPostButton[] = [];
+      for (const btn of row) {
+        const btnText = this.formatRichMessageText(btn.text, user, chatTitle, chatId);
+        let btnUrl = btn.url
+          .replace(/{user_id}/gi, String(user.id || 0))
+          .replace(/{id}/gi, String(user.id || 0))
+          .replace(/{group_id}/gi, String(chatId));
+
+        rowBtns.push({
+          text: btnText.trim() || btn.text,
+          url: btnUrl,
+          style: btn.style
+        });
+      }
+      if (rowBtns.length > 0) {
+        result.push(rowBtns);
+      }
+    }
+    return result.length > 0 ? result : undefined;
+  }
+
+  /**
+   * Compatibility alias for formatWelcomeDmText
+   */
+  public static formatWelcomeDmText(
+    template: string,
+    user: TelegramUser,
+    chatTitle: string,
+    chatId: number
+  ): string {
+    const rawTemplate = template !== undefined && template !== null && typeof template === 'string' && template.trim() !== ''
+      ? template
+      : 'You joined {groupname} 🎉';
+    return this.formatRichMessageText(rawTemplate, user, chatTitle, chatId);
+  }
+
+  /**
+   * Compatibility alias for formatWelcomeDmButtons
+   */
+  public static formatWelcomeDmButtons(
+    buttons: ScheduledPostButton[][] | undefined,
+    user: TelegramUser,
+    chatTitle: string,
+    chatId: number
+  ): ScheduledPostButton[][] | undefined {
+    return this.formatRichMessageButtons(buttons, user, chatTitle, chatId);
+  }
+
+  /**
+   * Send Welcome Greeting IN GROUP CHAT to a specific member with deduplication and PostSender support.
    */
   public static async sendWelcome(
     chatId: number,
@@ -1108,7 +1238,14 @@ export class ModerationService {
     if (!chatId || !member) return false;
 
     const settings = db.getGroupSettings(chatId, chatTitle);
-    if (!settings.welcomeEnabled) return false;
+    const welcomeConfig: RichMessageConfig | undefined = settings.groupWelcome || {
+      enabled: Boolean(settings.welcomeEnabled),
+      mode: 'simple',
+      contentType: 'text',
+      text: settings.welcomeMessage || 'Welcome {user} to {chat}!'
+    };
+
+    if (!welcomeConfig || !welcomeConfig.enabled) return false;
 
     // Skip welcoming the bot itself
     if (member.is_bot) {
@@ -1131,40 +1268,53 @@ export class ModerationService {
 
     try {
       const title = chatTitle || settings.chatTitle || 'the group';
-      const firstName = member.first_name || 'Member';
-      const lastName = member.last_name || '';
-      const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
-      const username = member.username ? `@${member.username}` : displayName;
-      const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
-      const template = settings.welcomeMessage || 'Welcome {user} to {chat}!';
+      const rawText = welcomeConfig.text !== undefined ? welcomeConfig.text : 'Welcome {user} to {chat}!';
+      const formattedText = this.formatRichMessageText(rawText, member, title, chatId);
+      const formattedButtons = welcomeConfig.mode === 'rich' || (welcomeConfig.buttons && welcomeConfig.buttons.length > 0)
+        ? this.formatRichMessageButtons(welcomeConfig.buttons, member, title, chatId)
+        : undefined;
 
-      const text = template
-        .replace(/{first_name}/gi, firstName)
-        .replace(/{last_name}/gi, lastName)
-        .replace(/{user}/gi, displayName)
-        .replace(/{name}/gi, displayName)
-        .replace(/{username}/gi, username)
-        .replace(/{mention}/gi, mention)
-        .replace(/{chat_title}/gi, title)
-        .replace(/{chat}/gi, title)
-        .replace(/{id}/gi, String(member.id));
+      const payload: PostPayload = {
+        contentType: welcomeConfig.contentType || 'text',
+        text: formattedText,
+        mediaFileId: welcomeConfig.mediaFileId,
+        mediaUploadId: welcomeConfig.mediaUploadId,
+        buttons: formattedButtons
+      };
 
-      const sendRes = await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' }).catch(() => null);
-      if (sendRes?.ok && sendRes.result?.message_id) {
-        const sentMsgId = sendRes.result.message_id;
-        setTimeout(() => {
-          telegramApi.deleteMessage(chatId, sentMsgId).catch(() => {});
-          db.untrackMessages(chatId, [sentMsgId]);
-        }, 10000); // exactly 10,000ms auto-delete
+      // GROUP CHAT DELIVERY: target destination is chatId (the group)
+      const sendRes = await PostSender.send(chatId, payload);
+      if (sendRes.ok && sendRes.messageId) {
+        const sentMsgId = sendRes.messageId;
+        if (settings.autoDeleteJoinLeave) {
+          setTimeout(() => {
+            telegramApi.deleteMessage(chatId, sentMsgId).catch(() => {});
+            db.untrackMessages(chatId, [sentMsgId]);
+          }, 10000); // 10s auto-delete
+        }
+
+        db.addLog({
+          chatId,
+          chatTitle: title,
+          targetUserId: member.id,
+          targetUsername: member.username,
+          action: 'send_message',
+          details: `Sent Group Welcome to ${member.first_name || member.id} in ${title} (Telegram msg #${sentMsgId})`
+        });
+        return true;
       }
-      return true;
+      return Boolean(sendRes.ok);
+    } catch (err: any) {
+      console.error(`[GroupWelcome] Exception sending group welcome in ${chatId}:`, err.message);
+      return false;
     } finally {
       ModerationService.inFlightWelcomes.delete(cacheKey);
     }
   }
 
   /**
-   * Send Goodbye Farewell when a member leaves with deduplication and placeholder formatting.
+   * Send Goodbye Farewell IN GROUP CHAT when a member leaves with deduplication and PostSender support.
+   * CRITICAL: This is strictly delivered to the group chat (chatId), NEVER as a private DM.
    */
   public static async sendGoodbye(
     chatId: number,
@@ -1174,7 +1324,14 @@ export class ModerationService {
     if (!chatId || !member) return false;
 
     const settings = db.getGroupSettings(chatId, chatTitle);
-    if (!settings.goodbyeEnabled) return false;
+    const goodbyeConfig: RichMessageConfig | undefined = settings.groupGoodbye || {
+      enabled: Boolean(settings.goodbyeEnabled),
+      mode: 'simple',
+      contentType: 'text',
+      text: settings.goodbyeMessage || 'Goodbye {user}!'
+    };
+
+    if (!goodbyeConfig || !goodbyeConfig.enabled) return false;
 
     // Skip goodbye for the bot itself
     if (member.is_bot) {
@@ -1182,123 +1339,63 @@ export class ModerationService {
       if (member.id === me?.result?.id) return false;
     }
 
-    const title = chatTitle || settings.chatTitle || 'the group';
-    const firstName = member.first_name || 'Member';
-    const lastName = member.last_name || '';
-    const displayName = member.first_name || (member.username ? `@${member.username}` : `User ${member.id}`);
-    const username = member.username ? `@${member.username}` : displayName;
-    const mention = `<a href="tg://user?id=${member.id}">${escapeHtml(displayName)}</a>`;
-    const template = settings.goodbyeMessage || 'Goodbye {user}!';
-
-    const text = template
-      .replace(/{first_name}/gi, firstName)
-      .replace(/{last_name}/gi, lastName)
-      .replace(/{user}/gi, displayName)
-      .replace(/{name}/gi, displayName)
-      .replace(/{username}/gi, username)
-      .replace(/{mention}/gi, mention)
-      .replace(/{chat_title}/gi, title)
-      .replace(/{chat}/gi, title)
-      .replace(/{id}/gi, String(member.id));
-
-    const sendRes = await telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' }).catch(() => null);
-    if (sendRes?.ok && sendRes.result?.message_id) {
-      const sentMsgId = sendRes.result.message_id;
-      setTimeout(() => {
-        telegramApi.deleteMessage(chatId, sentMsgId).catch(() => {});
-        db.untrackMessages(chatId, [sentMsgId]);
-      }, 10000); // exactly 10,000ms auto-delete
+    const cacheKey = `${chatId}:${member.id}`;
+    if (ModerationService.inFlightGoodbyes.has(cacheKey)) {
+      return false; // deduplicate concurrent in-flight goodbye requests
     }
-    return true;
-  }
 
-  /**
-   * Safe Dynamic Template Substitution for Welcome DM messages.
-   * Placeholders:
-   * {user} -> User display name (e.g. "First Last" or "@username" or "User 12345")
-   * {username} -> "@username" if available, else display name fallback
-   * {first_name} -> first_name if available, else display name fallback
-   * {last_name} -> last_name if available, else ""
-   * {user_id} -> String(user.id)
-   * {id} -> String(user.id)
-   * {groupname} -> Current Telegram group title (e.g. "My Group")
-   * {group_id} -> String(chatId)
-   * {chat} -> Current Telegram group title
-   * {chat_title} -> Current Telegram group title
-   * {name} -> display name
-   */
-  public static formatWelcomeDmText(
-    template: string,
-    user: TelegramUser,
-    chatTitle: string,
-    chatId: number
-  ): string {
-    const rawTemplate = template !== undefined && template !== null && template.trim() !== ''
-      ? template
-      : 'You joined {groupname} 🎉';
-
-    const firstName = user.first_name || (user.username ? `@${user.username}` : (user.id ? `User ${user.id}` : 'User'));
-    const lastName = user.last_name || '';
-    const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ') ||
-      (user.username ? `@${user.username}` : (user.id ? `User ${user.id}` : 'User'));
-    const username = user.username ? `@${user.username}` : displayName;
-    const title = chatTitle || 'the group';
-    const userIdStr = user.id ? String(user.id) : '0';
-    const groupIdStr = String(chatId);
-
-    let formatted = rawTemplate
-      .replace(/{groupname}/gi, title)
-      .replace(/{group_id}/gi, groupIdStr)
-      .replace(/{chat_title}/gi, title)
-      .replace(/{chat}/gi, title)
-      .replace(/{first_name}/gi, firstName)
-      .replace(/{last_name}/gi, lastName)
-      .replace(/{username}/gi, username)
-      .replace(/{user_id}/gi, userIdStr)
-      .replace(/{id}/gi, userIdStr)
-      .replace(/{user}/gi, displayName)
-      .replace(/{name}/gi, displayName);
-
-    if (!formatted.trim()) {
-      formatted = `You joined ${title} 🎉`;
+    const now = Date.now();
+    const lastGoodbye = ModerationService.goodbyeUsersCache.get(cacheKey) || 0;
+    if (now - lastGoodbye < 15000) {
+      return false; // deduplicate within 15 seconds
     }
-    return formatted;
-  }
+    ModerationService.inFlightGoodbyes.add(cacheKey);
+    ModerationService.goodbyeUsersCache.set(cacheKey, now);
 
-  /**
-   * Format button template placeholders safely.
-   */
-  public static formatWelcomeDmButtons(
-    buttons: ScheduledPostButton[][] | undefined,
-    user: TelegramUser,
-    chatTitle: string,
-    chatId: number
-  ): ScheduledPostButton[][] | undefined {
-    if (!buttons || !Array.isArray(buttons) || buttons.length === 0) return undefined;
-    const sanitized = sanitizeInlineButtons(buttons);
-    if (!sanitized) return undefined;
+    try {
+      const title = chatTitle || settings.chatTitle || 'the group';
+      const rawText = goodbyeConfig.text !== undefined ? goodbyeConfig.text : 'Goodbye {user}!';
+      const formattedText = this.formatRichMessageText(rawText, member, title, chatId);
+      const formattedButtons = goodbyeConfig.mode === 'rich' || (goodbyeConfig.buttons && goodbyeConfig.buttons.length > 0)
+        ? this.formatRichMessageButtons(goodbyeConfig.buttons, member, title, chatId)
+        : undefined;
 
-    const result: ScheduledPostButton[][] = [];
-    for (const row of sanitized) {
-      const rowBtns: ScheduledPostButton[] = [];
-      for (const btn of row) {
-        const btnText = this.formatWelcomeDmText(btn.text, user, chatTitle, chatId);
-        let btnUrl = btn.url
-          .replace(/{user_id}/gi, String(user.id || 0))
-          .replace(/{id}/gi, String(user.id || 0))
-          .replace(/{group_id}/gi, String(chatId));
+      const payload: PostPayload = {
+        contentType: goodbyeConfig.contentType || 'text',
+        text: formattedText,
+        mediaFileId: goodbyeConfig.mediaFileId,
+        mediaUploadId: goodbyeConfig.mediaUploadId,
+        buttons: formattedButtons
+      };
 
-        rowBtns.push({
-          text: btnText.trim() || btn.text,
-          url: btnUrl,
-          style: btn.style
+      // GROUP CHAT DELIVERY: strictly send to group chat (chatId)
+      const sendRes = await PostSender.send(chatId, payload);
+      if (sendRes.ok && sendRes.messageId) {
+        const sentMsgId = sendRes.messageId;
+        if (settings.autoDeleteJoinLeave) {
+          setTimeout(() => {
+            telegramApi.deleteMessage(chatId, sentMsgId).catch(() => {});
+            db.untrackMessages(chatId, [sentMsgId]);
+          }, 10000); // 10s auto-delete
+        }
+
+        db.addLog({
+          chatId,
+          chatTitle: title,
+          targetUserId: member.id,
+          targetUsername: member.username,
+          action: 'send_message',
+          details: `Sent Group Goodbye for ${member.first_name || member.id} in ${title} (Telegram msg #${sentMsgId})`
         });
+        return true;
       }
-      if (rowBtns.length > 0) {
-        result.push(rowBtns);
-      }
+      return Boolean(sendRes.ok);
+    } catch (err: any) {
+      console.error(`[GroupGoodbye] Exception sending group goodbye in ${chatId}:`, err.message);
+      return false;
+    } finally {
+      ModerationService.inFlightGoodbyes.delete(cacheKey);
     }
-    return result.length > 0 ? result : undefined;
   }
 
   /**
@@ -1361,8 +1458,10 @@ export class ModerationService {
     try {
       const title = chatTitle || settings.chatTitle || 'the group';
       const rawText = welcomeDmConfig.text !== undefined ? welcomeDmConfig.text : 'You joined {groupname} 🎉';
-      const formattedText = this.formatWelcomeDmText(rawText, user, title, chatId);
-      const formattedButtons = this.formatWelcomeDmButtons(welcomeDmConfig.buttons, user, title, chatId);
+      const formattedText = this.formatRichMessageText(rawText, user, title, chatId);
+      const formattedButtons = welcomeDmConfig.mode === 'rich' || (welcomeDmConfig.buttons && welcomeDmConfig.buttons.length > 0)
+        ? this.formatRichMessageButtons(welcomeDmConfig.buttons, user, title, chatId)
+        : undefined;
 
       const payload: PostPayload = {
         contentType: welcomeDmConfig.contentType || 'text',
@@ -1515,4 +1614,16 @@ function escapeHtml(text: string): string {
 function capitalize(str: string): string {
   if (!str) return '';
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+export function clearWelcomeAndGoodbyeCaches(): void {
+  ModerationService.clearWelcomeAndGoodbyeCaches();
+}
+
+export function formatRichMessageText(template: string, user: TelegramUser, chatTitle: string, chatId?: number): string {
+  return ModerationService.formatRichMessageText(template, user, chatTitle, chatId);
+}
+
+export function formatRichMessageButtons(buttons: ScheduledPostButton[][] | undefined, user: TelegramUser, chatTitle: string, chatId?: number): ScheduledPostButton[][] | undefined {
+  return ModerationService.formatRichMessageButtons(buttons, user, chatTitle, chatId);
 }

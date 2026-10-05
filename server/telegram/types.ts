@@ -341,13 +341,15 @@ export interface GroupSettings {
   notes?: Record<string, NoteRecord>;
   // Approved / Trusted Users
   approvedUsers?: Record<number, ApprovedUserRecord>;
-  // Welcome & Goodbye
-  welcomeEnabled: boolean; // default false
+  // Welcome & Goodbye (Unified Rich Message System)
+  welcomeEnabled: boolean; // default false (backward compatibility legacy mirror)
   welcomeMessage?: string;
-  goodbyeEnabled: boolean; // default false
+  goodbyeEnabled: boolean; // default false (backward compatibility legacy mirror)
   goodbyeMessage?: string;
   autoDeleteJoinLeave?: boolean; // default false
-  welcomeDm?: WelcomeDmConfig; // Per-group private welcome DM configuration (default disabled)
+  groupWelcome?: RichMessageConfig; // Per-group in-group welcome message config
+  groupGoodbye?: RichMessageConfig; // Per-group in-group goodbye message config
+  welcomeDm?: RichMessageConfig; // Per-group private welcome DM configuration (default disabled)
   // Slow Mode
   slowModeSeconds: number; // 0 = off
   // Reports
@@ -576,14 +578,19 @@ export interface PostPayload {
   protectContent?: boolean;
 }
 
-export interface WelcomeDmConfig {
+export type MessageMode = 'simple' | 'rich';
+
+export interface RichMessageConfig {
   enabled: boolean;
-  contentType?: PostContentType;
+  mode?: MessageMode; // 'simple' | 'rich' (default: 'simple')
+  contentType?: PostContentType; // 'text' | 'photo' | 'video' | 'animation' | 'document' (default: 'text')
   text?: string;
   mediaFileId?: string;
   mediaUploadId?: string;
   buttons?: ScheduledPostButton[][];
 }
+
+export type WelcomeDmConfig = RichMessageConfig;
 
 export interface SendPostResult {
   ok: boolean;

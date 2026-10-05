@@ -58,6 +58,7 @@ import {
   Link2
 } from 'lucide-react';
 import { RichPostComposer, ComposerContentType, ComposerButton, PostButtonStyle } from './components/RichPostComposer';
+import { RichMessageEditor, RichMessageConfigData } from './components/RichMessageEditor';
 
 const LIVE_TESTS = [
   { id: 'LIVE-01', title: 'Bot responds to /ping' },
@@ -420,20 +421,32 @@ export default function App() {
   const [removePackModal, setRemovePackModal] = useState<any | null>(null);
   const [removingPack, setRemovingPack] = useState<boolean>(false);
 
-  // Welcome DM State in Group Details
-  const [welcomeDmEnabled, setWelcomeDmEnabled] = useState<boolean>(false);
-  const [welcomeDmContentType, setWelcomeDmContentType] = useState<ComposerContentType>('text');
-  const [welcomeDmText, setWelcomeDmText] = useState<string>('You joined {groupname} 🎉');
-  const [welcomeDmMediaFileId, setWelcomeDmMediaFileId] = useState<string>('');
-  const [welcomeDmMediaUploadId, setWelcomeDmMediaUploadId] = useState<string | null>(null);
-  const [welcomeDmMediaFileName, setWelcomeDmMediaFileName] = useState<string | null>(null);
-  const [welcomeDmMediaUploadStatus, setWelcomeDmMediaUploadStatus] = useState<'idle' | 'uploading' | 'uploaded' | 'error'>('idle');
-  const [welcomeDmMediaUploadError, setWelcomeDmMediaUploadError] = useState<string | null>(null);
-  const [welcomeDmButtons, setWelcomeDmButtons] = useState<ComposerButton[][]>([]);
-  const [welcomeDmTestUserId, setWelcomeDmTestUserId] = useState<string>('');
-  const [welcomeDmTestLoading, setWelcomeDmTestLoading] = useState<boolean>(false);
-  const [welcomeDmSaveLoading, setWelcomeDmSaveLoading] = useState<boolean>(false);
-  const [welcomeDmNotification, setWelcomeDmNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  // Welcome & Goodbye State in Group Details
+  const [welcomeGoodbyeSubTab, setWelcomeGoodbyeSubTab] = useState<'group_welcome' | 'group_goodbye' | 'welcome_dm'>('group_welcome');
+  const [groupWelcomeConfig, setGroupWelcomeConfig] = useState<RichMessageConfigData>({
+    enabled: false,
+    mode: 'simple',
+    contentType: 'text',
+    text: '👋 Welcome {user} to {groupname}!'
+  });
+  const [groupGoodbyeConfig, setGroupGoodbyeConfig] = useState<RichMessageConfigData>({
+    enabled: false,
+    mode: 'simple',
+    contentType: 'text',
+    text: '👋 Goodbye {user}, we will miss you!'
+  });
+  const [welcomeDmConfig, setWelcomeDmConfig] = useState<RichMessageConfigData>({
+    enabled: false,
+    mode: 'simple',
+    contentType: 'text',
+    text: 'You joined {groupname} 🎉'
+  });
+  const [welcomeGoodbyeSaving, setWelcomeGoodbyeSaving] = useState<boolean>(false);
+  const [welcomeGoodbyeTesting, setWelcomeGoodbyeTesting] = useState<boolean>(false);
+  const [welcomeGoodbyeNotification, setWelcomeGoodbyeNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Private Chat Inner Sub-tab (Conversation vs Rich Post)
+  const [privateChatSubTab, setPrivateChatSubTab] = useState<'chat' | 'rich_post'>('chat');
 
   // Send Message Modal / Action
   const [sendTargetType, setSendTargetType] = useState<'group' | 'private'>('group');
@@ -831,71 +844,74 @@ export default function App() {
     }
   }, [session, activeGroupDetailId, selectedChatId, fetchGroupDetailsData]);
 
-  // Synchronize local Welcome DM form state whenever group settings are loaded or changed
+  // Synchronize local Welcome & Goodbye form states whenever group settings are loaded or changed
   useEffect(() => {
     if (groupDetails?.settings) {
-      const w = groupDetails.settings.welcomeDm;
-      setWelcomeDmEnabled(Boolean(w?.enabled));
-      setWelcomeDmContentType((w?.contentType as ComposerContentType) || 'text');
-      setWelcomeDmText(w?.text !== undefined && w.text !== null ? w.text : 'You joined {groupname} 🎉');
-      setWelcomeDmMediaFileId(w?.mediaFileId || '');
-      setWelcomeDmMediaUploadId(w?.mediaUploadId || null);
-      if (w?.buttons && Array.isArray(w.buttons)) {
-        setWelcomeDmButtons(
-          w.buttons.map((row: any[]) =>
-            (Array.isArray(row) ? row : []).map(b => ({
-              id: Math.random().toString(36).substring(2, 9),
-              text: b.text || '',
-              url: b.url || '',
-              style: b.style
-            }))
-          )
-        );
-      } else {
-        setWelcomeDmButtons([]);
-      }
-    }
-  }, [groupDetails?.chatId, groupDetails?.settings?.welcomeDm]);
-
-  // Live preview text generator with dynamic variable substitution
-  const welcomeDmPreviewText = useMemo(() => {
-    const raw = welcomeDmText || 'You joined {groupname} 🎉';
-    const groupName = groupDetails?.chatTitle || 'Telegram Group';
-    const groupId = String(groupDetails?.chatId || '-100123456789');
-    return raw
-      .replace(/{groupname}/gi, groupName)
-      .replace(/{group_id}/gi, groupId)
-      .replace(/{chat_title}/gi, groupName)
-      .replace(/{chat}/gi, groupName)
-      .replace(/{first_name}/gi, 'Alex')
-      .replace(/{last_name}/gi, 'Smith')
-      .replace(/{username}/gi, '@alexsmith')
-      .replace(/{user_id}/gi, '987654321')
-      .replace(/{id}/gi, '987654321')
-      .replace(/{user}/gi, 'Alex Smith')
-      .replace(/{name}/gi, 'Alex Smith');
-  }, [welcomeDmText, groupDetails?.chatTitle, groupDetails?.chatId]);
-
-  // Save Welcome DM configuration for current group
-  const handleSaveWelcomeDm = async () => {
-    if (!activeGroupDetailId) return;
-    setWelcomeDmSaveLoading(true);
-    setWelcomeDmNotification(null);
-    try {
-      const payload = {
-        enabled: welcomeDmEnabled,
-        contentType: welcomeDmContentType,
-        text: welcomeDmText.trim() || 'You joined {groupname} 🎉',
-        mediaFileId: welcomeDmMediaFileId.trim() || undefined,
-        mediaUploadId: welcomeDmMediaUploadId || undefined,
-        buttons: welcomeDmButtons.map(row => row.map(btn => ({
-          text: btn.text,
-          url: btn.url,
-          style: btn.style
-        }))).filter(row => row.length > 0)
+      const s = groupDetails.settings;
+      const gw = s.groupWelcome || {
+        enabled: Boolean(s.welcomeEnabled),
+        mode: 'simple',
+        contentType: 'text',
+        text: s.welcomeMessage || '👋 Welcome {user} to {groupname}!'
+      };
+      const gg = s.groupGoodbye || {
+        enabled: Boolean(s.goodbyeEnabled),
+        mode: 'simple',
+        contentType: 'text',
+        text: s.goodbyeMessage || '👋 Goodbye {user}, we will miss you!'
+      };
+      const wdm = s.welcomeDm || {
+        enabled: false,
+        mode: 'simple',
+        contentType: 'text',
+        text: 'You joined {groupname} 🎉'
       };
 
-      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/welcome-dm`, {
+      setGroupWelcomeConfig({
+        enabled: Boolean(gw.enabled),
+        mode: gw.mode || (gw.buttons && gw.buttons.length > 0 ? 'rich' : 'simple'),
+        contentType: (gw.contentType as ComposerContentType) || 'text',
+        text: gw.text !== undefined && gw.text !== null ? gw.text : '👋 Welcome {user} to {groupname}!',
+        mediaFileId: gw.mediaFileId || '',
+        mediaUploadId: gw.mediaUploadId || undefined,
+        buttons: Array.isArray(gw.buttons) ? gw.buttons : []
+      });
+
+      setGroupGoodbyeConfig({
+        enabled: Boolean(gg.enabled),
+        mode: gg.mode || (gg.buttons && gg.buttons.length > 0 ? 'rich' : 'simple'),
+        contentType: (gg.contentType as ComposerContentType) || 'text',
+        text: gg.text !== undefined && gg.text !== null ? gg.text : '👋 Goodbye {user}, we will miss you!',
+        mediaFileId: gg.mediaFileId || '',
+        mediaUploadId: gg.mediaUploadId || undefined,
+        buttons: Array.isArray(gg.buttons) ? gg.buttons : []
+      });
+
+      setWelcomeDmConfig({
+        enabled: Boolean(wdm.enabled),
+        mode: wdm.mode || (wdm.buttons && wdm.buttons.length > 0 ? 'rich' : 'simple'),
+        contentType: (wdm.contentType as ComposerContentType) || 'text',
+        text: wdm.text !== undefined && wdm.text !== null ? wdm.text : 'You joined {groupname} 🎉',
+        mediaFileId: wdm.mediaFileId || '',
+        mediaUploadId: wdm.mediaUploadId || undefined,
+        buttons: Array.isArray(wdm.buttons) ? wdm.buttons : []
+      });
+    }
+  }, [groupDetails?.chatId, groupDetails?.settings]);
+
+  // Save Welcome & Goodbye configuration for current group
+  const handleSaveWelcomeGoodbye = async () => {
+    if (!activeGroupDetailId) return;
+    setWelcomeGoodbyeSaving(true);
+    setWelcomeGoodbyeNotification(null);
+    try {
+      const payload = {
+        groupWelcome: groupWelcomeConfig,
+        groupGoodbye: groupGoodbyeConfig,
+        welcomeDm: welcomeDmConfig
+      };
+
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/welcome-goodbye`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -906,57 +922,56 @@ export default function App() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to save Welcome DM configuration');
+        throw new Error(data.error || 'Failed to save Welcome & Goodbye configurations');
       }
 
       setGroupDetails((prev: any) => prev ? {
         ...prev,
         settings: {
           ...prev.settings,
-          welcomeDm: data.welcomeDm
+          groupWelcome: data.settings?.groupWelcome || groupWelcomeConfig,
+          groupGoodbye: data.settings?.groupGoodbye || groupGoodbyeConfig,
+          welcomeDm: data.settings?.welcomeDm || welcomeDmConfig,
+          welcomeEnabled: data.settings?.welcomeEnabled,
+          welcomeMessage: data.settings?.welcomeMessage,
+          goodbyeEnabled: data.settings?.goodbyeEnabled,
+          goodbyeMessage: data.settings?.goodbyeMessage
         }
       } : prev);
 
-      setWelcomeDmNotification({ type: 'success', message: 'Welcome DM configuration saved successfully!' });
-      setTimeout(() => setWelcomeDmNotification(null), 4000);
+      setWelcomeGoodbyeNotification({ type: 'success', message: 'Welcome & Goodbye configurations saved successfully!' });
+      setTimeout(() => setWelcomeGoodbyeNotification(null), 4000);
     } catch (err: any) {
-      setWelcomeDmNotification({ type: 'error', message: err.message || 'Failed to save Welcome DM' });
+      setWelcomeGoodbyeNotification({ type: 'error', message: err.message || 'Failed to save Welcome & Goodbye settings' });
     } finally {
-      setWelcomeDmSaveLoading(false);
+      setWelcomeGoodbyeSaving(false);
     }
   };
 
-  // Send Test Welcome DM
-  const handleSendTestWelcomeDm = async () => {
+  // Send Test Welcome or Goodbye Message
+  const handleTestWelcomeGoodbye = async (target: 'groupWelcome' | 'groupGoodbye' | 'welcomeDm', targetUserId?: number) => {
     if (!activeGroupDetailId) return;
-    const numId = Number(welcomeDmTestUserId.trim());
-    if (!numId || isNaN(numId) || numId <= 0) {
-      setWelcomeDmNotification({
-        type: 'error',
-        message: 'Please enter a valid numeric Telegram User ID to receive the test DM.'
-      });
-      return;
+    if (target === 'welcomeDm') {
+      if (!targetUserId || targetUserId <= 0) {
+        setWelcomeGoodbyeNotification({
+          type: 'error',
+          message: 'Please enter a valid numeric Telegram User ID to receive the test DM.'
+        });
+        return;
+      }
     }
-    setWelcomeDmTestLoading(true);
-    setWelcomeDmNotification(null);
+    setWelcomeGoodbyeTesting(true);
+    setWelcomeGoodbyeNotification(null);
     try {
       const payload = {
-        targetUserId: numId,
-        welcomeDm: {
-          enabled: welcomeDmEnabled,
-          contentType: welcomeDmContentType,
-          text: welcomeDmText.trim() || 'You joined {groupname} 🎉',
-          mediaFileId: welcomeDmMediaFileId.trim() || undefined,
-          mediaUploadId: welcomeDmMediaUploadId || undefined,
-          buttons: welcomeDmButtons.map(row => row.map(btn => ({
-            text: btn.text,
-            url: btn.url,
-            style: btn.style
-          }))).filter(row => row.length > 0)
-        }
+        target,
+        targetUserId,
+        groupWelcome: groupWelcomeConfig,
+        groupGoodbye: groupGoodbyeConfig,
+        welcomeDm: welcomeDmConfig
       };
 
-      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/welcome-dm/test`, {
+      const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/welcome-goodbye/test`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -967,84 +982,27 @@ export default function App() {
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to send test Welcome DM');
+        throw new Error(data.error || `Failed to send test ${target}`);
       }
 
-      setWelcomeDmNotification({
+      const targetTitle = target === 'welcomeDm'
+        ? `User ID ${targetUserId}`
+        : (groupDetails?.chatTitle || `Group ${activeGroupDetailId}`);
+      const typeLabel = target === 'groupWelcome' ? 'Group Welcome' : target === 'groupGoodbye' ? 'Group Goodbye' : 'Welcome Private DM';
+
+      setWelcomeGoodbyeNotification({
         type: 'success',
-        message: `Test Welcome DM successfully delivered to Telegram user ID ${numId}!`
+        message: `Test ${typeLabel} successfully delivered to ${targetTitle}!`
       });
-      setTimeout(() => setWelcomeDmNotification(null), 5000);
+      setTimeout(() => setWelcomeGoodbyeNotification(null), 5000);
     } catch (err: any) {
-      setWelcomeDmNotification({
+      setWelcomeGoodbyeNotification({
         type: 'error',
-        message: err.message || 'Failed to send test Welcome DM'
+        message: err.message || `Failed to send test ${target}`
       });
     } finally {
-      setWelcomeDmTestLoading(false);
+      setWelcomeGoodbyeTesting(false);
     }
-  };
-
-  // Upload local media file for Welcome DM
-  const handleWelcomeDmFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const isGif = file.type === 'image/gif' || file.name.toLowerCase().endsWith('.gif');
-    if (isGif && welcomeDmContentType !== 'animation') {
-      setWelcomeDmContentType('animation');
-    }
-
-    setWelcomeDmMediaUploadStatus('uploading');
-    setWelcomeDmMediaUploadError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const targetType = isGif ? 'animation' : welcomeDmContentType;
-      const res = await fetch(`/api/dashboard/posts/upload-media?type=${targetType}`, {
-        method: 'POST',
-        headers: {
-          ...(session?.sessionId ? { 'x-session-id': session.sessionId } : {})
-        },
-        body: formData
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to upload local media file.');
-      }
-
-      setWelcomeDmMediaUploadId(data.mediaUploadId);
-      setWelcomeDmMediaFileName(data.filename || file.name);
-      setWelcomeDmMediaFileId(`upload:${data.mediaUploadId}`);
-      setWelcomeDmMediaUploadStatus('uploaded');
-      setWelcomeDmMediaUploadError(null);
-    } catch (err: any) {
-      setWelcomeDmMediaUploadStatus('error');
-      setWelcomeDmMediaUploadError(err.message || 'File upload failed.');
-    }
-  };
-
-  const handleAddWelcomeDmButtonRow = () => {
-    setWelcomeDmButtons(prev => [...prev, [{ id: Math.random().toString(36).substring(2, 9), text: 'Join Channel', url: 'https://t.me/', style: undefined }]]);
-  };
-
-  const handleAddWelcomeDmButtonToRow = (rowIndex: number) => {
-    setWelcomeDmButtons(prev => prev.map((row, idx) => idx === rowIndex ? [...row, { id: Math.random().toString(36).substring(2, 9), text: 'Button', url: 'https://', style: undefined }] : row));
-  };
-
-  const handleUpdateWelcomeDmButton = (rowIndex: number, btnIndex: number, field: string, value: any) => {
-    setWelcomeDmButtons(prev => prev.map((row, rIdx) => rIdx === rowIndex ? row.map((btn, bIdx) => bIdx === btnIndex ? { ...btn, [field]: value } : btn) : row));
-  };
-
-  const handleRemoveWelcomeDmButton = (rowIndex: number, btnIndex: number) => {
-    setWelcomeDmButtons(prev => prev.map((row, rIdx) => rIdx === rowIndex ? row.filter((_, bIdx) => bIdx !== btnIndex) : row).filter(row => row.length > 0));
-  };
-
-  const handleRemoveWelcomeDmButtonRow = (rowIndex: number) => {
-    setWelcomeDmButtons(prev => prev.filter((_, idx) => idx !== rowIndex));
   };
 
   // Private Chat Messages On-Demand Fetch & Refresh (15,000 ms while active)
@@ -3169,7 +3127,8 @@ export default function App() {
                 <div className={`flex items-center gap-1.5 ${themeInnerCardBg} p-2 rounded-xl border ${themeBorder} flex-wrap text-xs font-semibold overflow-x-auto`}>
                   {[
                     { id: 'overview', label: '📊 Overview' },
-                    { id: 'welcome_dm', label: '👋 Welcome DM' },
+                    { id: 'welcome_goodbye', label: '👋 Welcome & Goodbye' },
+                    { id: 'rich_post', label: '✨ Rich Post' },
                     { id: 'general', label: '⚙️ General' },
                     { id: 'moderation', label: '🛡️ Moderation' },
                     { id: 'content_protection', label: '🔒 Content Protection' },
@@ -3249,434 +3208,122 @@ export default function App() {
                 </div>
               )}
 
-              {/* INNER TAB: GROUP WELCOME PRIVATE DM */}
-              {groupDetailTab === 'welcome_dm' && (
+              {/* INNER TAB: GROUP WELCOME & GOODBYE + PRIVATE DM */}
+              {groupDetailTab === 'welcome_goodbye' && (
                 <div className="space-y-6">
-                  {/* Status Banner / Feedback */}
-                  {welcomeDmNotification && (
-                    <div className={`p-4 rounded-xl border flex items-center justify-between text-sm ${
-                      welcomeDmNotification.type === 'success'
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                        : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                    }`}>
-                      <div className="flex items-center gap-2">
-                        {welcomeDmNotification.type === 'success' ? <CheckCircle2 className="w-5 h-5 flex-shrink-0" /> : <AlertTriangle className="w-5 h-5 flex-shrink-0" />}
-                        <span>{welcomeDmNotification.message}</span>
-                      </div>
-                      <button onClick={() => setWelcomeDmNotification(null)} className="opacity-70 hover:opacity-100">
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Main Config Card */}
-                  <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-stone-800/60">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-base font-bold flex items-center gap-2">
-                            <span>👋</span> Welcome Private DM
-                          </h3>
-                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                            welcomeDmEnabled
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                              : 'bg-stone-500/10 text-stone-400 border border-stone-500/20'
-                          }`}>
-                            {welcomeDmEnabled ? 'Enabled' : 'Disabled'}
-                          </span>
-                        </div>
-                        <p className={`text-xs ${themeMutedText} mt-1`}>
-                          When a real human member joins <span className="font-semibold text-stone-200">{groupDetails.chatTitle || 'this group'}</span>, Roxie will automatically send them a personalized private Telegram message.
-                        </p>
-                      </div>
-
-                      {/* Enable Toggle Switch */}
-                      <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                        <input
-                          type="checkbox"
-                          checked={welcomeDmEnabled}
-                          onChange={(e) => setWelcomeDmEnabled(e.target.checked)}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-stone-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-                        <span className="ml-2.5 text-xs font-semibold">
-                          {welcomeDmEnabled ? 'Welcome DM ON' : 'Welcome DM OFF'}
-                        </span>
-                      </label>
-                    </div>
-
-                    {/* Content Type Selector */}
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold uppercase tracking-wider block">Content Type</label>
-                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                        {[
-                          { type: 'text', label: '📝 Text Only' },
-                          { type: 'photo', label: '📷 Photo' },
-                          { type: 'video', label: '📹 Video' },
-                          { type: 'animation', label: '🎬 GIF / Animation' },
-                          { type: 'document', label: '📄 Document' }
-                        ].map(t => (
-                          <button
-                            key={t.type}
-                            type="button"
-                            onClick={() => setWelcomeDmContentType(t.type as ComposerContentType)}
-                            className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all text-center ${
-                              welcomeDmContentType === t.type
-                                ? 'bg-blue-600 text-white border-blue-500 shadow-sm font-bold'
-                                : `${themeInnerCardBg} ${themeBorder} ${themeMutedText} hover:text-stone-200 hover:border-stone-600`
-                            }`}
-                          >
-                            {t.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Media File Upload / file_id (when not text) */}
-                    {welcomeDmContentType !== 'text' && (
-                      <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-3`}>
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold uppercase tracking-wider block">
-                            {welcomeDmContentType === 'photo' ? 'Photo Media Source' :
-                             welcomeDmContentType === 'video' ? 'Video Media Source' :
-                             welcomeDmContentType === 'animation' ? 'GIF / Animation Media Source' : 'Document Media Source'}
-                          </label>
-                          {welcomeDmMediaUploadId && (
-                            <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Uploaded: {welcomeDmMediaFileName}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <input
-                              type="text"
-                              value={welcomeDmMediaFileId}
-                              onChange={(e) => {
-                                setWelcomeDmMediaFileId(e.target.value);
-                                if (!e.target.value.startsWith('upload:')) {
-                                  setWelcomeDmMediaUploadId(null);
-                                  setWelcomeDmMediaFileName(null);
-                                }
-                              }}
-                              placeholder="Telegram file_id or https://... media URL"
-                              className={`w-full text-xs font-mono px-3 py-2 rounded-lg border ${themeInputBg}`}
-                            />
-                            <p className={`text-[11px] ${themeMutedText} mt-1`}>
-                              Paste a Telegram <code className="font-mono">file_id</code> or public <code className="font-mono">https://</code> URL.
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <label className={`cursor-pointer px-3 py-2 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-all ${
-                              welcomeDmMediaUploadStatus === 'uploading'
-                                ? 'opacity-60 bg-stone-800 border-stone-700'
-                                : 'bg-blue-600/10 text-blue-400 border-blue-500/30 hover:bg-blue-600/20'
-                            }`}>
-                              {welcomeDmMediaUploadStatus === 'uploading' ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading...
-                                </>
-                              ) : (
-                                <>
-                                  <Upload className="w-3.5 h-3.5" /> Choose Local File
-                                </>
-                              )}
-                              <input
-                                type="file"
-                                onChange={handleWelcomeDmFileUpload}
-                                accept={
-                                  welcomeDmContentType === 'photo' ? 'image/*' :
-                                  welcomeDmContentType === 'video' ? 'video/*' :
-                                  welcomeDmContentType === 'animation' ? 'image/gif,video/mp4' : '*/*'
-                                }
-                                className="hidden"
-                              />
-                            </label>
-
-                            {(welcomeDmMediaFileId || welcomeDmMediaUploadId) && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setWelcomeDmMediaFileId('');
-                                  setWelcomeDmMediaUploadId(null);
-                                  setWelcomeDmMediaFileName(null);
-                                  setWelcomeDmMediaUploadStatus('idle');
-                                }}
-                                className={`px-2.5 py-2 rounded-lg text-xs border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 flex items-center gap-1`}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" /> Clear
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {welcomeDmMediaUploadError && (
-                          <p className="text-xs text-rose-400 font-medium">{welcomeDmMediaUploadError}</p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Message Template Textarea & Placeholder Badges */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold uppercase tracking-wider block">
-                          {welcomeDmContentType === 'text' ? 'Message Text (HTML supported)' : 'Media Caption (HTML supported)'}
-                        </label>
-                        <span className={`text-[11px] font-mono ${
-                          welcomeDmText.length > (welcomeDmContentType === 'text' ? 4096 : 1024)
-                            ? 'text-rose-400 font-bold'
-                            : themeMutedText
-                        }`}>
-                          {welcomeDmText.length} / {welcomeDmContentType === 'text' ? 4096 : 1024}
-                        </span>
-                      </div>
-
-                      <textarea
-                        rows={4}
-                        value={welcomeDmText}
-                        onChange={(e) => setWelcomeDmText(e.target.value)}
-                        placeholder="You joined {groupname} 🎉"
-                        className={`w-full text-xs font-mono px-3 py-2.5 rounded-xl border ${themeInputBg} focus:outline-none`}
-                      />
-
-                      {/* Dynamic Variable Helper Chips */}
-                      <div className="space-y-1.5 pt-1">
-                        <span className={`text-[11px] font-semibold ${themeMutedText} block`}>
-                          Insert Dynamic Placeholders (click to append):
-                        </span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {[
-                            { tag: '{groupname}', desc: 'Current Group Title' },
-                            { tag: '{first_name}', desc: 'Member First Name' },
-                            { tag: '{last_name}', desc: 'Member Last Name' },
-                            { tag: '{user}', desc: 'Full Display Name' },
-                            { tag: '{username}', desc: '@username' },
-                            { tag: '{user_id}', desc: 'Telegram User ID' },
-                            { tag: '{group_id}', desc: 'Telegram Group ID' }
-                          ].map(chip => (
-                            <button
-                              key={chip.tag}
-                              type="button"
-                              onClick={() => setWelcomeDmText(prev => `${prev} ${chip.tag}`)}
-                              className={`px-2 py-1 rounded-lg text-[11px] font-mono border ${themeBorder} ${themeInnerCardBg} hover:border-blue-500/50 hover:bg-blue-600/10 hover:text-blue-400 transition-all flex items-center gap-1`}
-                              title={chip.desc}
-                            >
-                              <span className="font-bold text-blue-400">{chip.tag}</span>
-                              <span className={`text-[10px] ${themeMutedText}`}>({chip.desc})</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Inline Buttons Builder */}
-                    <div className="space-y-3 pt-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <label className="text-xs font-bold uppercase tracking-wider block">Inline URL Buttons</label>
-                          <p className={`text-[11px] ${themeMutedText}`}>
-                            Add interactive buttons with Telegram-supported button colors (Default, Primary 🔵, Success 🟢, Danger 🔴).
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleAddWelcomeDmButtonRow}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600/10 text-blue-400 border border-blue-500/30 hover:bg-blue-600/20 flex items-center gap-1.5 transition-all"
-                        >
-                          <Plus className="w-3.5 h-3.5" /> Add Button Row
-                        </button>
-                      </div>
-
-                      {welcomeDmButtons.length === 0 ? (
-                        <div className={`p-4 rounded-xl border ${themeBorder} ${themeInnerCardBg} text-center text-xs ${themeMutedText}`}>
-                          No inline buttons configured. Click <b>+ Add Button Row</b> to add buttons attached to the welcome message.
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {welcomeDmButtons.map((row, rIdx) => (
-                            <div key={rIdx} className={`p-3 rounded-xl border ${themeBorder} ${themeInnerCardBg} space-y-2`}>
-                              <div className="flex items-center justify-between text-xs font-bold text-stone-400">
-                                <span>Row {rIdx + 1}</span>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleAddWelcomeDmButtonToRow(rIdx)}
-                                    className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 font-semibold"
-                                  >
-                                    <Plus className="w-3 h-3" /> Add Button
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveWelcomeDmButtonRow(rIdx)}
-                                    className="text-xs text-rose-400 hover:text-rose-300 font-semibold"
-                                  >
-                                    Remove Row
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="space-y-2">
-                                {row.map((btn, bIdx) => (
-                                  <div key={btn.id || bIdx} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-                                    <div className="sm:col-span-4">
-                                      <input
-                                        type="text"
-                                        value={btn.text}
-                                        onChange={(e) => handleUpdateWelcomeDmButton(rIdx, bIdx, 'text', e.target.value)}
-                                        placeholder="Button Text"
-                                        className={`w-full text-xs px-2.5 py-1.5 rounded-lg border ${themeInputBg}`}
-                                      />
-                                    </div>
-                                    <div className="sm:col-span-5">
-                                      <input
-                                        type="text"
-                                        value={btn.url}
-                                        onChange={(e) => handleUpdateWelcomeDmButton(rIdx, bIdx, 'url', e.target.value)}
-                                        placeholder="https://t.me/..."
-                                        className={`w-full text-xs font-mono px-2.5 py-1.5 rounded-lg border ${themeInputBg}`}
-                                      />
-                                    </div>
-                                    <div className="sm:col-span-2">
-                                      <select
-                                        value={btn.style || ''}
-                                        onChange={(e) => handleUpdateWelcomeDmButton(rIdx, bIdx, 'style', e.target.value || undefined)}
-                                        className={`w-full text-xs px-2 py-1.5 rounded-lg border ${themeInputBg}`}
-                                      >
-                                        <option value="">Default</option>
-                                        <option value="primary">Primary 🔵</option>
-                                        <option value="success">Success 🟢</option>
-                                        <option value="danger">Danger 🔴</option>
-                                      </select>
-                                    </div>
-                                    <div className="sm:col-span-1 text-right">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemoveWelcomeDmButton(rIdx, bIdx)}
-                                        className="p-1.5 text-stone-500 hover:text-rose-400 transition-colors"
-                                        title="Remove Button"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Live Preview Section */}
-                    <div className="space-y-2 pt-3 border-t border-stone-800/60">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold uppercase tracking-wider block flex items-center gap-1.5">
-                          <Eye className="w-3.5 h-3.5 text-blue-400" /> Telegram Private DM Live Preview
-                        </label>
-                        <span className={`text-[11px] ${themeMutedText}`}>
-                          Simulated user: <b className="text-stone-300">Alex Smith (@alexsmith)</b>
-                        </span>
-                      </div>
-
-                      <div className={`p-4 rounded-xl border ${themeBorder} ${isDark ? 'bg-stone-950/80' : 'bg-stone-100'} space-y-3 max-w-lg`}>
-                        <div className="flex items-center gap-2 pb-2 border-b border-stone-800/40 text-xs">
-                          <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center font-bold text-white text-xs">
-                            R
-                          </div>
-                          <div>
-                            <div className="font-bold text-xs">Miss Roxie</div>
-                            <div className={`text-[10px] ${themeMutedText}`}>bot • Private Chat</div>
-                          </div>
-                        </div>
-
-                        {welcomeDmContentType !== 'text' && (
-                          <div className={`p-3 rounded-lg border border-dashed ${themeBorder} text-center text-xs ${themeMutedText}`}>
-                            [{welcomeDmContentType.toUpperCase()} MEDIA PREVIEW]
-                            {welcomeDmMediaFileName && <span className="block text-[11px] text-blue-400 mt-0.5">{welcomeDmMediaFileName}</span>}
-                          </div>
-                        )}
-
-                        <div className="text-xs whitespace-pre-wrap leading-relaxed text-stone-200">
-                          {welcomeDmPreviewText}
-                        </div>
-
-                        {welcomeDmButtons.length > 0 && (
-                          <div className="space-y-1.5 pt-1">
-                            {welcomeDmButtons.map((row, rIdx) => (
-                              <div key={rIdx} className="flex gap-1.5">
-                                {row.map((btn, bIdx) => {
-                                  const btnPreviewText = btn.text
-                                    .replace(/{groupname}/gi, groupDetails?.chatTitle || 'Telegram Group')
-                                    .replace(/{user}/gi, 'Alex Smith')
-                                    .replace(/{username}/gi, '@alexsmith');
-
-                                  const styleClasses =
-                                    btn.style === 'primary' ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-sm' :
-                                    btn.style === 'success' ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm' :
-                                    btn.style === 'danger' ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-sm' :
-                                    'bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700';
-
-                                  return (
-                                    <div
-                                      key={btn.id || bIdx}
-                                      className={`flex-1 text-center py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 ${styleClasses}`}
-                                    >
-                                      <span>{btnPreviewText || 'Button'}</span>
-                                      <ExternalLink className="w-3 h-3 opacity-60" />
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Action Buttons: Send Test DM & Save Configuration */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-stone-800/60">
-                      {/* Send Test DM controls */}
-                      <div className="flex items-center gap-2 flex-1 max-w-md">
-                        <input
-                          type="text"
-                          value={welcomeDmTestUserId}
-                          onChange={(e) => setWelcomeDmTestUserId(e.target.value)}
-                          placeholder="Your Telegram User ID (e.g. 123456789)"
-                          className={`w-full text-xs font-mono px-3 py-2 rounded-xl border ${themeInputBg}`}
-                        />
-                        <button
-                          type="button"
-                          disabled={welcomeDmTestLoading}
-                          onClick={handleSendTestWelcomeDm}
-                          className={`px-3.5 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 whitespace-nowrap transition-all ${
-                            welcomeDmTestLoading
-                              ? 'opacity-60 bg-stone-800 border-stone-700'
-                              : 'bg-stone-800 hover:bg-stone-700 text-stone-200 border-stone-700 hover:border-stone-600'
-                          }`}
-                        >
-                          {welcomeDmTestLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                          Send Test DM
-                        </button>
-                      </div>
-
-                      {/* Save Button */}
+                  {/* Top Sub-Navigation for Welcome & Goodbye */}
+                  <div className={`flex items-center gap-2 ${themeInnerCardBg} p-2 rounded-xl border ${themeBorder} text-xs font-semibold overflow-x-auto`}>
+                    {[
+                      { id: 'group_welcome' as const, label: '👥 Group Welcome (In-Group)', active: Boolean(groupWelcomeConfig.enabled) },
+                      { id: 'group_goodbye' as const, label: '👋 Group Goodbye (In-Group)', active: Boolean(groupGoodbyeConfig.enabled) },
+                      { id: 'welcome_dm' as const, label: '✉️ Welcome Private DM', active: Boolean(welcomeDmConfig.enabled) }
+                    ].map(st => (
                       <button
+                        key={st.id}
                         type="button"
-                        disabled={welcomeDmSaveLoading}
-                        onClick={handleSaveWelcomeDm}
-                        className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-sm flex items-center justify-center gap-2 transition-all ${
-                          welcomeDmSaveLoading
-                            ? 'opacity-70 bg-blue-700'
-                            : 'bg-blue-600 hover:bg-blue-500 hover:shadow-md'
+                        onClick={() => setWelcomeGoodbyeSubTab(st.id)}
+                        className={`px-3 py-2 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap ${
+                          welcomeGoodbyeSubTab === st.id
+                            ? 'bg-blue-600 text-white shadow-sm font-bold'
+                            : `${themeMutedText} hover:bg-stone-800/20 hover:text-stone-200`
                         }`}
                       >
-                        {welcomeDmSaveLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                        Save Welcome DM
+                        <span>{st.label}</span>
+                        <span className={`w-2 h-2 rounded-full ${st.active ? 'bg-emerald-400 ring-2 ring-emerald-400/20' : 'bg-stone-600'}`} />
                       </button>
-                    </div>
+                    ))}
                   </div>
+
+                  {/* Sub-tab 1: Group Welcome */}
+                  {welcomeGoodbyeSubTab === 'group_welcome' && (
+                    <RichMessageEditor
+                      title="👥 Group Welcome Greeting"
+                      subtitle="Sent in-group when a new member joins"
+                      description={`Broadcasted inside ${groupDetails.chatTitle || 'this group'} whenever a real human user joins.`}
+                      badgeLabel="In-Group Join"
+                      config={groupWelcomeConfig}
+                      defaultText="👋 Welcome {user} to {groupname}!"
+                      groupTitle={groupDetails.chatTitle}
+                      groupId={groupDetails.chatId}
+                      isPrivateDm={false}
+                      theme={theme}
+                      onChange={setGroupWelcomeConfig}
+                      onSave={handleSaveWelcomeGoodbye}
+                      onTest={() => handleTestWelcomeGoodbye('groupWelcome')}
+                      testLabel="Send Test to Group"
+                      isSaving={welcomeGoodbyeSaving}
+                      isTesting={welcomeGoodbyeTesting}
+                      notification={welcomeGoodbyeNotification}
+                      onClearNotification={() => setWelcomeGoodbyeNotification(null)}
+                    />
+                  )}
+
+                  {/* Sub-tab 2: Group Goodbye */}
+                  {welcomeGoodbyeSubTab === 'group_goodbye' && (
+                    <RichMessageEditor
+                      title="👋 Group Goodbye Farewell"
+                      subtitle="Sent in-group when a member leaves"
+                      description={`Broadcasted inside ${groupDetails.chatTitle || 'this group'} when a member leaves or is removed. Note: Roxie NEVER sends private goodbye DMs.`}
+                      badgeLabel="In-Group Leave"
+                      config={groupGoodbyeConfig}
+                      defaultText="👋 Goodbye {user}, we will miss you!"
+                      groupTitle={groupDetails.chatTitle}
+                      groupId={groupDetails.chatId}
+                      isPrivateDm={false}
+                      theme={theme}
+                      onChange={setGroupGoodbyeConfig}
+                      onSave={handleSaveWelcomeGoodbye}
+                      onTest={() => handleTestWelcomeGoodbye('groupGoodbye')}
+                      testLabel="Send Test to Group"
+                      isSaving={welcomeGoodbyeSaving}
+                      isTesting={welcomeGoodbyeTesting}
+                      notification={welcomeGoodbyeNotification}
+                      onClearNotification={() => setWelcomeGoodbyeNotification(null)}
+                    />
+                  )}
+
+                  {/* Sub-tab 3: Welcome Private DM */}
+                  {welcomeGoodbyeSubTab === 'welcome_dm' && (
+                    <RichMessageEditor
+                      title="✉️ Welcome Private DM"
+                      subtitle="Sent directly to user in private chat"
+                      description={`Automatically dispatched to the joining user's private Telegram DM when they enter ${groupDetails.chatTitle || 'this group'}.`}
+                      badgeLabel="Private DM"
+                      config={welcomeDmConfig}
+                      defaultText="You joined {groupname} 🎉"
+                      groupTitle={groupDetails.chatTitle}
+                      groupId={groupDetails.chatId}
+                      isPrivateDm={true}
+                      theme={theme}
+                      onChange={setWelcomeDmConfig}
+                      onSave={handleSaveWelcomeGoodbye}
+                      onTest={(targetUserId) => handleTestWelcomeGoodbye('welcomeDm', targetUserId)}
+                      testLabel="Send Test DM"
+                      testPlaceholder="Your Telegram User ID (e.g. 123456789)"
+                      isSaving={welcomeGoodbyeSaving}
+                      isTesting={welcomeGoodbyeTesting}
+                      notification={welcomeGoodbyeNotification}
+                      onClearNotification={() => setWelcomeGoodbyeNotification(null)}
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* INNER TAB: GROUP RICH POST COMPOSER */}
+              {groupDetailTab === 'rich_post' && (
+                <div className="space-y-6">
+                  <RichPostComposer
+                    groups={groups}
+                    selectedChatId={groupDetails.chatId}
+                    lockedDestination={{
+                      type: 'group',
+                      chatId: groupDetails.chatId,
+                      title: groupDetails.chatTitle
+                    }}
+                    theme={theme}
+                    onRefresh={refreshCurrentView}
+                    botUsername={botInfo?.username || 'MissRoxie_Bot'}
+                  />
                 </div>
               )}
 
@@ -5793,7 +5440,7 @@ export default function App() {
                 {activePrivateChatId ? (
                   <>
                     {/* Thread Header */}
-                    <div className={`p-4 border-b ${themeBorder} flex items-center justify-between shrink-0`}>
+                    <div className={`p-4 border-b ${themeBorder} flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0`}>
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold text-sm">
                           {privateChats.find(c => c.chatId === activePrivateChatId)?.name?.slice(0, 1) || 'U'}
@@ -5807,56 +5454,103 @@ export default function App() {
                           </span>
                         </div>
                       </div>
+
+                      {/* Sub-tabs: Chat vs Rich Post */}
+                      <div className={`flex items-center gap-1 ${themeInnerCardBg} p-1 rounded-xl border ${themeBorder}`}>
+                        <button
+                          type="button"
+                          onClick={() => setPrivateChatSubTab('chat')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                            privateChatSubTab === 'chat'
+                              ? 'bg-blue-600 text-white shadow-sm'
+                              : `${themeMutedText} hover:text-stone-200`
+                          }`}
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          Chat History
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPrivateChatSubTab('rich_post')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                            privateChatSubTab === 'rich_post'
+                              ? 'bg-blue-600 text-white shadow-sm'
+                              : `${themeMutedText} hover:text-stone-200`
+                          }`}
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          Rich Post
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Messages Scroll Area */}
-                    <div className="flex-1 p-4 overflow-y-auto space-y-3">
-                      {privateChatMessages.map((m, idx) => {
-                        const isOut = m.direction === 'out' || m.role === 'assistant';
-                        return (
-                          <div key={idx} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-md p-3 rounded-2xl text-xs space-y-1 ${
-                              isOut 
-                                ? 'bg-blue-600 text-white rounded-br-none' 
-                                : `${themeInnerCardBg} border ${themeBorder} rounded-bl-none`
-                            }`}>
-                              <div className="flex items-center justify-between gap-4 text-[10px] opacity-70">
-                                <span>{isOut ? 'Roxie' : 'User'}</span>
-                                <span>{new Date(m.timestamp).toLocaleTimeString()}</span>
+                    {privateChatSubTab === 'chat' ? (
+                      <>
+                        {/* Messages Scroll Area */}
+                        <div className="flex-1 p-4 overflow-y-auto space-y-3">
+                          {privateChatMessages.map((m, idx) => {
+                            const isOut = m.direction === 'out' || m.role === 'assistant';
+                            return (
+                              <div key={idx} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-md p-3 rounded-2xl text-xs space-y-1 ${
+                                  isOut
+                                    ? 'bg-blue-600 text-white rounded-br-none'
+                                    : `${themeInnerCardBg} border ${themeBorder} rounded-bl-none`
+                                }`}>
+                                  <div className="flex items-center justify-between gap-4 text-[10px] opacity-70">
+                                    <span>{isOut ? 'Roxie' : 'User'}</span>
+                                    <span>{new Date(m.timestamp).toLocaleTimeString()}</span>
+                                  </div>
+                                  {m.mediaType === 'sticker' ||
+                                  m.content?.startsWith('🎨 Sticker') ||
+                                  m.content?.includes('[Sent sticker]') ? (
+                                    <StickerPreview mediaFileId={m.mediaFileId} content={m.content} isDark={true} />
+                                  ) : (
+                                    <p className="whitespace-pre-wrap">{m.content}</p>
+                                  )}
+                                </div>
                               </div>
-                              {m.mediaType === 'sticker' ||
-                              m.content?.startsWith('🎨 Sticker') ||
-                              m.content?.includes('[Sent sticker]') ? (
-                                <StickerPreview mediaFileId={m.mediaFileId} content={m.content} isDark={true} />
-                              ) : (
-                                <p className="whitespace-pre-wrap">{m.content}</p>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {privateChatMessages.length === 0 && (
-                        <p className={`text-xs ${themeMutedText} text-center py-16`}>No messages in this conversation yet.</p>
-                      )}
-                    </div>
+                            );
+                          })}
+                          {privateChatMessages.length === 0 && (
+                            <p className={`text-xs ${themeMutedText} text-center py-16`}>No messages in this conversation yet.</p>
+                          )}
+                        </div>
 
-                    {/* Reply Composer */}
-                    <form onSubmit={handleSendPrivateReply} className={`p-4 border-t ${themeBorder} flex items-center gap-2 shrink-0`}>
-                      <input
-                        type="text"
-                        placeholder="Type reply to user..."
-                        value={privateReplyText}
-                        onChange={(e) => setPrivateReplyText(e.target.value)}
-                        className={`flex-1 ${themeInnerCardBg} border ${themeBorder} rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-blue-500`}
-                      />
-                      <button
-                        type="submit"
-                        disabled={sendingPrivateReply || !privateReplyText.trim()}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-                      >
-                        <Send className="w-3.5 h-3.5" /> Send
-                      </button>
-                    </form>
+                        {/* Reply Composer */}
+                        <form onSubmit={handleSendPrivateReply} className={`p-4 border-t ${themeBorder} flex items-center gap-2 shrink-0`}>
+                          <input
+                            type="text"
+                            placeholder="Type reply to user..."
+                            value={privateReplyText}
+                            onChange={(e) => setPrivateReplyText(e.target.value)}
+                            className={`flex-1 ${themeInnerCardBg} border ${themeBorder} rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-blue-500`}
+                          />
+                          <button
+                            type="submit"
+                            disabled={sendingPrivateReply || !privateReplyText.trim()}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+                          >
+                            <Send className="w-3.5 h-3.5" /> Send
+                          </button>
+                        </form>
+                      </>
+                    ) : (
+                      <div className="flex-1 p-6 overflow-y-auto">
+                        <RichPostComposer
+                          groups={groups}
+                          selectedChatId={Number(activePrivateChatId)}
+                          lockedDestination={{
+                            type: 'private',
+                            chatId: Number(activePrivateChatId),
+                            title: privateChats.find(c => c.chatId === activePrivateChatId)?.name || `User ${activePrivateChatId}`
+                          }}
+                          theme={theme}
+                          onRefresh={refreshCurrentView}
+                          botUsername={botInfo?.username || 'MissRoxie_Bot'}
+                        />
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-2">

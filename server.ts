@@ -16,7 +16,7 @@ import { runDummyDataCleanup } from './server/operations/cleanupDummyData.js';
 import { mongoManager } from './server/db/mongodb.js';
 import { MongoStorageService } from './server/db/mongoStorage.js';
 import { PostSender, sanitizeInlineButtons, validateMediaReference } from './server/telegram/postSender.js';
-import { PostPayload, PostContentType, ScheduledPostButton, WelcomeDmConfig, TelegramUser } from './server/telegram/types.js';
+import { PostPayload, PostContentType, ScheduledPostButton, WelcomeDmConfig, TelegramUser, RichMessageConfig, MessageMode, GroupSettings } from './server/telegram/types.js';
 import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
 import { ModerationService } from './server/telegram/moderation.js';
 
@@ -1307,8 +1307,83 @@ export async function startServer() {
   app.patch('/api/dashboard/groups/:chatId/settings', handleUpdateGroupSettings);
   app.put('/api/groups/:chatId/settings', handleUpdateGroupSettings);
 
-  // 8b. Per-Group Welcome Private DM APIs
-  app.get('/api/dashboard/groups/:chatId/welcome-dm', (req, res) => {
+  interface RichMessageValidationResult {
+    valid: boolean;
+    config?: RichMessageConfig;
+    error?: string;
+    status?: number;
+  }
+
+  // Helper to validate and normalize rich message configurations
+  function validateAndNormalizeRichMessageConfig(
+    body: any,
+    defaultText: string
+  ): RichMessageValidationResult {
+    if (!body || typeof body !== 'object') {
+      return {
+        valid: true,
+        config: { enabled: false, mode: 'simple', contentType: 'text', text: defaultText }
+      };
+    }
+
+    const enabled = Boolean(body.enabled);
+    const mode: MessageMode = body.mode === 'rich' ? 'rich' : 'simple';
+    const contentType: PostContentType = body.contentType || 'text';
+    const validTypes: PostContentType[] = ['text', 'photo', 'video', 'animation', 'document'];
+    if (!validTypes.includes(contentType)) {
+      return { valid: false, error: `Unsupported content type: ${contentType}`, status: 400 };
+    }
+
+    const rawText = typeof body.text === 'string' ? body.text.trim() : '';
+    const maxTextLen = contentType === 'text' ? 4096 : 1024;
+    if (rawText.length > maxTextLen) {
+      return { valid: false, error: `Text/caption exceeds maximum length (${rawText.length}/${maxTextLen} characters).`, status: 400 };
+    }
+
+    const text = rawText || defaultText;
+    let normalizedMediaId: string | undefined = undefined;
+    let mediaUploadId: string | undefined = undefined;
+
+    if (contentType !== 'text') {
+      const uploadCandidate = body.mediaUploadId ||
+        (body.mediaFileId?.startsWith('upl_') ? body.mediaFileId : (body.mediaFileId?.startsWith('upload:') ? body.mediaFileId.substring(7) : undefined));
+
+      if (uploadCandidate) {
+        const item = mediaUploadStore.getMedia(uploadCandidate);
+        if (!item) {
+          return { valid: false, error: `Uploaded media file (${uploadCandidate}) has expired or is invalid. Please re-upload the file.`, status: 400 };
+        }
+        mediaUploadId = item.id;
+        normalizedMediaId = `upload:${item.id}`;
+      } else if (body.mediaFileId) {
+        const mediaCheck = validateMediaReference(body.mediaFileId);
+        if (!mediaCheck.valid) {
+          return { valid: false, error: mediaCheck.error || `Invalid media reference for ${contentType} message.`, status: 400 };
+        }
+        normalizedMediaId = mediaCheck.normalized;
+      } else {
+        return { valid: false, error: `Media reference is required for ${contentType} message.`, status: 400 };
+      }
+    }
+
+    const sanitizedButtons = sanitizeInlineButtons(body.buttons);
+
+    return {
+      valid: true,
+      config: {
+        enabled,
+        mode,
+        contentType,
+        text,
+        mediaFileId: normalizedMediaId,
+        mediaUploadId,
+        buttons: sanitizedButtons
+      }
+    };
+  }
+
+  // 8b. Unified Group Welcome, Group Goodbye & Welcome Private DM APIs
+  app.get('/api/dashboard/groups/:chatId/welcome-goodbye', (req, res) => {
     try {
       const auth = verifyOperatorAuth(req, 'VIEWER');
       if (!auth.authorized) {
@@ -1321,8 +1396,21 @@ export async function startServer() {
       }
 
       const settings = db.getGroupSettings(chatId);
-      const welcomeDm: WelcomeDmConfig = settings.welcomeDm || {
+      const groupWelcome: RichMessageConfig = settings.groupWelcome || {
+        enabled: Boolean(settings.welcomeEnabled),
+        mode: 'simple',
+        contentType: 'text',
+        text: settings.welcomeMessage || 'Welcome {user} to {chat}!'
+      };
+      const groupGoodbye: RichMessageConfig = settings.groupGoodbye || {
+        enabled: Boolean(settings.goodbyeEnabled),
+        mode: 'simple',
+        contentType: 'text',
+        text: settings.goodbyeMessage || 'Goodbye {user}!'
+      };
+      const welcomeDm: RichMessageConfig = settings.welcomeDm || {
         enabled: false,
+        mode: 'simple',
         contentType: 'text',
         text: 'You joined {groupname} 🎉'
       };
@@ -1330,6 +1418,8 @@ export async function startServer() {
       res.json({
         chatId,
         chatTitle: settings.chatTitle || `Group ${chatId}`,
+        groupWelcome,
+        groupGoodbye,
         welcomeDm
       });
     } catch (err: any) {
@@ -1337,7 +1427,7 @@ export async function startServer() {
     }
   });
 
-  const handleUpdateWelcomeDm = async (req: express.Request, res: express.Response) => {
+  const handleUpdateWelcomeGoodbye = async (req: express.Request, res: express.Response) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');
       if (!auth.authorized) {
@@ -1349,62 +1439,45 @@ export async function startServer() {
         return res.status(400).json({ error: 'Valid target chatId is required.' });
       }
 
-      const settings = db.getGroupSettings(chatId);
       const body = req.body || {};
+      const updatesToApply: Partial<GroupSettings> = {};
 
-      const enabled = Boolean(body.enabled);
-      const contentType: PostContentType = body.contentType || 'text';
-      const validTypes: PostContentType[] = ['text', 'photo', 'video', 'animation', 'document'];
-      if (!validTypes.includes(contentType)) {
-        return res.status(400).json({ error: `Unsupported content type: ${contentType}` });
+      if (body.groupWelcome !== undefined) {
+        const check = validateAndNormalizeRichMessageConfig(body.groupWelcome, 'Welcome {user} to {chat}!');
+        if (!check.valid || !check.config) {
+          return res.status(check.status || 400).json({ error: check.error || 'Invalid groupWelcome configuration' });
+        }
+        updatesToApply.groupWelcome = check.config;
       }
 
-      const rawText = typeof body.text === 'string' ? body.text.trim() : '';
-      const maxTextLen = contentType === 'text' ? 4096 : 1024;
-      if (rawText.length > maxTextLen) {
-        return res.status(400).json({ error: `Text/caption exceeds maximum length (${rawText.length}/${maxTextLen} characters).` });
+      if (body.groupGoodbye !== undefined) {
+        const check = validateAndNormalizeRichMessageConfig(body.groupGoodbye, 'Goodbye {user}!');
+        if (!check.valid || !check.config) {
+          return res.status(check.status || 400).json({ error: check.error || 'Invalid groupGoodbye configuration' });
+        }
+        updatesToApply.groupGoodbye = check.config;
       }
 
-      // Default safe fallback if text is empty
-      const text = rawText || 'You joined {groupname} 🎉';
+      if (body.welcomeDm !== undefined) {
+        const check = validateAndNormalizeRichMessageConfig(body.welcomeDm, 'You joined {groupname} 🎉');
+        if (!check.valid || !check.config) {
+          return res.status(check.status || 400).json({ error: check.error || 'Invalid welcomeDm configuration' });
+        }
+        updatesToApply.welcomeDm = check.config;
+      }
 
-      let normalizedMediaId: string | undefined = undefined;
-      let mediaUploadId: string | undefined = undefined;
-
-      if (contentType !== 'text') {
-        const uploadCandidate = body.mediaUploadId ||
-          (body.mediaFileId?.startsWith('upl_') ? body.mediaFileId : (body.mediaFileId?.startsWith('upload:') ? body.mediaFileId.substring(7) : undefined));
-
-        if (uploadCandidate) {
-          const item = mediaUploadStore.getMedia(uploadCandidate);
-          if (!item) {
-            return res.status(400).json({ error: `Uploaded media file (${uploadCandidate}) has expired or is invalid. Please re-upload the file.` });
+      // If updating only single root fields directly on body (e.g. legacy welcome-dm payload)
+      if (body.groupWelcome === undefined && body.groupGoodbye === undefined && body.welcomeDm === undefined) {
+        if (body.contentType !== undefined || body.text !== undefined || body.enabled !== undefined || body.buttons !== undefined) {
+          const check = validateAndNormalizeRichMessageConfig(body, 'You joined {groupname} 🎉');
+          if (!check.valid || !check.config) {
+            return res.status(check.status || 400).json({ error: check.error || 'Invalid welcomeDm configuration' });
           }
-          mediaUploadId = item.id;
-          normalizedMediaId = `upload:${item.id}`;
-        } else if (body.mediaFileId) {
-          const mediaCheck = validateMediaReference(body.mediaFileId);
-          if (!mediaCheck.valid) {
-            return res.status(400).json({ error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` });
-          }
-          normalizedMediaId = mediaCheck.normalized;
-        } else {
-          return res.status(400).json({ error: `Media reference is required for ${contentType} welcome message.` });
+          updatesToApply.welcomeDm = check.config;
         }
       }
 
-      const sanitizedButtons = sanitizeInlineButtons(body.buttons);
-
-      const welcomeDmConfig: WelcomeDmConfig = {
-        enabled,
-        contentType,
-        text,
-        mediaFileId: normalizedMediaId,
-        mediaUploadId,
-        buttons: sanitizedButtons
-      };
-
-      const updated = db.updateGroupSettings(chatId, { welcomeDm: welcomeDmConfig });
+      const updated = db.updateGroupSettings(chatId, updatesToApply);
 
       db.logAction({
         id: Math.random().toString(36).slice(2, 9),
@@ -1414,15 +1487,17 @@ export async function startServer() {
         groupId: chatId,
         actorRole: 'DASHBOARD_ADMIN',
         adminUsername: auth.operatorUsername,
-        command: 'welcome_dm_config',
+        command: 'welcome_goodbye_config',
         action: 'setting_change',
         result: 'success',
-        details: `Updated Welcome DM config: enabled=${enabled}, type=${contentType}`
+        details: `Updated Welcome & Goodbye settings for group ${chatId}`
       });
 
       res.json({
         success: true,
         chatId,
+        groupWelcome: updated.groupWelcome,
+        groupGoodbye: updated.groupGoodbye,
         welcomeDm: updated.welcomeDm
       });
     } catch (err: any) {
@@ -1430,10 +1505,11 @@ export async function startServer() {
     }
   };
 
-  app.put('/api/dashboard/groups/:chatId/welcome-dm', handleUpdateWelcomeDm);
-  app.post('/api/dashboard/groups/:chatId/welcome-dm', handleUpdateWelcomeDm);
+  app.put('/api/dashboard/groups/:chatId/welcome-goodbye', handleUpdateWelcomeGoodbye);
+  app.post('/api/dashboard/groups/:chatId/welcome-goodbye', handleUpdateWelcomeGoodbye);
 
-  app.post('/api/dashboard/groups/:chatId/welcome-dm/test', async (req, res) => {
+  // Test endpoint for Welcome, Goodbye, or Welcome DM
+  app.post('/api/dashboard/groups/:chatId/welcome-goodbye/test', async (req, res) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');
       if (!auth.authorized) {
@@ -1447,23 +1523,48 @@ export async function startServer() {
 
       const settings = db.getGroupSettings(chatId);
       const chatTitle = settings.chatTitle || `Group ${chatId}`;
+      const target = (req.body?.target || 'welcomeDm') as 'groupWelcome' | 'groupGoodbye' | 'welcomeDm';
 
-      // Resolve target operator Telegram ID
-      const rawTargetUserId = req.body?.targetUserId || req.query?.targetUserId || process.env.ADMIN_USER_ID || process.env.TELEGRAM_ADMIN_ID;
-      const numTargetUserId = Number(rawTargetUserId);
-      if (!numTargetUserId || isNaN(numTargetUserId) || numTargetUserId <= 0) {
-        return res.status(400).json({
-          error: 'Cannot send test DM: A valid recipient Telegram User ID is required. Please enter your Telegram user ID or configure ADMIN_USER_ID.',
-          code: 'USER_ID_REQUIRED'
-        });
+      let configToTest: RichMessageConfig;
+      let defaultText = 'Welcome {user} to {chat}!';
+
+      if (target === 'groupGoodbye') {
+        defaultText = 'Goodbye {user}!';
+        configToTest = req.body?.groupGoodbye || req.body?.config || settings.groupGoodbye || {
+          enabled: true,
+          mode: 'simple',
+          contentType: 'text',
+          text: defaultText
+        };
+      } else if (target === 'groupWelcome') {
+        defaultText = 'Welcome {user} to {chat}!';
+        configToTest = req.body?.groupWelcome || req.body?.config || settings.groupWelcome || {
+          enabled: true,
+          mode: 'simple',
+          contentType: 'text',
+          text: defaultText
+        };
+      } else {
+        defaultText = 'You joined {groupname} 🎉';
+        configToTest = req.body?.welcomeDm || req.body?.config || settings.welcomeDm || {
+          enabled: true,
+          mode: 'simple',
+          contentType: 'text',
+          text: defaultText
+        };
       }
 
-      // Resolve payload to test: either from request body or saved welcomeDm configuration
-      const configToTest: WelcomeDmConfig = req.body?.welcomeDm || settings.welcomeDm || {
-        enabled: true,
-        contentType: 'text',
-        text: 'You joined {groupname} 🎉'
-      };
+      const rawTargetUserId = req.body?.targetUserId || req.query?.targetUserId || process.env.ADMIN_USER_ID || process.env.TELEGRAM_ADMIN_ID;
+      const numTargetUserId = Number(rawTargetUserId) || 123456789;
+
+      if (target === 'welcomeDm') {
+        if (!numTargetUserId || isNaN(numTargetUserId) || numTargetUserId <= 0) {
+          return res.status(400).json({
+            error: 'Cannot send test DM: A valid recipient Telegram User ID is required. Please enter your Telegram user ID or configure ADMIN_USER_ID.',
+            code: 'USER_ID_REQUIRED'
+          });
+        }
+      }
 
       const mockUser: TelegramUser = {
         id: numTargetUserId,
@@ -1473,9 +1574,11 @@ export async function startServer() {
         username: req.body?.username || auth.operatorUsername || 'admin'
       };
 
-      const rawText = configToTest.text !== undefined ? configToTest.text : 'You joined {groupname} 🎉';
-      const formattedText = ModerationService.formatWelcomeDmText(rawText, mockUser, chatTitle, chatId);
-      const formattedButtons = ModerationService.formatWelcomeDmButtons(configToTest.buttons, mockUser, chatTitle, chatId);
+      const rawText = configToTest.text !== undefined ? configToTest.text : defaultText;
+      const formattedText = ModerationService.formatRichMessageText(rawText, mockUser, chatTitle, chatId);
+      const formattedButtons = configToTest.mode === 'rich' || (configToTest.buttons && configToTest.buttons.length > 0)
+        ? ModerationService.formatRichMessageButtons(configToTest.buttons, mockUser, chatTitle, chatId)
+        : undefined;
 
       let normalizedMediaId = configToTest.mediaFileId;
       let mediaUploadId = configToTest.mediaUploadId;
@@ -1508,11 +1611,13 @@ export async function startServer() {
         buttons: formattedButtons
       };
 
-      const sendRes = await PostSender.send(numTargetUserId, payload);
+      const destinationChatId = target === 'welcomeDm' ? numTargetUserId : chatId;
+      const sendRes = await PostSender.send(destinationChatId, payload);
+
       if (!sendRes.ok) {
         return res.status(502).json({
           success: false,
-          error: `Telegram delivery failed: ${sendRes.error || 'User unreachable by bot in private chat. Ensure you have started the bot via /start.'}`,
+          error: `Telegram delivery failed: ${sendRes.error || 'Delivery rejected by Telegram.'}`,
           details: sendRes.error
         });
       }
@@ -1520,21 +1625,47 @@ export async function startServer() {
       db.addLog({
         chatId,
         chatTitle,
-        targetUserId: numTargetUserId,
+        targetUserId: target === 'welcomeDm' ? numTargetUserId : undefined,
         adminUsername: auth.operatorUsername,
         action: 'send_message',
-        details: `Sent Test Welcome DM to operator ID ${numTargetUserId} for group ${chatTitle} (Telegram msg #${sendRes.messageId || 'unknown'})`
+        details: `Sent Test ${target} message to ${destinationChatId} for group ${chatTitle} (Telegram msg #${sendRes.messageId || 'unknown'})`
       });
 
       res.json({
         success: true,
         messageId: sendRes.messageId,
-        chatId: numTargetUserId,
-        message: `Test Welcome DM successfully delivered to Telegram user ID ${numTargetUserId}!`
+        chatId: destinationChatId,
+        target,
+        message: `Test ${target} successfully delivered to ${target === 'welcomeDm' ? `Telegram user ID ${numTargetUserId}` : `Group ${chatTitle}`}!`
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // Backward compatibility alias endpoints for Welcome DM
+  app.get('/api/dashboard/groups/:chatId/welcome-dm', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
+      const chatId = Number(req.params.chatId);
+      if (!chatId || isNaN(chatId)) return res.status(400).json({ error: 'Valid target chatId is required.' });
+      const settings = db.getGroupSettings(chatId);
+      res.json({
+        chatId,
+        chatTitle: settings.chatTitle || `Group ${chatId}`,
+        welcomeDm: settings.welcomeDm || { enabled: false, mode: 'simple', contentType: 'text', text: 'You joined {groupname} 🎉' }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put('/api/dashboard/groups/:chatId/welcome-dm', handleUpdateWelcomeGoodbye);
+  app.post('/api/dashboard/groups/:chatId/welcome-dm', handleUpdateWelcomeGoodbye);
+  app.post('/api/dashboard/groups/:chatId/welcome-dm/test', async (req, res) => {
+    (req.body as any).target = 'welcomeDm';
+    return (app as any)._router.handle({ ...req, url: `/api/dashboard/groups/${req.params.chatId}/welcome-goodbye/test` }, res, () => {});
   });
 
   // 9. Inspect and modify Telegram permissions
@@ -2008,31 +2139,41 @@ export async function startServer() {
     }
   });
 
-  app.post('/api/dashboard/posts/send', async (req, res) => {
+  const handleSendRichPost = async (req: express.Request, res: express.Response) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');
       if (!auth.authorized) {
         return res.status(auth.status).json({ error: auth.error });
       }
 
-      const { chatId, payload } = req.body;
-      const numChatId = Number(chatId);
+      const rawChatId = req.params.chatId || req.params.userId || req.body.chatId;
+      const numChatId = Number(rawChatId);
       if (!numChatId || isNaN(numChatId)) {
-        return res.status(400).json({ error: 'Valid target chatId is required.' });
+        return res.status(400).json({ error: 'Valid target chatId or userId is required.' });
       }
 
       // Blocked dummy legacy destinations
-      if (numChatId === -100111222333 || String(chatId).includes('100111222333')) {
+      if (numChatId === -100111222333 || String(rawChatId).includes('100111222333')) {
         return res.status(400).json({ error: 'Target chatId is a blocked legacy test destination.' });
       }
 
-      // Verify chat existence in database
-      const isGroupConnected = db.getConnectedGroups().some(g => g.chatId === numChatId || Number(g.chatId) === numChatId);
-      if (!isGroupConnected) {
-        return res.status(404).json({ error: 'Target group not found in database.' });
-      }
-      const groupSettings = db.getGroupSettings(numChatId);
+      let chatTitle = `Chat ${numChatId}`;
+      const isGroup = numChatId < 0;
 
+      if (isGroup) {
+        // Verify group existence in database
+        const isGroupConnected = db.getConnectedGroups().some(g => g.chatId === numChatId || Number(g.chatId) === numChatId);
+        if (!isGroupConnected) {
+          return res.status(404).json({ error: 'Target group not found in database.' });
+        }
+        const groupSettings = db.getGroupSettings(numChatId);
+        chatTitle = groupSettings.chatTitle || `Group ${numChatId}`;
+      } else {
+        const privChat = db.getPrivateChatsList().find(c => Number(c.chatId) === numChatId || Number(c.userId) === numChatId);
+        chatTitle = privChat?.name || `Private User ${numChatId}`;
+      }
+
+      const payload = req.body?.payload || req.body;
       if (!payload || typeof payload !== 'object') {
         return res.status(400).json({ error: 'Post payload is required.' });
       }
@@ -2067,12 +2208,14 @@ export async function startServer() {
           }
           mediaUploadId = item.id;
           normalizedMediaId = `upload:${item.id}`;
-        } else {
+        } else if (payload.mediaFileId) {
           const mediaCheck = validateMediaReference(payload.mediaFileId);
           if (!mediaCheck.valid) {
             return res.status(400).json({ error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` });
           }
           normalizedMediaId = mediaCheck.normalized;
+        } else {
+          return res.status(400).json({ error: `Media reference is required for ${contentType} posts.` });
         }
       }
 
@@ -2095,29 +2238,41 @@ export async function startServer() {
       if (sendResult.ok) {
         db.addLog({
           chatId: numChatId,
-          chatTitle: groupSettings.chatTitle || `Chat ${numChatId}`,
+          chatTitle,
           adminUsername: auth.operatorUsername,
-          action: 'broadcast',
-          details: `Sent rich ${contentType.toUpperCase()} post via Dashboard Composer (Telegram msg #${sendResult.messageId || 'unknown'})`
+          action: isGroup ? 'broadcast' : 'send_message',
+          details: `Sent rich ${contentType.toUpperCase()} post to ${chatTitle} via Dashboard Composer (Telegram msg #${sendResult.messageId || 'unknown'})`
         });
 
-        // Add to conversation memory if available
+        // Add to group or private conversation memory if messageId available
         if (sendResult.messageId) {
-          db.addGroupConversationEntry(numChatId, {
-            role: 'assistant',
-            name: 'Roxie',
-            displayName: 'Roxie (Dashboard Composer)',
-            username: 'MissRoxie_Bot',
-            content: text || `[${contentType.toUpperCase()}]`,
-            timestamp: Date.now(),
-            messageId: sendResult.messageId,
-            chatId: numChatId,
-            mediaType: contentType,
-            mediaFileId: sendResult.telegramFileId || normalizedMediaId,
-            direction: 'outgoing',
-            source: 'dashboard',
-            sender: 'Roxie'
-          });
+          if (isGroup) {
+            db.addGroupConversationEntry(numChatId, {
+              role: 'assistant',
+              name: 'Roxie',
+              displayName: 'Roxie (Dashboard Composer)',
+              username: 'MissRoxie_Bot',
+              content: text || `[${contentType.toUpperCase()}]`,
+              timestamp: Date.now(),
+              messageId: sendResult.messageId,
+              chatId: numChatId,
+              mediaType: contentType,
+              mediaFileId: sendResult.telegramFileId || normalizedMediaId,
+              direction: 'outgoing',
+              source: 'dashboard',
+              sender: 'Roxie'
+            });
+          } else {
+            db.addPrivateMessage(numChatId, numChatId, {
+              role: 'assistant',
+              content: text || `[${contentType.toUpperCase()}]`,
+              timestamp: Date.now(),
+              messageId: sendResult.messageId,
+              mediaType: contentType,
+              mediaFileId: sendResult.telegramFileId || normalizedMediaId,
+              direction: 'out'
+            });
+          }
         }
 
         return res.json({ success: true, result: sendResult });
@@ -2127,42 +2282,53 @@ export async function startServer() {
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Internal server error in dashboard post composer' });
     }
-  });
+  };
 
-  app.post('/api/dashboard/posts/schedule', async (req, res) => {
+  const handleScheduleRichPost = async (req: express.Request, res: express.Response) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');
       if (!auth.authorized) {
         return res.status(auth.status).json({ error: auth.error });
       }
 
-      const { chatId, payload, nextRun, timezone, name } = req.body;
-      const numChatId = Number(chatId);
+      const rawChatId = req.params.chatId || req.params.userId || req.body.chatId;
+      const numChatId = Number(rawChatId);
       if (!numChatId || isNaN(numChatId)) {
-        return res.status(400).json({ error: 'Valid target chatId is required.' });
+        return res.status(400).json({ error: 'Valid target chatId or userId is required.' });
       }
 
-      if (numChatId === -100111222333 || String(chatId).includes('100111222333')) {
+      if (numChatId === -100111222333 || String(rawChatId).includes('100111222333')) {
         return res.status(400).json({ error: 'Target chatId is a blocked legacy test destination.' });
       }
 
-      const isGroupConnected = db.getConnectedGroups().some(g => g.chatId === numChatId || Number(g.chatId) === numChatId);
-      if (!isGroupConnected) {
-        return res.status(404).json({ error: 'Target group not found in database.' });
-      }
-      const groupSettings = db.getGroupSettings(numChatId);
+      let chatTitle = `Chat ${numChatId}`;
+      const isGroup = numChatId < 0;
 
-      if (!payload || typeof payload !== 'object') {
+      if (isGroup) {
+        const isGroupConnected = db.getConnectedGroups().some(g => g.chatId === numChatId || Number(g.chatId) === numChatId);
+        if (!isGroupConnected) {
+          return res.status(404).json({ error: 'Target group not found in database.' });
+        }
+        const groupSettings = db.getGroupSettings(numChatId);
+        chatTitle = groupSettings.chatTitle || `Group ${numChatId}`;
+      } else {
+        const privChat = db.getPrivateChatsList().find(c => Number(c.chatId) === numChatId || Number(c.userId) === numChatId);
+        chatTitle = privChat?.name || `Private User ${numChatId}`;
+      }
+
+      const { payload, nextRun, timezone, name } = req.body;
+      const postPayload = payload || req.body;
+      if (!postPayload || typeof postPayload !== 'object') {
         return res.status(400).json({ error: 'Post payload is required.' });
       }
 
-      const contentType: PostContentType = payload.contentType || 'text';
+      const contentType: PostContentType = postPayload.contentType || 'text';
       const validTypes: PostContentType[] = ['text', 'photo', 'video', 'animation', 'document'];
       if (!validTypes.includes(contentType)) {
         return res.status(400).json({ error: `Unsupported content type: ${contentType}` });
       }
 
-      const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+      const text = typeof postPayload.text === 'string' ? postPayload.text.trim() : '';
       const maxTextLen = contentType === 'text' ? 4096 : 1024;
       if (text.length > maxTextLen) {
         return res.status(400).json({ error: `Text/caption exceeds maximum length (${text.length}/${maxTextLen} characters).` });
@@ -2175,13 +2341,13 @@ export async function startServer() {
       let scheduledMediaId: string | undefined = undefined;
       if (contentType !== 'text') {
         const isLocalUpload = Boolean(
-          payload.mediaUploadId ||
-          (payload.mediaFileId && (
-            payload.mediaFileId.startsWith('upl_') ||
-            payload.mediaFileId.startsWith('upload:') ||
-            payload.mediaFileId.startsWith('blob:') ||
-            payload.mediaFileId.startsWith('data:') ||
-            payload.mediaFileId.startsWith('local_preview_')
+          postPayload.mediaUploadId ||
+          (postPayload.mediaFileId && (
+            postPayload.mediaFileId.startsWith('upl_') ||
+            postPayload.mediaFileId.startsWith('upload:') ||
+            postPayload.mediaFileId.startsWith('blob:') ||
+            postPayload.mediaFileId.startsWith('data:') ||
+            postPayload.mediaFileId.startsWith('local_preview_')
           ))
         );
 
@@ -2191,7 +2357,7 @@ export async function startServer() {
           });
         }
 
-        const mediaCheck = validateMediaReference(payload.mediaFileId);
+        const mediaCheck = validateMediaReference(postPayload.mediaFileId);
         if (!mediaCheck.valid) {
           return res.status(400).json({ error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` });
         }
@@ -2207,11 +2373,11 @@ export async function startServer() {
         return res.status(400).json({ error: 'Scheduled execution time must be in the future.' });
       }
 
-      const sanitizedButtons = sanitizeInlineButtons(payload.buttons);
+      const sanitizedButtons = sanitizeInlineButtons(postPayload.buttons);
 
       const scheduleRecord = db.addSchedule({
         chatId: numChatId,
-        chatTitle: groupSettings.chatTitle || `Chat ${numChatId}`,
+        chatTitle,
         name: name || (text.slice(0, 30) || `Rich ${contentType.toUpperCase()} Schedule`),
         message: text || `[${contentType.toUpperCase()}]`,
         messageText: text,
@@ -2220,10 +2386,10 @@ export async function startServer() {
         timezone: timezone || 'UTC',
         contentType,
         mediaFileId: scheduledMediaId,
-        replyToMessageId: payload.replyToMessageId ? Number(payload.replyToMessageId) : undefined,
-        replyToLatest: Boolean(payload.replyToLatest),
-        autoDeletePrevious: Boolean(payload.autoDeletePrevious),
-        pinAfterSend: Boolean(payload.pinAfterSend),
+        replyToMessageId: postPayload.replyToMessageId ? Number(postPayload.replyToMessageId) : undefined,
+        replyToLatest: Boolean(postPayload.replyToLatest),
+        autoDeletePrevious: Boolean(postPayload.autoDeletePrevious),
+        pinAfterSend: Boolean(postPayload.pinAfterSend),
         inlineKeyboard: sanitizedButtons,
         enabled: true,
         adminUsername: auth.operatorUsername,
@@ -2232,17 +2398,26 @@ export async function startServer() {
 
       db.addLog({
         chatId: numChatId,
-        chatTitle: groupSettings.chatTitle || `Chat ${numChatId}`,
+        chatTitle,
         adminUsername: auth.operatorUsername,
         action: 'schedule_created',
-        details: `Scheduled rich ${contentType.toUpperCase()} post [${scheduleRecord.id}] via Dashboard Composer for ${scheduleRecord.nextRun}`
+        details: `Scheduled rich ${contentType.toUpperCase()} post [${scheduleRecord.id}] to ${chatTitle} via Dashboard Composer for ${scheduleRecord.nextRun}`
       });
 
       return res.json({ success: true, schedule: scheduleRecord });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Internal server error in dashboard post scheduler' });
     }
-  });
+  };
+
+  // Mount Composer endpoints for standalone, group-locked, and private-locked views
+  app.post('/api/dashboard/posts/send', handleSendRichPost);
+  app.post('/api/dashboard/groups/:chatId/rich-post/send', handleSendRichPost);
+  app.post('/api/dashboard/private/:userId/rich-post/send', handleSendRichPost);
+
+  app.post('/api/dashboard/posts/schedule', handleScheduleRichPost);
+  app.post('/api/dashboard/groups/:chatId/rich-post/schedule', handleScheduleRichPost);
+  app.post('/api/dashboard/private/:userId/rich-post/schedule', handleScheduleRichPost);
 
   // --- Scheduled Messages & Rules Dashboard APIs ---
   app.get('/api/dashboard/schedules', (req, res) => {

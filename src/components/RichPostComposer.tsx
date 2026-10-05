@@ -45,6 +45,11 @@ export interface RichPostComposerProps {
     unavailable?: boolean;
   }>;
   selectedChatId?: number | 'all';
+  lockedDestination?: {
+    type: 'group' | 'private';
+    chatId: number;
+    title?: string;
+  };
   theme?: 'dark' | 'light';
   onRefresh?: () => void;
   botUsername?: string;
@@ -118,6 +123,7 @@ function validateMediaReference(ref?: string, hasUploadedMedia?: boolean): { val
 export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   groups,
   selectedChatId,
+  lockedDestination,
   theme = 'dark',
   onRefresh,
   botUsername = 'MissRoxie_Bot'
@@ -132,8 +138,17 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     : 'bg-white border-stone-300 text-stone-900 placeholder:text-stone-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500';
 
   // Form State
-  const initialChatId = selectedChatId && selectedChatId !== 'all' ? selectedChatId : (groups[0]?.chatId || '');
+  const initialChatId = lockedDestination?.chatId !== undefined
+    ? lockedDestination.chatId
+    : (selectedChatId && selectedChatId !== 'all' ? selectedChatId : (groups[0]?.chatId || ''));
   const [targetChatId, setTargetChatId] = useState<number | string>(initialChatId);
+
+  // Keep targetChatId in sync if lockedDestination changes
+  React.useEffect(() => {
+    if (lockedDestination?.chatId !== undefined) {
+      setTargetChatId(lockedDestination.chatId);
+    }
+  }, [lockedDestination?.chatId]);
   const [contentType, setContentType] = useState<ComposerContentType>('text');
   const [text, setText] = useState<string>('');
   const [mediaFileId, setMediaFileId] = useState<string>('');
@@ -459,10 +474,11 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       }
 
       setShowSendModal(false);
+      const targetLabel = lockedDestination?.title || selectedGroup?.chatTitle || `Chat ${targetChatId}`;
       setNotification({
         type: 'success',
         title: 'Post Sent Successfully!',
-        message: `Your ${contentType.toUpperCase()} post was delivered to ${selectedGroup?.chatTitle || targetChatId}.`,
+        message: `Your ${contentType.toUpperCase()} post was delivered to ${targetLabel}.`,
         details: data.result?.messageId ? `Telegram Message ID: #${data.result.messageId}` : undefined
       });
 
@@ -529,10 +545,11 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       }
 
       setShowScheduleModal(false);
+      const targetLabel = lockedDestination?.title || selectedGroup?.chatTitle || `Chat ${targetChatId}`;
       setNotification({
         type: 'success',
         title: 'Post Scheduled Successfully!',
-        message: `Scheduled for ${computedScheduleTime.formatted} to ${selectedGroup?.chatTitle || targetChatId}.`,
+        message: `Scheduled for ${computedScheduleTime.formatted} to ${targetLabel}.`,
         details: data.schedule?.id ? `Schedule ID: [${data.schedule.id}]` : undefined
       });
 
@@ -657,26 +674,40 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center justify-between">
               <span>1. Target Destination</span>
-              {selectedGroup && (
+              {(lockedDestination?.chatId !== undefined || selectedGroup) && (
                 <span className="text-[11px] font-normal text-blue-400 font-mono">
-                  Chat ID: {selectedGroup.chatId}
+                  Chat ID: {lockedDestination?.chatId ?? selectedGroup?.chatId}
                 </span>
               )}
             </label>
-            <select
-              value={targetChatId}
-              onChange={e => setTargetChatId(e.target.value)}
-              className={`w-full px-3 py-2.5 rounded-xl text-xs font-medium border ${themeInputBg} outline-none`}
-            >
-              <option value="" disabled>
-                -- Select Target Group --
-              </option>
-              {activeGroups.map(g => (
-                <option key={g.chatId} value={g.chatId}>
-                  👥 {g.chatTitle || g.title || `Group ${g.chatId}`} ({g.chatId})
+            {lockedDestination ? (
+              <div className={`w-full px-3 py-2.5 rounded-xl text-xs font-medium border ${themeBorder} ${themeInnerCardBg} flex items-center justify-between`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">{lockedDestination.type === 'private' ? '👤' : '👥'}</span>
+                  <span className="font-semibold text-stone-200">
+                    {lockedDestination.title || (lockedDestination.type === 'private' ? `Private Chat (${lockedDestination.chatId})` : `Group (${lockedDestination.chatId})`)}
+                  </span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  Locked Destination
+                </span>
+              </div>
+            ) : (
+              <select
+                value={targetChatId}
+                onChange={e => setTargetChatId(e.target.value)}
+                className={`w-full px-3 py-2.5 rounded-xl text-xs font-medium border ${themeInputBg} outline-none`}
+              >
+                <option value="" disabled>
+                  -- Select Target Group --
                 </option>
-              ))}
-            </select>
+                {activeGroups.map(g => (
+                  <option key={g.chatId} value={g.chatId}>
+                    👥 {g.chatTitle || g.title || `Group ${g.chatId}`} ({g.chatId})
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* Section 2: Content Type */}
