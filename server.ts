@@ -1257,6 +1257,29 @@ export async function startServer() {
         }
       }
 
+      // Validate rich message configurations if provided in general settings update
+      if (updates.groupWelcome !== undefined) {
+        const check = validateAndNormalizeRichMessageConfig(updates.groupWelcome, 'Welcome {user} to {chat}!', prevSettings.groupWelcome);
+        if (!check.valid || !check.config) {
+          return res.status(check.status || 400).json({ error: check.error || 'Invalid groupWelcome configuration' });
+        }
+        updates.groupWelcome = check.config;
+      }
+      if (updates.groupGoodbye !== undefined) {
+        const check = validateAndNormalizeRichMessageConfig(updates.groupGoodbye, 'Goodbye {user}!', prevSettings.groupGoodbye);
+        if (!check.valid || !check.config) {
+          return res.status(check.status || 400).json({ error: check.error || 'Invalid groupGoodbye configuration' });
+        }
+        updates.groupGoodbye = check.config;
+      }
+      if (updates.welcomeDm !== undefined) {
+        const check = validateAndNormalizeRichMessageConfig(updates.welcomeDm, 'You joined {groupname} 🎉', prevSettings.welcomeDm);
+        if (!check.valid || !check.config) {
+          return res.status(check.status || 400).json({ error: check.error || 'Invalid welcomeDm configuration' });
+        }
+        updates.welcomeDm = check.config;
+      }
+
       const clientTimestamp = updates._clientTimestamp ? Number(updates._clientTimestamp) : undefined;
       if (clientTimestamp && db.isStaleSettingsUpdate(chatId, clientTimestamp)) {
         return res.json({
@@ -1314,59 +1337,77 @@ export async function startServer() {
     status?: number;
   }
 
-  // Helper to validate and normalize rich message configurations
+  // Helper to validate and normalize rich message configurations with existing configuration preservation
   function validateAndNormalizeRichMessageConfig(
     body: any,
-    defaultText: string
+    defaultText: string,
+    existingConfig?: RichMessageConfig
   ): RichMessageValidationResult {
     if (!body || typeof body !== 'object') {
       return {
         valid: true,
-        config: { enabled: false, mode: 'simple', contentType: 'text', text: defaultText }
+        config: existingConfig || { enabled: false, mode: 'simple', contentType: 'text', text: defaultText }
       };
     }
 
-    const enabled = Boolean(body.enabled);
-    const mode: MessageMode = body.mode === 'rich' ? 'rich' : 'simple';
-    const contentType: PostContentType = body.contentType || 'text';
+    const enabled = body.enabled !== undefined ? Boolean(body.enabled) : (existingConfig?.enabled ?? false);
+    const mode: MessageMode = body.mode !== undefined
+      ? (body.mode === 'rich' ? 'rich' : 'simple')
+      : (existingConfig?.mode ?? (body.buttons && body.buttons.length > 0 ? 'rich' : 'simple'));
+
+    const contentType: PostContentType = body.contentType || existingConfig?.contentType || 'text';
     const validTypes: PostContentType[] = ['text', 'photo', 'video', 'animation', 'document'];
     if (!validTypes.includes(contentType)) {
       return { valid: false, error: `Unsupported content type: ${contentType}`, status: 400 };
     }
 
-    const rawText = typeof body.text === 'string' ? body.text.trim() : '';
+    const rawText = typeof body.text === 'string'
+      ? body.text.trim()
+      : (body.text === undefined && existingConfig?.text !== undefined ? existingConfig.text : '');
     const maxTextLen = contentType === 'text' ? 4096 : 1024;
     if (rawText.length > maxTextLen) {
       return { valid: false, error: `Text/caption exceeds maximum length (${rawText.length}/${maxTextLen} characters).`, status: 400 };
     }
 
-    const text = rawText || defaultText;
-    let normalizedMediaId: string | undefined = undefined;
-    let mediaUploadId: string | undefined = undefined;
+    const text = rawText || existingConfig?.text || defaultText;
+    let normalizedMediaId: string | undefined = existingConfig?.mediaFileId;
+    let mediaUploadId: string | undefined = existingConfig?.mediaUploadId;
 
     if (contentType !== 'text') {
-      const uploadCandidate = body.mediaUploadId ||
-        (body.mediaFileId?.startsWith('upl_') ? body.mediaFileId : (body.mediaFileId?.startsWith('upload:') ? body.mediaFileId.substring(7) : undefined));
+      if (body.mediaFileId !== undefined || body.mediaUploadId !== undefined) {
+        const uploadCandidate = body.mediaUploadId ||
+          (body.mediaFileId?.startsWith('upl_') ? body.mediaFileId : (body.mediaFileId?.startsWith('upload:') ? body.mediaFileId.substring(7) : undefined));
 
-      if (uploadCandidate) {
-        const item = mediaUploadStore.getMedia(uploadCandidate);
-        if (!item) {
-          return { valid: false, error: `Uploaded media file (${uploadCandidate}) has expired or is invalid. Please re-upload the file.`, status: 400 };
+        if (uploadCandidate) {
+          const item = mediaUploadStore.getMedia(uploadCandidate);
+          if (!item) {
+            return { valid: false, error: `Uploaded media file (${uploadCandidate}) has expired or is invalid. Please re-upload the file.`, status: 400 };
+          }
+          mediaUploadId = item.id;
+          normalizedMediaId = `upload:${item.id}`;
+        } else if (body.mediaFileId) {
+          const mediaCheck = validateMediaReference(body.mediaFileId);
+          if (!mediaCheck.valid) {
+            return { valid: false, error: mediaCheck.error || `Invalid media reference for ${contentType} message.`, status: 400 };
+          }
+          normalizedMediaId = mediaCheck.normalized;
+          mediaUploadId = undefined;
+        } else {
+          return { valid: false, error: `Media reference is required for ${contentType} message.`, status: 400 };
         }
-        mediaUploadId = item.id;
-        normalizedMediaId = `upload:${item.id}`;
-      } else if (body.mediaFileId) {
-        const mediaCheck = validateMediaReference(body.mediaFileId);
-        if (!mediaCheck.valid) {
-          return { valid: false, error: mediaCheck.error || `Invalid media reference for ${contentType} message.`, status: 400 };
-        }
-        normalizedMediaId = mediaCheck.normalized;
-      } else {
+      } else if (!normalizedMediaId) {
         return { valid: false, error: `Media reference is required for ${contentType} message.`, status: 400 };
+      }
+    } else {
+      if (body.contentType === 'text') {
+        normalizedMediaId = undefined;
+        mediaUploadId = undefined;
       }
     }
 
-    const sanitizedButtons = sanitizeInlineButtons(body.buttons);
+    const sanitizedButtons = body.buttons !== undefined
+      ? sanitizeInlineButtons(body.buttons)
+      : (existingConfig?.buttons ? sanitizeInlineButtons(existingConfig.buttons) : []);
 
     return {
       valid: true,
@@ -1418,6 +1459,7 @@ export async function startServer() {
       res.json({
         chatId,
         chatTitle: settings.chatTitle || `Group ${chatId}`,
+        settings,
         groupWelcome,
         groupGoodbye,
         welcomeDm
@@ -1439,11 +1481,12 @@ export async function startServer() {
         return res.status(400).json({ error: 'Valid target chatId is required.' });
       }
 
+      const settings = db.getGroupSettings(chatId);
       const body = req.body || {};
       const updatesToApply: Partial<GroupSettings> = {};
 
       if (body.groupWelcome !== undefined) {
-        const check = validateAndNormalizeRichMessageConfig(body.groupWelcome, 'Welcome {user} to {chat}!');
+        const check = validateAndNormalizeRichMessageConfig(body.groupWelcome, 'Welcome {user} to {chat}!', settings.groupWelcome);
         if (!check.valid || !check.config) {
           return res.status(check.status || 400).json({ error: check.error || 'Invalid groupWelcome configuration' });
         }
@@ -1451,7 +1494,7 @@ export async function startServer() {
       }
 
       if (body.groupGoodbye !== undefined) {
-        const check = validateAndNormalizeRichMessageConfig(body.groupGoodbye, 'Goodbye {user}!');
+        const check = validateAndNormalizeRichMessageConfig(body.groupGoodbye, 'Goodbye {user}!', settings.groupGoodbye);
         if (!check.valid || !check.config) {
           return res.status(check.status || 400).json({ error: check.error || 'Invalid groupGoodbye configuration' });
         }
@@ -1459,17 +1502,17 @@ export async function startServer() {
       }
 
       if (body.welcomeDm !== undefined) {
-        const check = validateAndNormalizeRichMessageConfig(body.welcomeDm, 'You joined {groupname} 🎉');
+        const check = validateAndNormalizeRichMessageConfig(body.welcomeDm, 'You joined {groupname} 🎉', settings.welcomeDm);
         if (!check.valid || !check.config) {
           return res.status(check.status || 400).json({ error: check.error || 'Invalid welcomeDm configuration' });
         }
         updatesToApply.welcomeDm = check.config;
       }
 
-      // If updating only single root fields directly on body (e.g. legacy welcome-dm payload)
+      // If updating only single root fields directly on body (e.g. legacy welcome-dm payload or direct partial update)
       if (body.groupWelcome === undefined && body.groupGoodbye === undefined && body.welcomeDm === undefined) {
-        if (body.contentType !== undefined || body.text !== undefined || body.enabled !== undefined || body.buttons !== undefined) {
-          const check = validateAndNormalizeRichMessageConfig(body, 'You joined {groupname} 🎉');
+        if (body.contentType !== undefined || body.text !== undefined || body.enabled !== undefined || body.buttons !== undefined || body.mode !== undefined || body.mediaFileId !== undefined) {
+          const check = validateAndNormalizeRichMessageConfig(body, 'You joined {groupname} 🎉', settings.welcomeDm);
           if (!check.valid || !check.config) {
             return res.status(check.status || 400).json({ error: check.error || 'Invalid welcomeDm configuration' });
           }
@@ -1496,6 +1539,7 @@ export async function startServer() {
       res.json({
         success: true,
         chatId,
+        settings: updated,
         groupWelcome: updated.groupWelcome,
         groupGoodbye: updated.groupGoodbye,
         welcomeDm: updated.welcomeDm
@@ -1654,6 +1698,7 @@ export async function startServer() {
       res.json({
         chatId,
         chatTitle: settings.chatTitle || `Group ${chatId}`,
+        settings,
         welcomeDm: settings.welcomeDm || { enabled: false, mode: 'simple', contentType: 'text', text: 'You joined {groupname} 🎉' }
       });
     } catch (err: any) {

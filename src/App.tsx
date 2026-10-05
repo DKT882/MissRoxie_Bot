@@ -844,71 +844,90 @@ export default function App() {
     }
   }, [session, activeGroupDetailId, selectedChatId, fetchGroupDetailsData]);
 
-  // Synchronize local Welcome & Goodbye form states whenever group settings are loaded or changed
+  // Track last group chatId to only re-initialize configs when switching to a different group
+  const lastWelcomeGoodbyeGroupChatIdRef = useRef<number | string | null>(null);
+
+  // Synchronize local Welcome & Goodbye form states whenever group is loaded or switched
   useEffect(() => {
-    if (groupDetails?.settings) {
-      const s = groupDetails.settings;
-      const gw = s.groupWelcome || {
-        enabled: Boolean(s.welcomeEnabled),
-        mode: 'simple',
-        contentType: 'text',
-        text: s.welcomeMessage || '👋 Welcome {user} to {groupname}!'
-      };
-      const gg = s.groupGoodbye || {
-        enabled: Boolean(s.goodbyeEnabled),
-        mode: 'simple',
-        contentType: 'text',
-        text: s.goodbyeMessage || '👋 Goodbye {user}, we will miss you!'
-      };
-      const wdm = s.welcomeDm || {
-        enabled: false,
-        mode: 'simple',
-        contentType: 'text',
-        text: 'You joined {groupname} 🎉'
-      };
+    if (groupDetails?.chatId && groupDetails.settings) {
+      const currentChatId = groupDetails.chatId;
+      const isDifferentGroup = lastWelcomeGoodbyeGroupChatIdRef.current !== currentChatId;
 
-      setGroupWelcomeConfig({
-        enabled: Boolean(gw.enabled),
-        mode: gw.mode || (gw.buttons && gw.buttons.length > 0 ? 'rich' : 'simple'),
-        contentType: (gw.contentType as ComposerContentType) || 'text',
-        text: gw.text !== undefined && gw.text !== null ? gw.text : '👋 Welcome {user} to {groupname}!',
-        mediaFileId: gw.mediaFileId || '',
-        mediaUploadId: gw.mediaUploadId || undefined,
-        buttons: Array.isArray(gw.buttons) ? gw.buttons : []
-      });
+      if (isDifferentGroup) {
+        lastWelcomeGoodbyeGroupChatIdRef.current = currentChatId;
+        const s = groupDetails.settings;
+        const gw = s.groupWelcome || {
+          enabled: Boolean(s.welcomeEnabled),
+          mode: 'simple',
+          contentType: 'text',
+          text: s.welcomeMessage || '👋 Welcome {user} to {groupname}!'
+        };
+        const gg = s.groupGoodbye || {
+          enabled: Boolean(s.goodbyeEnabled),
+          mode: 'simple',
+          contentType: 'text',
+          text: s.goodbyeMessage || '👋 Goodbye {user}, we will miss you!'
+        };
+        const wdm = s.welcomeDm || {
+          enabled: false,
+          mode: 'simple',
+          contentType: 'text',
+          text: 'You joined {groupname} 🎉'
+        };
 
-      setGroupGoodbyeConfig({
-        enabled: Boolean(gg.enabled),
-        mode: gg.mode || (gg.buttons && gg.buttons.length > 0 ? 'rich' : 'simple'),
-        contentType: (gg.contentType as ComposerContentType) || 'text',
-        text: gg.text !== undefined && gg.text !== null ? gg.text : '👋 Goodbye {user}, we will miss you!',
-        mediaFileId: gg.mediaFileId || '',
-        mediaUploadId: gg.mediaUploadId || undefined,
-        buttons: Array.isArray(gg.buttons) ? gg.buttons : []
-      });
+        setGroupWelcomeConfig({
+          enabled: Boolean(gw.enabled),
+          mode: gw.mode || (gw.buttons && gw.buttons.length > 0 ? 'rich' : 'simple'),
+          contentType: (gw.contentType as ComposerContentType) || 'text',
+          text: gw.text !== undefined && gw.text !== null ? gw.text : '👋 Welcome {user} to {groupname}!',
+          mediaFileId: gw.mediaFileId || '',
+          mediaUploadId: gw.mediaUploadId || undefined,
+          buttons: Array.isArray(gw.buttons) ? gw.buttons : []
+        });
 
-      setWelcomeDmConfig({
-        enabled: Boolean(wdm.enabled),
-        mode: wdm.mode || (wdm.buttons && wdm.buttons.length > 0 ? 'rich' : 'simple'),
-        contentType: (wdm.contentType as ComposerContentType) || 'text',
-        text: wdm.text !== undefined && wdm.text !== null ? wdm.text : 'You joined {groupname} 🎉',
-        mediaFileId: wdm.mediaFileId || '',
-        mediaUploadId: wdm.mediaUploadId || undefined,
-        buttons: Array.isArray(wdm.buttons) ? wdm.buttons : []
-      });
+        setGroupGoodbyeConfig({
+          enabled: Boolean(gg.enabled),
+          mode: gg.mode || (gg.buttons && gg.buttons.length > 0 ? 'rich' : 'simple'),
+          contentType: (gg.contentType as ComposerContentType) || 'text',
+          text: gg.text !== undefined && gg.text !== null ? gg.text : '👋 Goodbye {user}, we will miss you!',
+          mediaFileId: gg.mediaFileId || '',
+          mediaUploadId: gg.mediaUploadId || undefined,
+          buttons: Array.isArray(gg.buttons) ? gg.buttons : []
+        });
+
+        setWelcomeDmConfig({
+          enabled: Boolean(wdm.enabled),
+          mode: wdm.mode || (wdm.buttons && wdm.buttons.length > 0 ? 'rich' : 'simple'),
+          contentType: (wdm.contentType as ComposerContentType) || 'text',
+          text: wdm.text !== undefined && wdm.text !== null ? wdm.text : 'You joined {groupname} 🎉',
+          mediaFileId: wdm.mediaFileId || '',
+          mediaUploadId: wdm.mediaUploadId || undefined,
+          buttons: Array.isArray(wdm.buttons) ? wdm.buttons : []
+        });
+      }
+    } else if (!groupDetails) {
+      lastWelcomeGoodbyeGroupChatIdRef.current = null;
     }
-  }, [groupDetails?.chatId, groupDetails?.settings]);
+  }, [groupDetails?.chatId]);
 
   // Save Welcome & Goodbye configuration for current group
-  const handleSaveWelcomeGoodbye = async () => {
+  const handleSaveWelcomeGoodbye = async (overrideConfigs?: {
+    groupWelcome?: RichMessageConfigData;
+    groupGoodbye?: RichMessageConfigData;
+    welcomeDm?: RichMessageConfigData;
+  }) => {
     if (!activeGroupDetailId) return;
     setWelcomeGoodbyeSaving(true);
     setWelcomeGoodbyeNotification(null);
     try {
+      const gwToSend = overrideConfigs?.groupWelcome || groupWelcomeConfig;
+      const ggToSend = overrideConfigs?.groupGoodbye || groupGoodbyeConfig;
+      const wdmToSend = overrideConfigs?.welcomeDm || welcomeDmConfig;
+
       const payload = {
-        groupWelcome: groupWelcomeConfig,
-        groupGoodbye: groupGoodbyeConfig,
-        welcomeDm: welcomeDmConfig
+        groupWelcome: gwToSend,
+        groupGoodbye: ggToSend,
+        welcomeDm: wdmToSend
       };
 
       const res = await fetch(`/api/dashboard/groups/${activeGroupDetailId}/welcome-goodbye`, {
@@ -925,19 +944,27 @@ export default function App() {
         throw new Error(data.error || 'Failed to save Welcome & Goodbye configurations');
       }
 
+      const returnedGw: RichMessageConfigData = data.groupWelcome || data.settings?.groupWelcome || gwToSend;
+      const returnedGg: RichMessageConfigData = data.groupGoodbye || data.settings?.groupGoodbye || ggToSend;
+      const returnedWdm: RichMessageConfigData = data.welcomeDm || data.settings?.welcomeDm || wdmToSend;
+
       setGroupDetails((prev: any) => prev ? {
         ...prev,
         settings: {
           ...prev.settings,
-          groupWelcome: data.settings?.groupWelcome || groupWelcomeConfig,
-          groupGoodbye: data.settings?.groupGoodbye || groupGoodbyeConfig,
-          welcomeDm: data.settings?.welcomeDm || welcomeDmConfig,
-          welcomeEnabled: data.settings?.welcomeEnabled,
-          welcomeMessage: data.settings?.welcomeMessage,
-          goodbyeEnabled: data.settings?.goodbyeEnabled,
-          goodbyeMessage: data.settings?.goodbyeMessage
+          groupWelcome: returnedGw,
+          groupGoodbye: returnedGg,
+          welcomeDm: returnedWdm,
+          welcomeEnabled: Boolean(returnedGw.enabled),
+          welcomeMessage: returnedGw.text,
+          goodbyeEnabled: Boolean(returnedGg.enabled),
+          goodbyeMessage: returnedGg.text
         }
       } : prev);
+
+      setGroupWelcomeConfig(returnedGw);
+      setGroupGoodbyeConfig(returnedGg);
+      setWelcomeDmConfig(returnedWdm);
 
       setWelcomeGoodbyeNotification({ type: 'success', message: 'Welcome & Goodbye configurations saved successfully!' });
       setTimeout(() => setWelcomeGoodbyeNotification(null), 4000);
@@ -946,6 +973,47 @@ export default function App() {
     } finally {
       setWelcomeGoodbyeSaving(false);
     }
+  };
+
+  const handleToggleGroupWelcome = async (newEnabled: boolean) => {
+    const updated: RichMessageConfigData = { ...groupWelcomeConfig, enabled: newEnabled };
+    setGroupWelcomeConfig(updated);
+    setGroupDetails((prev: any) => prev ? {
+      ...prev,
+      settings: {
+        ...prev.settings,
+        groupWelcome: updated,
+        welcomeEnabled: newEnabled
+      }
+    } : prev);
+    await handleSaveWelcomeGoodbye({ groupWelcome: updated });
+  };
+
+  const handleToggleGroupGoodbye = async (newEnabled: boolean) => {
+    const updated: RichMessageConfigData = { ...groupGoodbyeConfig, enabled: newEnabled };
+    setGroupGoodbyeConfig(updated);
+    setGroupDetails((prev: any) => prev ? {
+      ...prev,
+      settings: {
+        ...prev.settings,
+        groupGoodbye: updated,
+        goodbyeEnabled: newEnabled
+      }
+    } : prev);
+    await handleSaveWelcomeGoodbye({ groupGoodbye: updated });
+  };
+
+  const handleToggleWelcomeDm = async (newEnabled: boolean) => {
+    const updated: RichMessageConfigData = { ...welcomeDmConfig, enabled: newEnabled };
+    setWelcomeDmConfig(updated);
+    setGroupDetails((prev: any) => prev ? {
+      ...prev,
+      settings: {
+        ...prev.settings,
+        welcomeDm: updated
+      }
+    } : prev);
+    await handleSaveWelcomeGoodbye({ welcomeDm: updated });
   };
 
   // Send Test Welcome or Goodbye Message
@@ -3248,7 +3316,8 @@ export default function App() {
                       isPrivateDm={false}
                       theme={theme}
                       onChange={setGroupWelcomeConfig}
-                      onSave={handleSaveWelcomeGoodbye}
+                      onToggle={handleToggleGroupWelcome}
+                      onSave={() => handleSaveWelcomeGoodbye()}
                       onTest={() => handleTestWelcomeGoodbye('groupWelcome')}
                       testLabel="Send Test to Group"
                       isSaving={welcomeGoodbyeSaving}
@@ -3272,7 +3341,8 @@ export default function App() {
                       isPrivateDm={false}
                       theme={theme}
                       onChange={setGroupGoodbyeConfig}
-                      onSave={handleSaveWelcomeGoodbye}
+                      onToggle={handleToggleGroupGoodbye}
+                      onSave={() => handleSaveWelcomeGoodbye()}
                       onTest={() => handleTestWelcomeGoodbye('groupGoodbye')}
                       testLabel="Send Test to Group"
                       isSaving={welcomeGoodbyeSaving}
@@ -3296,7 +3366,8 @@ export default function App() {
                       isPrivateDm={true}
                       theme={theme}
                       onChange={setWelcomeDmConfig}
-                      onSave={handleSaveWelcomeGoodbye}
+                      onToggle={handleToggleWelcomeDm}
+                      onSave={() => handleSaveWelcomeGoodbye()}
                       onTest={(targetUserId) => handleTestWelcomeGoodbye('welcomeDm', targetUserId)}
                       testLabel="Send Test DM"
                       testPlaceholder="Your Telegram User ID (e.g. 123456789)"

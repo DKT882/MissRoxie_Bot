@@ -2915,8 +2915,16 @@ export class StorageManager {
     mergedAutoEngine.responseTypeWeights = updatedWeights;
 
     // Synchronize groupWelcome / groupGoodbye with legacy mirrors
-    let effectiveGroupWelcome = updates.groupWelcome !== undefined ? updates.groupWelcome : current.groupWelcome;
-    let effectiveGroupGoodbye = updates.groupGoodbye !== undefined ? updates.groupGoodbye : current.groupGoodbye;
+    let effectiveGroupWelcome = updates.groupWelcome !== undefined
+      ? { ...(current.groupWelcome || { mode: 'simple', contentType: 'text', text: 'Welcome {user} to {chat}!' }), ...updates.groupWelcome }
+      : current.groupWelcome;
+    let effectiveGroupGoodbye = updates.groupGoodbye !== undefined
+      ? { ...(current.groupGoodbye || { mode: 'simple', contentType: 'text', text: 'Goodbye {user}!' }), ...updates.groupGoodbye }
+      : current.groupGoodbye;
+    let effectiveWelcomeDm = updates.welcomeDm !== undefined
+      ? { ...(current.welcomeDm || { mode: 'simple', contentType: 'text', text: 'You joined {groupname} 🎉' }), ...updates.welcomeDm }
+      : current.welcomeDm;
+
     let effectiveWelcomeEnabled = updates.welcomeEnabled !== undefined ? updates.welcomeEnabled : current.welcomeEnabled;
     let effectiveWelcomeMessage = updates.welcomeMessage !== undefined ? updates.welcomeMessage : current.welcomeMessage;
     let effectiveGoodbyeEnabled = updates.goodbyeEnabled !== undefined ? updates.goodbyeEnabled : current.goodbyeEnabled;
@@ -2957,6 +2965,7 @@ export class StorageManager {
       goodbyeMessage: effectiveGoodbyeMessage,
       groupWelcome: effectiveGroupWelcome,
       groupGoodbye: effectiveGroupGoodbye,
+      welcomeDm: effectiveWelcomeDm,
       humanMessagesSinceLastSticker: updatedHumanCount,
       requiredStickerGap: updatedStickerGap,
       stickerActivityMin: updatedMin,

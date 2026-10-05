@@ -413,6 +413,119 @@ async function runRichMessageSystemTestSuite() {
     assert(sanitized![0][3].style === 'danger', 'TEST 47: Danger button style preserved');
     assert(sanitized![0][0].style === undefined, 'TEST 48: Default button style normalized');
 
+    // =========================================================================
+    // SECTION 9: WELCOME DM TOGGLE PERSISTENCE & INDEPENDENCE REGRESSION
+    // =========================================================================
+    console.log('\n--- SECTION 9: WELCOME DM TOGGLE PERSISTENCE & INDEPENDENCE ---');
+
+    const testChatId = -1009998887771;
+    // 1. Initial State: all false
+    db.updateGroupSettings(testChatId, {
+      groupWelcome: { enabled: false, mode: 'simple', contentType: 'text', text: 'Welcome {user}!' },
+      groupGoodbye: { enabled: false, mode: 'simple', contentType: 'text', text: 'Goodbye {user}!' },
+      welcomeDm: {
+        enabled: false,
+        mode: 'rich',
+        contentType: 'photo',
+        text: 'Custom Welcome DM {user}',
+        mediaFileId: 'AgACAgIAAxkBAAI999888',
+        buttons: [[{ text: 'Visit Website', url: 'https://example.com', style: 'primary' }]]
+      }
+    });
+
+    // TEST 49: welcomeDm.enabled false -> true persists and reloads
+    db.updateGroupSettings(testChatId, {
+      welcomeDm: { enabled: true } as any
+    });
+    let s = db.getGroupSettings(testChatId);
+    assert(s.welcomeDm?.enabled === true, 'TEST 49: welcomeDm.enabled false -> true persists');
+    assert(s.welcomeDm?.mode === 'rich', 'TEST 49b: Partial update preserved mode=rich');
+    assert(s.welcomeDm?.contentType === 'photo', 'TEST 49c: Partial update preserved contentType=photo');
+    assert(s.welcomeDm?.mediaFileId === 'AgACAgIAAxkBAAI999888', 'TEST 49d: Partial update preserved mediaFileId');
+    assert(s.welcomeDm?.text === 'Custom Welcome DM {user}', 'TEST 49e: Partial update preserved custom text');
+    assert(s.welcomeDm?.buttons?.length === 1 && s.welcomeDm.buttons[0][0].text === 'Visit Website', 'TEST 49f: Partial update preserved buttons');
+
+    // TEST 50: welcomeDm.enabled true -> false persists and reloads
+    db.updateGroupSettings(testChatId, {
+      welcomeDm: { enabled: false } as any
+    });
+    s = db.getGroupSettings(testChatId);
+    assert(s.welcomeDm?.enabled === false, 'TEST 50: welcomeDm.enabled true -> false persists');
+    assert(s.welcomeDm?.mode === 'rich', 'TEST 50b: Turning OFF does NOT delete rich configuration');
+    assert(s.welcomeDm?.mediaFileId === 'AgACAgIAAxkBAAI999888', 'TEST 50c: Turning OFF does NOT delete mediaFileId');
+
+    // TEST 51: Reload after re-enabling remains true
+    db.updateGroupSettings(testChatId, {
+      welcomeDm: { enabled: true } as any
+    });
+    const reloadedSettings = db.getGroupSettings(testChatId);
+    assert(reloadedSettings.welcomeDm?.enabled === true, 'TEST 51: Reload from storage preserves welcomeDm.enabled = true');
+
+    // TEST 52: Group Welcome update (ON) does NOT overwrite welcomeDm
+    db.updateGroupSettings(testChatId, {
+      groupWelcome: { enabled: true, text: 'New group welcome!' } as any
+    });
+    s = db.getGroupSettings(testChatId);
+    assert(s.groupWelcome?.enabled === true, 'TEST 52a: groupWelcome enabled is true');
+    assert(s.welcomeDm?.enabled === true, 'TEST 52b: groupWelcome update does NOT overwrite welcomeDm');
+
+    // TEST 53: Welcome DM update (OFF) does NOT overwrite groupWelcome
+    db.updateGroupSettings(testChatId, {
+      welcomeDm: { enabled: false } as any
+    });
+    s = db.getGroupSettings(testChatId);
+    assert(s.welcomeDm?.enabled === false, 'TEST 53a: welcomeDm enabled is false');
+    assert(s.groupWelcome?.enabled === true, 'TEST 53b: welcomeDm update does NOT overwrite groupWelcome');
+
+    // TEST 54: Group Goodbye update (ON) does NOT overwrite welcomeDm
+    db.updateGroupSettings(testChatId, {
+      groupGoodbye: { enabled: true, text: 'Farewell!' } as any
+    });
+    s = db.getGroupSettings(testChatId);
+    assert(s.groupGoodbye?.enabled === true, 'TEST 54a: groupGoodbye enabled is true');
+    assert(s.welcomeDm?.enabled === false, 'TEST 54b: groupGoodbye update does NOT overwrite welcomeDm');
+
+    // TEST 58: Test A: Group Welcome = ON, Group Goodbye = OFF, Private Welcome DM = OFF
+    db.updateGroupSettings(testChatId, {
+      groupWelcome: { enabled: true } as any,
+      groupGoodbye: { enabled: false } as any,
+      welcomeDm: { enabled: false } as any
+    });
+    s = db.getGroupSettings(testChatId);
+    assert(s.groupWelcome?.enabled === true && s.groupGoodbye?.enabled === false && s.welcomeDm?.enabled === false, 'TEST 58: TEST A - Group Welcome ON, Group Goodbye OFF, Private Welcome DM OFF');
+
+    // TEST 59: Test B: Group Welcome = OFF, Group Goodbye = OFF, Private Welcome DM = ON
+    db.updateGroupSettings(testChatId, {
+      groupWelcome: { enabled: false } as any,
+      groupGoodbye: { enabled: false } as any,
+      welcomeDm: { enabled: true } as any
+    });
+    s = db.getGroupSettings(testChatId);
+    assert(s.groupWelcome?.enabled === false && s.groupGoodbye?.enabled === false && s.welcomeDm?.enabled === true, 'TEST 59: TEST B - Group Welcome OFF, Group Goodbye OFF, Private Welcome DM ON');
+
+    // TEST 60: Test C: Group Welcome = ON, Group Goodbye = ON, Private Welcome DM = ON
+    db.updateGroupSettings(testChatId, {
+      groupWelcome: { enabled: true } as any,
+      groupGoodbye: { enabled: true } as any,
+      welcomeDm: { enabled: true } as any
+    });
+    s = db.getGroupSettings(testChatId);
+    assert(s.groupWelcome?.enabled === true && s.groupGoodbye?.enabled === true && s.welcomeDm?.enabled === true, 'TEST 60: TEST C - ALL THREE ON');
+
+    // TEST 61: Test D: Toggle only Private Welcome DM OFF -> Group Welcome and Goodbye remain ON
+    db.updateGroupSettings(testChatId, {
+      welcomeDm: { enabled: false } as any
+    });
+    s = db.getGroupSettings(testChatId);
+    assert(s.groupWelcome?.enabled === true && s.groupGoodbye?.enabled === true && s.welcomeDm?.enabled === false, 'TEST 61: TEST D - Toggle Private DM OFF leaves Group Welcome and Goodbye ON');
+
+    // TEST 62: Test E: Toggle only Group Welcome ON -> Private Welcome DM remains independent
+    db.updateGroupSettings(testChatId, {
+      groupWelcome: { enabled: true } as any
+    });
+    s = db.getGroupSettings(testChatId);
+    assert(s.groupWelcome?.enabled === true && s.welcomeDm?.enabled === false, 'TEST 62: TEST E - Toggle Group Welcome ON leaves Private DM unchanged');
+
   } finally {
     // Restore mocks
     telegramApi.sendMessage = origSendMessage;
