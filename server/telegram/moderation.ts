@@ -1,8 +1,9 @@
 import { telegramApi } from './api.js';
-import { TelegramMessage, TelegramUser, TelegramChat, TelegramChatMember, ChatPermissions, TempActionRecord, CaptchaSession } from './types.js';
+import { TelegramMessage, TelegramUser, TelegramChat, TelegramChatMember, ChatPermissions, TempActionRecord, CaptchaSession, PostPayload, ScheduledPostButton, WelcomeDmConfig } from './types.js';
 import { db } from '../db/storage.js';
 import { TelegramMiddleware } from './middleware.js';
 import { ContentPolicyEngine } from './policyEngine.js';
+import { PostSender, sanitizeInlineButtons } from './postSender.js';
 
 export const MUTED_PERMISSIONS: ChatPermissions = {
   can_send_messages: false,
@@ -162,6 +163,8 @@ export class ModerationService {
   private static inFlightWelcomes: Set<string> = new Set();
   private static welcomedUsersCache: Map<string, number> = new Map();
   private static recentBotBans: Map<string, number> = new Map();
+  private static inFlightWelcomeDms: Set<string> = new Set();
+  private static welcomedDmUsersCache: Map<string, number> = new Map();
 
   public static clearReportCooldowns(): void {
     this.reportCooldowns.clear();
@@ -169,6 +172,11 @@ export class ModerationService {
 
   public static clearRecentBotBans(): void {
     this.recentBotBans.clear();
+  }
+
+  public static clearWelcomedDmCache(): void {
+    this.welcomedDmUsersCache.clear();
+    this.inFlightWelcomeDms.clear();
   }
 
   /**
@@ -1205,6 +1213,192 @@ export class ModerationService {
   }
 
   /**
+   * Safe Dynamic Template Substitution for Welcome DM messages.
+   * Placeholders:
+   * {user} -> User display name (e.g. "First Last" or "@username" or "User 12345")
+   * {username} -> "@username" if available, else display name fallback
+   * {first_name} -> first_name if available, else display name fallback
+   * {last_name} -> last_name if available, else ""
+   * {user_id} -> String(user.id)
+   * {id} -> String(user.id)
+   * {groupname} -> Current Telegram group title (e.g. "My Group")
+   * {group_id} -> String(chatId)
+   * {chat} -> Current Telegram group title
+   * {chat_title} -> Current Telegram group title
+   * {name} -> display name
+   */
+  public static formatWelcomeDmText(
+    template: string,
+    user: TelegramUser,
+    chatTitle: string,
+    chatId: number
+  ): string {
+    const rawTemplate = template !== undefined && template !== null && template.trim() !== ''
+      ? template
+      : 'You joined {groupname} 🎉';
+
+    const firstName = user.first_name || (user.username ? `@${user.username}` : (user.id ? `User ${user.id}` : 'User'));
+    const lastName = user.last_name || '';
+    const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ') ||
+      (user.username ? `@${user.username}` : (user.id ? `User ${user.id}` : 'User'));
+    const username = user.username ? `@${user.username}` : displayName;
+    const title = chatTitle || 'the group';
+    const userIdStr = user.id ? String(user.id) : '0';
+    const groupIdStr = String(chatId);
+
+    let formatted = rawTemplate
+      .replace(/{groupname}/gi, title)
+      .replace(/{group_id}/gi, groupIdStr)
+      .replace(/{chat_title}/gi, title)
+      .replace(/{chat}/gi, title)
+      .replace(/{first_name}/gi, firstName)
+      .replace(/{last_name}/gi, lastName)
+      .replace(/{username}/gi, username)
+      .replace(/{user_id}/gi, userIdStr)
+      .replace(/{id}/gi, userIdStr)
+      .replace(/{user}/gi, displayName)
+      .replace(/{name}/gi, displayName);
+
+    if (!formatted.trim()) {
+      formatted = `You joined ${title} 🎉`;
+    }
+    return formatted;
+  }
+
+  /**
+   * Format button template placeholders safely.
+   */
+  public static formatWelcomeDmButtons(
+    buttons: ScheduledPostButton[][] | undefined,
+    user: TelegramUser,
+    chatTitle: string,
+    chatId: number
+  ): ScheduledPostButton[][] | undefined {
+    if (!buttons || !Array.isArray(buttons) || buttons.length === 0) return undefined;
+    const sanitized = sanitizeInlineButtons(buttons);
+    if (!sanitized) return undefined;
+
+    const result: ScheduledPostButton[][] = [];
+    for (const row of sanitized) {
+      const rowBtns: ScheduledPostButton[] = [];
+      for (const btn of row) {
+        const btnText = this.formatWelcomeDmText(btn.text, user, chatTitle, chatId);
+        let btnUrl = btn.url
+          .replace(/{user_id}/gi, String(user.id || 0))
+          .replace(/{id}/gi, String(user.id || 0))
+          .replace(/{group_id}/gi, String(chatId));
+
+        rowBtns.push({
+          text: btnText.trim() || btn.text,
+          url: btnUrl,
+          style: btn.style
+        });
+      }
+      if (rowBtns.length > 0) {
+        result.push(rowBtns);
+      }
+    }
+    return result.length > 0 ? result : undefined;
+  }
+
+  /**
+   * Send Welcome Private DM to a real human user when they join a group where Welcome DM is enabled.
+   */
+  public static async handleWelcomeDm(
+    chatId: number,
+    user: TelegramUser,
+    chatTitle?: string
+  ): Promise<{ sent: boolean; skipped?: string; error?: string; messageId?: number }> {
+    if (!chatId || !user || !user.id) {
+      return { sent: false, skipped: 'INVALID_PARAMETERS' };
+    }
+
+    // Welcome DMs should ONLY target real human users.
+    if (user.is_bot) {
+      return { sent: false, skipped: 'TARGET_IS_BOT' };
+    }
+
+    // Exclude Telegram service accounts
+    if (user.id === 777000 || user.id === 1087968824) {
+      return { sent: false, skipped: 'SERVICE_ACCOUNT' };
+    }
+
+    // Exclude Roxie itself
+    const me = await telegramApi.getMe().catch(() => null);
+    if (me?.result?.id && user.id === me.result.id) {
+      return { sent: false, skipped: 'SELF_USER' };
+    }
+
+    const settings = db.getGroupSettings(chatId, chatTitle);
+    const welcomeDmConfig = settings.welcomeDm;
+
+    // Disabled by default. Only send if explicitly enabled.
+    if (!welcomeDmConfig || !welcomeDmConfig.enabled) {
+      return { sent: false, skipped: 'FEATURE_DISABLED' };
+    }
+
+    // Deduplication & In-Flight Guard: prevent duplicate DMs for same user within 60s
+    const dedupeKey = `${chatId}:${user.id}`;
+    if (this.inFlightWelcomeDms.has(dedupeKey)) {
+      return { sent: false, skipped: 'IN_FLIGHT' };
+    }
+
+    const now = Date.now();
+    const lastWelcomed = this.welcomedDmUsersCache.get(dedupeKey) || 0;
+    if (now - lastWelcomed < 60000) {
+      return { sent: false, skipped: 'ALREADY_WELCOMED_RECENTLY' };
+    }
+
+    this.inFlightWelcomeDms.add(dedupeKey);
+    this.welcomedDmUsersCache.set(dedupeKey, now);
+
+    if (this.welcomedDmUsersCache.size > 1000) {
+      for (const [k, ts] of this.welcomedDmUsersCache.entries()) {
+        if (now - ts > 300000) this.welcomedDmUsersCache.delete(k);
+      }
+    }
+
+    try {
+      const title = chatTitle || settings.chatTitle || 'the group';
+      const rawText = welcomeDmConfig.text !== undefined ? welcomeDmConfig.text : 'You joined {groupname} 🎉';
+      const formattedText = this.formatWelcomeDmText(rawText, user, title, chatId);
+      const formattedButtons = this.formatWelcomeDmButtons(welcomeDmConfig.buttons, user, title, chatId);
+
+      const payload: PostPayload = {
+        contentType: welcomeDmConfig.contentType || 'text',
+        text: formattedText,
+        mediaFileId: welcomeDmConfig.mediaFileId,
+        mediaUploadId: welcomeDmConfig.mediaUploadId,
+        buttons: formattedButtons
+      };
+
+      // PRIVATE CHAT DELIVERY: target chat_id is the joining user's Telegram user ID
+      const targetUserId = user.id;
+      const sendRes = await PostSender.send(targetUserId, payload);
+
+      if (sendRes.ok) {
+        db.addLog({
+          chatId,
+          chatTitle: title,
+          targetUserId: user.id,
+          targetUsername: user.username,
+          action: 'send_message',
+          details: `Sent Welcome Private DM to ${user.first_name || user.id} (@${user.username || 'unknown'}) for joining ${title} (Telegram msg #${sendRes.messageId || 'unknown'})`
+        });
+        return { sent: true, messageId: sendRes.messageId };
+      } else {
+        console.warn(`[WelcomeDM] Private DM delivery failed for user ${user.id} from group ${chatId}: ${sendRes.error}`);
+        return { sent: false, error: sendRes.error };
+      }
+    } catch (err: any) {
+      console.error(`[WelcomeDM] Exception sending welcome DM to user ${user.id}:`, err.message);
+      return { sent: false, error: err.message };
+    } finally {
+      this.inFlightWelcomeDms.delete(dedupeKey);
+    }
+  }
+
+  /**
    * Welcome and Goodbye Message Handler.
    */
   public static async handleWelcomeAndGoodbye(message: TelegramMessage): Promise<void> {
@@ -1220,6 +1414,15 @@ export class ModerationService {
         setTimeout(() => {
           telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
         }, 3500); // delete after 3.5 seconds
+      }
+    }
+
+    // Fallback Welcome DM for new chat members (deduplicated safely against chat_member update)
+    if (message.new_chat_members && message.new_chat_members.length > 0) {
+      for (const member of message.new_chat_members) {
+        if (!member.is_bot) {
+          this.handleWelcomeDm(chatId, member, chatTitle).catch(() => {});
+        }
       }
     }
 

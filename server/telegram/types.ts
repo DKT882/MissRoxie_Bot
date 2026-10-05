@@ -347,6 +347,7 @@ export interface GroupSettings {
   goodbyeEnabled: boolean; // default false
   goodbyeMessage?: string;
   autoDeleteJoinLeave?: boolean; // default false
+  welcomeDm?: WelcomeDmConfig; // Per-group private welcome DM configuration (default disabled)
   // Slow Mode
   slowModeSeconds: number; // 0 = off
   // Reports
@@ -573,6 +574,15 @@ export interface PostPayload {
   replyToMessageId?: number;
   autoDeletePrevious?: boolean;
   protectContent?: boolean;
+}
+
+export interface WelcomeDmConfig {
+  enabled: boolean;
+  contentType?: PostContentType;
+  text?: string;
+  mediaFileId?: string;
+  mediaUploadId?: string;
+  buttons?: ScheduledPostButton[][];
 }
 
 export interface SendPostResult {

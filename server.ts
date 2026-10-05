@@ -16,8 +16,9 @@ import { runDummyDataCleanup } from './server/operations/cleanupDummyData.js';
 import { mongoManager } from './server/db/mongodb.js';
 import { MongoStorageService } from './server/db/mongoStorage.js';
 import { PostSender, sanitizeInlineButtons, validateMediaReference } from './server/telegram/postSender.js';
-import { PostPayload, PostContentType, ScheduledPostButton } from './server/telegram/types.js';
+import { PostPayload, PostContentType, ScheduledPostButton, WelcomeDmConfig, TelegramUser } from './server/telegram/types.js';
 import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
+import { ModerationService } from './server/telegram/moderation.js';
 
 dotenv.config();
 
@@ -1305,6 +1306,236 @@ export async function startServer() {
   };
   app.patch('/api/dashboard/groups/:chatId/settings', handleUpdateGroupSettings);
   app.put('/api/groups/:chatId/settings', handleUpdateGroupSettings);
+
+  // 8b. Per-Group Welcome Private DM APIs
+  app.get('/api/dashboard/groups/:chatId/welcome-dm', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const chatId = Number(req.params.chatId);
+      if (!chatId || isNaN(chatId)) {
+        return res.status(400).json({ error: 'Valid target chatId is required.' });
+      }
+
+      const settings = db.getGroupSettings(chatId);
+      const welcomeDm: WelcomeDmConfig = settings.welcomeDm || {
+        enabled: false,
+        contentType: 'text',
+        text: 'You joined {groupname} 🎉'
+      };
+
+      res.json({
+        chatId,
+        chatTitle: settings.chatTitle || `Group ${chatId}`,
+        welcomeDm
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  const handleUpdateWelcomeDm = async (req: express.Request, res: express.Response) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const chatId = Number(req.params.chatId);
+      if (!chatId || isNaN(chatId)) {
+        return res.status(400).json({ error: 'Valid target chatId is required.' });
+      }
+
+      const settings = db.getGroupSettings(chatId);
+      const body = req.body || {};
+
+      const enabled = Boolean(body.enabled);
+      const contentType: PostContentType = body.contentType || 'text';
+      const validTypes: PostContentType[] = ['text', 'photo', 'video', 'animation', 'document'];
+      if (!validTypes.includes(contentType)) {
+        return res.status(400).json({ error: `Unsupported content type: ${contentType}` });
+      }
+
+      const rawText = typeof body.text === 'string' ? body.text.trim() : '';
+      const maxTextLen = contentType === 'text' ? 4096 : 1024;
+      if (rawText.length > maxTextLen) {
+        return res.status(400).json({ error: `Text/caption exceeds maximum length (${rawText.length}/${maxTextLen} characters).` });
+      }
+
+      // Default safe fallback if text is empty
+      const text = rawText || 'You joined {groupname} 🎉';
+
+      let normalizedMediaId: string | undefined = undefined;
+      let mediaUploadId: string | undefined = undefined;
+
+      if (contentType !== 'text') {
+        const uploadCandidate = body.mediaUploadId ||
+          (body.mediaFileId?.startsWith('upl_') ? body.mediaFileId : (body.mediaFileId?.startsWith('upload:') ? body.mediaFileId.substring(7) : undefined));
+
+        if (uploadCandidate) {
+          const item = mediaUploadStore.getMedia(uploadCandidate);
+          if (!item) {
+            return res.status(400).json({ error: `Uploaded media file (${uploadCandidate}) has expired or is invalid. Please re-upload the file.` });
+          }
+          mediaUploadId = item.id;
+          normalizedMediaId = `upload:${item.id}`;
+        } else if (body.mediaFileId) {
+          const mediaCheck = validateMediaReference(body.mediaFileId);
+          if (!mediaCheck.valid) {
+            return res.status(400).json({ error: mediaCheck.error || `Invalid media reference for ${contentType} posts.` });
+          }
+          normalizedMediaId = mediaCheck.normalized;
+        } else {
+          return res.status(400).json({ error: `Media reference is required for ${contentType} welcome message.` });
+        }
+      }
+
+      const sanitizedButtons = sanitizeInlineButtons(body.buttons);
+
+      const welcomeDmConfig: WelcomeDmConfig = {
+        enabled,
+        contentType,
+        text,
+        mediaFileId: normalizedMediaId,
+        mediaUploadId,
+        buttons: sanitizedButtons
+      };
+
+      const updated = db.updateGroupSettings(chatId, { welcomeDm: welcomeDmConfig });
+
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId,
+        chatTitle: updated.chatTitle || `Group ${chatId}`,
+        groupId: chatId,
+        actorRole: 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername,
+        command: 'welcome_dm_config',
+        action: 'setting_change',
+        result: 'success',
+        details: `Updated Welcome DM config: enabled=${enabled}, type=${contentType}`
+      });
+
+      res.json({
+        success: true,
+        chatId,
+        welcomeDm: updated.welcomeDm
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  app.put('/api/dashboard/groups/:chatId/welcome-dm', handleUpdateWelcomeDm);
+  app.post('/api/dashboard/groups/:chatId/welcome-dm', handleUpdateWelcomeDm);
+
+  app.post('/api/dashboard/groups/:chatId/welcome-dm/test', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const chatId = Number(req.params.chatId);
+      if (!chatId || isNaN(chatId)) {
+        return res.status(400).json({ error: 'Valid target chatId is required.' });
+      }
+
+      const settings = db.getGroupSettings(chatId);
+      const chatTitle = settings.chatTitle || `Group ${chatId}`;
+
+      // Resolve target operator Telegram ID
+      const rawTargetUserId = req.body?.targetUserId || req.query?.targetUserId || process.env.ADMIN_USER_ID || process.env.TELEGRAM_ADMIN_ID;
+      const numTargetUserId = Number(rawTargetUserId);
+      if (!numTargetUserId || isNaN(numTargetUserId) || numTargetUserId <= 0) {
+        return res.status(400).json({
+          error: 'Cannot send test DM: A valid recipient Telegram User ID is required. Please enter your Telegram user ID or configure ADMIN_USER_ID.',
+          code: 'USER_ID_REQUIRED'
+        });
+      }
+
+      // Resolve payload to test: either from request body or saved welcomeDm configuration
+      const configToTest: WelcomeDmConfig = req.body?.welcomeDm || settings.welcomeDm || {
+        enabled: true,
+        contentType: 'text',
+        text: 'You joined {groupname} 🎉'
+      };
+
+      const mockUser: TelegramUser = {
+        id: numTargetUserId,
+        is_bot: false,
+        first_name: req.body?.firstName || 'Operator',
+        last_name: req.body?.lastName || '',
+        username: req.body?.username || auth.operatorUsername || 'admin'
+      };
+
+      const rawText = configToTest.text !== undefined ? configToTest.text : 'You joined {groupname} 🎉';
+      const formattedText = ModerationService.formatWelcomeDmText(rawText, mockUser, chatTitle, chatId);
+      const formattedButtons = ModerationService.formatWelcomeDmButtons(configToTest.buttons, mockUser, chatTitle, chatId);
+
+      let normalizedMediaId = configToTest.mediaFileId;
+      let mediaUploadId = configToTest.mediaUploadId;
+
+      if (configToTest.contentType && configToTest.contentType !== 'text') {
+        const uploadCandidate = mediaUploadId ||
+          (normalizedMediaId?.startsWith('upl_') ? normalizedMediaId : (normalizedMediaId?.startsWith('upload:') ? normalizedMediaId.substring(7) : undefined));
+
+        if (uploadCandidate) {
+          const item = mediaUploadStore.getMedia(uploadCandidate);
+          if (!item) {
+            return res.status(400).json({ error: `Uploaded media file (${uploadCandidate}) has expired or is invalid.` });
+          }
+          mediaUploadId = item.id;
+          normalizedMediaId = `upload:${item.id}`;
+        } else if (normalizedMediaId) {
+          const mediaCheck = validateMediaReference(normalizedMediaId);
+          if (!mediaCheck.valid) {
+            return res.status(400).json({ error: mediaCheck.error || `Invalid media reference.` });
+          }
+          normalizedMediaId = mediaCheck.normalized;
+        }
+      }
+
+      const payload: PostPayload = {
+        contentType: configToTest.contentType || 'text',
+        text: formattedText,
+        mediaFileId: normalizedMediaId,
+        mediaUploadId,
+        buttons: formattedButtons
+      };
+
+      const sendRes = await PostSender.send(numTargetUserId, payload);
+      if (!sendRes.ok) {
+        return res.status(502).json({
+          success: false,
+          error: `Telegram delivery failed: ${sendRes.error || 'User unreachable by bot in private chat. Ensure you have started the bot via /start.'}`,
+          details: sendRes.error
+        });
+      }
+
+      db.addLog({
+        chatId,
+        chatTitle,
+        targetUserId: numTargetUserId,
+        adminUsername: auth.operatorUsername,
+        action: 'send_message',
+        details: `Sent Test Welcome DM to operator ID ${numTargetUserId} for group ${chatTitle} (Telegram msg #${sendRes.messageId || 'unknown'})`
+      });
+
+      res.json({
+        success: true,
+        messageId: sendRes.messageId,
+        chatId: numTargetUserId,
+        message: `Test Welcome DM successfully delivered to Telegram user ID ${numTargetUserId}!`
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // 9. Inspect and modify Telegram permissions
   app.get('/api/dashboard/groups/:chatId/permissions', async (req, res) => {

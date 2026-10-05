@@ -709,6 +709,9 @@ export class TelegramBotManager {
     if (message.new_chat_members && Array.isArray(message.new_chat_members)) {
       for (const newMember of message.new_chat_members) {
         db.cacheUser(newMember, chatId);
+        if (!newMember.is_bot) {
+          ModerationService.handleWelcomeDm(chatId, newMember, message.chat.title).catch(() => {});
+        }
       }
       const raidTriggered = await ModerationService.handleAntiRaid(chatId, message.new_chat_members, message.chat.title);
       if (!raidTriggered) {
@@ -1076,10 +1079,22 @@ export class TelegramBotManager {
       return; // Added bot was banned, abort further join flows (welcome/captcha/anti-raid)
     }
 
-    // Member joined via invite link, join request, or direct addition
-    if (newStatus === 'member' && oldStatus !== 'member' && user) {
+    // Authoritative check for actual new joiner transition:
+    // User transitions from non-member state (left, kicked, restricted, or not present) into member state.
+    // Explicitly ignores member->admin, admin->member demotions, admin->admin, restricted->admin, or existing member updates.
+    const isNewMemberJoin = newStatus === 'member' && oldStatus !== 'member' && oldStatus !== 'administrator' && oldStatus !== 'creator';
+
+    // Member joined via invite link, approved join request, or direct addition
+    if (isNewMemberJoin && user) {
       const me = await telegramApi.getMe().catch(() => null);
       if (user.id !== me?.result?.id) {
+        // Asynchronously deliver Welcome DM to human joiners in background (non-blocking)
+        if (!user.is_bot) {
+          ModerationService.handleWelcomeDm(chatId, user, chatTitle).catch((err) => {
+            console.warn(`[WelcomeDM] Background error sending welcome DM for user ${user.id}:`, err?.message);
+          });
+        }
+
         const raidTriggered = await ModerationService.handleAntiRaid(chatId, [user], chatTitle);
         if (!raidTriggered) {
           const captchaSent = await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);

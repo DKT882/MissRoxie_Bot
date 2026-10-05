@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoEngineConfig, AutoEngineMode, AutoEnginePreset, AutoEngineChannelConfig, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig, AUTO_ENGINE_PRESETS } from '../telegram/types.js';
+import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoEngineConfig, AutoEngineMode, AutoEnginePreset, AutoEngineChannelConfig, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig, AUTO_ENGINE_PRESETS, WelcomeDmConfig } from '../telegram/types.js';
 import { getDefaultStickersStats } from '../telegram/defaultStickers.js';
 import { logDebug } from '../observability/logger.js';
 import { mongoManager } from './mongodb.js';
@@ -2354,6 +2354,7 @@ export class StorageManager {
           lastStickerTimestamp: 0
         },
         stickerPacks: {},
+        welcomeDm: { enabled: false, text: 'You joined {groupname} 🎉' },
         updatedAt: new Date().toISOString()
       };
       this.scheduleSave(chatId);
@@ -2389,6 +2390,7 @@ export class StorageManager {
       if (!s.welcomeMessage) { s.welcomeMessage = 'Welcome {user} to {chat}!'; needsSave = true; }
       if (s.goodbyeEnabled === undefined) { s.goodbyeEnabled = false; needsSave = true; }
       if (!s.goodbyeMessage) { s.goodbyeMessage = 'Goodbye {user}!'; needsSave = true; }
+      if (s.welcomeDm === undefined) { s.welcomeDm = { enabled: false, text: 'You joined {groupname} 🎉' }; }
       if (s.slowModeSeconds === undefined) { s.slowModeSeconds = 0; needsSave = true; }
       if (s.automodEnabled === undefined) { s.automodEnabled = false; needsSave = true; }
       if (s.mediaAction === undefined) { s.mediaAction = 'delete'; needsSave = true; }
