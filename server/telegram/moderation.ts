@@ -4,6 +4,7 @@ import { db } from '../db/storage.js';
 import { TelegramMiddleware } from './middleware.js';
 import { ContentPolicyEngine } from './policyEngine.js';
 import { PostSender, sanitizeInlineButtons } from './postSender.js';
+import { WelcomeDmFallbackService } from './welcomeDmFallback.js';
 
 export const MUTED_PERMISSIONS: ChatPermissions = {
   can_send_messages: false,
@@ -1405,7 +1406,7 @@ export class ModerationService {
     chatId: number,
     user: TelegramUser,
     chatTitle?: string
-  ): Promise<{ sent: boolean; skipped?: string; error?: string; messageId?: number }> {
+  ): Promise<{ sent: boolean; fallbackSent?: boolean; token?: string; skipped?: string; error?: string; messageId?: number; fallbackMessageId?: number }> {
     if (!chatId || !user || !user.id) {
       return { sent: false, skipped: 'INVALID_PARAMETERS' };
     }
@@ -1486,8 +1487,64 @@ export class ModerationService {
         });
         return { sent: true, messageId: sendRes.messageId };
       } else {
-        console.warn(`[WelcomeDM] Private DM delivery failed for user ${user.id} from group ${chatId}: ${sendRes.error}`);
-        return { sent: false, error: sendRes.error };
+        const errorMsg = sendRes.error || 'Telegram send failed';
+        console.warn(`[WelcomeDM] Private DM delivery failed for user ${user.id} from group ${chatId}: ${errorMsg}`);
+
+        // Check if Telegram specifically returned a first-contact error (e.g. 403 Forbidden: bot can't initiate conversation with a user)
+        const isFirstContact = /can't initiate conversation/i.test(errorMsg) ||
+                               /cannot initiate conversation/i.test(errorMsg) ||
+                               /bot can't initiate/i.test(errorMsg);
+        const isBlocked = /blocked by the user/i.test(errorMsg) ||
+                          /user is deactivated/i.test(errorMsg);
+
+        // Fallback: If Telegram blocked first-contact and user hasn't explicitly blocked Roxie, and fallback is enabled:
+        const fallbackEnabled = welcomeDmConfig.fallbackEnabled === true;
+        if (isFirstContact && !isBlocked && fallbackEnabled) {
+          try {
+            const pending = WelcomeDmFallbackService.createPendingWelcome(chatId, title, user, welcomeDmConfig);
+            const botUser = me?.result || (await telegramApi.getMe().then(r => r.result).catch(() => null));
+            const botUsername = botUser?.username || 'MissRoxie_Bot';
+            const deepLink = `https://t.me/${botUsername}?start=welcome_${pending.token}`;
+
+            const rawFallbackText = welcomeDmConfig.fallbackText || '👋 Welcome {first_name}!\n\nStart Roxie privately to receive your personal welcome message.';
+            const formattedFallbackText = this.formatRichMessageText(rawFallbackText, user, title, chatId);
+            const fallbackButtonText = welcomeDmConfig.fallbackButtonText || '💬 Start Roxie';
+
+            const fallbackRes = await telegramApi.sendMessage(chatId, formattedFallbackText, {
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: fallbackButtonText, url: deepLink }]
+                ]
+              }
+            });
+
+            if (fallbackRes.ok && fallbackRes.result?.message_id) {
+              const fallbackMsgId = fallbackRes.result.message_id;
+              if (settings.autoDeleteJoinLeave) {
+                setTimeout(() => {
+                  telegramApi.deleteMessage(chatId, fallbackMsgId).catch(() => {});
+                  db.untrackMessages(chatId, [fallbackMsgId]);
+                }, 15000);
+              }
+
+              db.addLog({
+                chatId,
+                chatTitle: title,
+                targetUserId: user.id,
+                targetUsername: user.username,
+                action: 'send_message',
+                details: `Sent Welcome DM deep-link fallback in group ${title} for ${user.first_name || user.id} (first-contact user)`
+              });
+
+              return { sent: false, fallbackSent: true, token: pending.token, error: errorMsg, fallbackMessageId: fallbackMsgId };
+            }
+          } catch (fallbackErr: any) {
+            console.error(`[WelcomeDM] Exception sending fallback in group ${chatId}:`, fallbackErr?.message);
+          }
+        }
+
+        return { sent: false, fallbackSent: false, error: errorMsg };
       }
     } catch (err: any) {
       console.error(`[WelcomeDM] Exception sending welcome DM to user ${user.id}:`, err.message);

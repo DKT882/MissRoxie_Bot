@@ -588,6 +588,10 @@ export interface RichMessageConfig {
   mediaFileId?: string;
   mediaUploadId?: string;
   buttons?: ScheduledPostButton[][];
+  // Fallback options for Welcome DM when Telegram restricts first-contact private DM
+  fallbackEnabled?: boolean; // default: false (notify in group with Start button)
+  fallbackText?: string; // custom fallback message template
+  fallbackButtonText?: string; // custom deep-link button text
 }
 
 export type WelcomeDmConfig = RichMessageConfig;

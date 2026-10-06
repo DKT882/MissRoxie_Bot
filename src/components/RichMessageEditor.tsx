@@ -37,6 +37,9 @@ export interface RichMessageConfigData {
   mediaFileId?: string;
   mediaUploadId?: string;
   buttons?: Array<Array<{ text: string; url: string; style?: PostButtonStyle }>>;
+  fallbackEnabled?: boolean;
+  fallbackText?: string;
+  fallbackButtonText?: string;
   pinAfterSend?: boolean;
   replyToLatest?: boolean;
   protectContent?: boolean;
@@ -109,6 +112,9 @@ export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
   const mediaFileId = config.mediaFileId || '';
   const mediaUploadId = config.mediaUploadId || '';
   const buttons = config.buttons || [];
+  const fallbackEnabled = Boolean(config.fallbackEnabled);
+  const fallbackText = config.fallbackText !== undefined ? config.fallbackText : '';
+  const fallbackButtonText = config.fallbackButtonText !== undefined ? config.fallbackButtonText : '';
 
   const maxChars = contentType === 'text' ? 4096 : 1024;
   const isOverLimit = text.length > maxChars;
@@ -642,6 +648,60 @@ export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* First-Contact Fallback Settings (for Private Welcome DM) */}
+      {isPrivateDm && (
+        <div className={`p-4 rounded-xl border ${themeBorder} ${themeInnerCardBg} space-y-3 pt-3`}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-stone-200 block">
+                Notify in Group if User Cannot Be Privately Contacted
+              </label>
+              <p className={`text-[11px] ${themeMutedText}`}>
+                If a joining user has never started Roxie before, Telegram restricts direct private DMs. When enabled, Roxie sends a friendly in-group message with a &quot;Start Roxie&quot; button that immediately delivers their welcome DM upon clicking.
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-2">
+              <input
+                type="checkbox"
+                checked={fallbackEnabled}
+                onChange={e => onChange({ ...config, fallbackEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-10 h-5 bg-stone-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          {fallbackEnabled && (
+            <div className="space-y-3 pt-2 border-t border-stone-800/40">
+              <div>
+                <label className="text-xs font-semibold text-stone-300 block mb-1">
+                  In-Group Fallback Text
+                </label>
+                <input
+                  type="text"
+                  value={fallbackText}
+                  onChange={e => onChange({ ...config, fallbackText: e.target.value })}
+                  placeholder="👋 Welcome {first_name}! Start Roxie privately to receive your personal welcome message."
+                  className={`w-full text-xs px-3 py-2 rounded-lg border ${themeInputBg}`}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-stone-300 block mb-1">
+                  Fallback Button Label
+                </label>
+                <input
+                  type="text"
+                  value={fallbackButtonText}
+                  onChange={e => onChange({ ...config, fallbackButtonText: e.target.value })}
+                  placeholder="💬 Start Roxie"
+                  className={`w-full text-xs px-3 py-2 rounded-lg border ${themeInputBg}`}
+                />
+              </div>
             </div>
           )}
         </div>

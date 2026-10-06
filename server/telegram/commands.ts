@@ -4,8 +4,10 @@ import { db } from '../db/storage.js';
 import { ModerationService, parseDuration, parseModerationArgs } from './moderation.js';
 import { messageScheduler } from './scheduler.js';
 import { PostBuilderManager } from './postBuilder.js';
+import { PostSender } from './postSender.js';
+import { WelcomeDmFallbackService } from './welcomeDmFallback.js';
 import { mapTelegramError } from './errorMapper.js';
-import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand, CachedMember, ScheduledPostButton } from './types.js';
+import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand, CachedMember, ScheduledPostButton, PostPayload } from './types.js';
 import { mtprotoParticipantService, MtprotoParticipantService } from './mtprotoParticipantService.js';
 import {
   COMMAND_CATALOG,
@@ -5201,6 +5203,74 @@ export class CommandHandler {
   // ==========================================
   private static async handleStart(ctx: CommandContext) {
     const isGroup = TelegramMiddleware.isGroup(ctx.message);
+    const startArg = (ctx.args[0] || '').trim();
+
+    // Check for deferred Welcome DM deep link (/start welcome_<token>) in private chat
+    if (!isGroup && startArg.startsWith('welcome_')) {
+      const token = startArg.replace(/^welcome_/, '').trim();
+      const claimResult = WelcomeDmFallbackService.acquireClaim(token, ctx.sender.id);
+
+      if (!claimResult.ok) {
+        const reason = (claimResult as { ok: false; reason: string }).reason;
+        if (reason === 'NOT_FOUND') {
+          await telegramApi.sendMessage(ctx.chatId, '⚠️ This welcome link is invalid or has already been used.');
+        } else if (reason === 'EXPIRED') {
+          await telegramApi.sendMessage(ctx.chatId, '⏳ This welcome link has expired.');
+        } else if (reason === 'WRONG_USER') {
+          await telegramApi.sendMessage(ctx.chatId, '⛔ This welcome message was generated for another member.');
+        } else if (reason === 'IN_FLIGHT') {
+          // A concurrent request is already in-flight for this token, ignore duplicate to prevent replay
+          console.log(`[WelcomeDM] In-flight claim active for token ${token}, suppressing concurrent duplicate request`);
+        }
+        return;
+      }
+
+      const pending = claimResult.pending;
+
+      try {
+        const rawText = pending.config.text !== undefined ? pending.config.text : 'You joined {groupname} 🎉';
+        const formattedText = ModerationService.formatRichMessageText(rawText, ctx.sender, pending.chatTitle, pending.chatId);
+        const formattedButtons = pending.config.mode === 'rich' || (pending.config.buttons && pending.config.buttons.length > 0)
+          ? ModerationService.formatRichMessageButtons(pending.config.buttons, ctx.sender, pending.chatTitle, pending.chatId)
+          : undefined;
+
+        const payload: PostPayload = {
+          contentType: pending.config.contentType || 'text',
+          text: formattedText,
+          mediaFileId: pending.config.mediaFileId,
+          mediaUploadId: pending.config.mediaUploadId,
+          buttons: formattedButtons
+        };
+
+        const sendRes = await PostSender.send(ctx.sender.id, payload);
+
+        if (sendRes.ok) {
+          // Successful delivery: permanently consume the token
+          WelcomeDmFallbackService.completeClaim(token);
+
+          TelegramMiddleware.logAudit({
+            chatId: pending.chatId,
+            chatTitle: pending.chatTitle,
+            actor: await TelegramMiddleware.resolveActor(ctx),
+            command: 'start',
+            action: 'send_message',
+            result: 'success',
+            details: `Delivered deferred Welcome Private DM to ${ctx.sender.first_name || ctx.sender.id} (@${ctx.sender.username || 'unknown'}) for joining ${pending.chatTitle}`
+          });
+        } else {
+          // Delivery failed: release in-flight lock so user can retry until TTL expiration
+          WelcomeDmFallbackService.releaseClaim(token);
+          console.warn(`[WelcomeDM] Delivery of deferred Welcome DM failed for user ${ctx.sender.id}: ${sendRes.error}`);
+          await telegramApi.sendMessage(ctx.chatId, `⚠️ Could not deliver your welcome message at this moment: ${sendRes.error || 'Telegram delivery error'}. Please try again shortly.`);
+        }
+      } catch (err: any) {
+        WelcomeDmFallbackService.releaseClaim(token);
+        console.error(`[WelcomeDM] Exception during deferred Welcome DM delivery for token ${token}:`, err?.message);
+        await telegramApi.sendMessage(ctx.chatId, '⚠️ An unexpected error occurred while delivering your welcome message. Please try again.');
+      }
+      return;
+    }
+
     const greeting = isGroup
       ? `👋 <b>Hello ${ctx.chatTitle || 'group'}!</b>\n\n` +
         `I am <b>@${(await telegramApi.getMe()).result?.username || 'MissRoxie_Bot'}</b>, your group moderation and administration assistant.\n\n` +

@@ -1409,6 +1409,16 @@ export async function startServer() {
       ? sanitizeInlineButtons(body.buttons)
       : (existingConfig?.buttons ? sanitizeInlineButtons(existingConfig.buttons) : []);
 
+    const fallbackEnabled = body.fallbackEnabled !== undefined
+      ? Boolean(body.fallbackEnabled)
+      : (existingConfig?.fallbackEnabled !== undefined ? Boolean(existingConfig.fallbackEnabled) : false);
+    const fallbackText = typeof body.fallbackText === 'string'
+      ? body.fallbackText.trim()
+      : (body.fallbackText === undefined && existingConfig?.fallbackText !== undefined ? existingConfig.fallbackText : undefined);
+    const fallbackButtonText = typeof body.fallbackButtonText === 'string'
+      ? body.fallbackButtonText.trim()
+      : (body.fallbackButtonText === undefined && existingConfig?.fallbackButtonText !== undefined ? existingConfig.fallbackButtonText : undefined);
+
     return {
       valid: true,
       config: {
@@ -1418,7 +1428,10 @@ export async function startServer() {
         text,
         mediaFileId: normalizedMediaId,
         mediaUploadId,
-        buttons: sanitizedButtons
+        buttons: sanitizedButtons,
+        fallbackEnabled,
+        fallbackText,
+        fallbackButtonText
       }
     };
   }
