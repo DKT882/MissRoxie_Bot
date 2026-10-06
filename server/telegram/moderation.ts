@@ -1507,6 +1507,20 @@ export class ModerationService {
         ? options.targetChatId
         : user.id;
 
+      console.log(JSON.stringify({
+        event: 'WELCOME_DM_EVALUATION',
+        chatId,
+        chatTitle: title,
+        userId: user.id,
+        username: user.username || null,
+        trigger,
+        triggerMode,
+        welcomeDmEnabled: Boolean(welcomeDmConfig.enabled),
+        selectedTargetChatId: targetDestination,
+        contentType: payload.contentType,
+        timestamp: new Date().toISOString()
+      }));
+
       const sendRes = await PostSender.send(targetDestination, payload);
 
       if (sendRes.ok) {

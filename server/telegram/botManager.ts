@@ -1020,10 +1020,47 @@ export class TelegramBotManager {
       db.scheduleSave(chatId);
     }
 
+    const welcomeDmConfig = settings.welcomeDm;
+    const triggerMode = welcomeDmConfig?.triggerMode || 'normal_join';
+    const welcomeDmEnabled = Boolean(welcomeDmConfig?.enabled);
+    const autoAcceptEnabled = Boolean(settings.autoAcceptEnabled);
+
+    console.log(JSON.stringify({
+      event: 'CHAT_JOIN_REQUEST_RECEIVED',
+      chatId,
+      chatTitle,
+      userId: user.id,
+      username: user.username || null,
+      user_chat_id: joinRequest.user_chat_id || null,
+      welcomeDmEnabled,
+      triggerMode,
+      autoAcceptEnabled,
+      receivedAt: new Date().toISOString()
+    }));
+
     // 1. Attempt Join Request Welcome Private DM first (using temporary user_chat_id)
     if (!user.is_bot && joinRequest.user_chat_id) {
       try {
-        await ModerationService.handleJoinRequestWelcomeDm(joinRequest);
+        console.log(JSON.stringify({
+          event: 'JOIN_REQUEST_WELCOME_DM_DISPATCH_START',
+          chatId,
+          userId: user.id,
+          user_chat_id: joinRequest.user_chat_id,
+          trigger: 'join_request',
+          timestamp: new Date().toISOString()
+        }));
+        const dmRes = await ModerationService.handleJoinRequestWelcomeDm(joinRequest);
+        console.log(JSON.stringify({
+          event: 'JOIN_REQUEST_WELCOME_DM_DISPATCH_END',
+          chatId,
+          userId: user.id,
+          user_chat_id: joinRequest.user_chat_id,
+          sent: dmRes.sent,
+          skipped: dmRes.skipped || null,
+          error: dmRes.error || null,
+          messageId: dmRes.messageId || null,
+          timestamp: new Date().toISOString()
+        }));
       } catch (err: any) {
         console.warn(`[WelcomeDM] Error sending join request welcome DM for user ${user.id}:`, err?.message);
       }
@@ -1031,8 +1068,22 @@ export class TelegramBotManager {
 
     // 2. Only after DM delivery attempt is complete, continue with existing auto-accept behavior
     if (settings.autoAcceptEnabled) {
+      console.log(JSON.stringify({
+        event: 'AUTO_ACCEPT_EXECUTION_START',
+        chatId,
+        userId: user.id,
+        timestamp: new Date().toISOString()
+      }));
       try {
         const res = await telegramApi.approveChatJoinRequest(chatId, user.id);
+        console.log(JSON.stringify({
+          event: 'AUTO_ACCEPT_EXECUTION_END',
+          chatId,
+          userId: user.id,
+          ok: res.ok,
+          description: res.description || null,
+          timestamp: new Date().toISOString()
+        }));
         if (res.ok) {
           db.addLog({
             chatId,

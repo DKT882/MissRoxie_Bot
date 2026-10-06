@@ -210,40 +210,68 @@ export class PostSender {
       }
 
       let sendRes: any;
+      let usedMethod = 'sendMessage';
+      const sendStartTime = new Date().toISOString();
+      const sendStartMs = Date.now();
 
       // 4. Dispatch to Telegram based on effectiveContentType via TelegramApi
       if (effectiveContentType === 'photo' && resolvedMedia) {
+        usedMethod = 'sendPhoto';
         sendRes = await telegramApi.sendPhoto(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
       } else if (effectiveContentType === 'video' && resolvedMedia) {
+        usedMethod = 'sendVideo';
         sendRes = await telegramApi.sendVideo(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
       } else if (effectiveContentType === 'animation' && resolvedMedia) {
+        usedMethod = 'sendAnimation';
         sendRes = await telegramApi.sendAnimation(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
       } else if (effectiveContentType === 'document' && resolvedMedia) {
+        usedMethod = 'sendDocument';
         sendRes = await telegramApi.sendDocument(chatId, resolvedMedia, {
           caption: textContent,
           parse_mode: 'HTML',
           ...options
         });
       } else if (effectiveContentType === 'sticker' && typeof resolvedMedia === 'string') {
+        usedMethod = 'sendSticker';
         sendRes = await telegramApi.sendSticker(chatId, resolvedMedia, options);
       } else {
+        usedMethod = 'sendMessage';
         sendRes = await telegramApi.sendMessage(chatId, textContent, {
           parse_mode: 'HTML',
           ...options
         });
       }
+
+      const sendEndTime = new Date().toISOString();
+      const sendDurationMs = Date.now() - sendStartMs;
+
+      console.log(JSON.stringify({
+        event: 'POST_SENDER_DELIVERY_RESULT',
+        destinationChatId: chatId,
+        contentType: effectiveContentType,
+        apiMethod: usedMethod,
+        requestSentAt: sendStartTime,
+        responseReceivedAt: sendEndTime,
+        durationMs: sendDurationMs,
+        ok: Boolean(sendRes?.ok),
+        error_code: sendRes?.error_code || null,
+        description: sendRes?.description || null,
+        message_id: sendRes?.result?.message_id || null,
+        chat_id: sendRes?.result?.chat?.id || null,
+        chat_type: sendRes?.result?.chat?.type || null
+      }));
 
       if (!sendRes || !sendRes.ok || !sendRes.result) {
         const errorMsg = sendRes?.description || 'Telegram send failed';
