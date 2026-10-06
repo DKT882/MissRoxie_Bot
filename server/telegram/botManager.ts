@@ -1019,6 +1019,17 @@ export class TelegramBotManager {
     if (chatId < 0) {
       db.scheduleSave(chatId);
     }
+
+    // 1. Attempt Join Request Welcome Private DM first (using temporary user_chat_id)
+    if (!user.is_bot && joinRequest.user_chat_id) {
+      try {
+        await ModerationService.handleJoinRequestWelcomeDm(joinRequest);
+      } catch (err: any) {
+        console.warn(`[WelcomeDM] Error sending join request welcome DM for user ${user.id}:`, err?.message);
+      }
+    }
+
+    // 2. Only after DM delivery attempt is complete, continue with existing auto-accept behavior
     if (settings.autoAcceptEnabled) {
       try {
         const res = await telegramApi.approveChatJoinRequest(chatId, user.id);

@@ -40,6 +40,7 @@ export interface RichMessageConfigData {
   fallbackEnabled?: boolean;
   fallbackText?: string;
   fallbackButtonText?: string;
+  triggerMode?: 'normal_join' | 'join_request' | 'both';
   pinAfterSend?: boolean;
   replyToLatest?: boolean;
   protectContent?: boolean;
@@ -115,6 +116,7 @@ export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
   const fallbackEnabled = Boolean(config.fallbackEnabled);
   const fallbackText = config.fallbackText !== undefined ? config.fallbackText : '';
   const fallbackButtonText = config.fallbackButtonText !== undefined ? config.fallbackButtonText : '';
+  const triggerMode = config.triggerMode || 'normal_join';
 
   const maxChars = contentType === 'text' ? 4096 : 1024;
   const isOverLimit = text.length > maxChars;
@@ -650,6 +652,94 @@ export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Delivery Trigger Mode (for Private Welcome DM) */}
+      {isPrivateDm && (
+        <div className={`p-4 rounded-xl border ${themeBorder} ${themeInnerCardBg} space-y-3 pt-3`}>
+          <div>
+            <label className="text-xs font-bold uppercase tracking-wider text-stone-200 block">
+              Delivery Trigger
+            </label>
+            <p className={`text-[11px] ${themeMutedText}`}>
+              Choose when Roxie should send the private welcome message.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => onChange({ ...config, triggerMode: 'normal_join' })}
+              className={`p-3 rounded-lg border text-left transition-all ${
+                triggerMode === 'normal_join'
+                  ? 'border-blue-500 bg-blue-500/10 text-white'
+                  : 'border-stone-800 bg-stone-900/40 text-stone-400 hover:border-stone-700'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="welcomeDmTriggerMode"
+                  checked={triggerMode === 'normal_join'}
+                  onChange={() => onChange({ ...config, triggerMode: 'normal_join' })}
+                  className="text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                />
+                <span className="text-xs font-semibold text-stone-200">Normal Join</span>
+              </div>
+              <p className="text-[10px] text-stone-400 mt-1 pl-5">
+                Sent when user joins the group directly or is approved.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onChange({ ...config, triggerMode: 'join_request' })}
+              className={`p-3 rounded-lg border text-left transition-all ${
+                triggerMode === 'join_request'
+                  ? 'border-blue-500 bg-blue-500/10 text-white'
+                  : 'border-stone-800 bg-stone-900/40 text-stone-400 hover:border-stone-700'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="welcomeDmTriggerMode"
+                  checked={triggerMode === 'join_request'}
+                  onChange={() => onChange({ ...config, triggerMode: 'join_request' })}
+                  className="text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                />
+                <span className="text-xs font-semibold text-stone-200">Join Request</span>
+              </div>
+              <p className="text-[10px] text-stone-400 mt-1 pl-5">
+                Sent immediately when user submits a request to join.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onChange({ ...config, triggerMode: 'both' })}
+              className={`p-3 rounded-lg border text-left transition-all ${
+                triggerMode === 'both'
+                  ? 'border-blue-500 bg-blue-500/10 text-white'
+                  : 'border-stone-800 bg-stone-900/40 text-stone-400 hover:border-stone-700'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="welcomeDmTriggerMode"
+                  checked={triggerMode === 'both'}
+                  onChange={() => onChange({ ...config, triggerMode: 'both' })}
+                  className="text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                />
+                <span className="text-xs font-semibold text-stone-200">Both</span>
+              </div>
+              <p className="text-[10px] text-stone-400 mt-1 pl-5">
+                Sent on join request or normal join (deduplicated).
+              </p>
+            </button>
+          </div>
         </div>
       )}
 

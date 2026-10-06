@@ -1,5 +1,5 @@
 import { telegramApi } from './api.js';
-import { TelegramMessage, TelegramUser, TelegramChat, TelegramChatMember, ChatPermissions, TempActionRecord, CaptchaSession, PostPayload, ScheduledPostButton, WelcomeDmConfig, RichMessageConfig } from './types.js';
+import { TelegramMessage, TelegramUser, TelegramChat, TelegramChatMember, ChatPermissions, TempActionRecord, CaptchaSession, PostPayload, ScheduledPostButton, WelcomeDmConfig, RichMessageConfig, TelegramChatJoinRequest } from './types.js';
 import { db } from '../db/storage.js';
 import { TelegramMiddleware } from './middleware.js';
 import { ContentPolicyEngine } from './policyEngine.js';
@@ -1400,12 +1400,17 @@ export class ModerationService {
   }
 
   /**
-   * Send Welcome Private DM to a real human user when they join a group where Welcome DM is enabled.
+   * Send Welcome Private DM to a real human user when they join a group or request to join.
+   * Supports both normal_join (destination = user.id) and join_request (destination = targetChatId / user_chat_id).
    */
   public static async handleWelcomeDm(
     chatId: number,
     user: TelegramUser,
-    chatTitle?: string
+    chatTitle?: string,
+    options?: {
+      targetChatId?: number;
+      trigger?: 'normal_join' | 'join_request';
+    }
   ): Promise<{ sent: boolean; fallbackSent?: boolean; token?: string; skipped?: string; error?: string; messageId?: number; fallbackMessageId?: number }> {
     if (!chatId || !user || !user.id) {
       return { sent: false, skipped: 'INVALID_PARAMETERS' };
@@ -1435,8 +1440,22 @@ export class ModerationService {
       return { sent: false, skipped: 'FEATURE_DISABLED' };
     }
 
-    // Deduplication & In-Flight Guard: prevent duplicate DMs for same user within 60s
-    const dedupeKey = `${chatId}:${user.id}`;
+    const trigger = options?.trigger || 'normal_join';
+    const triggerMode = welcomeDmConfig.triggerMode || 'normal_join';
+
+    // Verify triggerMode matches current event trigger
+    if (trigger === 'normal_join' && triggerMode === 'join_request') {
+      return { sent: false, skipped: 'TRIGGER_MODE_MISMATCH' };
+    }
+    if (trigger === 'join_request' && triggerMode === 'normal_join') {
+      return { sent: false, skipped: 'TRIGGER_MODE_MISMATCH' };
+    }
+
+    // Deduplication & In-Flight Guard:
+    const dedupeKey = trigger === 'join_request'
+      ? `join_req:${chatId}:${user.id}`
+      : `${chatId}:${user.id}`;
+
     if (this.inFlightWelcomeDms.has(dedupeKey)) {
       return { sent: false, skipped: 'IN_FLIGHT' };
     }
@@ -1445,6 +1464,15 @@ export class ModerationService {
     const lastWelcomed = this.welcomedDmUsersCache.get(dedupeKey) || 0;
     if (now - lastWelcomed < 60000) {
       return { sent: false, skipped: 'ALREADY_WELCOMED_RECENTLY' };
+    }
+
+    // Also check cross-trigger duplicate for 'both' mode:
+    // If a user received a join_request DM within the last 60s, do not double-send on normal_join approval.
+    if (trigger === 'normal_join' && triggerMode === 'both') {
+      const lastJoinReq = this.welcomedDmUsersCache.get(`join_req:${chatId}:${user.id}`) || 0;
+      if (now - lastJoinReq < 60000) {
+        return { sent: false, skipped: 'ALREADY_WELCOMED_RECENTLY' };
+      }
     }
 
     this.inFlightWelcomeDms.add(dedupeKey);
@@ -1472,9 +1500,14 @@ export class ModerationService {
         buttons: formattedButtons
       };
 
-      // PRIVATE CHAT DELIVERY: target chat_id is the joining user's Telegram user ID
-      const targetUserId = user.id;
-      const sendRes = await PostSender.send(targetUserId, payload);
+      // PRIVATE CHAT DELIVERY:
+      // For Join Request: target destination is options.targetChatId (joinRequest.user_chat_id)
+      // For Normal Join: target destination is user.id
+      const targetDestination = (trigger === 'join_request' && options?.targetChatId)
+        ? options.targetChatId
+        : user.id;
+
+      const sendRes = await PostSender.send(targetDestination, payload);
 
       if (sendRes.ok) {
         db.addLog({
@@ -1483,12 +1516,18 @@ export class ModerationService {
           targetUserId: user.id,
           targetUsername: user.username,
           action: 'send_message',
-          details: `Sent Welcome Private DM to ${user.first_name || user.id} (@${user.username || 'unknown'}) for joining ${title} (Telegram msg #${sendRes.messageId || 'unknown'})`
+          details: `Sent Welcome Private DM (${trigger}) to ${user.first_name || user.id} (@${user.username || 'unknown'}) for joining ${title} (Telegram msg #${sendRes.messageId || 'unknown'})`
         });
         return { sent: true, messageId: sendRes.messageId };
       } else {
         const errorMsg = sendRes.error || 'Telegram send failed';
-        console.warn(`[WelcomeDM] Private DM delivery failed for user ${user.id} from group ${chatId}: ${errorMsg}`);
+        console.warn(`[WelcomeDM] Private DM delivery failed for user ${user.id} (trigger=${trigger}, destination=${targetDestination}) from group ${chatId}: ${errorMsg}`);
+
+        // Fallback: ONLY apply first-contact group fallback for NORMAL joins.
+        // For join requests, Telegram gives a temporary private chat permission; if it fails, do NOT send fallback to the group.
+        if (trigger === 'join_request') {
+          return { sent: false, fallbackSent: false, error: errorMsg };
+        }
 
         // Check if Telegram specifically returned a first-contact error (e.g. 403 Forbidden: bot can't initiate conversation with a user)
         const isFirstContact = /can't initiate conversation/i.test(errorMsg) ||
@@ -1552,6 +1591,26 @@ export class ModerationService {
     } finally {
       this.inFlightWelcomeDms.delete(dedupeKey);
     }
+  }
+
+  /**
+   * Helper specifically for Telegram ChatJoinRequest updates.
+   */
+  public static async handleJoinRequestWelcomeDm(
+    joinRequest: TelegramChatJoinRequest
+  ): Promise<{ sent: boolean; fallbackSent?: boolean; skipped?: string; error?: string; messageId?: number }> {
+    if (!joinRequest || !joinRequest.chat || !joinRequest.from || !joinRequest.user_chat_id) {
+      return { sent: false, skipped: 'INVALID_PARAMETERS' };
+    }
+    return this.handleWelcomeDm(
+      joinRequest.chat.id,
+      joinRequest.from,
+      joinRequest.chat.title,
+      {
+        targetChatId: joinRequest.user_chat_id,
+        trigger: 'join_request'
+      }
+    );
   }
 
   /**

@@ -580,6 +580,16 @@ export interface PostPayload {
 
 export type MessageMode = 'simple' | 'rich';
 
+export type WelcomeDmTriggerMode = 'normal_join' | 'join_request' | 'both';
+
+export interface WelcomeDmDeliveryTarget {
+  targetChatId: number;
+  user: TelegramUser;
+  chatId: number;
+  chatTitle: string;
+  trigger: 'normal_join' | 'join_request';
+}
+
 export interface RichMessageConfig {
   enabled: boolean;
   mode?: MessageMode; // 'simple' | 'rich' (default: 'simple')
@@ -592,6 +602,8 @@ export interface RichMessageConfig {
   fallbackEnabled?: boolean; // default: false (notify in group with Start button)
   fallbackText?: string; // custom fallback message template
   fallbackButtonText?: string; // custom deep-link button text
+  // Delivery trigger mode for Welcome Private DM
+  triggerMode?: WelcomeDmTriggerMode; // 'normal_join' | 'join_request' | 'both' (default: 'normal_join')
 }
 
 export type WelcomeDmConfig = RichMessageConfig;

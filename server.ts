@@ -16,7 +16,7 @@ import { runDummyDataCleanup } from './server/operations/cleanupDummyData.js';
 import { mongoManager } from './server/db/mongodb.js';
 import { MongoStorageService } from './server/db/mongoStorage.js';
 import { PostSender, sanitizeInlineButtons, validateMediaReference } from './server/telegram/postSender.js';
-import { PostPayload, PostContentType, ScheduledPostButton, WelcomeDmConfig, TelegramUser, RichMessageConfig, MessageMode, GroupSettings } from './server/telegram/types.js';
+import { PostPayload, PostContentType, ScheduledPostButton, WelcomeDmConfig, TelegramUser, RichMessageConfig, MessageMode, GroupSettings, WelcomeDmTriggerMode } from './server/telegram/types.js';
 import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
 import { ModerationService } from './server/telegram/moderation.js';
 
@@ -1419,6 +1419,15 @@ export async function startServer() {
       ? body.fallbackButtonText.trim()
       : (body.fallbackButtonText === undefined && existingConfig?.fallbackButtonText !== undefined ? existingConfig.fallbackButtonText : undefined);
 
+    let triggerMode: WelcomeDmTriggerMode = 'normal_join';
+    if (body.triggerMode === 'normal_join' || body.triggerMode === 'join_request' || body.triggerMode === 'both') {
+      triggerMode = body.triggerMode;
+    } else if (existingConfig?.triggerMode === 'normal_join' || existingConfig?.triggerMode === 'join_request' || existingConfig?.triggerMode === 'both') {
+      triggerMode = existingConfig.triggerMode;
+    } else {
+      triggerMode = 'normal_join';
+    }
+
     return {
       valid: true,
       config: {
@@ -1431,7 +1440,8 @@ export async function startServer() {
         buttons: sanitizedButtons,
         fallbackEnabled,
         fallbackText,
-        fallbackButtonText
+        fallbackButtonText,
+        triggerMode
       }
     };
   }
