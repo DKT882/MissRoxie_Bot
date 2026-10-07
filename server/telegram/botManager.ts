@@ -325,15 +325,24 @@ export class TelegramBotManager {
 
   private async runPollingLoop(instanceId: string) {
     let hadError = false;
+    let wasLeader = false;
     while (!this.shouldStop && TelegramBotManager.activeInstanceId === instanceId) {
       try {
         // Single-consumer distributed lease check
         const hasLease = await TelegramBotManager.acquireOrRenewPollingLease(instanceId);
         if (!hasLease) {
+          if (wasLeader) {
+            console.log(`[POLLING_LEASE] LEADERSHIP_LOST instance=${instanceId}`);
+            wasLeader = false;
+          }
+          console.log(`[POLLING_LEASE] STANDBY instance=${instanceId}`);
           console.log(`[POLLING_LEASE] Instance ${instanceId} is on standby (another process is active polling leader). Waiting 10s...`);
           await new Promise((r) => setTimeout(r, 10000));
           continue;
         }
+
+        wasLeader = true;
+        console.log(`[POLLING_LEASE] LEADER_ACQUIRED instance=${instanceId}`);
 
         this.lastPolledAt = new Date().toISOString();
         this.abortController = new AbortController();
@@ -341,6 +350,8 @@ export class TelegramBotManager {
         metricsTracker.increment('telegram_api_requests');
         const offset = this.lastUpdateId ? this.lastUpdateId + 1 : undefined;
         const pollReqStart = Date.now();
+
+        console.log(`[TELEGRAM_POLLING] GET_UPDATES_START instance=${instanceId} offset=${offset ?? 'none'}`);
 
         const data = await telegramApi.getUpdates(
           offset,
@@ -353,8 +364,10 @@ export class TelegramBotManager {
 
         if (data.ok && Array.isArray(data.result)) {
           const count = data.result.length;
+          console.log(`[TELEGRAM_POLLING] GET_UPDATES_RESULT instance=${instanceId} updateCount=${count}`);
           console.log(`[TELEGRAM_POLL_TRACE] ok=true updateCount=${count} firstUpdateId=${count > 0 ? data.result[0]?.update_id : 'none'} lastUpdateId=${count > 0 ? data.result[count - 1]?.update_id : 'none'}`);
         } else {
+          console.log(`[TELEGRAM_POLLING] GET_UPDATES_ERROR instance=${instanceId} error=${data?.description || `error_code_${data?.error_code}`}`);
           console.log(`[TELEGRAM_POLL_TRACE] ok=${Boolean(data.ok)} error_code=${data.error_code} description="${data.description || ''}"`);
         }
 
@@ -438,6 +451,8 @@ export class TelegramBotManager {
       } catch (err: any) {
         if (this.shouldStop || TelegramBotManager.activeInstanceId !== instanceId) break;
         if (err.name === 'AbortError') break;
+
+        console.log(`[TELEGRAM_POLLING] GET_UPDATES_ERROR instance=${instanceId} error=${err?.message || 'Unknown error'}`);
 
         metricsTracker.increment('telegram_api_errors');
         hadError = true;
