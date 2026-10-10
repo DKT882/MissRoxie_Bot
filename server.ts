@@ -2443,6 +2443,12 @@ export async function startServer() {
 
       const sanitizedButtons = sanitizeInlineButtons(postPayload.buttons);
 
+      const rawTrigger = typeof req.body.triggerKeyword === 'string' ? req.body.triggerKeyword.trim() : undefined;
+      if (rawTrigger && rawTrigger.length > 200) {
+        return res.status(400).json({ error: 'Trigger keyword/phrase must not exceed 200 characters.' });
+      }
+      const triggerKeyword = rawTrigger && rawTrigger.length > 0 ? rawTrigger : undefined;
+
       const scheduleRecord = db.addSchedule({
         chatId: numChatId,
         chatTitle,
@@ -2460,6 +2466,7 @@ export async function startServer() {
         pinAfterSend: Boolean(postPayload.pinAfterSend),
         inlineKeyboard: sanitizedButtons,
         enabled: true,
+        triggerKeyword,
         adminUsername: auth.operatorUsername,
         lastStatus: 'pending'
       });
@@ -2530,6 +2537,12 @@ export async function startServer() {
         return res.status(400).json({ error: 'Message text or media is required for schedule.' });
       }
 
+      const rawTrigger = typeof req.body.triggerKeyword === 'string' ? req.body.triggerKeyword.trim() : undefined;
+      if (rawTrigger && rawTrigger.length > 200) {
+        return res.status(400).json({ error: 'Trigger keyword/phrase must not exceed 200 characters.' });
+      }
+      const triggerKeyword = rawTrigger && rawTrigger.length > 0 ? rawTrigger : undefined;
+
       const newSchedule = db.addSchedule({
         chatId: numChatId,
         chatTitle: req.body.chatTitle || `Chat ${numChatId}`,
@@ -2549,6 +2562,7 @@ export async function startServer() {
         pinAfterSend: Boolean(pinAfterSend),
         inlineKeyboard: sanitizeDashboardInlineKeyboard(inlineKeyboard),
         enabled: enabled !== false,
+        triggerKeyword,
         adminUsername: (req as any).operator?.username || 'dashboard_admin',
         lastStatus: 'pending'
       });
@@ -2577,6 +2591,17 @@ export async function startServer() {
       }
       if (updates.autoDeletePrevious !== undefined) {
         updates.autoDeletePrevious = Boolean(updates.autoDeletePrevious);
+      }
+      if ('triggerKeyword' in updates) {
+        if (typeof updates.triggerKeyword === 'string') {
+          const trimmed = updates.triggerKeyword.trim();
+          if (trimmed.length > 200) {
+            return res.status(400).json({ error: 'Trigger keyword/phrase must not exceed 200 characters.' });
+          }
+          updates.triggerKeyword = trimmed.length > 0 ? trimmed : undefined;
+        } else if (updates.triggerKeyword === null || updates.triggerKeyword === false || updates.triggerKeyword === '') {
+          updates.triggerKeyword = undefined;
+        }
       }
       const updated = db.updateSchedule(id, updates);
       if (!updated) {

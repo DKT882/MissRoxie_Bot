@@ -298,6 +298,7 @@ export default function App() {
     pinAfterSend: boolean;
     replyToLatest: boolean;
     autoDeletePrevious: boolean;
+    triggerKeyword: string;
     inlineKeyboard: Array<Array<{ text: string; url: string; style?: 'primary' | 'success' | 'danger' }>>;
   }>({
     chatId: '',
@@ -315,6 +316,7 @@ export default function App() {
     pinAfterSend: false,
     replyToLatest: false,
     autoDeletePrevious: false,
+    triggerKeyword: '',
     inlineKeyboard: []
   });
 
@@ -1887,6 +1889,9 @@ export default function App() {
         pinAfterSend: Boolean(newScheduleForm.pinAfterSend),
         replyToLatest: Boolean(newScheduleForm.replyToLatest),
         autoDeletePrevious: Boolean(newScheduleForm.autoDeletePrevious),
+        triggerKeyword: (newScheduleForm.triggerKeyword || '').trim().length > 0
+          ? (newScheduleForm.triggerKeyword || '').trim()
+          : (editingSchedule ? null : undefined),
         inlineKeyboard: cleanedKeyboard.length > 0 ? cleanedKeyboard : undefined
       };
 
@@ -5272,6 +5277,7 @@ export default function App() {
                             pinAfterSend: false,
                             replyToLatest: false,
                             autoDeletePrevious: false,
+                            triggerKeyword: '',
                             inlineKeyboard: []
                           });
                           setShowCreateScheduleModal(true);
@@ -5367,6 +5373,7 @@ export default function App() {
                                     pinAfterSend: Boolean(s.pinAfterSend),
                                     replyToLatest: Boolean(s.replyToLatest),
                                     autoDeletePrevious: Boolean(s.autoDeletePrevious),
+                                    triggerKeyword: s.triggerKeyword || '',
                                     inlineKeyboard: Array.isArray(s.inlineKeyboard) ? s.inlineKeyboard.map((row: any[]) => Array.isArray(row) ? row.map(btn => ({ text: btn.text || '', url: btn.url || '', style: btn.style && ['primary', 'success', 'danger'].includes(btn.style) ? btn.style : undefined })) : []) : []
                                   });
                                   setShowCreateScheduleModal(true);
@@ -5815,6 +5822,7 @@ export default function App() {
                           pinAfterSend: false,
                           replyToLatest: false,
                           autoDeletePrevious: false,
+                          triggerKeyword: '',
                           inlineKeyboard: []
                         });
                         setShowCreateScheduleModal(true);
@@ -5882,6 +5890,11 @@ export default function App() {
                                     {s.scheduleType}
                                   </span>
                                 )}
+                                {s.triggerKeyword && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20" title={`Trigger keyword: ${s.triggerKeyword}`}>
+                                    ⚡ Trigger: "{s.triggerKeyword}"
+                                  </span>
+                                )}
                                 {s.pinAfterSend && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 font-semibold border border-purple-500/20">
                                     📌 Pin
@@ -5906,6 +5919,9 @@ export default function App() {
                               <p className={`line-clamp-2 text-xs ${isDark ? 'text-stone-300' : 'text-slate-700'}`}>{s.message || s.messageText}</p>
                               <div className={`flex flex-wrap items-center gap-3 text-[11px] ${themeMutedText} pt-1`}>
                                 <span>Interval: <strong className="text-stone-300">{s.intervalFormatted || 'Custom'}</strong></span>
+                                {s.triggerKeyword && (
+                                  <span>Trigger: <strong className="text-emerald-400">"{s.triggerKeyword}"</strong></span>
+                                )}
                                 <span>Next: <strong className="text-stone-300">{s.nextRun ? new Date(s.nextRun).toLocaleString() : 'N/A'}</strong></span>
                                 <span>Runs: <strong className="text-stone-300">{s.runsCount || 0}</strong></span>
                                 {s.lastRun && (
@@ -5948,6 +5964,7 @@ export default function App() {
                                     pinAfterSend: Boolean(s.pinAfterSend),
                                     replyToLatest: Boolean(s.replyToLatest),
                                     autoDeletePrevious: Boolean(s.autoDeletePrevious),
+                                    triggerKeyword: s.triggerKeyword || '',
                                     inlineKeyboard: Array.isArray(s.inlineKeyboard) ? s.inlineKeyboard.map((row: any[]) => Array.isArray(row) ? row.map(btn => ({ text: btn.text || '', url: btn.url || '', style: btn.style && ['primary', 'success', 'danger'].includes(btn.style) ? btn.style : undefined })) : []) : []
                                   });
                                   setShowCreateScheduleModal(true);
@@ -7135,6 +7152,24 @@ export default function App() {
                   onChange={(e) => setNewScheduleForm({ ...newScheduleForm, name: e.target.value })}
                   className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-500`}
                 />
+              </div>
+
+              {/* Trigger Keyword / Phrase */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-semibold block">Trigger Keyword / Phrase (Optional)</label>
+                  <span className={`text-[10px] ${themeMutedText}`}>Dispatches post immediately on group match</span>
+                </div>
+                <input
+                  type="text"
+                  placeholder="e.g., hiii, good morning, !rules (leave blank for time-only)"
+                  value={newScheduleForm.triggerKeyword}
+                  onChange={(e) => setNewScheduleForm({ ...newScheduleForm, triggerKeyword: e.target.value })}
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-500`}
+                />
+                <p className={`text-[10px] ${themeMutedText}`}>
+                  Case-insensitive whole-word or phrase matching. When someone sends this in the group, Roxie broadcasts this post immediately.
+                </p>
               </div>
 
               {/* Message Content */}

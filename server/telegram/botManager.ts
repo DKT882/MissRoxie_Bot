@@ -1002,6 +1002,26 @@ export class TelegramBotManager {
       });
     }
 
+    // 6b. Check Trigger Keyword for Scheduled Group Messages
+    if (chatId && chatId < 0 && isHuman && !isRoxieSelf && textOrCaption) {
+      try {
+        const triggerHandled = await messageScheduler.handleIncomingMessageTrigger(message, chatId, textOrCaption);
+        if (triggerHandled) {
+          this.recordResponseSent();
+          logDebug({
+            event: 'TELEGRAM_MESSAGE_PROCESSED',
+            chat_id: chatId,
+            message_id: message.message_id,
+            is_command: false,
+            triggered_schedule: true
+          });
+          return { handled: true, shouldTriggerAi: false };
+        }
+      } catch (triggerErr: any) {
+        console.error('[SCHEDULE_TRIGGER] Error evaluating message trigger:', triggerErr?.message || triggerErr);
+      }
+    }
+
     // 7. Check Smart Telegram Reactions (non-blocking & independent)
     if (isHuman && !ChatbotService.isTelegramServiceText(content)) {
       ReactionService.handleMessageReaction(message, this.botUser).catch((err) => {
@@ -1039,6 +1059,9 @@ export class TelegramBotManager {
     const triggerMode = welcomeDmConfig?.triggerMode || 'normal_join';
     const welcomeDmEnabled = Boolean(welcomeDmConfig?.enabled);
     const autoAcceptEnabled = Boolean(settings.autoAcceptEnabled);
+
+    console.log(`[JOIN_REQUEST_RECEIVED]\nchatId=${chatId}\nuserId=${user.id}\nuserChatId=${joinRequest.user_chat_id || 'undefined'}\ninviteLink=${joinRequest.invite_link?.invite_link || 'none'}`);
+    console.log(`[JOIN_REQUEST_APPROVAL_ORDER] dmAttempted=BEFORE_APPROVAL`);
 
     console.log(JSON.stringify({
       event: 'CHAT_JOIN_REQUEST_RECEIVED',
@@ -1083,6 +1106,7 @@ export class TelegramBotManager {
 
     // 2. Only after DM delivery attempt is complete, continue with existing auto-accept behavior
     if (settings.autoAcceptEnabled) {
+      console.log(`[JOIN_REQUEST_APPROVAL_ORDER] approvalExecution=AFTER_DM_ATTEMPT`);
       console.log(JSON.stringify({
         event: 'AUTO_ACCEPT_EXECUTION_START',
         chatId,

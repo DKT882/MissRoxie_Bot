@@ -4254,6 +4254,7 @@ export class StorageManager {
             lastSentMessageId: sc.lastSentMessageId,
             mentionMode: sc.mentionMode,
             lastMentionedUserId: sc.lastMentionedUserId,
+            triggerKeyword: sc.triggerKeyword ? String(sc.triggerKeyword).trim() : undefined,
             enabled: sc.enabled !== false,
             timezone: sc.timezone || 'Asia/Kolkata',
             createdAt: sc.createdAt || new Date().toISOString(),
@@ -4746,6 +4747,9 @@ export class StorageManager {
     const s = this.data.schedules.find((x) => x.id.toUpperCase() === id.toUpperCase());
     if (!s) return null;
     Object.assign(s, updates);
+    if ('triggerKeyword' in updates && updates.triggerKeyword === undefined) {
+      delete s.triggerKeyword;
+    }
     this.scheduleSave(s.chatId);
     return s;
   }

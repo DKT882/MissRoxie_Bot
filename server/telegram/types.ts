@@ -647,6 +647,7 @@ export interface ScheduledMessage {
   lastSentMessageId?: number;
   mentionMode?: 'none' | 'random_member' | 'all_members';
   lastMentionedUserId?: number;
+  triggerKeyword?: string;
   createdAt: string;
   runsCount: number;
 }

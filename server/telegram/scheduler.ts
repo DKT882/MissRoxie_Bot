@@ -1,6 +1,6 @@
 import { db } from '../db/storage.js';
 import { telegramApi } from './api.js';
-import { ScheduledMessage, ScheduledPostButton } from './types.js';
+import { ScheduledMessage, ScheduledPostButton, TelegramMessage } from './types.js';
 import { PostSender } from './postSender.js';
 import { ModerationService } from './moderation.js';
 import { TelegramMiddleware } from './middleware.js';
@@ -31,13 +31,97 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/**
+ * Predictable, case-insensitive keyword or phrase matching.
+ * - Leading/trailing whitespace trimmed
+ * - Phrase matched in normalized message text
+ * - Prevents partial-word accidental matches via Unicode-aware boundaries (?<![\p{L}\p{N}]) and (?![\p{L}\p{N}])
+ */
+export function matchesTrigger(text?: string | null, trigger?: string | null): boolean {
+  if (!text || !trigger) return false;
+  const trimmedTrigger = trigger.trim();
+  const trimmedText = text.trim();
+  if (!trimmedTrigger || !trimmedText) return false;
+
+  const triggerWords = trimmedTrigger.split(/\s+/).filter(Boolean);
+  if (triggerWords.length === 0) return false;
+
+  const escapedWords = triggerWords.map(w => w.replace(/[\^$*+?.()|[\]{}\\]/g, '\\$&'));
+  const pattern = escapedWords.join('\\s+');
+
+  try {
+    const regex = new RegExp(`(?<![\\p{L}\\p{N}])${pattern}(?![\\p{L}\\p{N}])`, 'iu');
+    return regex.test(trimmedText);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Deterministically finds the single best matching scheduled message for an incoming text or caption.
+ * Selection priority:
+ * 1. Longest trigger keyword/phrase length first (more specific trigger wins)
+ * 2. Earliest createdAt timestamp (oldest configured schedule wins)
+ * 3. Alphabetical schedule id as tie-breaker
+ */
+export function findMatchingSchedule(
+  schedules: ScheduledMessage[],
+  textOrCaption: string
+): ScheduledMessage | null {
+  if (!textOrCaption || !textOrCaption.trim() || !Array.isArray(schedules) || schedules.length === 0) {
+    return null;
+  }
+
+  const eligible = schedules.filter(
+    s => s && s.enabled !== false && typeof s.triggerKeyword === 'string' && s.triggerKeyword.trim().length > 0
+  );
+
+  if (eligible.length === 0) {
+    return null;
+  }
+
+  const matching = eligible.filter(s => matchesTrigger(textOrCaption, s.triggerKeyword!));
+
+  if (matching.length === 0) {
+    return null;
+  }
+
+  if (matching.length === 1) {
+    return matching[0];
+  }
+
+  matching.sort((a, b) => {
+    const lenA = a.triggerKeyword!.trim().length;
+    const lenB = b.triggerKeyword!.trim().length;
+    if (lenB !== lenA) {
+      return lenB - lenA;
+    }
+    const createdA = new Date(a.createdAt || 0).getTime();
+    const createdB = new Date(b.createdAt || 0).getTime();
+    if (createdA !== createdB) {
+      return createdA - createdB;
+    }
+    return a.id.localeCompare(b.id);
+  });
+
+  return matching[0];
+}
+
 export class MessageScheduler {
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   private isChecking: boolean = false;
-  private executingScheduleIds: Set<string> = new Set();
+  private static readonly globalExecutingScheduleIds: Set<string> = new Set();
+  private executingScheduleIds: Set<string> = MessageScheduler.globalExecutingScheduleIds;
   private executions: number = 0;
   private failures: number = 0;
+
+  /**
+   * Resets executing schedule IDs in-flight lock (useful for testing).
+   */
+  public static resetExecutingScheduleIds(): void {
+    MessageScheduler.globalExecutingScheduleIds.clear();
+  }
 
   // SAFETY: Permanently disabled by default until scheduled broadcast requirements are re-audited
   public static readonly IS_ENABLED_BY_DEFAULT: boolean = false;
@@ -227,82 +311,7 @@ export class MessageScheduler {
               }
             }
 
-            let textContent = freshSchedule.messageText || freshSchedule.message || '';
-            let newLastMentionedUserId: number | undefined = freshSchedule.lastMentionedUserId;
-
-            // Resolve dynamic mentions if schedule has mentionMode or placeholder tokens
-            const hasMemberToken = /@(?:member|random)|\[(?:member|random)\]/i.test(textContent);
-            const hasAllToken = /@all|\/all|\[all\]/i.test(textContent);
-            const shouldMentionRandom = freshSchedule.mentionMode === 'random_member' || hasMemberToken;
-            const shouldMentionAll = freshSchedule.mentionMode === 'all_members' || hasAllToken;
-
-            if (shouldMentionRandom) {
-              const allMembers = db.getGroupMembersList(freshSchedule.chatId);
-              const botId = db.getCurrentBotId();
-              const eligible = allMembers.filter(m => {
-                if (!m || !m.userId) return false;
-                if (botId && m.userId === botId) return false;
-                const uname = (m.username || '').toLowerCase();
-                if (uname.includes('bot') || uname.endsWith('bot') || (m as any).is_bot) return false;
-                return true;
-              });
-
-              if (eligible.length > 0) {
-                // Member mention rotation: Avoid repeating the same member consecutively
-                let candidates = eligible.filter(m => m.userId !== freshSchedule.lastMentionedUserId);
-                if (candidates.length === 0) {
-                  candidates = eligible;
-                }
-                const selected = candidates[Math.floor(Math.random() * candidates.length)];
-                newLastMentionedUserId = selected.userId;
-
-                const rawUname = (selected.username || '').trim().replace(/^@/, '');
-                const mentionTag = rawUname.length > 0
-                  ? `@${rawUname}`
-                  : `<a href="tg://user?id=${selected.userId}">${escapeHtml(selected.firstName || 'Member')}</a>`;
-
-                if (hasMemberToken) {
-                  textContent = textContent.replace(/@(?:member|random)|\[(?:member|random)\]/gi, mentionTag);
-                } else if (textContent) {
-                  textContent = `${textContent} ${mentionTag}`;
-                } else {
-                  textContent = mentionTag;
-                }
-              }
-            } else if (shouldMentionAll) {
-              const allMembers = db.getGroupMembersList(freshSchedule.chatId);
-              const botId = db.getCurrentBotId();
-              const seenUserIds = new Set<number>();
-              const mentions: string[] = [];
-
-              for (const m of allMembers) {
-                if (!m || !m.userId) continue;
-                if (botId && m.userId === botId) continue;
-                if (seenUserIds.has(m.userId)) continue;
-
-                const rawUname = (m.username || '').trim().replace(/^@/, '');
-                const lowerUname = rawUname.toLowerCase();
-                if (lowerUname.includes('bot') || lowerUname.endsWith('bot') || (m as any).is_bot) continue;
-
-                seenUserIds.add(m.userId);
-                const emoji = MENTION_EMOJIS[Math.floor(Math.random() * MENTION_EMOJIS.length)];
-                if (rawUname.length > 0) {
-                  mentions.push(`${emoji} → @${rawUname}`);
-                } else {
-                  const displayName = m.firstName?.trim() || 'Member';
-                  mentions.push(`${emoji} → <a href="tg://user?id=${m.userId}">${escapeHtml(displayName)}</a>`);
-                }
-              }
-
-              const allMentionsText = mentions.join('\n');
-              if (hasAllToken) {
-                textContent = textContent.replace(/@all|\/all|\[all\]/gi, allMentionsText);
-              } else if (textContent) {
-                textContent = `${textContent}\n\n${allMentionsText}`;
-              } else {
-                textContent = allMentionsText;
-              }
-            }
+            const { textContent, newLastMentionedUserId } = MessageScheduler.resolveScheduleText(freshSchedule);
 
             const payload = PostSender.scheduleToPayload(freshSchedule, textContent);
             const sendRes = await PostSender.send(freshSchedule.chatId, payload);
@@ -381,6 +390,276 @@ export class MessageScheduler {
     }
   }
 
+  public static resolveScheduleText(freshSchedule: ScheduledMessage): {
+    textContent: string;
+    newLastMentionedUserId?: number;
+  } {
+    let textContent = freshSchedule.messageText || freshSchedule.message || '';
+    let newLastMentionedUserId: number | undefined = freshSchedule.lastMentionedUserId;
+
+    // Resolve dynamic mentions if schedule has mentionMode or placeholder tokens
+    const hasMemberToken = /@(?:member|random)|\[(?:member|random)\]/i.test(textContent);
+    const hasAllToken = /@all|\/all|\[all\]/i.test(textContent);
+    const shouldMentionRandom = freshSchedule.mentionMode === 'random_member' || hasMemberToken;
+    const shouldMentionAll = freshSchedule.mentionMode === 'all_members' || hasAllToken;
+
+    if (shouldMentionRandom) {
+      const allMembers = db.getGroupMembersList(freshSchedule.chatId);
+      const botId = db.getCurrentBotId();
+      const eligible = allMembers.filter(m => {
+        if (!m || !m.userId) return false;
+        if (botId && m.userId === botId) return false;
+        const uname = (m.username || '').toLowerCase();
+        if (uname.includes('bot') || uname.endsWith('bot') || (m as any).is_bot) return false;
+        return true;
+      });
+
+      if (eligible.length > 0) {
+        // Member mention rotation: Avoid repeating the same member consecutively
+        let candidates = eligible.filter(m => m.userId !== freshSchedule.lastMentionedUserId);
+        if (candidates.length === 0) {
+          candidates = eligible;
+        }
+        const selected = candidates[Math.floor(Math.random() * candidates.length)];
+        newLastMentionedUserId = selected.userId;
+
+        const rawUname = (selected.username || '').trim().replace(/^@/, '');
+        const mentionTag = rawUname.length > 0
+          ? `@${rawUname}`
+          : `<a href="tg://user?id=${selected.userId}">${escapeHtml(selected.firstName || 'Member')}</a>`;
+
+        if (hasMemberToken) {
+          textContent = textContent.replace(/@(?:member|random)|\[(?:member|random)\]/gi, mentionTag);
+        } else if (textContent) {
+          textContent = `${textContent} ${mentionTag}`;
+        } else {
+          textContent = mentionTag;
+        }
+      }
+    } else if (shouldMentionAll) {
+      const allMembers = db.getGroupMembersList(freshSchedule.chatId);
+      const botId = db.getCurrentBotId();
+      const seenUserIds = new Set<number>();
+      const mentions: string[] = [];
+
+      for (const m of allMembers) {
+        if (!m || !m.userId) continue;
+        if (botId && m.userId === botId) continue;
+        if (seenUserIds.has(m.userId)) continue;
+
+        const rawUname = (m.username || '').trim().replace(/^@/, '');
+        const lowerUname = rawUname.toLowerCase();
+        if (lowerUname.includes('bot') || lowerUname.endsWith('bot') || (m as any).is_bot) continue;
+
+        seenUserIds.add(m.userId);
+        const emoji = MENTION_EMOJIS[Math.floor(Math.random() * MENTION_EMOJIS.length)];
+        if (rawUname.length > 0) {
+          mentions.push(`${emoji} → @${rawUname}`);
+        } else {
+          const displayName = m.firstName?.trim() || 'Member';
+          mentions.push(`${emoji} → <a href="tg://user?id=${m.userId}">${escapeHtml(displayName)}</a>`);
+        }
+      }
+
+      const allMentionsText = mentions.join('\n');
+      if (hasAllToken) {
+        textContent = textContent.replace(/@all|\/all|\[all\]/gi, allMentionsText);
+      } else if (textContent) {
+        textContent = `${textContent}\n\n${allMentionsText}`;
+      } else {
+        textContent = allMentionsText;
+      }
+    }
+
+    return { textContent, newLastMentionedUserId };
+  }
+
+  // Deduplication cache to prevent duplicate triggered sends on the same incoming message
+  private static processedTriggerMessageKeys: Set<string> = new Set();
+
+  /**
+   * Resets trigger deduplication cache (useful for testing).
+   */
+  public static resetTriggerDeduplicationCache(): void {
+    MessageScheduler.processedTriggerMessageKeys.clear();
+  }
+
+  // Configurable internal cooldown per schedule (default 30 seconds)
+  public static readonly TRIGGER_COOLDOWN_MS: number = 30000;
+  private static scheduleTriggerCooldowns: Map<string, number> = new Map();
+
+  /**
+   * Resets trigger cooldown cache (useful for testing).
+   */
+  public static resetTriggerCooldownCache(): void {
+    MessageScheduler.scheduleTriggerCooldowns.clear();
+  }
+
+  /**
+   * Evaluates incoming message text or caption against configured schedule triggers in the target chat.
+   * Returns true if a matching schedule was found and successfully triggered.
+   */
+  public async handleIncomingMessageTrigger(
+    message: TelegramMessage,
+    chatId: number,
+    textOrCaption: string
+  ): Promise<boolean> {
+    if (!message || !chatId || !textOrCaption) return false;
+
+    // Prevent duplicate responses to the same incoming Telegram message
+    const triggerKey = `${chatId}:${message.message_id}`;
+    if (MessageScheduler.processedTriggerMessageKeys.has(triggerKey)) {
+      return false;
+    }
+
+    const groupSchedules = db.getGroupSchedules(chatId);
+    if (!groupSchedules || groupSchedules.length === 0) return false;
+
+    const matched = findMatchingSchedule(groupSchedules, textOrCaption);
+    if (!matched) return false;
+
+    // Record processed trigger key
+    MessageScheduler.processedTriggerMessageKeys.add(triggerKey);
+    if (MessageScheduler.processedTriggerMessageKeys.size > 2000) {
+      const first = MessageScheduler.processedTriggerMessageKeys.values().next().value;
+      if (first) MessageScheduler.processedTriggerMessageKeys.delete(first);
+    }
+
+    console.log(`[SCHEDULE_TRIGGER] Matched trigger keyword "${matched.triggerKeyword}" for schedule [${matched.id}] in chat ${chatId}`);
+
+    return await this.executeTriggeredSchedule(matched, message);
+  }
+
+  /**
+   * Executes a scheduled message immediately via PostSender upon trigger keyword match.
+   * Preserves time-based schedule nextRun, recurring interval calculations, and distributed claims.
+   */
+  public async executeTriggeredSchedule(
+    freshSchedule: ScheduledMessage,
+    triggerMessage?: TelegramMessage
+  ): Promise<boolean> {
+    // 1. Fetch latest schedule from storage. Abort if no longer exists or is disabled (no fallback to stale snapshot)
+    const schedule = db.getScheduleById(freshSchedule.id);
+    if (!schedule || schedule.enabled === false) {
+      console.log(`[SCHEDULE_TRIGGER] Schedule [${freshSchedule.id}] does not exist in storage or is disabled. Aborting trigger.`);
+      return false;
+    }
+
+    // 2. Prevent concurrent execution: shared with checkAndExecuteSchedules timer loop
+    if (this.executingScheduleIds.has(schedule.id)) {
+      console.log(`[SCHEDULE_TRIGGER] Schedule [${schedule.id}] is currently executing. Skipping concurrent trigger.`);
+      return false;
+    }
+
+    // 3. Check per-schedule trigger cooldown (30 seconds)
+    const now = Date.now();
+    const lastTriggeredAt = MessageScheduler.scheduleTriggerCooldowns.get(schedule.id) || 0;
+    if (lastTriggeredAt > 0 && now - lastTriggeredAt < MessageScheduler.TRIGGER_COOLDOWN_MS) {
+      const remainingSec = Math.ceil((MessageScheduler.TRIGGER_COOLDOWN_MS - (now - lastTriggeredAt)) / 1000);
+      console.log(`[SCHEDULE_TRIGGER] Schedule [${schedule.id}] is on cooldown (${remainingSec}s remaining). Skipping.`);
+      return false;
+    }
+
+    // 4. Acquire in-flight lock before any asynchronous operations (auto-delete or send)
+    this.executingScheduleIds.add(schedule.id);
+
+    try {
+      // Re-verify schedule state after lock acquisition to guard against race conditions
+      const latestSchedule = db.getScheduleById(schedule.id);
+      if (!latestSchedule || latestSchedule.enabled === false) {
+        return false;
+      }
+
+      // Auto-delete previous scheduled broadcast message if configured
+      if (latestSchedule.autoDeletePrevious && latestSchedule.lastSentMessageId) {
+        try {
+          const delRes = await telegramApi.deleteMessage(latestSchedule.chatId, latestSchedule.lastSentMessageId);
+          if (!delRes.ok && delRes.description) {
+            console.error(`[SCHEDULE_TRIGGER] Failed to delete previous scheduled message scheduleId=${latestSchedule.id} messageId=${latestSchedule.lastSentMessageId} error=${delRes.description}`);
+          }
+        } catch (delErr: any) {
+          console.error(`[SCHEDULE_TRIGGER] Failed to delete previous scheduled message scheduleId=${latestSchedule.id} messageId=${latestSchedule.lastSentMessageId} error=${delErr?.message || delErr}`);
+        }
+      }
+
+      const { textContent, newLastMentionedUserId } = MessageScheduler.resolveScheduleText(latestSchedule);
+      const payload = PostSender.scheduleToPayload(latestSchedule, textContent);
+
+      const sendRes = await PostSender.send(latestSchedule.chatId, payload);
+
+      if (sendRes && sendRes.ok && sendRes.messageId) {
+        const newSentMessageId = sendRes.messageId;
+
+        // Record cooldown timestamp only upon successful delivery
+        MessageScheduler.scheduleTriggerCooldowns.set(latestSchedule.id, Date.now());
+        if (MessageScheduler.scheduleTriggerCooldowns.size > 1000) {
+          const cutoff = Date.now() - MessageScheduler.TRIGGER_COOLDOWN_MS;
+          for (const [sId, sTs] of MessageScheduler.scheduleTriggerCooldowns.entries()) {
+            if (sTs < cutoff) {
+              MessageScheduler.scheduleTriggerCooldowns.delete(sId);
+            }
+          }
+        }
+
+        db.addLog({
+          chatId: latestSchedule.chatId,
+          chatTitle: latestSchedule.chatTitle,
+          adminUserId: latestSchedule.adminId,
+          adminUsername: latestSchedule.adminUsername,
+          action: 'schedule_sent',
+          details: `Triggered broadcast [${latestSchedule.id}] via keyword "${latestSchedule.triggerKeyword}": "${textContent.slice(0, 30)}..."`
+        });
+
+        this.executions++;
+        metricsTracker.increment('scheduler_runs');
+
+        // Update lastRun, lastStatus, lastSentMessageId without modifying nextRun
+        db.updateSchedule(latestSchedule.id, {
+          lastRun: new Date().toISOString(),
+          lastStatus: 'success',
+          lastSentMessageId: newSentMessageId,
+          runsCount: (latestSchedule.runsCount || 0) + 1,
+          ...(newLastMentionedUserId !== undefined ? { lastMentionedUserId: newLastMentionedUserId } : {})
+        });
+
+        return true;
+      } else {
+        const errMsg = sendRes?.error || (sendRes as any)?.description || 'Telegram send failed';
+        console.error(`[SCHEDULE_TRIGGER] Failed to deliver triggered schedule [${latestSchedule.id}] in chat ${latestSchedule.chatId}: ${errMsg}`);
+
+        db.updateSchedule(latestSchedule.id, {
+          lastStatus: 'failure',
+          lastError: errMsg
+        });
+
+        errorTracker.recordError({
+          source: 'SCHEDULER',
+          severity: 'ERROR',
+          message: `Failed to execute triggered schedule ${latestSchedule.id}: ${errMsg}`,
+          chatId: latestSchedule.chatId
+        });
+
+        return false;
+      }
+    } catch (err: any) {
+      console.error(`[SCHEDULE_TRIGGER] Exception delivering triggered schedule [${schedule.id}]:`, err?.message || err);
+      db.updateSchedule(schedule.id, {
+        lastStatus: 'failure',
+        lastError: err?.message || 'Delivery error'
+      });
+      errorTracker.recordError({
+        source: 'SCHEDULER',
+        severity: 'ERROR',
+        message: `Exception delivering triggered schedule ${schedule.id}: ${err?.message || err}`,
+        chatId: schedule.chatId
+      });
+      return false;
+    } finally {
+      // Release in-flight lock
+      this.executingScheduleIds.delete(schedule.id);
+    }
+  }
+
   public createSchedule(
     chatId: number,
     chatTitle: string | undefined,
@@ -394,7 +673,8 @@ export class MessageScheduler {
     explicitMentionMode?: 'none' | 'random_member' | 'all_members',
     pinAfterSend?: boolean,
     inlineKeyboard?: ScheduledPostButton[][],
-    replyToLatest?: boolean
+    replyToLatest?: boolean,
+    triggerKeyword?: string
   ): { success: boolean; schedule?: ScheduledMessage; error?: string } {
     const parsed = this.parseInterval(intervalStr);
     if (!parsed) {
@@ -422,6 +702,10 @@ export class MessageScheduler {
     }
 
     const nextRun = new Date(Date.now() + parsed.ms).toISOString();
+    const normalizedTrigger = typeof triggerKeyword === 'string' && triggerKeyword.trim().length > 0
+      ? triggerKeyword.trim()
+      : undefined;
+
     const schedule = db.addSchedule({
       chatId,
       chatTitle,
@@ -438,7 +722,8 @@ export class MessageScheduler {
       pinAfterSend: pinAfterSend || false,
       replyToLatest: replyToLatest || false,
       inlineKeyboard: inlineKeyboard && inlineKeyboard.length > 0 ? inlineKeyboard : undefined,
-      mentionMode
+      mentionMode,
+      triggerKeyword: normalizedTrigger
     });
 
     db.addLog({
@@ -447,7 +732,7 @@ export class MessageScheduler {
       adminUserId: adminId,
       adminUsername,
       action: 'schedule_created',
-      details: `Created recurring schedule [${schedule.id}] every ${parsed.formatted}${mentionMode !== 'none' ? ` (mentionMode: ${mentionMode})` : ''}${schedule.pinAfterSend ? ' [pin]' : ''}${schedule.replyToLatest ? ' [replyLatest]' : ''}${schedule.inlineKeyboard ? ` [buttons: ${schedule.inlineKeyboard.flat().length}]` : ''}`
+      details: `Created recurring schedule [${schedule.id}] every ${parsed.formatted}${mentionMode !== 'none' ? ` (mentionMode: ${mentionMode})` : ''}${schedule.pinAfterSend ? ' [pin]' : ''}${schedule.replyToLatest ? ' [replyLatest]' : ''}${schedule.inlineKeyboard ? ` [buttons: ${schedule.inlineKeyboard.flat().length}]` : ''}${schedule.triggerKeyword ? ` [trigger: "${schedule.triggerKeyword}"]` : ''}`
     });
 
     return { success: true, schedule };
