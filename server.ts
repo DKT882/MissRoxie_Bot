@@ -1973,21 +1973,19 @@ export async function startServer() {
   // 12. Send Message to Group or Private Chat (with Reply-to-User support)
   app.post('/api/dashboard/send', async (req, res) => {
     try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+      }
+
       const targetId = req.body.targetId || req.body.chatId;
       const text = req.body.message || req.body.text;
       const replyToMessageId = req.body.replyToMessageId !== undefined && req.body.replyToMessageId !== null
         ? Number(req.body.replyToMessageId)
         : undefined;
 
-      const authHeader = req.headers.authorization;
-      let sessionId = req.headers['x-session-id'] as string;
-      if (!sessionId && authHeader && authHeader.startsWith('Bearer ')) {
-        sessionId = authHeader.substring(7);
-      }
-      if (!sessionId && req.body.sessionId) {
-        sessionId = req.body.sessionId;
-      }
-      const operator = (req as any).operator?.username || req.body.operator || 'dashboard_admin';
+      const operator = auth.operatorUsername || 'dashboard_admin';
+      const sessionId = auth.session?.sessionId;
 
       const clientRequestId = req.body.clientRequestId || req.body.idempotencyKey;
       const result = await executeSendMessageWorkflow(targetId, text, replyToMessageId, operator, sessionId, clientRequestId);
@@ -2002,6 +2000,11 @@ export async function startServer() {
 
   // 13. Broadcast announcement to multiple groups
   app.post('/api/dashboard/broadcast', async (req, res) => {
+    const auth = verifyOperatorAuth(req, 'MODERATOR');
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+    }
+
     const broadcastId = (req.body.broadcastId || req.body.operationId || '').trim();
     if (broadcastId) {
       if (activeBroadcastLocks.has(broadcastId)) {
@@ -2050,8 +2053,8 @@ export async function startServer() {
         timestamp: new Date().toISOString(),
         chatId: groupIds[0] || 0,
         groupId: groupIds[0] || 0,
-        actorRole: 'DASHBOARD_ADMIN',
-        adminUsername: 'dashboard_admin',
+        actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+        adminUsername: auth.operatorUsername || 'dashboard_admin',
         command: 'broadcast',
         action: 'broadcast',
         result: failed.length === 0 ? 'success' : 'denied',

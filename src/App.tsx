@@ -1703,7 +1703,7 @@ export default function App() {
     setSendResult(null);
     try {
       const clientRequestId = `send_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const res = await fetch('/api/dashboard/send', {
+      const res = await deduplicatedFetch('/api/dashboard/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1733,7 +1733,7 @@ export default function App() {
     setSendingPrivateReply(true);
     try {
       const clientRequestId = `priv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const res = await fetch('/api/dashboard/send', {
+      const res = await deduplicatedFetch('/api/dashboard/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1791,7 +1791,7 @@ export default function App() {
         payload.replyToMessageId = groupReplyTarget.messageId;
       }
 
-      const res = await fetch('/api/dashboard/send', {
+      const res = await deduplicatedFetch('/api/dashboard/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -1831,7 +1831,7 @@ export default function App() {
     setShowBroadcastConfirm(false);
     try {
       const broadcastId = `bcast_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const res = await fetch('/api/dashboard/broadcast', {
+      const res = await deduplicatedFetch('/api/dashboard/broadcast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1912,7 +1912,7 @@ export default function App() {
       const method = editingSchedule ? 'PUT' : 'POST';
       const endpoint = editingSchedule ? `/api/dashboard/schedules/${editingSchedule.id}` : '/api/dashboard/schedules';
 
-      const res = await fetch(endpoint, {
+      const res = await deduplicatedFetch(endpoint, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -1931,7 +1931,7 @@ export default function App() {
 
   const handleToggleSchedule = async (id: string, currentEnabled: boolean) => {
     try {
-      const res = await fetch(`/api/dashboard/schedules/${id}/toggle`, {
+      const res = await deduplicatedFetch(`/api/dashboard/schedules/${id}/toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !currentEnabled })
@@ -1947,7 +1947,7 @@ export default function App() {
   const handleDeleteSchedule = async (id: string) => {
     if (!confirm('Are you sure you want to delete this scheduled message?')) return;
     try {
-      const res = await fetch(`/api/dashboard/schedules/${id}`, { method: 'DELETE' });
+      const res = await deduplicatedFetch(`/api/dashboard/schedules/${id}`, { method: 'DELETE' });
       if (res.ok) {
         await fetchData();
       }

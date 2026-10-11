@@ -69,6 +69,16 @@ export interface RichMessageEditorProps {
   onClearNotification?: () => void;
 }
 
+function getAuthHeaders(extraHeaders: Record<string, string> = {}): Record<string, string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('roxie_session_id') : null;
+  const headers: Record<string, string> = { ...extraHeaders };
+  if (token) {
+    headers['x-session-id'] = token;
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
   title,
   subtitle,
@@ -138,6 +148,8 @@ export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
 
       const res = await fetch(`/api/dashboard/posts/upload-media?type=${targetType}`, {
         method: 'POST',
+        credentials: 'same-origin',
+        headers: getAuthHeaders(),
         body: formData
       });
 

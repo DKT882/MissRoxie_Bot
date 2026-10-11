@@ -55,6 +55,16 @@ export interface RichPostComposerProps {
   botUsername?: string;
 }
 
+function getAuthHeaders(extraHeaders: Record<string, string> = {}): Record<string, string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('roxie_session_id') : null;
+  const headers: Record<string, string> = { ...extraHeaders };
+  if (token) {
+    headers['x-session-id'] = token;
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 function isValidHttpUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
   const trimmed = url.trim();
@@ -238,6 +248,8 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       const targetType = isGif ? 'animation' : contentType;
       const res = await fetch(`/api/dashboard/posts/upload-media?type=${targetType}`, {
         method: 'POST',
+        credentials: 'same-origin',
+        headers: getAuthHeaders(),
         body: formData
       });
 
@@ -459,9 +471,10 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       const payload = buildPostPayload();
       const res = await fetch('/api/dashboard/posts/send', {
         method: 'POST',
-        headers: {
+        credentials: 'same-origin',
+        headers: getAuthHeaders({
           'Content-Type': 'application/json'
-        },
+        }),
         body: JSON.stringify({
           chatId: Number(targetChatId),
           payload
@@ -528,9 +541,10 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       const payload = buildPostPayload();
       const res = await fetch('/api/dashboard/posts/schedule', {
         method: 'POST',
-        headers: {
+        credentials: 'same-origin',
+        headers: getAuthHeaders({
           'Content-Type': 'application/json'
-        },
+        }),
         body: JSON.stringify({
           chatId: Number(targetChatId),
           payload,
