@@ -645,6 +645,7 @@ export interface ScheduledMessage {
   pinAfterSend?: boolean;
   inlineKeyboard?: ScheduledPostButton[][];
   lastSentMessageId?: number;
+  pendingDeleteMessageIds?: number[];
   mentionMode?: 'none' | 'random_member' | 'all_members';
   lastMentionedUserId?: number;
   triggerKeyword?: string;

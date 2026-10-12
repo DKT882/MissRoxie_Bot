@@ -278,7 +278,8 @@ export class PostSender {
         return {
           ok: false,
           chatId,
-          error: errorMsg
+          error: errorMsg,
+          result: sendRes
         };
       }
 

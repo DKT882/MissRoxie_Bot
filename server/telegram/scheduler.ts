@@ -7,6 +7,8 @@ import { TelegramMiddleware } from './middleware.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
 
+export type DeletionClassification = 'SUCCESS' | 'ALREADY_ABSENT' | 'PERMANENT_FAILURE' | 'TRANSIENT_FAILURE';
+
 export function isValidHttpUrl(stringUrl?: string): boolean {
   if (!stringUrl || typeof stringUrl !== 'string') return false;
   try {
@@ -126,6 +128,148 @@ export class MessageScheduler {
   // SAFETY: Permanently disabled by default until scheduled broadcast requirements are re-audited
   public static readonly IS_ENABLED_BY_DEFAULT: boolean = false;
   public static readonly MAX_EXECUTABLE_SCHEDULES: number = 50;
+  public static readonly MAX_PENDING_DELETE_IDS: number = 10;
+
+  /**
+   * Classify Telegram deleteMessage responses according to failure characteristics:
+   * - SUCCESS: HTTP 200 ok
+   * - ALREADY_ABSENT: Message does not exist or was already deleted (resolved)
+   * - PERMANENT_FAILURE: Message cannot be deleted (>48h), bot lacks permissions, chat deactivated (terminal for this ID)
+   * - TRANSIENT_FAILURE: Rate limit (429), timeout (408), 5xx, or network disconnect (retryable)
+   */
+  public static classifyDeletionResult(res: { ok: boolean; description?: string; error_code?: number }): DeletionClassification {
+    if (res.ok) {
+      return 'SUCCESS';
+    }
+
+    const desc = (res.description || '').toLowerCase();
+    const code = res.error_code;
+
+    // 1. Already Absent: Telegram reports message is already gone or invalid (resolved)
+    if (
+      desc.includes('message to delete not found') ||
+      desc.includes('message not found') ||
+      desc.includes('message_id_invalid')
+    ) {
+      return 'ALREADY_ABSENT';
+    }
+
+    // 2. Permanent Failures: Terminal conditions where retrying this message ID will never succeed
+    if (
+      code === 403 ||
+      desc.includes("message can't be deleted") ||
+      desc.includes("can't be deleted") ||
+      desc.includes('not enough rights') ||
+      desc.includes('chat_admin_required') ||
+      desc.includes('need administrator rights') ||
+      desc.includes('not an administrator') ||
+      desc.includes('chat not found') ||
+      desc.includes('peer_id_invalid') ||
+      desc.includes('group chat was deactivated') ||
+      desc.includes('bot was kicked') ||
+      desc.includes('bot is not a member')
+    ) {
+      return 'PERMANENT_FAILURE';
+    }
+
+    // 3. Transient Failures: Timeouts, 429s, 5xx, network drops, etc.
+    return 'TRANSIENT_FAILURE';
+  }
+
+  /**
+   * Process all candidate message deletions for a schedule:
+   * - Collects candidate IDs from pendingDeleteMessageIds and lastSentMessageId
+   * - Deletes each message via telegramApi.deleteMessage
+   * - Resolved messages (SUCCESS, ALREADY_ABSENT) and terminal messages (PERMANENT_FAILURE) are pruned
+   * - Transient failures are kept in pendingDeleteMessageIds bounded to MAX_PENDING_DELETE_IDS
+   */
+  public static async processScheduleDeletions(
+    schedule: ScheduledMessage
+  ): Promise<{ remainingPendingIds: number[]; lastSentMessageIdDeleted: boolean }> {
+    if (!schedule.autoDeletePrevious) {
+      return {
+        remainingPendingIds: Array.isArray(schedule.pendingDeleteMessageIds) ? [...schedule.pendingDeleteMessageIds] : [],
+        lastSentMessageIdDeleted: false
+      };
+    }
+
+    const candidateIds = new Set<number>();
+    if (Array.isArray(schedule.pendingDeleteMessageIds)) {
+      for (const id of schedule.pendingDeleteMessageIds) {
+        if (typeof id === 'number' && Number.isInteger(id) && id > 0) {
+          candidateIds.add(id);
+        }
+      }
+    }
+    if (typeof schedule.lastSentMessageId === 'number' && Number.isInteger(schedule.lastSentMessageId) && schedule.lastSentMessageId > 0) {
+      candidateIds.add(schedule.lastSentMessageId);
+    }
+
+    if (candidateIds.size === 0) {
+      return { remainingPendingIds: [], lastSentMessageIdDeleted: false };
+    }
+
+    const remainingPendingIds: number[] = [];
+    let lastSentMessageIdDeleted = false;
+
+    for (const messageId of candidateIds) {
+      let delRes: { ok: boolean; description?: string; error_code?: number };
+      try {
+        delRes = await telegramApi.deleteMessage(schedule.chatId, messageId);
+      } catch (err: any) {
+        delRes = { ok: false, description: err?.message || String(err) };
+      }
+
+      const classification = MessageScheduler.classifyDeletionResult(delRes);
+
+      if (classification === 'SUCCESS' || classification === 'ALREADY_ABSENT') {
+        if (schedule.lastSentMessageId === messageId) {
+          lastSentMessageIdDeleted = true;
+        }
+        if (classification === 'ALREADY_ABSENT') {
+          console.log(`[SCHEDULER_AUTO_DELETE] Message ${messageId} in chat ${schedule.chatId} was already deleted or absent. Resolved.`);
+        }
+      } else if (classification === 'PERMANENT_FAILURE') {
+        if (schedule.lastSentMessageId === messageId) {
+          lastSentMessageIdDeleted = true;
+        }
+        console.warn(`[SCHEDULER_AUTO_DELETE] Permanent deletion failure for schedule ${schedule.id} messageId ${messageId} in chat ${schedule.chatId}: ${delRes.description || 'Unknown error'}`);
+        errorTracker.recordError({
+          source: 'SCHEDULER',
+          severity: 'WARN',
+          message: `Permanent deletion failure for message ${messageId} in schedule ${schedule.id}: ${delRes.description || 'Unknown error'}`,
+          chatId: schedule.chatId
+        });
+      } else {
+        // TRANSIENT_FAILURE: Keep ID for future retry
+        remainingPendingIds.push(messageId);
+        console.warn(`[SCHEDULER_AUTO_DELETE] Transient deletion failure for schedule ${schedule.id} messageId ${messageId} in chat ${schedule.chatId}: ${delRes.description || 'Unknown error'}. Preserving for future retry.`);
+      }
+    }
+
+    // Bounded queue policy: keep at most MAX_PENDING_DELETE_IDS
+    let boundedPendingIds = remainingPendingIds;
+    if (boundedPendingIds.length > MessageScheduler.MAX_PENDING_DELETE_IDS) {
+      const overflowCount = boundedPendingIds.length - MessageScheduler.MAX_PENDING_DELETE_IDS;
+      const evictedIds = boundedPendingIds.slice(0, overflowCount);
+      boundedPendingIds = boundedPendingIds.slice(overflowCount);
+
+      for (const evictedId of evictedIds) {
+        console.warn(`[SCHEDULER_AUTO_DELETE] Pending delete queue exceeded maximum limit (${MessageScheduler.MAX_PENDING_DELETE_IDS}). Evicting oldest message ID ${evictedId} for schedule ${schedule.id}`);
+        errorTracker.recordError({
+          source: 'SCHEDULER',
+          severity: 'WARN',
+          message: `Pending delete queue reached limit (${MessageScheduler.MAX_PENDING_DELETE_IDS}). Evicting message ID ${evictedId} without deletion.`,
+          chatId: schedule.chatId
+        });
+      }
+    }
+
+    return {
+      remainingPendingIds: boundedPendingIds,
+      lastSentMessageIdDeleted
+    };
+  }
 
   public static buildSendOptions(schedule: ScheduledMessage, dynamicReplyId?: number): {
     reply_to_message_id?: number;
@@ -299,15 +443,26 @@ export class MessageScheduler {
               continue;
             }
 
-            // If auto-delete is enabled for this schedule, delete its previous message
-            if (freshSchedule.autoDeletePrevious && freshSchedule.lastSentMessageId) {
-              try {
-                const delRes = await telegramApi.deleteMessage(freshSchedule.chatId, freshSchedule.lastSentMessageId);
-                if (!delRes.ok && delRes.description) {
-                  console.error(`[ERROR] Failed to delete previous scheduled message scheduleId=${freshSchedule.id} messageId=${freshSchedule.lastSentMessageId} error=${delRes.description}`);
-                }
-              } catch (delErr: any) {
-                console.error(`[ERROR] Failed to delete previous scheduled message scheduleId=${freshSchedule.id} messageId=${freshSchedule.lastSentMessageId} error=${delErr?.message || delErr}`);
+            // If auto-delete is enabled for this schedule, delete its previous message(s)
+            let pendingDeleteIds: number[] = Array.isArray(freshSchedule.pendingDeleteMessageIds)
+              ? [...freshSchedule.pendingDeleteMessageIds]
+              : [];
+
+            if (freshSchedule.autoDeletePrevious) {
+              const delResult = await MessageScheduler.processScheduleDeletions(freshSchedule);
+              pendingDeleteIds = delResult.remainingPendingIds;
+              if (delResult.lastSentMessageIdDeleted && !pendingDeleteIds.includes(freshSchedule.lastSentMessageId!)) {
+                freshSchedule.lastSentMessageId = undefined;
+                freshSchedule.pendingDeleteMessageIds = pendingDeleteIds.length > 0 ? pendingDeleteIds : undefined;
+                db.updateSchedule(freshSchedule.id, {
+                  lastSentMessageId: undefined,
+                  pendingDeleteMessageIds: pendingDeleteIds.length > 0 ? pendingDeleteIds : undefined
+                });
+              } else if (pendingDeleteIds.length > 0) {
+                freshSchedule.pendingDeleteMessageIds = pendingDeleteIds;
+                db.updateSchedule(freshSchedule.id, {
+                  pendingDeleteMessageIds: pendingDeleteIds
+                });
               }
             }
 
@@ -332,15 +487,15 @@ export class MessageScheduler {
               this.executions++;
               metricsTracker.increment('scheduler_runs');
 
-              // Calculate next run time and update lastSentMessageId
+              // Calculate next run time and update lastSentMessageId and pendingDeleteMessageIds
               if (hasInterval) {
                 const nextDate = new Date(now + freshSchedule.intervalMs!).toISOString();
-                db.updateScheduleNextRun(freshSchedule.id, nextDate, 'success', undefined, newSentMessageId);
+                db.updateScheduleNextRun(freshSchedule.id, nextDate, 'success', undefined, newSentMessageId, pendingDeleteIds);
                 if (newLastMentionedUserId !== undefined) {
                   db.updateSchedule(freshSchedule.id, { lastMentionedUserId: newLastMentionedUserId });
                 }
               } else {
-                db.updateScheduleNextRun(freshSchedule.id, '', 'success', undefined, newSentMessageId);
+                db.updateScheduleNextRun(freshSchedule.id, '', 'success', undefined, newSentMessageId, pendingDeleteIds);
                 if (newLastMentionedUserId !== undefined) {
                   db.updateSchedule(freshSchedule.id, { lastMentionedUserId: newLastMentionedUserId });
                 }
@@ -570,15 +725,26 @@ export class MessageScheduler {
         return false;
       }
 
-      // Auto-delete previous scheduled broadcast message if configured
-      if (latestSchedule.autoDeletePrevious && latestSchedule.lastSentMessageId) {
-        try {
-          const delRes = await telegramApi.deleteMessage(latestSchedule.chatId, latestSchedule.lastSentMessageId);
-          if (!delRes.ok && delRes.description) {
-            console.error(`[SCHEDULE_TRIGGER] Failed to delete previous scheduled message scheduleId=${latestSchedule.id} messageId=${latestSchedule.lastSentMessageId} error=${delRes.description}`);
-          }
-        } catch (delErr: any) {
-          console.error(`[SCHEDULE_TRIGGER] Failed to delete previous scheduled message scheduleId=${latestSchedule.id} messageId=${latestSchedule.lastSentMessageId} error=${delErr?.message || delErr}`);
+      // Auto-delete previous scheduled broadcast message(s) if configured
+      let pendingDeleteIds: number[] = Array.isArray(latestSchedule.pendingDeleteMessageIds)
+        ? [...latestSchedule.pendingDeleteMessageIds]
+        : [];
+
+      if (latestSchedule.autoDeletePrevious) {
+        const delResult = await MessageScheduler.processScheduleDeletions(latestSchedule);
+        pendingDeleteIds = delResult.remainingPendingIds;
+        if (delResult.lastSentMessageIdDeleted && !pendingDeleteIds.includes(latestSchedule.lastSentMessageId!)) {
+          latestSchedule.lastSentMessageId = undefined;
+          latestSchedule.pendingDeleteMessageIds = pendingDeleteIds.length > 0 ? pendingDeleteIds : undefined;
+          db.updateSchedule(latestSchedule.id, {
+            lastSentMessageId: undefined,
+            pendingDeleteMessageIds: pendingDeleteIds.length > 0 ? pendingDeleteIds : undefined
+          });
+        } else if (pendingDeleteIds.length > 0) {
+          latestSchedule.pendingDeleteMessageIds = pendingDeleteIds;
+          db.updateSchedule(latestSchedule.id, {
+            pendingDeleteMessageIds: pendingDeleteIds
+          });
         }
       }
 
@@ -613,11 +779,12 @@ export class MessageScheduler {
         this.executions++;
         metricsTracker.increment('scheduler_runs');
 
-        // Update lastRun, lastStatus, lastSentMessageId without modifying nextRun
+        // Update lastRun, lastStatus, lastSentMessageId, pendingDeleteMessageIds without modifying nextRun
         db.updateSchedule(latestSchedule.id, {
           lastRun: new Date().toISOString(),
           lastStatus: 'success',
           lastSentMessageId: newSentMessageId,
+          pendingDeleteMessageIds: pendingDeleteIds.length > 0 ? pendingDeleteIds : undefined,
           runsCount: (latestSchedule.runsCount || 0) + 1,
           ...(newLastMentionedUserId !== undefined ? { lastMentionedUserId: newLastMentionedUserId } : {})
         });
@@ -629,7 +796,8 @@ export class MessageScheduler {
 
         db.updateSchedule(latestSchedule.id, {
           lastStatus: 'failure',
-          lastError: errMsg
+          lastError: errMsg,
+          ...(pendingDeleteIds.length > 0 ? { pendingDeleteMessageIds: pendingDeleteIds } : {})
         });
 
         errorTracker.recordError({

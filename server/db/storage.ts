@@ -3664,7 +3664,9 @@ export class StorageManager {
         text: sc.text || sc.message,
         message: sc.message || sc.text,
         target: sc.target || String(numId),
-        timezone: sc.timezone || 'UTC'
+        timezone: sc.timezone || 'UTC',
+        lastSentMessageId: sc.lastSentMessageId,
+        pendingDeleteMessageIds: sc.pendingDeleteMessageIds
       })),
       personality: {
         chatbotEnabled: Boolean(s.chatbotEnabled),
@@ -4252,6 +4254,7 @@ export class StorageManager {
             pinAfterSend: sc.pinAfterSend,
             inlineKeyboard: sc.inlineKeyboard,
             lastSentMessageId: sc.lastSentMessageId,
+            pendingDeleteMessageIds: Array.isArray(sc.pendingDeleteMessageIds) ? sc.pendingDeleteMessageIds.filter((id: any) => typeof id === 'number' && Number.isInteger(id) && id > 0) : undefined,
             mentionMode: sc.mentionMode,
             lastMentionedUserId: sc.lastMentionedUserId,
             triggerKeyword: sc.triggerKeyword ? String(sc.triggerKeyword).trim() : undefined,
@@ -4777,15 +4780,33 @@ export class StorageManager {
     return s;
   }
 
-  public updateScheduleNextRun(id: string, nextRun: string, status?: 'success' | 'failure', error?: string, lastSentMessageId?: number): void {
-    const s = this.data.schedules.find((x) => x.id === id);
+  public updateScheduleNextRun(
+    id: string,
+    nextRun: string,
+    status?: 'success' | 'failure',
+    error?: string,
+    lastSentMessageId?: number | null,
+    pendingDeleteMessageIds?: number[]
+  ): void {
+    const s = this.data.schedules.find((x) => x.id.toUpperCase() === id.toUpperCase());
     if (s) {
       s.nextRun = nextRun;
       s.lastRun = new Date().toISOString();
       s.lastStatus = status || 'success';
       if (error) s.lastError = error;
       if (lastSentMessageId !== undefined) {
-        s.lastSentMessageId = lastSentMessageId;
+        if (lastSentMessageId === null) {
+          delete s.lastSentMessageId;
+        } else {
+          s.lastSentMessageId = lastSentMessageId;
+        }
+      }
+      if (pendingDeleteMessageIds !== undefined) {
+        if (pendingDeleteMessageIds.length > 0) {
+          s.pendingDeleteMessageIds = pendingDeleteMessageIds;
+        } else {
+          delete s.pendingDeleteMessageIds;
+        }
       }
       s.runsCount = (s.runsCount || 0) + 1;
       this.scheduleSave(s.chatId);

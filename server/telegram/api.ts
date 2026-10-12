@@ -504,7 +504,7 @@ export class TelegramApi {
     return this.call('deleteMessage', {
       chat_id: chatId,
       message_id: messageId
-    }, { timeoutMs: 4000, maxRetries: 1 });
+    }, { timeoutMs: 7000, maxRetries: 1 });
   }
 
   public async deleteMessages(chatId: number | string, messageIds: number[]): Promise<{ ok: boolean; result?: boolean; description?: string; error_code?: number }> {
