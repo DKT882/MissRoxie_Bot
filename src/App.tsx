@@ -282,6 +282,8 @@ export default function App() {
   const [schedulesFilterChatId, setSchedulesFilterChatId] = useState<number | 'all'>('all');
   const [showCreateScheduleModal, setShowCreateScheduleModal] = useState<boolean>(false);
   const [editingSchedule, setEditingSchedule] = useState<any | null>(null);
+  const [scheduleFormError, setScheduleFormError] = useState<string | null>(null);
+  const [scheduleNotification, setScheduleNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [newScheduleForm, setNewScheduleForm] = useState<{
     chatId: number | string;
     name: string;
@@ -1855,7 +1857,24 @@ export default function App() {
 
   // Schedule and Automation Action Handlers
   const handleSaveSchedule = async () => {
-    if (!newScheduleForm.chatId || !newScheduleForm.message.trim()) return;
+    if (schedulesLoading) return;
+    setScheduleFormError(null);
+
+    if (!newScheduleForm.chatId) {
+      setScheduleFormError('Please select a target group.');
+      return;
+    }
+    if (!newScheduleForm.message.trim() && !newScheduleForm.mediaFileId?.trim()) {
+      setScheduleFormError('Message text or media is required for schedule.');
+      return;
+    }
+
+    const scheduleId = editingSchedule ? (editingSchedule.id || editingSchedule._id) : null;
+    if (editingSchedule && !scheduleId) {
+      setScheduleFormError('Cannot update schedule: Missing schedule ID.');
+      return;
+    }
+
     setSchedulesLoading(true);
     try {
       const cleanedKeyboard = newScheduleForm.inlineKeyboard
@@ -1883,7 +1902,7 @@ export default function App() {
         scheduleType: newScheduleForm.scheduleType,
         timezone: newScheduleForm.timezone || 'UTC',
         contentType: newScheduleForm.contentType || 'text',
-        mediaFileId: newScheduleForm.mediaFileId.trim() || undefined,
+        mediaFileId: (newScheduleForm.mediaFileId || '').trim() || undefined,
         replyToMessageId: newScheduleForm.replyToMessageId ? Number(newScheduleForm.replyToMessageId) : undefined,
         enabled: newScheduleForm.enabled,
         pinAfterSend: Boolean(newScheduleForm.pinAfterSend),
@@ -1902,7 +1921,12 @@ export default function App() {
         if (rawStr.endsWith('m')) payload.intervalMs = num * 60 * 1000;
         else if (rawStr.endsWith('d')) payload.intervalMs = num * 24 * 60 * 60 * 1000;
         else payload.intervalMs = num * 60 * 60 * 1000;
-        payload.nextRun = new Date(Date.now() + payload.intervalMs).toISOString();
+
+        if (editingSchedule && editingSchedule.nextRun && (newScheduleForm.intervalStr || '1h') === (editingSchedule.intervalFormatted || '1h')) {
+          payload.nextRun = editingSchedule.nextRun;
+        } else {
+          payload.nextRun = new Date(Date.now() + payload.intervalMs).toISOString();
+        }
       } else {
         const dateStr = `${newScheduleForm.nextRunDate}T${newScheduleForm.nextRunTime || '12:00'}:00`;
         const parsedDate = new Date(dateStr);
@@ -1910,20 +1934,32 @@ export default function App() {
       }
 
       const method = editingSchedule ? 'PUT' : 'POST';
-      const endpoint = editingSchedule ? `/api/dashboard/schedules/${editingSchedule.id}` : '/api/dashboard/schedules';
+      const endpoint = editingSchedule ? `/api/dashboard/schedules/${scheduleId}` : '/api/dashboard/schedules';
 
       const res = await deduplicatedFetch(endpoint, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && (data?.success !== false)) {
         setShowCreateScheduleModal(false);
         setEditingSchedule(null);
+        setScheduleFormError(null);
+        setScheduleNotification({
+          type: 'success',
+          message: editingSchedule ? 'Scheduled message updated successfully.' : 'Scheduled message created successfully.'
+        });
         await fetchData();
+        setTimeout(() => setScheduleNotification(null), 4000);
+      } else {
+        const errorMsg = data?.error || (res.status === 401 ? 'Unauthorized: Operator session required.' : res.status === 403 ? 'Forbidden: Requires MODERATOR role or higher.' : res.status === 404 ? 'Schedule not found.' : `Failed to save schedule (HTTP ${res.status}).`);
+        setScheduleFormError(errorMsg);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save schedule:', err);
+      setScheduleFormError(err?.message || 'Network error while saving schedule.');
     } finally {
       setSchedulesLoading(false);
     }
@@ -1938,9 +1974,13 @@ export default function App() {
       });
       if (res.ok) {
         await fetchData();
+      } else {
+        const data = await res.json().catch(() => null);
+        alert(data?.error || `Failed to toggle schedule (HTTP ${res.status})`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to toggle schedule:', err);
+      alert(err?.message || 'Network error while toggling schedule.');
     }
   };
 
@@ -1950,9 +1990,13 @@ export default function App() {
       const res = await deduplicatedFetch(`/api/dashboard/schedules/${id}`, { method: 'DELETE' });
       if (res.ok) {
         await fetchData();
+      } else {
+        const data = await res.json().catch(() => null);
+        alert(data?.error || `Failed to delete schedule (HTTP ${res.status})`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete schedule:', err);
+      alert(err?.message || 'Network error while deleting schedule.');
     }
   };
 
@@ -5261,6 +5305,7 @@ export default function App() {
                       <button
                         onClick={() => {
                           setEditingSchedule(null);
+                          setScheduleFormError(null);
                           setNewScheduleForm({
                             chatId: activeGroupDetailId,
                             name: '',
@@ -5334,6 +5379,9 @@ export default function App() {
                               <p className={`line-clamp-2 text-xs ${isDark ? 'text-stone-300' : 'text-slate-700'}`}>{s.message || s.messageText}</p>
                               <div className={`flex flex-wrap items-center gap-3 text-[11px] ${themeMutedText} pt-1`}>
                                 <span>Interval: <strong className="text-stone-300">{s.intervalFormatted || 'Custom'}</strong></span>
+                                {s.triggerKeyword && (
+                                  <span>Trigger: <strong className="text-emerald-400">"{s.triggerKeyword}"</strong></span>
+                                )}
                                 <span>Next: <strong className="text-stone-300">{s.nextRun ? new Date(s.nextRun).toLocaleString() : 'N/A'}</strong></span>
                                 <span>Runs: <strong className="text-stone-300">{s.runsCount || 0}</strong></span>
                                 {s.lastStatus && (
@@ -5357,14 +5405,26 @@ export default function App() {
                               <button
                                 onClick={() => {
                                   setEditingSchedule(s);
+                                  setScheduleFormError(null);
+                                  let defaultDate = new Date().toISOString().split('T')[0];
+                                  let defaultTime = '12:00';
+                                  if (s.nextRun) {
+                                    try {
+                                      const d = new Date(s.nextRun);
+                                      if (!isNaN(d.getTime())) {
+                                        defaultDate = d.toISOString().split('T')[0];
+                                        defaultTime = d.toISOString().split('T')[1].slice(0, 5);
+                                      }
+                                    } catch {}
+                                  }
                                   setNewScheduleForm({
                                     chatId: s.chatId,
                                     name: s.name || '',
                                     message: s.message || s.messageText || '',
                                     scheduleType: s.scheduleType || 'interval',
                                     intervalStr: s.intervalFormatted || '1h',
-                                    nextRunDate: s.nextRun ? new Date(s.nextRun).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-                                    nextRunTime: s.nextRun ? new Date(s.nextRun).toISOString().split('T')[1].slice(0, 5) : '12:00',
+                                    nextRunDate: defaultDate,
+                                    nextRunTime: defaultTime,
                                     timezone: s.timezone || 'UTC',
                                     contentType: s.contentType || 'text',
                                     mediaFileId: s.mediaFileId || '',
@@ -5795,6 +5855,16 @@ export default function App() {
             <div className="space-y-6">
               {/* Header & Main Schedule Management */}
               <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6`}>
+                {scheduleNotification && (
+                  <div className={`p-3 rounded-xl border text-xs flex items-center justify-between ${
+                    scheduleNotification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                  }`}>
+                    <span className="font-semibold">{scheduleNotification.message}</span>
+                    <button onClick={() => setScheduleNotification(null)} className="opacity-70 hover:opacity-100">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h3 className="text-sm font-bold flex items-center gap-2">
@@ -5806,6 +5876,7 @@ export default function App() {
                     <button
                       onClick={() => {
                         setEditingSchedule(null);
+                        setScheduleFormError(null);
                         setNewScheduleForm({
                           chatId: groups[0]?.chatId || '',
                           name: '',
@@ -5948,14 +6019,26 @@ export default function App() {
                               <button
                                 onClick={() => {
                                   setEditingSchedule(s);
+                                  setScheduleFormError(null);
+                                  let defaultDate = new Date().toISOString().split('T')[0];
+                                  let defaultTime = '12:00';
+                                  if (s.nextRun) {
+                                    try {
+                                      const d = new Date(s.nextRun);
+                                      if (!isNaN(d.getTime())) {
+                                        defaultDate = d.toISOString().split('T')[0];
+                                        defaultTime = d.toISOString().split('T')[1].slice(0, 5);
+                                      }
+                                    } catch {}
+                                  }
                                   setNewScheduleForm({
                                     chatId: s.chatId,
                                     name: s.name || '',
                                     message: s.message || s.messageText || '',
                                     scheduleType: s.scheduleType || 'interval',
                                     intervalStr: s.intervalFormatted || '1h',
-                                    nextRunDate: s.nextRun ? new Date(s.nextRun).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-                                    nextRunTime: s.nextRun ? new Date(s.nextRun).toISOString().split('T')[1].slice(0, 5) : '12:00',
+                                    nextRunDate: defaultDate,
+                                    nextRunTime: defaultTime,
                                     timezone: s.timezone || 'UTC',
                                     contentType: s.contentType || 'text',
                                     mediaFileId: s.mediaFileId || '',
@@ -7116,12 +7199,20 @@ export default function App() {
                 {editingSchedule ? 'Edit Scheduled Message' : 'Create Scheduled Message'}
               </h3>
               <button
-                onClick={() => { setShowCreateScheduleModal(false); setEditingSchedule(null); }}
+                onClick={() => { setShowCreateScheduleModal(false); setEditingSchedule(null); setScheduleFormError(null); }}
                 className={`p-1.5 rounded-lg ${themeInnerCardBg} border ${themeBorder} text-stone-400 hover:text-white`}
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {/* Error Banner in modal */}
+            {scheduleFormError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="flex-1 font-medium">{scheduleFormError}</span>
+              </div>
+            )}
 
             <form onSubmit={(e) => { e.preventDefault(); handleSaveSchedule(); }} className="space-y-4 text-xs">
               {/* Target Group */}
@@ -7134,6 +7225,11 @@ export default function App() {
                   className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-blue-500`}
                 >
                   <option value="">Select a group...</option>
+                  {editingSchedule && !groups.some(g => String(g.chatId) === String(editingSchedule.chatId)) && (
+                    <option value={editingSchedule.chatId}>
+                      {editingSchedule.chatTitle || `Group ${editingSchedule.chatId}`} (ID: {editingSchedule.chatId})
+                    </option>
+                  )}
                   {groups.map(g => (
                     <option key={g.chatId} value={g.chatId}>
                       {g.chatTitle} (ID: {g.chatId})
@@ -7509,14 +7605,14 @@ export default function App() {
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-800">
                 <button
                   type="button"
-                  onClick={() => { setShowCreateScheduleModal(false); setEditingSchedule(null); }}
+                  onClick={() => { setShowCreateScheduleModal(false); setEditingSchedule(null); setScheduleFormError(null); }}
                   className={`px-4 py-2 ${themeInnerCardBg} border ${themeBorder} rounded-xl text-xs font-semibold`}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={schedulesLoading || !newScheduleForm.chatId || !newScheduleForm.message.trim()}
+                  disabled={schedulesLoading || !newScheduleForm.chatId || (!newScheduleForm.message.trim() && !newScheduleForm.mediaFileId?.trim())}
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 transition-colors shadow-sm flex items-center gap-1.5"
                 >
                   {schedulesLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}

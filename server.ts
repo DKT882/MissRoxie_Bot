@@ -2519,6 +2519,11 @@ export async function startServer() {
 
   app.post('/api/dashboard/schedules', async (req, res) => {
     try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+      }
+
       const {
         chatId, message, messageText, name, scheduleType,
         intervalMs, intervalFormatted, nextRun, timezone,
@@ -2566,7 +2571,7 @@ export async function startServer() {
         inlineKeyboard: sanitizeDashboardInlineKeyboard(inlineKeyboard),
         enabled: enabled !== false,
         triggerKeyword,
-        adminUsername: (req as any).operator?.username || 'dashboard_admin',
+        adminUsername: auth.operatorUsername || 'dashboard_admin',
         lastStatus: 'pending'
       });
 
@@ -2578,11 +2583,45 @@ export async function startServer() {
 
   app.put('/api/dashboard/schedules/:id', (req, res) => {
     try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+      }
+
       const id = req.params.id;
+      if (!id || id === 'undefined' || id === 'null') {
+        return res.status(400).json({ error: 'Valid schedule ID is required.' });
+      }
+
+      const existing = db.getScheduleById(id);
+      if (!existing) {
+        return res.status(404).json({ error: 'Schedule not found.' });
+      }
+
       const updates = { ...req.body };
       if (updates.chatId && (Number(updates.chatId) === -100111222333 || String(updates.chatId).includes('100111222333'))) {
         return res.status(400).json({ error: 'Target chatId is a blocked legacy test destination.' });
       }
+
+      if ('chatId' in updates) {
+        const numChatId = Number(updates.chatId);
+        if (!numChatId || isNaN(numChatId)) {
+          return res.status(400).json({ error: 'Valid target chatId is required.' });
+        }
+        updates.chatId = numChatId;
+      }
+
+      if ('message' in updates || 'messageText' in updates || 'mediaFileId' in updates) {
+        const text = (updates.messageText !== undefined ? updates.messageText : (updates.message !== undefined ? updates.message : existing.message || '')).trim();
+        const media = updates.mediaFileId !== undefined ? (typeof updates.mediaFileId === 'string' ? updates.mediaFileId.trim() || undefined : undefined) : existing.mediaFileId;
+        if (!text && !media) {
+          return res.status(400).json({ error: 'Message text or media is required for schedule.' });
+        }
+        if (updates.message !== undefined) updates.message = text;
+        if (updates.messageText !== undefined) updates.messageText = text;
+        if (updates.mediaFileId !== undefined) updates.mediaFileId = media;
+      }
+
       if (updates.inlineKeyboard !== undefined) {
         updates.inlineKeyboard = sanitizeDashboardInlineKeyboard(updates.inlineKeyboard);
       }
@@ -2595,6 +2634,9 @@ export async function startServer() {
       if (updates.autoDeletePrevious !== undefined) {
         updates.autoDeletePrevious = Boolean(updates.autoDeletePrevious);
       }
+      if (updates.enabled !== undefined) {
+        updates.enabled = Boolean(updates.enabled);
+      }
       if ('triggerKeyword' in updates) {
         if (typeof updates.triggerKeyword === 'string') {
           const trimmed = updates.triggerKeyword.trim();
@@ -2604,6 +2646,13 @@ export async function startServer() {
           updates.triggerKeyword = trimmed.length > 0 ? trimmed : undefined;
         } else if (updates.triggerKeyword === null || updates.triggerKeyword === false || updates.triggerKeyword === '') {
           updates.triggerKeyword = undefined;
+        }
+      }
+      if ('pendingDeleteMessageIds' in updates) {
+        if (Array.isArray(updates.pendingDeleteMessageIds)) {
+          updates.pendingDeleteMessageIds = updates.pendingDeleteMessageIds.filter((mId: any) => typeof mId === 'number' && Number.isInteger(mId) && mId > 0);
+        } else {
+          delete updates.pendingDeleteMessageIds;
         }
       }
       const updated = db.updateSchedule(id, updates);
@@ -2618,6 +2667,11 @@ export async function startServer() {
 
   app.post('/api/dashboard/schedules/:id/toggle', (req, res) => {
     try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+      }
+
       const id = req.params.id;
       const updated = db.toggleSchedule(id, req.body.enabled);
       if (!updated) {
@@ -2631,6 +2685,11 @@ export async function startServer() {
 
   app.delete('/api/dashboard/schedules/:id', (req, res) => {
     try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+      }
+
       const id = req.params.id;
       const s = db.getScheduleById(id);
       if (!s) {

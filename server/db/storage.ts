@@ -4750,6 +4750,21 @@ export class StorageManager {
     if ('triggerKeyword' in updates && updates.triggerKeyword === undefined) {
       delete s.triggerKeyword;
     }
+    if ('lastSentMessageId' in updates && (updates.lastSentMessageId === undefined || updates.lastSentMessageId === null)) {
+      delete s.lastSentMessageId;
+    }
+    if ('pendingDeleteMessageIds' in updates && (updates.pendingDeleteMessageIds === undefined || (Array.isArray(updates.pendingDeleteMessageIds) && updates.pendingDeleteMessageIds.length === 0))) {
+      delete s.pendingDeleteMessageIds;
+    }
+    if ('mediaFileId' in updates && (updates.mediaFileId === undefined || updates.mediaFileId === '')) {
+      delete s.mediaFileId;
+    }
+    if ('replyToMessageId' in updates && updates.replyToMessageId === undefined) {
+      delete s.replyToMessageId;
+    }
+    if ('inlineKeyboard' in updates && (updates.inlineKeyboard === undefined || (Array.isArray(updates.inlineKeyboard) && updates.inlineKeyboard.length === 0))) {
+      delete s.inlineKeyboard;
+    }
     this.scheduleSave(s.chatId);
     return s;
   }
