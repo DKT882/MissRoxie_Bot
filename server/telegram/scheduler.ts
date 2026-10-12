@@ -424,8 +424,18 @@ export class MessageScheduler {
           let isDelivered = false;
           try {
             // Read fresh schedule state to avoid stale closure state
-            const freshSchedule = db.getScheduleById(schedule.id) || schedule;
-            if (freshSchedule.enabled === false) continue;
+            const freshSchedule = db.getScheduleById(schedule.id);
+            if (!freshSchedule || freshSchedule.enabled === false) {
+              continue;
+            }
+
+            // Verify freshSchedule.nextRun has not been updated into the future by a recent edit
+            if (freshSchedule.nextRun) {
+              const freshNextRunTime = new Date(freshSchedule.nextRun).getTime();
+              if (!isNaN(freshNextRunTime) && freshNextRunTime > now) {
+                continue;
+              }
+            }
 
             // Immediately advance nextRun in memory/storage so any concurrent check cannot pick it up
             const hasInterval = freshSchedule.intervalMs && freshSchedule.intervalMs > 0 && freshSchedule.scheduleType !== 'one_time';
@@ -487,19 +497,21 @@ export class MessageScheduler {
               this.executions++;
               metricsTracker.increment('scheduler_runs');
 
-              // Calculate next run time and update lastSentMessageId and pendingDeleteMessageIds
-              if (hasInterval) {
-                const nextDate = new Date(now + freshSchedule.intervalMs!).toISOString();
-                db.updateScheduleNextRun(freshSchedule.id, nextDate, 'success', undefined, newSentMessageId, pendingDeleteIds);
+              // Calculate next run time and update lastSentMessageId and pendingDeleteMessageIds using latest state
+              const latest = db.getScheduleById(freshSchedule.id) || freshSchedule;
+              const latestHasInterval = latest.intervalMs && latest.intervalMs > 0 && latest.scheduleType !== 'one_time';
+              if (latestHasInterval) {
+                const nextDate = new Date(now + latest.intervalMs!).toISOString();
+                db.updateScheduleNextRun(latest.id, nextDate, 'success', undefined, newSentMessageId, pendingDeleteIds);
                 if (newLastMentionedUserId !== undefined) {
-                  db.updateSchedule(freshSchedule.id, { lastMentionedUserId: newLastMentionedUserId });
+                  db.updateSchedule(latest.id, { lastMentionedUserId: newLastMentionedUserId });
                 }
               } else {
-                db.updateScheduleNextRun(freshSchedule.id, '', 'success', undefined, newSentMessageId, pendingDeleteIds);
+                db.updateScheduleNextRun(latest.id, '', 'success', undefined, newSentMessageId, pendingDeleteIds);
                 if (newLastMentionedUserId !== undefined) {
-                  db.updateSchedule(freshSchedule.id, { lastMentionedUserId: newLastMentionedUserId });
+                  db.updateSchedule(latest.id, { lastMentionedUserId: newLastMentionedUserId });
                 }
-                db.toggleSchedule(freshSchedule.id, false);
+                db.toggleSchedule(latest.id, false);
               }
             } else {
               const errMsg = sendRes?.error || (sendRes as any)?.description || 'Telegram send failed';
@@ -524,9 +536,10 @@ export class MessageScheduler {
                 db.deleteSchedule(schedule.chatId, schedule.id);
               } else {
                 console.error(`Error executing schedule ${schedule.id}:`, err.message);
-                const hasInterval = schedule.intervalMs && schedule.intervalMs > 0 && schedule.scheduleType !== 'one_time';
-                const fallbackNextRun = hasInterval ? new Date(now + schedule.intervalMs!).toISOString() : '';
-                db.updateScheduleNextRun(schedule.id, fallbackNextRun, 'failure', err.message);
+                const latest = db.getScheduleById(schedule.id) || schedule;
+                const latestHasInterval = latest.intervalMs && latest.intervalMs > 0 && latest.scheduleType !== 'one_time';
+                const fallbackNextRun = latestHasInterval ? new Date(now + latest.intervalMs!).toISOString() : '';
+                db.updateScheduleNextRun(latest.id, fallbackNextRun, 'failure', err.message);
               }
               errorTracker.recordError({
                 source: 'SCHEDULER',

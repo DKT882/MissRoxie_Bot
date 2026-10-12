@@ -4749,8 +4749,18 @@ export class StorageManager {
   public updateSchedule(id: string, updates: Partial<ScheduledMessage>): ScheduledMessage | null {
     const s = this.data.schedules.find((x) => x.id.toUpperCase() === id.toUpperCase());
     if (!s) return null;
+    const oldChatId = s.chatId;
+
     Object.assign(s, updates);
-    if ('triggerKeyword' in updates && updates.triggerKeyword === undefined) {
+
+    // Keep message and messageText in lockstep
+    if ('message' in updates && !('messageText' in updates)) {
+      s.messageText = updates.message;
+    } else if ('messageText' in updates && !('message' in updates)) {
+      s.message = updates.messageText;
+    }
+
+    if ('triggerKeyword' in updates && (updates.triggerKeyword === undefined || updates.triggerKeyword === null)) {
       delete s.triggerKeyword;
     }
     if ('lastSentMessageId' in updates && (updates.lastSentMessageId === undefined || updates.lastSentMessageId === null)) {
@@ -4759,14 +4769,18 @@ export class StorageManager {
     if ('pendingDeleteMessageIds' in updates && (updates.pendingDeleteMessageIds === undefined || (Array.isArray(updates.pendingDeleteMessageIds) && updates.pendingDeleteMessageIds.length === 0))) {
       delete s.pendingDeleteMessageIds;
     }
-    if ('mediaFileId' in updates && (updates.mediaFileId === undefined || updates.mediaFileId === '')) {
+    if ('mediaFileId' in updates && (updates.mediaFileId === undefined || updates.mediaFileId === '' || updates.mediaFileId === null)) {
       delete s.mediaFileId;
     }
-    if ('replyToMessageId' in updates && updates.replyToMessageId === undefined) {
+    if ('replyToMessageId' in updates && (updates.replyToMessageId === undefined || updates.replyToMessageId === null || updates.replyToMessageId === 0)) {
       delete s.replyToMessageId;
     }
-    if ('inlineKeyboard' in updates && (updates.inlineKeyboard === undefined || (Array.isArray(updates.inlineKeyboard) && updates.inlineKeyboard.length === 0))) {
+    if ('inlineKeyboard' in updates && (updates.inlineKeyboard === undefined || updates.inlineKeyboard === null || (Array.isArray(updates.inlineKeyboard) && updates.inlineKeyboard.length === 0))) {
       delete s.inlineKeyboard;
+    }
+
+    if (oldChatId && oldChatId !== s.chatId) {
+      this.scheduleSave(oldChatId);
     }
     this.scheduleSave(s.chatId);
     return s;

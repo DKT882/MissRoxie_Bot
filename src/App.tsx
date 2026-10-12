@@ -1902,8 +1902,10 @@ export default function App() {
         scheduleType: newScheduleForm.scheduleType,
         timezone: newScheduleForm.timezone || 'UTC',
         contentType: newScheduleForm.contentType || 'text',
-        mediaFileId: (newScheduleForm.mediaFileId || '').trim() || undefined,
-        replyToMessageId: newScheduleForm.replyToMessageId ? Number(newScheduleForm.replyToMessageId) : undefined,
+        mediaFileId: newScheduleForm.contentType !== 'text'
+          ? ((newScheduleForm.mediaFileId || '').trim() || (editingSchedule ? null : undefined))
+          : (editingSchedule ? null : undefined),
+        replyToMessageId: newScheduleForm.replyToMessageId ? Number(newScheduleForm.replyToMessageId) : (editingSchedule ? null : undefined),
         enabled: newScheduleForm.enabled,
         pinAfterSend: Boolean(newScheduleForm.pinAfterSend),
         replyToLatest: Boolean(newScheduleForm.replyToLatest),
@@ -1911,18 +1913,29 @@ export default function App() {
         triggerKeyword: (newScheduleForm.triggerKeyword || '').trim().length > 0
           ? (newScheduleForm.triggerKeyword || '').trim()
           : (editingSchedule ? null : undefined),
-        inlineKeyboard: cleanedKeyboard.length > 0 ? cleanedKeyboard : undefined
+        inlineKeyboard: cleanedKeyboard.length > 0 ? cleanedKeyboard : (editingSchedule ? [] : undefined)
       };
 
       if (newScheduleForm.scheduleType === 'interval') {
         payload.intervalFormatted = newScheduleForm.intervalStr || '1h';
         const rawStr = (newScheduleForm.intervalStr || '1h').toLowerCase().trim();
-        const num = parseFloat(rawStr) || 1;
-        if (rawStr.endsWith('m')) payload.intervalMs = num * 60 * 1000;
-        else if (rawStr.endsWith('d')) payload.intervalMs = num * 24 * 60 * 60 * 1000;
-        else payload.intervalMs = num * 60 * 60 * 1000;
+        const match = rawStr.match(/^(\d+(?:\.\d+)?)\s*(m(?:in(?:ute)?s?)?|h(?:(?:ou)?rs?)?|d(?:ays?)?)$/);
+        let calculatedMs = 3600000;
+        if (match) {
+          const val = parseFloat(match[1]);
+          const unit = match[2];
+          if (unit.startsWith('m')) calculatedMs = val * 60 * 1000;
+          else if (unit.startsWith('d')) calculatedMs = val * 24 * 60 * 60 * 1000;
+          else calculatedMs = val * 60 * 60 * 1000;
+        } else {
+          const num = parseFloat(rawStr) || 1;
+          if (rawStr.endsWith('m') || rawStr.includes('min')) calculatedMs = num * 60 * 1000;
+          else if (rawStr.endsWith('d') || rawStr.includes('day')) calculatedMs = num * 24 * 60 * 60 * 1000;
+          else calculatedMs = num * 60 * 60 * 1000;
+        }
+        payload.intervalMs = calculatedMs;
 
-        if (editingSchedule && editingSchedule.nextRun && (newScheduleForm.intervalStr || '1h') === (editingSchedule.intervalFormatted || '1h')) {
+        if (editingSchedule && editingSchedule.nextRun && (newScheduleForm.intervalStr || '1h').trim().toLowerCase() === (editingSchedule.intervalFormatted || '1h').trim().toLowerCase()) {
           payload.nextRun = editingSchedule.nextRun;
         } else {
           payload.nextRun = new Date(Date.now() + payload.intervalMs).toISOString();

@@ -19,6 +19,7 @@ import { PostSender, sanitizeInlineButtons, validateMediaReference } from './ser
 import { PostPayload, PostContentType, ScheduledPostButton, WelcomeDmConfig, TelegramUser, RichMessageConfig, MessageMode, GroupSettings, WelcomeDmTriggerMode } from './server/telegram/types.js';
 import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
 import { ModerationService } from './server/telegram/moderation.js';
+import { messageScheduler } from './server/telegram/scheduler.js';
 
 dotenv.config();
 
@@ -2611,19 +2612,58 @@ export async function startServer() {
         updates.chatId = numChatId;
       }
 
-      if ('message' in updates || 'messageText' in updates || 'mediaFileId' in updates) {
+      if ('message' in updates || 'messageText' in updates || 'mediaFileId' in updates || 'contentType' in updates) {
         const text = (updates.messageText !== undefined ? updates.messageText : (updates.message !== undefined ? updates.message : existing.message || '')).trim();
-        const media = updates.mediaFileId !== undefined ? (typeof updates.mediaFileId === 'string' ? updates.mediaFileId.trim() || undefined : undefined) : existing.mediaFileId;
+        const media = updates.mediaFileId !== undefined
+          ? (typeof updates.mediaFileId === 'string' && updates.mediaFileId.trim() ? updates.mediaFileId.trim() : undefined)
+          : existing.mediaFileId;
         if (!text && !media) {
           return res.status(400).json({ error: 'Message text or media is required for schedule.' });
         }
-        if (updates.message !== undefined) updates.message = text;
-        if (updates.messageText !== undefined) updates.messageText = text;
-        if (updates.mediaFileId !== undefined) updates.mediaFileId = media;
+        updates.message = text;
+        updates.messageText = text;
+        if (updates.mediaFileId !== undefined || updates.contentType === 'text') {
+          updates.mediaFileId = updates.contentType === 'text' ? undefined : media;
+        }
       }
 
-      if (updates.inlineKeyboard !== undefined) {
-        updates.inlineKeyboard = sanitizeDashboardInlineKeyboard(updates.inlineKeyboard);
+      if ('replyToMessageId' in updates) {
+        if (updates.replyToMessageId === null || updates.replyToMessageId === false || updates.replyToMessageId === '' || updates.replyToMessageId === 0) {
+          updates.replyToMessageId = undefined;
+        } else {
+          const numReply = Number(updates.replyToMessageId);
+          updates.replyToMessageId = (!isNaN(numReply) && numReply > 0) ? numReply : undefined;
+        }
+      }
+
+      if ('inlineKeyboard' in updates) {
+        if (updates.inlineKeyboard === null || updates.inlineKeyboard === false || (Array.isArray(updates.inlineKeyboard) && updates.inlineKeyboard.length === 0)) {
+          updates.inlineKeyboard = undefined;
+        } else {
+          updates.inlineKeyboard = sanitizeDashboardInlineKeyboard(updates.inlineKeyboard);
+        }
+      }
+
+      if ('intervalStr' in updates || 'intervalFormatted' in updates || 'intervalMs' in updates) {
+        let intervalMs = updates.intervalMs !== undefined ? Number(updates.intervalMs) : undefined;
+        let intervalFormatted = updates.intervalFormatted || updates.intervalStr;
+
+        if ((!intervalMs || isNaN(intervalMs) || intervalMs <= 0) && typeof intervalFormatted === 'string') {
+          const parsed = messageScheduler.parseInterval(intervalFormatted);
+          if (parsed) {
+            intervalMs = parsed.ms;
+            intervalFormatted = parsed.formatted;
+          }
+        }
+
+        if (intervalMs && !isNaN(intervalMs) && intervalMs > 0) {
+          updates.intervalMs = intervalMs;
+          if (intervalFormatted) updates.intervalFormatted = String(intervalFormatted);
+
+          if (!('nextRun' in updates) && existing.intervalMs !== intervalMs) {
+            updates.nextRun = new Date(Date.now() + intervalMs).toISOString();
+          }
+        }
       }
       if (updates.pinAfterSend !== undefined) {
         updates.pinAfterSend = Boolean(updates.pinAfterSend);
