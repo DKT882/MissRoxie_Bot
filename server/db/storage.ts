@@ -4702,7 +4702,8 @@ export class StorageManager {
   }
 
   public getGroupSchedules(chatId: number): ScheduledMessage[] {
-    return this.data.schedules.filter((s) => s.chatId === chatId);
+    const numId = Number(chatId);
+    return this.data.schedules.filter((s) => Number(s.chatId) === numId);
   }
 
   public addSchedule(schedule: Omit<ScheduledMessage, 'id' | 'createdAt' | 'runsCount'>): ScheduledMessage {
@@ -4760,7 +4761,7 @@ export class StorageManager {
       s.message = updates.messageText;
     }
 
-    if ('triggerKeyword' in updates && (updates.triggerKeyword === undefined || updates.triggerKeyword === null)) {
+    if ('triggerKeyword' in updates && (updates.triggerKeyword === undefined || updates.triggerKeyword === null || updates.triggerKeyword === '')) {
       delete s.triggerKeyword;
     }
     if ('lastSentMessageId' in updates && (updates.lastSentMessageId === undefined || updates.lastSentMessageId === null)) {

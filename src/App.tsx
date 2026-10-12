@@ -7271,13 +7271,13 @@ export default function App() {
                 </div>
                 <input
                   type="text"
-                  placeholder="e.g., hiii, good morning, !rules (leave blank for time-only)"
+                  placeholder="e.g., hii, good morning, rules, help me (comma-separated, leave blank for time-only)"
                   value={newScheduleForm.triggerKeyword}
                   onChange={(e) => setNewScheduleForm({ ...newScheduleForm, triggerKeyword: e.target.value })}
                   className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-500`}
                 />
                 <p className={`text-[10px] ${themeMutedText}`}>
-                  Case-insensitive whole-word or phrase matching. When someone sends this in the group, Roxie broadcasts this post immediately.
+                  Case-insensitive whole-word or phrase matching. Supports multiple triggers separated by commas (e.g. "hii, good morning, rules, help me"). When someone sends any matching phrase in the group, Roxie broadcasts this post immediately.
                 </p>
               </div>
 

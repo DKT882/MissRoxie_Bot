@@ -39,13 +39,39 @@ function escapeHtml(text: string): string {
  * - Phrase matched in normalized message text
  * - Prevents partial-word accidental matches via Unicode-aware boundaries (?<![\p{L}\p{N}]) and (?![\p{L}\p{N}])
  */
-export function matchesTrigger(text?: string | null, trigger?: string | null): boolean {
-  if (!text || !trigger) return false;
-  const trimmedTrigger = trigger.trim();
-  const trimmedText = text.trim();
-  if (!trimmedTrigger || !trimmedText) return false;
+/**
+ * Splits a comma-separated trigger keyword/phrase string into distinct, trimmed, non-empty phrases.
+ * Handles repeated commas, leading/trailing commas, and surrounding whitespace.
+ */
+export function parseTriggerPhrases(trigger?: string | null): string[] {
+  if (!trigger || typeof trigger !== 'string') return [];
+  return trigger
+    .split(',')
+    .map(p => p.trim())
+    .filter(p => p.length > 0);
+}
 
-  const triggerWords = trimmedTrigger.split(/\s+/).filter(Boolean);
+/**
+ * Standardizes a comma-separated trigger string: trims phrases, drops empty entries,
+ * and joins with standard comma-space (', ').
+ */
+export function normalizeTriggerKeyword(raw?: string | null): string | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const phrases = parseTriggerPhrases(raw);
+  if (phrases.length === 0) return undefined;
+  return phrases.join(', ');
+}
+
+/**
+ * Tests whether a single phrase matches within the text with Unicode-aware whole-word/phrase boundaries.
+ */
+export function matchesSinglePhrase(text: string, phrase: string): boolean {
+  if (!text || !phrase) return false;
+  const trimmedText = text.trim();
+  const trimmedPhrase = phrase.trim();
+  if (!trimmedText || !trimmedPhrase) return false;
+
+  const triggerWords = trimmedPhrase.split(/\s+/).filter(Boolean);
   if (triggerWords.length === 0) return false;
 
   const escapedWords = triggerWords.map(w => w.replace(/[\^$*+?.()|[\]{}\\]/g, '\\$&'));
@@ -60,9 +86,38 @@ export function matchesTrigger(text?: string | null, trigger?: string | null): b
 }
 
 /**
+ * Finds the longest matching trigger phrase from a configured (potentially comma-separated) trigger string.
+ * Returns null if no phrases match.
+ */
+export function getLongestMatchingPhrase(text?: string | null, trigger?: string | null): string | null {
+  if (!text || !trigger) return null;
+  const phrases = parseTriggerPhrases(trigger);
+  if (phrases.length === 0) return null;
+
+  let longestMatch: string | null = null;
+  for (const phrase of phrases) {
+    if (matchesSinglePhrase(text, phrase)) {
+      if (!longestMatch || phrase.length > longestMatch.length) {
+        longestMatch = phrase;
+      }
+    }
+  }
+  return longestMatch;
+}
+
+/**
+ * Tests whether an incoming message text or caption matches a configured schedule trigger.
+ * Supports single phrases or multiple comma-separated phrases (e.g. "hii, good morning, rules, help me").
+ * Any matching phrase triggers the schedule.
+ */
+export function matchesTrigger(text?: string | null, trigger?: string | null): boolean {
+  return getLongestMatchingPhrase(text, trigger) !== null;
+}
+
+/**
  * Deterministically finds the single best matching scheduled message for an incoming text or caption.
  * Selection priority:
- * 1. Longest trigger keyword/phrase length first (more specific trigger wins)
+ * 1. Longest matched trigger phrase length first (more specific trigger wins)
  * 2. Earliest createdAt timestamp (oldest configured schedule wins)
  * 3. Alphabetical schedule id as tie-breaker
  */
@@ -82,31 +137,41 @@ export function findMatchingSchedule(
     return null;
   }
 
-  const matching = eligible.filter(s => matchesTrigger(textOrCaption, s.triggerKeyword!));
+  const matches: Array<{ schedule: ScheduledMessage; matchedPhrase: string }> = [];
 
-  if (matching.length === 0) {
+  for (const s of eligible) {
+    const matchedPhrase = getLongestMatchingPhrase(textOrCaption, s.triggerKeyword!);
+    if (matchedPhrase) {
+      matches.push({ schedule: s, matchedPhrase });
+    }
+  }
+
+  if (matches.length === 0) {
     return null;
   }
 
-  if (matching.length === 1) {
-    return matching[0];
+  if (matches.length === 1) {
+    return matches[0].schedule;
   }
 
-  matching.sort((a, b) => {
-    const lenA = a.triggerKeyword!.trim().length;
-    const lenB = b.triggerKeyword!.trim().length;
+  matches.sort((a, b) => {
+    // 1. Longest matched trigger phrase length wins
+    const lenA = a.matchedPhrase.length;
+    const lenB = b.matchedPhrase.length;
     if (lenB !== lenA) {
       return lenB - lenA;
     }
-    const createdA = new Date(a.createdAt || 0).getTime();
-    const createdB = new Date(b.createdAt || 0).getTime();
+    // 2. Earliest createdAt timestamp wins
+    const createdA = new Date(a.schedule.createdAt || 0).getTime();
+    const createdB = new Date(b.schedule.createdAt || 0).getTime();
     if (createdA !== createdB) {
       return createdA - createdB;
     }
-    return a.id.localeCompare(b.id);
+    // 3. Alphabetical id tie-breaker
+    return a.schedule.id.localeCompare(b.schedule.id);
   });
 
-  return matching[0];
+  return matches[0].schedule;
 }
 
 export class MessageScheduler {
@@ -693,9 +758,10 @@ export class MessageScheduler {
       if (first) MessageScheduler.processedTriggerMessageKeys.delete(first);
     }
 
-    console.log(`[SCHEDULE_TRIGGER] Matched trigger keyword "${matched.triggerKeyword}" for schedule [${matched.id}] in chat ${chatId}`);
+    const matchedPhrase = getLongestMatchingPhrase(textOrCaption, matched.triggerKeyword) || matched.triggerKeyword;
+    console.log(`[SCHEDULE_TRIGGER] Matched trigger keyword "${matchedPhrase}" for schedule [${matched.id}] in chat ${chatId}`);
 
-    return await this.executeTriggeredSchedule(matched, message);
+    return await this.executeTriggeredSchedule(matched, message, matchedPhrase);
   }
 
   /**
@@ -704,7 +770,8 @@ export class MessageScheduler {
    */
   public async executeTriggeredSchedule(
     freshSchedule: ScheduledMessage,
-    triggerMessage?: TelegramMessage
+    triggerMessage?: TelegramMessage,
+    matchedPhrase?: string
   ): Promise<boolean> {
     // 1. Fetch latest schedule from storage. Abort if no longer exists or is disabled (no fallback to stale snapshot)
     const schedule = db.getScheduleById(freshSchedule.id);
@@ -786,7 +853,7 @@ export class MessageScheduler {
           adminUserId: latestSchedule.adminId,
           adminUsername: latestSchedule.adminUsername,
           action: 'schedule_sent',
-          details: `Triggered broadcast [${latestSchedule.id}] via keyword "${latestSchedule.triggerKeyword}": "${textContent.slice(0, 30)}..."`
+          details: `Triggered broadcast [${latestSchedule.id}] via keyword "${matchedPhrase || latestSchedule.triggerKeyword}": "${textContent.slice(0, 30)}..."`
         });
 
         this.executions++;
@@ -884,7 +951,7 @@ export class MessageScheduler {
 
     const nextRun = new Date(Date.now() + parsed.ms).toISOString();
     const normalizedTrigger = typeof triggerKeyword === 'string' && triggerKeyword.trim().length > 0
-      ? triggerKeyword.trim()
+      ? normalizeTriggerKeyword(triggerKeyword)
       : undefined;
 
     const schedule = db.addSchedule({

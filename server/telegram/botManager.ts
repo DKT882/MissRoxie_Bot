@@ -1003,7 +1003,9 @@ export class TelegramBotManager {
     }
 
     // 6b. Check Trigger Keyword for Scheduled Group Messages
-    if (chatId && chatId < 0 && isHuman && !isRoxieSelf && textOrCaption) {
+    const isAnonAdmin = TelegramMiddleware.isAnonymousAdminMessage(message, chatId);
+    const isEligibleTriggerSender = (isHuman || isAnonAdmin) && !isRoxieSelf;
+    if (chatId && chatId < 0 && isEligibleTriggerSender && textOrCaption) {
       try {
         const triggerHandled = await messageScheduler.handleIncomingMessageTrigger(message, chatId, textOrCaption);
         if (triggerHandled) {

@@ -19,7 +19,7 @@ import { PostSender, sanitizeInlineButtons, validateMediaReference } from './ser
 import { PostPayload, PostContentType, ScheduledPostButton, WelcomeDmConfig, TelegramUser, RichMessageConfig, MessageMode, GroupSettings, WelcomeDmTriggerMode } from './server/telegram/types.js';
 import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
 import { ModerationService } from './server/telegram/moderation.js';
-import { messageScheduler } from './server/telegram/scheduler.js';
+import { messageScheduler, normalizeTriggerKeyword } from './server/telegram/scheduler.js';
 
 dotenv.config();
 
@@ -2451,7 +2451,7 @@ export async function startServer() {
       if (rawTrigger && rawTrigger.length > 200) {
         return res.status(400).json({ error: 'Trigger keyword/phrase must not exceed 200 characters.' });
       }
-      const triggerKeyword = rawTrigger && rawTrigger.length > 0 ? rawTrigger : undefined;
+      const triggerKeyword = rawTrigger && rawTrigger.length > 0 ? normalizeTriggerKeyword(rawTrigger) : undefined;
 
       const scheduleRecord = db.addSchedule({
         chatId: numChatId,
@@ -2550,7 +2550,7 @@ export async function startServer() {
       if (rawTrigger && rawTrigger.length > 200) {
         return res.status(400).json({ error: 'Trigger keyword/phrase must not exceed 200 characters.' });
       }
-      const triggerKeyword = rawTrigger && rawTrigger.length > 0 ? rawTrigger : undefined;
+      const triggerKeyword = rawTrigger && rawTrigger.length > 0 ? normalizeTriggerKeyword(rawTrigger) : undefined;
 
       const newSchedule = db.addSchedule({
         chatId: numChatId,
@@ -2683,7 +2683,8 @@ export async function startServer() {
           if (trimmed.length > 200) {
             return res.status(400).json({ error: 'Trigger keyword/phrase must not exceed 200 characters.' });
           }
-          updates.triggerKeyword = trimmed.length > 0 ? trimmed : undefined;
+          const normalized = normalizeTriggerKeyword(trimmed);
+          updates.triggerKeyword = normalized && normalized.length > 0 ? normalized : undefined;
         } else if (updates.triggerKeyword === null || updates.triggerKeyword === false || updates.triggerKeyword === '') {
           updates.triggerKeyword = undefined;
         }
