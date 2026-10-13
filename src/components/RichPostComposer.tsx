@@ -65,7 +65,7 @@ function getAuthHeaders(extraHeaders: Record<string, string> = {}): Record<strin
   return headers;
 }
 
-function isValidHttpUrl(url: string): boolean {
+export function isValidHttpUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
   const trimmed = url.trim();
   if (!trimmed) return false;
@@ -85,6 +85,65 @@ function isValidHttpUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function updateComposerButton(
+  grid: ComposerButton[][],
+  rowIndex: number,
+  btnIndex: number,
+  field: 'text' | 'url' | 'style',
+  val: any
+): ComposerButton[][] {
+  const next = grid.map(r => [...r]);
+  if (next[rowIndex] && next[rowIndex][btnIndex]) {
+    next[rowIndex][btnIndex] = {
+      ...next[rowIndex][btnIndex],
+      [field]: field === 'style' ? (val || undefined) : (typeof val === 'string' ? val : (val ?? ''))
+    };
+  }
+  return next;
+}
+
+export function validateButtonGrid(buttonGrid: ComposerButton[][]): string[] {
+  const errors: string[] = [];
+  buttonGrid.forEach((row, rIdx) => {
+    row.forEach((btn, bIdx) => {
+      const btnText = (btn.text || '').trim();
+      const btnUrl = (btn.url || '').trim();
+      if (!btnText) {
+        errors.push(`Row ${rIdx + 1}, Button ${bIdx + 1}: Button text cannot be empty.`);
+      }
+      if (!isValidHttpUrl(btnUrl)) {
+        errors.push(`Row ${rIdx + 1}, Button ${bIdx + 1} (${btnText || 'Untitled'}): Invalid URL. Must start with http:// or https://`);
+      }
+    });
+  });
+  return errors;
+}
+
+export function formatComposerButtons(buttonGrid: ComposerButton[][]): Array<Array<{ text: string; url: string; style?: PostButtonStyle }>> {
+  return buttonGrid
+    .map(row =>
+      row
+        .filter(b => (b.text || '').trim() && isValidHttpUrl((b.url || '').trim()))
+        .map(b => {
+          const btnObj: { text: string; url: string; style?: PostButtonStyle } = {
+            text: (b.text || '').trim(),
+            url: (() => {
+              try {
+                return new URL((b.url || '').trim()).href;
+              } catch {
+                return (b.url || '').trim();
+              }
+            })()
+          };
+          if (b.style) {
+            btnObj.style = b.style;
+          }
+          return btnObj;
+        })
+    )
+    .filter(row => row.length > 0);
 }
 
 function validateMediaReference(ref?: string, hasUploadedMedia?: boolean): { valid: boolean; error?: string } {
@@ -301,16 +360,8 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       errors.push(`Content exceeds maximum allowed length (${text.length}/${maxChars} chars).`);
     }
     // Button validation
-    buttonGrid.forEach((row, rIdx) => {
-      row.forEach((btn, bIdx) => {
-        if (!btn.text.trim()) {
-          errors.push(`Row ${rIdx + 1}, Button ${bIdx + 1}: Button text cannot be empty.`);
-        }
-        if (!isValidHttpUrl(btn.url)) {
-          errors.push(`Row ${rIdx + 1}, Button ${bIdx + 1} (${btn.text || 'Untitled'}): Invalid URL. Must start with http:// or https://`);
-        }
-      });
-    });
+    const btnErrors = validateButtonGrid(buttonGrid);
+    errors.push(...btnErrors);
     return errors;
   }, [targetChatId, contentType, text, mediaFileId, uploadedMediaId, uploadStatus, isOverCharLimit, maxChars, buttonGrid]);
 
@@ -386,16 +437,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   }, []);
 
   const handleUpdateButton = useCallback((rowIndex: number, btnIndex: number, field: 'text' | 'url' | 'style', val: any) => {
-    setButtonGrid(prev => {
-      const next = prev.map(r => [...r]);
-      if (next[rowIndex] && next[rowIndex][btnIndex]) {
-        next[rowIndex][btnIndex] = {
-          ...next[rowIndex][btnIndex],
-          [field]: val || undefined
-        };
-      }
-      return next;
-    });
+    setButtonGrid(prev => updateComposerButton(prev, rowIndex, btnIndex, field, val));
   }, []);
 
   const handleRemoveButton = useCallback((rowIndex: number, btnIndex: number) => {
@@ -417,28 +459,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
 
   // Format payload for backend submission
   const buildPostPayload = useCallback(() => {
-    const formattedButtons = buttonGrid
-      .map(row =>
-        row
-          .filter(b => b.text.trim() && isValidHttpUrl(b.url))
-          .map(b => {
-            const btnObj: { text: string; url: string; style?: PostButtonStyle } = {
-              text: b.text.trim(),
-              url: (() => {
-                try {
-                  return new URL(b.url.trim()).href;
-                } catch {
-                  return b.url.trim();
-                }
-              })()
-            };
-            if (b.style) {
-              btnObj.style = b.style;
-            }
-            return btnObj;
-          })
-      )
-      .filter(row => row.length > 0);
+    const formattedButtons = formatComposerButtons(buttonGrid);
 
     const mediaId = uploadedMediaId ? `upload:${uploadedMediaId}` : (mediaFileId.trim() || undefined);
 
@@ -672,6 +693,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             </div>
           </div>
           <button
+            type="button"
             onClick={() => setNotification(null)}
             className="p-1 hover:bg-white/10 rounded-lg transition-colors text-stone-400 hover:text-stone-200"
           >
@@ -1028,7 +1050,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                           >
                             <input
                               type="text"
-                              value={btn.text}
+                              value={btn.text ?? ''}
                               onChange={e => handleUpdateButton(rIdx, bIdx, 'text', e.target.value)}
                               placeholder="Button Text"
                               maxLength={64}
@@ -1038,7 +1060,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                             <div className="flex-1 relative flex items-center">
                               <input
                                 type="url"
-                                value={btn.url}
+                                value={btn.url ?? ''}
                                 onChange={e => handleUpdateButton(rIdx, bIdx, 'url', e.target.value)}
                                 placeholder="https://example.com"
                                 className={`w-full px-2.5 py-1.5 rounded-lg text-xs border ${themeInputBg} outline-none pr-7 font-mono`}

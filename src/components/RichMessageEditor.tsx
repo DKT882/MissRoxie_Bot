@@ -212,7 +212,7 @@ export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
         const newRow = [...row];
         newRow[btnIndex] = {
           ...newRow[btnIndex],
-          [field]: val || undefined
+          [field]: field === 'style' ? (val || undefined) : (typeof val === 'string' ? val : (val ?? ''))
         };
         return newRow;
       }
@@ -306,7 +306,7 @@ export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
             <span>{notification.message}</span>
           </div>
           {onClearNotification && (
-            <button onClick={onClearNotification} className="opacity-70 hover:opacity-100">
+            <button type="button" onClick={onClearNotification} className="opacity-70 hover:opacity-100">
               <X className="w-4 h-4" />
             </button>
           )}
@@ -620,7 +620,7 @@ export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
                         <div className="sm:col-span-4">
                           <input
                             type="text"
-                            value={btn.text}
+                            value={btn.text ?? ''}
                             onChange={e => handleUpdateButton(rIdx, bIdx, 'text', e.target.value)}
                             placeholder="Button Text"
                             className={`w-full text-xs px-2.5 py-1.5 rounded-lg border ${themeInputBg}`}
@@ -629,7 +629,7 @@ export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
                         <div className="sm:col-span-5">
                           <input
                             type="text"
-                            value={btn.url}
+                            value={btn.url ?? ''}
                             onChange={e => handleUpdateButton(rIdx, bIdx, 'url', e.target.value)}
                             placeholder="https://t.me/..."
                             className={`w-full text-xs font-mono px-2.5 py-1.5 rounded-lg border ${themeInputBg}`}
@@ -849,7 +849,7 @@ export const RichMessageEditor: React.FC<RichMessageEditorProps> = ({
               {buttons.map((row, rIdx) => (
                 <div key={rIdx} className="flex gap-1.5">
                   {row.map((btn, bIdx) => {
-                    const btnPreviewText = btn.text
+                    const btnPreviewText = (btn.text || 'Untitled Button')
                       .replace(/{groupname}/gi, groupTitle)
                       .replace(/{user}/gi, 'Alex Smith')
                       .replace(/{username}/gi, '@alexsmith');
