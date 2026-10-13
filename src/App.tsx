@@ -5618,6 +5618,7 @@ export default function App() {
           {activeNav === 'rich-post' && (
             <RichPostComposer
               groups={groups}
+              privateChats={privateChats}
               selectedChatId={selectedChatId}
               theme={theme}
               onRefresh={refreshCurrentView}
@@ -6039,6 +6040,7 @@ export default function App() {
           {activeNav === 'broadcast' && (
             <RichPostComposer
               groups={groups}
+              privateChats={privateChats}
               selectedChatId={selectedChatId}
               theme={theme}
               onRefresh={refreshCurrentView}

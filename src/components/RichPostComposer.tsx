@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   Send,
   Calendar,
@@ -26,7 +26,10 @@ import {
   Eye,
   Link2,
   Upload,
-  Paperclip
+  Paperclip,
+  Users,
+  MessageSquare,
+  Search
 } from 'lucide-react';
 
 export type ComposerContentType = 'text' | 'photo' | 'video' | 'animation' | 'document';
@@ -57,6 +60,14 @@ export interface UploadedMediaItemState {
   localPreviewUrl: string;
 }
 
+export interface PrivateChatRecipient {
+  chatId: number | string;
+  userId: number;
+  username?: string;
+  name?: string;
+  messageCount?: number;
+}
+
 export interface RichPostComposerProps {
   groups: Array<{
     chatId: number;
@@ -66,6 +77,7 @@ export interface RichPostComposerProps {
     botLeft?: boolean;
     unavailable?: boolean;
   }>;
+  privateChats?: PrivateChatRecipient[];
   selectedChatId?: number | 'all';
   lockedDestination?: {
     type: 'group' | 'private';
@@ -237,6 +249,7 @@ const SafeImagePreview: React.FC<{ url: string; alt?: string; className?: string
 
 export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   groups,
+  privateChats: privateChatsProp,
   selectedChatId,
   lockedDestination,
   theme = 'dark',
@@ -257,7 +270,248 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     return groups.filter(g => !g.botLeft && !g.unavailable);
   }, [groups]);
 
-  // Destination State
+  // Local fallback for privateChats if not supplied or empty
+  const [localPrivateChats, setLocalPrivateChats] = useState<PrivateChatRecipient[]>([]);
+
+  useEffect(() => {
+    if (!privateChatsProp || privateChatsProp.length === 0) {
+      fetch('/api/dashboard/private-chats', {
+        headers: getAuthHeaders(),
+        credentials: 'same-origin'
+      })
+        .then(res => (res.ok ? res.json() : []))
+        .then(data => {
+          if (Array.isArray(data)) {
+            setLocalPrivateChats(data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [privateChatsProp]);
+
+  const effectivePrivateChats = useMemo(() => {
+    return privateChatsProp && privateChatsProp.length > 0 ? privateChatsProp : localPrivateChats;
+  }, [privateChatsProp, localPrivateChats]);
+
+  // Recipient Type Dropdown State: 'groups' | 'private_chats' | 'both'
+  const [recipientType, setRecipientType] = useState<'groups' | 'private_chats' | 'both'>('groups');
+
+  // Search filter query
+  const [recipientSearchQuery, setRecipientSearchQuery] = useState<string>('');
+
+  // Selected Group IDs State (Persistent Set across dropdown switches; initialized empty to prevent accidental broadcasts)
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(() => {
+    if (lockedDestination?.type === 'group') {
+      return new Set([lockedDestination.chatId]);
+    }
+    return new Set<number>();
+  });
+
+  // Selected Private Chat IDs State (Persistent Set across dropdown switches; initialized empty to prevent accidental broadcasts)
+  const [selectedPrivateChatIds, setSelectedPrivateChatIds] = useState<Set<number | string>>(() => {
+    if (lockedDestination?.type === 'private') {
+      return new Set([lockedDestination.chatId]);
+    }
+    return new Set<number | string>();
+  });
+
+  // Tracks recipient chatIds successfully delivered in this session for the current message
+  const [deliveredRecipientIds, setDeliveredRecipientIds] = useState<Set<number>>(new Set());
+  // Explicit confirmation if user intentionally retries already delivered recipients
+  const [confirmDuplicateRetry, setConfirmDuplicateRetry] = useState<boolean>(false);
+
+  // Sync initial selection strictly when lockedDestination changes
+  useEffect(() => {
+    if (lockedDestination) {
+      if (lockedDestination.type === 'group') {
+        setSelectedGroupIds(new Set([lockedDestination.chatId]));
+        setSelectedPrivateChatIds(new Set());
+      } else {
+        setSelectedPrivateChatIds(new Set([lockedDestination.chatId]));
+        setSelectedGroupIds(new Set());
+      }
+    }
+  }, [lockedDestination]);
+
+  // Filter visible groups based on search
+  const visibleGroups = useMemo(() => {
+    const q = recipientSearchQuery.trim().toLowerCase();
+    return activeGroups.filter(g => {
+      if (!q) return true;
+      const title = (g.chatTitle || g.title || '').toLowerCase();
+      const id = String(g.chatId);
+      return title.includes(q) || id.includes(q);
+    });
+  }, [activeGroups, recipientSearchQuery]);
+
+  // Filter visible private chats based on search
+  const visiblePrivateChats = useMemo(() => {
+    const q = recipientSearchQuery.trim().toLowerCase();
+    return effectivePrivateChats.filter(p => {
+      if (!q) return true;
+      const name = (p.name || '').toLowerCase();
+      const uname = (p.username || '').toLowerCase();
+      const id = String(p.chatId ?? p.userId);
+      return name.includes(q) || uname.includes(q) || id.includes(q);
+    });
+  }, [effectivePrivateChats, recipientSearchQuery]);
+
+  // Mode helpers
+  const isGroupsMode = recipientType === 'groups';
+  const isPrivateMode = recipientType === 'private_chats';
+  const isBothMode = recipientType === 'both';
+
+  // Visible selected count in current mode
+  const visibleSelectedCount = useMemo(() => {
+    let count = 0;
+    if (isGroupsMode || isBothMode) {
+      visibleGroups.forEach(g => {
+        if (selectedGroupIds.has(g.chatId)) count++;
+      });
+    }
+    if (isPrivateMode || isBothMode) {
+      visiblePrivateChats.forEach(p => {
+        if (selectedPrivateChatIds.has(p.chatId)) count++;
+      });
+    }
+    return count;
+  }, [isGroupsMode, isPrivateMode, isBothMode, visibleGroups, visiblePrivateChats, selectedGroupIds, selectedPrivateChatIds]);
+
+  const totalVisibleCount = useMemo(() => {
+    let count = 0;
+    if (isGroupsMode || isBothMode) count += visibleGroups.length;
+    if (isPrivateMode || isBothMode) count += visiblePrivateChats.length;
+    return count;
+  }, [isGroupsMode, isPrivateMode, isBothMode, visibleGroups.length, visiblePrivateChats.length]);
+
+  const isAllVisibleSelected = totalVisibleCount > 0 && visibleSelectedCount === totalVisibleCount;
+  const isPartiallySelected = visibleSelectedCount > 0 && visibleSelectedCount < totalVisibleCount;
+
+  // Ref for indeterminate checkbox
+  const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllCheckboxRef.current) {
+      selectAllCheckboxRef.current.indeterminate = isPartiallySelected;
+    }
+  }, [isPartiallySelected]);
+
+  // Toggle select all visible
+  const handleToggleSelectAllVisible = () => {
+    if (isAllVisibleSelected) {
+      // Deselect all visible in current mode
+      if (isGroupsMode || isBothMode) {
+        setSelectedGroupIds(prev => {
+          const next = new Set(prev);
+          visibleGroups.forEach(g => next.delete(g.chatId));
+          return next;
+        });
+      }
+      if (isPrivateMode || isBothMode) {
+        setSelectedPrivateChatIds(prev => {
+          const next = new Set(prev);
+          visiblePrivateChats.forEach(p => next.delete(p.chatId));
+          return next;
+        });
+      }
+    } else {
+      // Select all visible in current mode
+      if (isGroupsMode || isBothMode) {
+        setSelectedGroupIds(prev => {
+          const next = new Set(prev);
+          visibleGroups.forEach(g => next.add(g.chatId));
+          return next;
+        });
+      }
+      if (isPrivateMode || isBothMode) {
+        setSelectedPrivateChatIds(prev => {
+          const next = new Set(prev);
+          visiblePrivateChats.forEach(p => next.add(p.chatId));
+          return next;
+        });
+      }
+    }
+  };
+
+  const handleToggleGroup = (chatId: number) => {
+    setSelectedGroupIds(prev => {
+      const next = new Set(prev);
+      if (next.has(chatId)) {
+        next.delete(chatId);
+      } else {
+        next.add(chatId);
+      }
+      return next;
+    });
+  };
+
+  const handleTogglePrivateChat = (chatId: number | string) => {
+    setSelectedPrivateChatIds(prev => {
+      const next = new Set(prev);
+      if (next.has(chatId)) {
+        next.delete(chatId);
+      } else {
+        next.add(chatId);
+      }
+      return next;
+    });
+  };
+
+  // Active broadcast target recipients strictly scoped to current recipientType (or lockedDestination)
+  const activeTargets = useMemo(() => {
+    if (lockedDestination) {
+      return [{
+        chatId: Number(lockedDestination.chatId),
+        title: lockedDestination.title || `${lockedDestination.type === 'private' ? 'Private Chat' : 'Group'} (${lockedDestination.chatId})`,
+        type: lockedDestination.type
+      }];
+    }
+    const targets: Array<{ chatId: number; title: string; type: 'group' | 'private' }> = [];
+    if (recipientType === 'groups' || recipientType === 'both') {
+      const targetGroups = activeGroups.filter(g => selectedGroupIds.has(g.chatId));
+      targets.push(...targetGroups.map(g => ({
+        chatId: g.chatId,
+        title: g.chatTitle || g.title || `Group ${g.chatId}`,
+        type: 'group' as const
+      })));
+    }
+    if (recipientType === 'private_chats' || recipientType === 'both') {
+      const targetPrivate = effectivePrivateChats.filter(p => selectedPrivateChatIds.has(p.chatId));
+      targets.push(...targetPrivate.map(p => ({
+        chatId: Number(p.chatId ?? p.userId),
+        title: p.name || (p.username ? `@${p.username}` : `User ${p.chatId}`),
+        type: 'private' as const
+      })));
+    }
+    return targets;
+  }, [lockedDestination, recipientType, activeGroups, selectedGroupIds, effectivePrivateChats, selectedPrivateChatIds]);
+
+  // Total selected count strictly based on active targets in current mode
+  const totalSelectedRecipients = activeTargets.length;
+
+  const selectedSummaryText = useMemo(() => {
+    if (lockedDestination) {
+      return lockedDestination.title || `${lockedDestination.type === 'private' ? 'Private Chat' : 'Group'} (${lockedDestination.chatId})`;
+    }
+    if (activeTargets.length === 0) return '0 recipients selected';
+    const gCount = activeTargets.filter(t => t.type === 'group').length;
+    const pCount = activeTargets.filter(t => t.type === 'private').length;
+    if (gCount > 0 && pCount > 0) {
+      return `${activeTargets.length} selected (${gCount} group${gCount > 1 ? 's' : ''}, ${pCount} private)`;
+    }
+    if (gCount > 0) {
+      return `${gCount} group${gCount > 1 ? 's' : ''} selected`;
+    }
+    return `${pCount} private chat${pCount > 1 ? 's' : ''} selected`;
+  }, [lockedDestination, activeTargets]);
+
+  // Sending progress state
+  const [sendingProgress, setSendingProgress] = useState<{
+    current: number;
+    total: number;
+    targetName: string;
+  } | null>(null);
+
+  // Destination State (legacy targetChatId kept for compatibility)
   const initialChatId = lockedDestination?.chatId !== undefined
     ? lockedDestination.chatId
     : (selectedChatId && selectedChatId !== 'all' ? selectedChatId : (activeGroups[0]?.chatId || 'all'));
@@ -368,6 +622,12 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   const maxChars = contentType === 'text' ? 4096 : 1024;
   const isOverCharLimit = text.length > maxChars;
 
+  // Reset session delivery records when core message content or media changes
+  useEffect(() => {
+    setDeliveredRecipientIds(new Set());
+    setConfirmDuplicateRetry(false);
+  }, [text, primaryMedia?.url, uploadedMedia?.id, contentType]);
+
   // Media link URL add handler
   const handleAddMediaLink = () => {
     if (!activeMediaInputType) return;
@@ -475,8 +735,8 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   // Validation Checks
   const validationErrors = useMemo(() => {
     const errors: string[] = [];
-    if (!targetChatId) {
-      errors.push('Please select a target destination scope.');
+    if (!lockedDestination && totalSelectedRecipients === 0) {
+      errors.push('Please select at least one recipient (group or private chat) from the recipients panel.');
     }
     if (contentType === 'text' && !text.trim()) {
       errors.push('Message text is required for text-only posts.');
@@ -496,9 +756,15 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     const btnErrors = validateButtonGrid(buttonGrid);
     errors.push(...btnErrors);
     return errors;
-  }, [targetChatId, contentType, text, uploadStatus, mediaLinks, uploadedMedia, primaryMedia, isOverCharLimit, maxChars, buttonGrid]);
+  }, [lockedDestination, totalSelectedRecipients, contentType, text, uploadStatus, mediaLinks, uploadedMedia, primaryMedia, isOverCharLimit, maxChars, buttonGrid]);
 
   const isFormValid = validationErrors.length === 0;
+
+  // Track recipients in active selection that were already delivered in this session
+  const alreadyDeliveredSelected = useMemo(() => {
+    return activeTargets.filter(t => deliveredRecipientIds.has(t.chatId));
+  }, [activeTargets, deliveredRecipientIds]);
+  const hasAlreadyDelivered = alreadyDeliveredSelected.length > 0;
 
   // Scheduled date computation
   const computedScheduleTime = useMemo(() => {
@@ -590,6 +856,8 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setProtectContent(false);
     setShowClearModal(false);
     setNotification(null);
+    setDeliveredRecipientIds(new Set());
+    setConfirmDuplicateRetry(false);
   };
 
   const isDirty = Boolean(text.trim() || mediaLinks.length > 0 || uploadedMedia || buttonGrid.length > 0);
@@ -634,80 +902,14 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     try {
       const payload = buildPostPayload();
 
-      // Case A: Broadcast across all active groups
-      if (targetChatId === 'all') {
-        const targetGroups = activeGroups;
-        if (targetGroups.length === 0) {
-          throw new Error('No active connected groups available for broadcast.');
-        }
-
-        // If text-only post, use existing multi-group /api/dashboard/broadcast
-        if (contentType === 'text') {
-          const broadcastId = `bcast_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-          const res = await fetch('/api/dashboard/broadcast', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({
-              broadcastId,
-              groupIds: targetGroups.map(g => g.chatId),
-              message: text.trim()
-            })
-          });
-          const data = await res.json();
-          if (!res.ok) {
-            throw new Error(data.error || 'Multi-group broadcast request failed.');
-          }
-
-          setShowSendModal(false);
-          setNotification({
-            type: 'success',
-            title: 'Broadcast Complete!',
-            message: `Delivered text broadcast to ${data.sent || targetGroups.length} of ${data.total || targetGroups.length} connected groups.`,
-            details: data.failed > 0 ? `${data.failed} group(s) encountered delivery errors.` : undefined
-          });
-        } else {
-          // If rich media post, sequentially dispatch to each active group using existing /api/dashboard/posts/send
-          let successCount = 0;
-          let failCount = 0;
-
-          for (const g of targetGroups) {
-            try {
-              const res = await fetch('/api/dashboard/posts/send', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({
-                  chatId: g.chatId,
-                  payload
-                })
-              });
-              const data = await res.json();
-              if (res.ok && data.success) {
-                successCount++;
-              } else {
-                failCount++;
-              }
-            } catch {
-              failCount++;
-            }
-          }
-
-          setShowSendModal(false);
-          setNotification({
-            type: successCount > 0 ? 'success' : 'error',
-            title: successCount > 0 ? 'Media Broadcast Complete!' : 'Broadcast Failed',
-            message: `Delivered ${contentType.toUpperCase()} broadcast to ${successCount} group(s).${failCount > 0 ? ` (${failCount} failed)` : ''}`
-          });
-        }
-      } else {
-        // Case B: Single Group or Private Chat destination
+      // Case A: Locked destination
+      if (lockedDestination) {
         const res = await fetch('/api/dashboard/posts/send', {
           method: 'POST',
           credentials: 'same-origin',
           headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
-            chatId: Number(targetChatId),
+            chatId: Number(lockedDestination.chatId),
             payload
           })
         });
@@ -718,13 +920,107 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
         }
 
         setShowSendModal(false);
-        const targetLabel = lockedDestination?.title || selectedGroup?.chatTitle || `Chat ${targetChatId}`;
+        setConfirmDuplicateRetry(false);
+        setDeliveredRecipientIds(prev => new Set(prev).add(Number(lockedDestination.chatId)));
+        const targetLabel = lockedDestination.title || `Chat ${lockedDestination.chatId}`;
         setNotification({
           type: 'success',
           title: 'Broadcast Sent Successfully!',
           message: `Your ${contentType.toUpperCase()} post was delivered to ${targetLabel}.`,
           details: data.result?.messageId ? `Telegram Message ID: #${data.result.messageId}` : undefined
         });
+      } else {
+        // Case B: Multi-recipient dispatch strictly scoped to activeTargets
+        const targets = activeTargets;
+
+        if (targets.length === 0) {
+          throw new Error('No recipients selected for broadcast.');
+        }
+
+        let successCount = 0;
+        let failCount = 0;
+        const newlyDeliveredIds: number[] = [];
+        const successfulTargets: Array<{ chatId: number; title: string; type: 'group' | 'private' }> = [];
+        const failedTargets: Array<{ chatId: number; title: string; type: 'group' | 'private'; error: string }> = [];
+
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+          setSendingProgress({
+            current: i + 1,
+            total: targets.length,
+            targetName: target.title
+          });
+
+          try {
+            const res = await fetch('/api/dashboard/posts/send', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+              body: JSON.stringify({
+                chatId: target.chatId,
+                payload
+              })
+            });
+
+            const data = await res.json();
+            if (res.ok && data.success) {
+              successCount++;
+              newlyDeliveredIds.push(target.chatId);
+              successfulTargets.push(target);
+            } else {
+              failCount++;
+              failedTargets.push({ ...target, error: data.error || 'delivery error' });
+            }
+          } catch (err: any) {
+            failCount++;
+            failedTargets.push({ ...target, error: err.message || 'network error' });
+          }
+        }
+
+        if (newlyDeliveredIds.length > 0) {
+          setDeliveredRecipientIds(prev => {
+            const next = new Set(prev);
+            newlyDeliveredIds.forEach(id => next.add(id));
+            return next;
+          });
+        }
+
+        setShowSendModal(false);
+        setSendingProgress(null);
+        setConfirmDuplicateRetry(false);
+
+        if (successCount > 0 && failCount === 0) {
+          const groupCount = targets.filter(t => t.type === 'group').length;
+          const privateCount = targets.filter(t => t.type === 'private').length;
+          setNotification({
+            type: 'success',
+            title: 'Broadcast Complete!',
+            message: `Delivered ${contentType.toUpperCase()} broadcast to all ${successCount} recipient(s) (${groupCount} groups, ${privateCount} private).`
+          });
+        } else if (successCount > 0 && failCount > 0) {
+          // Partial delivery: Safely deselect successfully delivered recipients so ONLY failed targets remain selected for retry!
+          setSelectedGroupIds(prev => {
+            const next = new Set(prev);
+            successfulTargets.filter(t => t.type === 'group').forEach(t => next.delete(t.chatId));
+            return next;
+          });
+          setSelectedPrivateChatIds(prev => {
+            const next = new Set(prev);
+            successfulTargets.filter(t => t.type === 'private').forEach(t => next.delete(t.chatId));
+            return next;
+          });
+
+          const failedSummary = failedTargets.map(t => `${t.title} (${t.error})`).join('; ');
+          setNotification({
+            type: 'error',
+            title: 'Broadcast Partially Delivered — Safe Retry Ready',
+            message: `Delivered to ${successCount} of ${targets.length} recipient(s). ${failCount} recipient(s) failed.`,
+            details: `Successfully delivered recipients were automatically deselected to prevent duplicate messages. Only the ${failCount} failed recipient(s) remain selected. Click "Send Broadcast" to retry failed recipients only: ${failedSummary}`
+          });
+        } else {
+          const failedSummary = failedTargets.slice(0, 3).map(t => `${t.title}: ${t.error}`).join('; ');
+          throw new Error(`Broadcast failed for all ${targets.length} recipient(s). ${failedSummary}`);
+        }
       }
 
       if (onRefresh) onRefresh();
@@ -736,6 +1032,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       });
     } finally {
       setIsSubmitting(false);
+      setSendingProgress(null);
     }
   };
 
@@ -757,30 +1054,49 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
 
     try {
       const payload = buildPostPayload();
-      const sendTargetChatId = targetChatId === 'all' ? (activeGroups[0]?.chatId || 0) : Number(targetChatId);
 
-      const res = await fetch('/api/dashboard/posts/schedule', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          chatId: sendTargetChatId,
-          payload,
-          nextRun: computedScheduleTime.isoString,
-          name: `Broadcast: ${text.slice(0, 30) || contentType.toUpperCase()}`
-        })
-      });
+      if (lockedDestination) {
+        const res = await fetch('/api/dashboard/posts/schedule', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            chatId: Number(lockedDestination.chatId),
+            payload,
+            nextRun: computedScheduleTime.isoString,
+            name: `Broadcast: ${text.slice(0, 30) || contentType.toUpperCase()}`
+          })
+        });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to schedule post.');
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to schedule post.');
+        }
+      } else {
+        const targetChatIds = activeTargets.map(t => t.chatId);
+        if (targetChatIds.length === 0) {
+          throw new Error('Please select at least one recipient to schedule.');
+        }
+        for (const cId of targetChatIds) {
+          await fetch('/api/dashboard/posts/schedule', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+              chatId: cId,
+              payload,
+              nextRun: computedScheduleTime.isoString,
+              name: `Broadcast: ${text.slice(0, 30) || contentType.toUpperCase()}`
+            })
+          });
+        }
       }
 
       setShowScheduleModal(false);
       setNotification({
         type: 'success',
         title: 'Post Scheduled Successfully!',
-        message: `Your post is queued for automatic transmission on ${computedScheduleTime.formatted}.`
+        message: `Your post is queued for automatic transmission on ${computedScheduleTime.formatted} across ${activeTargets.length} recipient(s).`
       });
 
       if (onRefresh) onRefresh();
@@ -794,6 +1110,218 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  const renderTelegramBubble = () => (
+    <div
+      className={`rounded-2xl border ${themeBorder} overflow-hidden shadow-lg ${
+        previewTheme === 'light'
+          ? 'bg-[#e2e8f0]'
+          : previewTheme === 'dark'
+          ? 'bg-[#09090b]'
+          : previewTheme === 'midnight'
+          ? 'bg-[#030712]'
+          : previewTheme === 'emerald'
+          ? 'bg-[#022c22]'
+          : isDark
+          ? 'bg-[#0f172a]'
+          : 'bg-[#e2e8f0]'
+      }`}
+    >
+      {/* Telegram Header */}
+      <div className="px-4 py-3 bg-[#1e293b] border-b border-stone-800 text-white flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center font-bold text-xs">
+            R
+          </div>
+          <div>
+            <p className="text-xs font-bold leading-tight truncate max-w-[180px] sm:max-w-xs">
+              {lockedDestination
+                ? (lockedDestination.title || `Chat ${lockedDestination.chatId}`)
+                : selectedSummaryText}
+            </p>
+            <p className="text-[10px] text-stone-400 font-mono">
+              @{botUsername}
+            </p>
+          </div>
+        </div>
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-semibold uppercase">
+          {contentType}
+        </span>
+      </div>
+
+      {/* Bubble Canvas */}
+      <div className="p-4 space-y-3">
+        <div
+          className={`max-w-[92%] rounded-2xl p-3.5 space-y-2.5 shadow-md ${
+            previewTheme === 'light'
+              ? 'bg-white text-stone-900 border border-stone-200'
+              : previewTheme === 'dark'
+              ? 'bg-[#18181b] text-stone-100 border border-stone-800'
+              : previewTheme === 'midnight'
+              ? 'bg-[#111827] text-stone-100 border border-stone-800'
+              : previewTheme === 'emerald'
+              ? 'bg-[#064e3b] text-emerald-50 border border-emerald-800'
+              : isDark
+              ? 'bg-[#1e293b] text-stone-100'
+              : 'bg-white text-stone-900'
+          }`}
+        >
+          {/* Reply Indicator if enabled */}
+          {replyToLatest && (
+            <div className="border-l-2 border-blue-500 pl-2 py-0.5 text-[10px] text-stone-400 bg-blue-500/5 rounded-r">
+              <p className="font-semibold text-blue-400">Replying to latest message</p>
+              <p className="truncate">Sample context...</p>
+            </div>
+          )}
+
+          {/* Media Preview: Uploaded local media preview */}
+          {uploadedMedia && (
+            <div className="rounded-xl overflow-hidden bg-black/40 border border-stone-700/50 flex items-center justify-center min-h-[140px] max-h-[260px] relative">
+              {uploadedMedia.contentType === 'photo' || uploadedMedia.contentType === 'animation' ? (
+                <img
+                  src={uploadedMedia.localPreviewUrl}
+                  alt="Local media preview"
+                  className="w-full h-full object-cover max-h-[260px]"
+                />
+              ) : uploadedMedia.contentType === 'video' ? (
+                <video
+                  src={uploadedMedia.localPreviewUrl}
+                  controls
+                  className="w-full max-h-[260px]"
+                />
+              ) : uploadedMedia.mimeType.startsWith('audio/') ? (
+                <div className="text-center p-6 space-y-2 text-stone-300">
+                  <Music className="w-10 h-10 mx-auto text-amber-400" />
+                  <p className="text-xs font-semibold">{uploadedMedia.filename}</p>
+                  <p className="text-[10px] text-stone-400 font-mono">
+                    Local Audio Upload ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
+                  </p>
+                </div>
+              ) : (
+                <div className="text-center p-6 space-y-2 text-stone-300">
+                  <FileText className="w-10 h-10 mx-auto text-indigo-400" />
+                  <p className="text-xs font-semibold">{uploadedMedia.filename}</p>
+                  <p className="text-[10px] text-stone-400 font-mono">
+                    Local Document Upload ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Media Preview: URL media preview */}
+          {!uploadedMedia && primaryMedia && (
+            <div className="rounded-xl overflow-hidden bg-black/40 border border-stone-700/50 flex items-center justify-center min-h-[140px] max-h-[260px] relative">
+              {primaryMedia.type === 'image' || (primaryMedia.type === 'gif' && primaryMedia.url.toLowerCase().endsWith('.gif')) ? (
+                <SafeImagePreview
+                  url={primaryMedia.url}
+                  className="w-full h-full object-cover max-h-[260px]"
+                />
+              ) : primaryMedia.type === 'video' ? (
+                <div className="text-center p-6 space-y-2 text-stone-300">
+                  <Video className="w-10 h-10 mx-auto text-blue-400" />
+                  <p className="text-xs font-semibold">Video Media Link</p>
+                  <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
+                    {primaryMedia.url}
+                  </p>
+                </div>
+              ) : primaryMedia.type === 'audio' ? (
+                <div className="text-center p-6 space-y-2 text-stone-300">
+                  <Music className="w-10 h-10 mx-auto text-amber-400" />
+                  <p className="text-xs font-semibold">Audio Media Link</p>
+                  <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
+                    {primaryMedia.url}
+                  </p>
+                </div>
+              ) : primaryMedia.type === 'gif' ? (
+                <div className="text-center p-6 space-y-2 text-stone-300">
+                  <Film className="w-10 h-10 mx-auto text-purple-400" />
+                  <p className="text-xs font-semibold">GIF Animation Link</p>
+                  <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
+                    {primaryMedia.url}
+                  </p>
+                </div>
+              ) : (
+                <div className="text-center p-6 space-y-2 text-stone-300">
+                  <FileText className="w-10 h-10 mx-auto text-indigo-400" />
+                  <p className="text-xs font-semibold">Document / File Link</p>
+                  <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
+                    {primaryMedia.url}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Text / Caption Content */}
+          {text.trim() ? (
+            <div
+              className="text-xs leading-relaxed whitespace-pre-wrap break-words"
+              dangerouslySetInnerHTML={{ __html: text.replace(/\n/g, '<br/>') }}
+            />
+          ) : (
+            <p className="text-xs italic text-stone-500">
+              {contentType === 'text' ? '(Empty message content)' : '(No caption provided)'}
+            </p>
+          )}
+
+          {/* Timestamp & Pin Badge */}
+          <div className="flex items-center justify-end gap-1.5 pt-1 text-[10px] text-stone-400">
+            {pinAfterSend && (
+              <span className="flex items-center gap-0.5 text-amber-400">
+                <Pin className="w-3 h-3" /> Pinned
+              </span>
+            )}
+            <span>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+        </div>
+
+        {/* Inline Buttons Grid Preview */}
+        {buttonGrid.length > 0 && (
+          <div className="space-y-1.5 max-w-[92%]">
+            {buttonGrid.map((row, rIdx) => (
+              <div key={`prev_row_${rIdx}`} className="flex items-center gap-1.5">
+                {row.map(btn => {
+                  let styleClass = isDark
+                    ? 'bg-[#27354a] text-blue-300 border border-blue-500/20'
+                    : 'bg-white text-blue-600 border border-blue-200';
+                  if (btn.style === 'primary') {
+                    styleClass = isDark
+                      ? 'bg-blue-600/30 text-blue-300 border border-blue-500/50'
+                      : 'bg-blue-100 text-blue-800 border border-blue-300';
+                  } else if (btn.style === 'success') {
+                    styleClass = isDark
+                      ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50'
+                      : 'bg-emerald-100 text-emerald-800 border border-emerald-300';
+                  } else if (btn.style === 'danger') {
+                    styleClass = isDark
+                      ? 'bg-red-600/30 text-red-300 border border-red-500/50'
+                      : 'bg-red-100 text-red-800 border border-red-300';
+                  }
+
+                  return (
+                    <a
+                      key={btn.id}
+                      href={isValidHttpUrl(btn.url) ? btn.url : undefined}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={e => {
+                        if (!isValidHttpUrl(btn.url)) e.preventDefault();
+                      }}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-medium text-center truncate flex items-center justify-center gap-1.5 shadow-sm transition-opacity hover:opacity-90 ${styleClass}`}
+                    >
+                      <span className="truncate">{btn.text || 'Untitled Button'}</span>
+                      <ExternalLink className="w-3 h-3 shrink-0 opacity-70" />
+                    </a>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -839,7 +1367,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
           <button
             type="button"
             onClick={() => setShowPreviewModal(true)}
-            className="lg:hidden px-3.5 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 border border-stone-700"
+            className="px-3.5 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 border border-stone-700"
           >
             <Eye className="w-4 h-4" />
             Preview
@@ -891,21 +1419,11 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       )}
 
       {/* Main Two-Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: Composer Form (7 cols) */}
-        <div className={`lg:col-span-7 ${themeCardBg} border rounded-2xl p-6 space-y-6 shadow-sm`}>
-          
-          {/* Section 1: Broadcast Destination Scope */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center justify-between">
-              <span>1. Broadcast Destination</span>
-              {targetChatId !== 'all' && (
-                <span className="text-[11px] font-normal text-blue-400 font-mono">
-                  Target ID: {lockedDestination?.chatId ?? selectedGroup?.chatId ?? targetChatId}
-                </span>
-              )}
-            </label>
-
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
+        {/* LEFT COLUMN: Composer Form (approx 70-80% width) */}
+        <div className="flex-1 w-full min-w-0 space-y-6">
+          <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6 shadow-sm`}>
+            {/* Destination Scope Indicator */}
             {lockedDestination ? (
               <div className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border ${themeBorder} ${themeInnerCardBg} flex items-center justify-between`}>
                 <div className="flex items-center gap-2">
@@ -919,22 +1437,18 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                 </span>
               </div>
             ) : (
-              <select
-                value={targetChatId}
-                onChange={e => setTargetChatId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border ${themeInputBg} outline-none`}
-              >
-                <option value="all">
-                  📢 [ All Connected Groups ] ({activeGroups.length} active)
-                </option>
-                {activeGroups.map(g => (
-                  <option key={g.chatId} value={g.chatId}>
-                    👥 {g.chatTitle || g.title || `Group ${g.chatId}`} ({g.chatId})
-                  </option>
-                ))}
-              </select>
+              <div className={`p-3 rounded-xl border ${themeBorder} ${themeInnerCardBg} flex items-center justify-between text-xs`}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Users className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span className="text-stone-300 font-semibold truncate">
+                    Broadcast Target: <span className="text-stone-100 font-bold">{selectedSummaryText}</span>
+                  </span>
+                </div>
+                <span className="hidden sm:inline-block text-[11px] text-stone-400 font-medium shrink-0">
+                  Manage via recipients panel 👉
+                </span>
+              </div>
             )}
-          </div>
 
           {/* Section 2: Post Content / Caption */}
           <div className="space-y-2">
@@ -1571,247 +2085,395 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               </ul>
             </div>
           )}
-        </div>
 
-        {/* RIGHT COLUMN: Live Telegram Preview (5 cols) */}
-        <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center gap-1.5">
-              <span>Live Telegram Preview</span>
-            </h3>
-            <div className="flex items-center gap-1.5 text-[10px] text-stone-400">
-              <span className="hidden sm:inline">Theme:</span>
-              <select
-                value={previewTheme}
-                onChange={e => setPreviewTheme(e.target.value as any)}
-                className="bg-stone-900 border border-stone-700 text-stone-300 rounded px-1.5 py-0.5 text-[10px] outline-none"
-                title="Simulate Telegram client theme"
-              >
-                <option value="default">Default Slate</option>
-                <option value="dark">Dark Obsidian</option>
-                <option value="light">Classic Light</option>
-                <option value="midnight">Midnight Navy</option>
-                <option value="emerald">Forest Emerald</option>
-              </select>
+          {/* Section 5: Live Telegram Preview */}
+          <div className="space-y-3 pt-3 border-t border-stone-800/80">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center gap-1.5">
+                <Eye className="w-3.5 h-3.5 text-blue-400" />
+                <span>5. Live Telegram Preview</span>
+              </label>
+              <div className="flex items-center gap-1.5 text-[10px] text-stone-400">
+                <span className="hidden sm:inline">Theme:</span>
+                <select
+                  value={previewTheme}
+                  onChange={e => setPreviewTheme(e.target.value as any)}
+                  className="bg-stone-900 border border-stone-700 text-stone-300 rounded px-1.5 py-0.5 text-[10px] outline-none"
+                  title="Simulate Telegram client theme"
+                >
+                  <option value="default">Default Slate</option>
+                  <option value="dark">Dark Obsidian</option>
+                  <option value="light">Classic Light</option>
+                  <option value="midnight">Midnight Navy</option>
+                  <option value="emerald">Forest Emerald</option>
+                </select>
+              </div>
+            </div>
+
+            {renderTelegramBubble()}
+
+            <div className="p-3 rounded-xl bg-stone-900/60 border border-stone-800 text-[11px] text-stone-400 flex items-start gap-2">
+              <Shield className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
+              <p>
+                <strong className="text-stone-300">Telegram Bot Delivery:</strong> Media files can be delivered via public HTTP/HTTPS links or direct local file upload to Roxie. Supports text-only, media-only, and media with caption broadcasts.
+              </p>
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* Telegram Bubble Container */}
-          <div
-            className={`rounded-2xl border ${themeBorder} overflow-hidden shadow-lg ${
-              previewTheme === 'light'
-                ? 'bg-[#e2e8f0]'
-                : previewTheme === 'dark'
-                ? 'bg-[#09090b]'
-                : previewTheme === 'midnight'
-                ? 'bg-[#030712]'
-                : previewTheme === 'emerald'
-                ? 'bg-[#022c22]'
-                : isDark
-                ? 'bg-[#0f172a]'
-                : 'bg-[#e2e8f0]'
-            }`}
-          >
-            {/* Telegram Header */}
-            <div className="px-4 py-3 bg-[#1e293b] border-b border-stone-800 text-white flex items-center justify-between">
+        {/* RIGHT COLUMN: Broadcast Recipients Panel (approx 20-30% width, ~25% on desktop) */}
+        <div className="w-full lg:w-[28%] xl:w-[25%] lg:min-w-[280px] lg:sticky lg:top-4 space-y-4">
+          <div className={`${themeCardBg} border rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm`}>
+            {/* Panel Header */}
+            <div className="flex items-center justify-between gap-2 border-b border-stone-800/80 pb-3">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center font-bold text-xs">
-                  R
-                </div>
-                <div>
-                  <p className="text-xs font-bold leading-tight">
-                    {targetChatId === 'all'
-                      ? '📢 All Connected Groups'
-                      : (selectedGroup?.chatTitle || selectedGroup?.title || `Chat ${targetChatId}`)}
-                  </p>
-                  <p className="text-[10px] text-stone-400 font-mono">
-                    @{botUsername}
-                  </p>
-                </div>
+                <Users className="w-4 h-4 text-blue-500 shrink-0" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-stone-200">
+                  Broadcast Recipients
+                </h3>
               </div>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-semibold uppercase">
-                {contentType}
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
+                {totalSelectedRecipients} selected
               </span>
             </div>
 
-            {/* Bubble Canvas */}
-            <div className="p-4 space-y-3">
-              <div
-                className={`max-w-[92%] rounded-2xl p-3.5 space-y-2.5 shadow-md ${
-                  previewTheme === 'light'
-                    ? 'bg-white text-stone-900 border border-stone-200'
-                    : previewTheme === 'dark'
-                    ? 'bg-[#18181b] text-stone-100 border border-stone-800'
-                    : previewTheme === 'midnight'
-                    ? 'bg-[#111827] text-stone-100 border border-stone-800'
-                    : previewTheme === 'emerald'
-                    ? 'bg-[#064e3b] text-emerald-50 border border-emerald-800'
-                    : isDark
-                    ? 'bg-[#1e293b] text-stone-100'
-                    : 'bg-white text-stone-900'
-                }`}
-              >
-                {/* Reply Indicator if enabled */}
-                {replyToLatest && (
-                  <div className="border-l-2 border-blue-500 pl-2 py-0.5 text-[10px] text-stone-400 bg-blue-500/5 rounded-r">
-                    <p className="font-semibold text-blue-400">Replying to latest message</p>
-                    <p className="truncate">Sample context...</p>
-                  </div>
-                )}
-
-                {/* Media Preview: Uploaded local media preview */}
-                {uploadedMedia && (
-                  <div className="rounded-xl overflow-hidden bg-black/40 border border-stone-700/50 flex items-center justify-center min-h-[140px] max-h-[260px] relative">
-                    {uploadedMedia.contentType === 'photo' || uploadedMedia.contentType === 'animation' ? (
-                      <img
-                        src={uploadedMedia.localPreviewUrl}
-                        alt="Local media preview"
-                        className="w-full h-full object-cover max-h-[260px]"
-                      />
-                    ) : uploadedMedia.contentType === 'video' ? (
-                      <video
-                        src={uploadedMedia.localPreviewUrl}
-                        controls
-                        className="w-full max-h-[260px]"
-                      />
-                    ) : uploadedMedia.mimeType.startsWith('audio/') ? (
-                      <div className="text-center p-6 space-y-2 text-stone-300">
-                        <Music className="w-10 h-10 mx-auto text-amber-400" />
-                        <p className="text-xs font-semibold">{uploadedMedia.filename}</p>
-                        <p className="text-[10px] text-stone-400 font-mono">
-                          Local Audio Upload ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="text-center p-6 space-y-2 text-stone-300">
-                        <FileText className="w-10 h-10 mx-auto text-indigo-400" />
-                        <p className="text-xs font-semibold">{uploadedMedia.filename}</p>
-                        <p className="text-[10px] text-stone-400 font-mono">
-                          Local Document Upload ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Media Preview: URL media preview */}
-                {!uploadedMedia && primaryMedia && (
-                  <div className="rounded-xl overflow-hidden bg-black/40 border border-stone-700/50 flex items-center justify-center min-h-[140px] max-h-[260px] relative">
-                    {primaryMedia.type === 'image' || (primaryMedia.type === 'gif' && primaryMedia.url.toLowerCase().endsWith('.gif')) ? (
-                      <SafeImagePreview
-                        url={primaryMedia.url}
-                        className="w-full h-full object-cover max-h-[260px]"
-                      />
-                    ) : primaryMedia.type === 'video' ? (
-                      <div className="text-center p-6 space-y-2 text-stone-300">
-                        <Video className="w-10 h-10 mx-auto text-blue-400" />
-                        <p className="text-xs font-semibold">Video Media Link</p>
-                        <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
-                          {primaryMedia.url}
-                        </p>
-                      </div>
-                    ) : primaryMedia.type === 'audio' ? (
-                      <div className="text-center p-6 space-y-2 text-stone-300">
-                        <Music className="w-10 h-10 mx-auto text-amber-400" />
-                        <p className="text-xs font-semibold">Audio Media Link</p>
-                        <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
-                          {primaryMedia.url}
-                        </p>
-                      </div>
-                    ) : primaryMedia.type === 'gif' ? (
-                      <div className="text-center p-6 space-y-2 text-stone-300">
-                        <Film className="w-10 h-10 mx-auto text-purple-400" />
-                        <p className="text-xs font-semibold">GIF Animation Link</p>
-                        <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
-                          {primaryMedia.url}
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="text-center p-6 space-y-2 text-stone-300">
-                        <FileText className="w-10 h-10 mx-auto text-indigo-400" />
-                        <p className="text-xs font-semibold">Document / File Link</p>
-                        <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
-                          {primaryMedia.url}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Text / Caption Content */}
-                {text.trim() ? (
-                  <div
-                    className="text-xs leading-relaxed whitespace-pre-wrap break-words"
-                    dangerouslySetInnerHTML={{ __html: text.replace(/\n/g, '<br/>') }}
-                  />
-                ) : (
-                  <p className="text-xs italic text-stone-500">
-                    {contentType === 'text' ? '(Empty message content)' : '(No caption provided)'}
-                  </p>
-                )}
-
-                {/* Timestamp & Pin Badge */}
-                <div className="flex items-center justify-end gap-1.5 pt-1 text-[10px] text-stone-400">
-                  {pinAfterSend && (
-                    <span className="flex items-center gap-0.5 text-amber-400">
-                      <Pin className="w-3 h-3" /> Pinned
-                    </span>
-                  )}
-                  <span>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            {lockedDestination ? (
+              <div className={`p-3.5 rounded-xl border ${themeBorder} ${themeInnerCardBg} space-y-2`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-stone-300">Locked Scope</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    Active
+                  </span>
                 </div>
+                <div className="flex items-center gap-2 text-xs font-semibold text-stone-200">
+                  <span>{lockedDestination.type === 'private' ? '👤' : '👥'}</span>
+                  <span className="truncate">{lockedDestination.title || `Chat ${lockedDestination.chatId}`}</span>
+                </div>
+                <p className="font-mono text-[10px] text-stone-500">ID: {lockedDestination.chatId}</p>
               </div>
-
-              {/* Inline Buttons Grid Preview */}
-              {buttonGrid.length > 0 && (
-                <div className="space-y-1.5 max-w-[92%]">
-                  {buttonGrid.map((row, rIdx) => (
-                    <div key={`prev_row_${rIdx}`} className="flex items-center gap-1.5">
-                      {row.map(btn => {
-                        let styleClass = isDark
-                          ? 'bg-[#27354a] text-blue-300 border border-blue-500/20'
-                          : 'bg-white text-blue-600 border border-blue-200';
-                        if (btn.style === 'primary') {
-                          styleClass = isDark
-                            ? 'bg-blue-600/30 text-blue-300 border border-blue-500/50'
-                            : 'bg-blue-100 text-blue-800 border border-blue-300';
-                        } else if (btn.style === 'success') {
-                          styleClass = isDark
-                            ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50'
-                            : 'bg-emerald-100 text-emerald-800 border border-emerald-300';
-                        } else if (btn.style === 'danger') {
-                          styleClass = isDark
-                            ? 'bg-red-600/30 text-red-300 border border-red-500/50'
-                            : 'bg-red-100 text-red-800 border border-red-300';
-                        }
-
-                        return (
-                          <a
-                            key={btn.id}
-                            href={isValidHttpUrl(btn.url) ? btn.url : undefined}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={e => {
-                              if (!isValidHttpUrl(btn.url)) e.preventDefault();
-                            }}
-                            className={`flex-1 py-2 px-3 rounded-xl text-xs font-medium text-center truncate flex items-center justify-center gap-1.5 shadow-sm transition-opacity hover:opacity-90 ${styleClass}`}
-                          >
-                            <span className="truncate">{btn.text || 'Untitled Button'}</span>
-                            <ExternalLink className="w-3 h-3 shrink-0 opacity-70" />
-                          </a>
-                        );
-                      })}
-                    </div>
-                  ))}
+            ) : (
+              <>
+                {/* Recipient Type Dropdown */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-stone-400 flex items-center justify-between">
+                    <span>Recipient Type</span>
+                    <span className="text-[10px] font-normal text-stone-500">
+                      {recipientType === 'groups' ? 'Groups only' : recipientType === 'private_chats' ? 'Private chats only' : 'Both (Mixed)'}
+                    </span>
+                  </label>
+                  <select
+                    value={recipientType}
+                    onChange={e => setRecipientType(e.target.value as 'groups' | 'private_chats' | 'both')}
+                    className={`w-full px-3 py-2 rounded-xl text-xs font-medium border ${themeInputBg} outline-none transition-colors cursor-pointer`}
+                  >
+                    <option value="groups">Groups</option>
+                    <option value="private_chats">Private Chats</option>
+                    <option value="both">Both</option>
+                  </select>
                 </div>
-              )}
-            </div>
-          </div>
 
-          <div className="p-3 rounded-xl bg-stone-900/60 border border-stone-800 text-[11px] text-stone-400 flex items-start gap-2">
-            <Shield className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
-            <p>
-              <strong className="text-stone-300">Telegram Bot Delivery:</strong> Media files can be delivered via public HTTP/HTTPS links or direct local file upload to Roxie. Supports text-only, media-only, and media with caption broadcasts.
-            </p>
+                {/* Select All / Deselect All Control & Search Box */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-stone-950/60 border border-stone-800/80">
+                    <label className="flex items-center gap-2 text-xs font-medium text-stone-300 hover:text-white transition-colors cursor-pointer select-none">
+                      <input
+                        ref={selectAllCheckboxRef}
+                        type="checkbox"
+                        checked={isAllVisibleSelected}
+                        onChange={handleToggleSelectAllVisible}
+                        className="rounded bg-stone-900 border-stone-700 text-blue-600 focus:ring-0 w-3.5 h-3.5 cursor-pointer"
+                      />
+                      <span className="text-[11px]">
+                        {isAllVisibleSelected ? 'Deselect All' : 'Select All'}
+                        <span className="text-stone-500 ml-1">({totalVisibleCount})</span>
+                      </span>
+                    </label>
+                    <span className="text-[10px] font-mono text-stone-400">
+                      {visibleSelectedCount}/{totalVisibleCount}
+                    </span>
+                  </div>
+
+                  {/* Search Input */}
+                  <div className="relative flex items-center">
+                    <Search className="w-3.5 h-3.5 text-stone-500 absolute left-2.5 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={recipientSearchQuery}
+                      onChange={e => setRecipientSearchQuery(e.target.value)}
+                      placeholder="Search by name or ID..."
+                      className={`w-full pl-8 pr-7 py-1.5 rounded-lg text-[11px] border ${themeInputBg} outline-none`}
+                    />
+                    {recipientSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setRecipientSearchQuery('')}
+                        className="absolute right-2 text-stone-500 hover:text-stone-300 p-0.5"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Scrollable Recipient List */}
+                <div className="max-h-[380px] xl:max-h-[440px] overflow-y-auto space-y-1.5 pr-1 text-xs">
+                  {/* Category: Groups Only */}
+                  {recipientType === 'groups' && (
+                    <>
+                      {visibleGroups.length === 0 ? (
+                        <div className="py-8 text-center text-xs text-stone-500">
+                          {activeGroups.length === 0 ? 'No active connected groups found.' : 'No groups match your search.'}
+                        </div>
+                      ) : (
+                        visibleGroups.map(g => {
+                          const isChecked = selectedGroupIds.has(g.chatId);
+                          const isDelivered = deliveredRecipientIds.has(g.chatId);
+                          return (
+                            <div
+                              key={`group_${g.chatId}`}
+                              onClick={() => handleToggleGroup(g.chatId)}
+                              className={`flex items-start gap-2.5 p-2 rounded-xl border transition-all cursor-pointer select-none ${
+                                isChecked
+                                  ? 'bg-blue-600/10 border-blue-500/40 text-stone-100'
+                                  : 'bg-stone-950/40 border-stone-800/80 text-stone-300 hover:border-stone-700'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {}}
+                                className="rounded bg-stone-900 border-stone-700 text-blue-600 focus:ring-0 w-3.5 h-3.5 mt-0.5 cursor-pointer shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-1">
+                                  <p className="font-semibold text-xs truncate">
+                                    {g.chatTitle || g.title || `Group ${g.chatId}`}
+                                  </p>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {isDelivered && (
+                                      <span className="text-[9px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1 py-0.2 rounded">
+                                        Sent
+                                      </span>
+                                    )}
+                                    {g.memberCount !== undefined && (
+                                      <span className="text-[10px] text-stone-400 font-mono">
+                                        {g.memberCount}m
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <p className="font-mono text-[10px] text-stone-500 truncate">
+                                  ID: {g.chatId}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </>
+                  )}
+
+                  {/* Category: Private Chats Only */}
+                  {recipientType === 'private_chats' && (
+                    <>
+                      {visiblePrivateChats.length === 0 ? (
+                        <div className="py-8 text-center text-xs text-stone-500">
+                          {effectivePrivateChats.length === 0 ? 'No private chats available.' : 'No private chats match your search.'}
+                        </div>
+                      ) : (
+                        visiblePrivateChats.map(p => {
+                          const isChecked = selectedPrivateChatIds.has(p.chatId);
+                          const isDelivered = deliveredRecipientIds.has(Number(p.chatId ?? p.userId));
+                          const displayTitle = p.name || (p.username ? `@${p.username}` : `User ${p.chatId}`);
+                          return (
+                            <div
+                              key={`priv_${p.chatId}`}
+                              onClick={() => handleTogglePrivateChat(p.chatId)}
+                              className={`flex items-start gap-2.5 p-2 rounded-xl border transition-all cursor-pointer select-none ${
+                                isChecked
+                                  ? 'bg-emerald-600/10 border-emerald-500/40 text-stone-100'
+                                  : 'bg-stone-950/40 border-stone-800/80 text-stone-300 hover:border-stone-700'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {}}
+                                className="rounded bg-stone-900 border-stone-700 text-emerald-600 focus:ring-0 w-3.5 h-3.5 mt-0.5 cursor-pointer shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-1">
+                                  <p className="font-semibold text-xs truncate">
+                                    {displayTitle}
+                                  </p>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {isDelivered && (
+                                      <span className="text-[9px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1 py-0.2 rounded">
+                                        Sent
+                                      </span>
+                                    )}
+                                    {p.messageCount !== undefined && (
+                                      <span className="text-[10px] text-stone-400 font-mono">
+                                        {p.messageCount} msgs
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <p className="font-mono text-[10px] text-stone-500 truncate">
+                                  ID: {p.chatId}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </>
+                  )}
+
+                  {/* Category: Both (Groups & Private Chats with section headings) */}
+                  {recipientType === 'both' && (
+                    <div className="space-y-3">
+                      {/* Sub-heading: Groups */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between px-1 text-[11px] font-bold text-stone-400 uppercase tracking-wider">
+                          <span className="flex items-center gap-1">
+                            <Users className="w-3 h-3 text-blue-400" /> Groups
+                          </span>
+                          <span className="text-[10px] font-mono text-stone-500">
+                            {visibleGroups.filter(g => selectedGroupIds.has(g.chatId)).length}/{visibleGroups.length}
+                          </span>
+                        </div>
+                        {visibleGroups.length === 0 ? (
+                          <p className="text-[11px] text-stone-500 italic px-2 py-1">No groups found.</p>
+                        ) : (
+                          visibleGroups.map(g => {
+                            const isChecked = selectedGroupIds.has(g.chatId);
+                            const isDelivered = deliveredRecipientIds.has(g.chatId);
+                            return (
+                              <div
+                                key={`both_g_${g.chatId}`}
+                                onClick={() => handleToggleGroup(g.chatId)}
+                                className={`flex items-start gap-2.5 p-2 rounded-xl border transition-all cursor-pointer select-none ${
+                                  isChecked
+                                    ? 'bg-blue-600/10 border-blue-500/40 text-stone-100'
+                                    : 'bg-stone-950/40 border-stone-800/80 text-stone-300 hover:border-stone-700'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {}}
+                                  className="rounded bg-stone-900 border-stone-700 text-blue-600 focus:ring-0 w-3.5 h-3.5 mt-0.5 cursor-pointer shrink-0"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <p className="font-semibold text-xs truncate">
+                                      {g.chatTitle || g.title || `Group ${g.chatId}`}
+                                    </p>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {isDelivered && (
+                                        <span className="text-[9px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1 py-0.2 rounded">
+                                          Sent
+                                        </span>
+                                      )}
+                                      {g.memberCount !== undefined && (
+                                        <span className="text-[10px] text-stone-400 font-mono">
+                                          {g.memberCount}m
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <p className="font-mono text-[10px] text-stone-500 truncate">
+                                    ID: {g.chatId}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      {/* Sub-heading: Private Chats */}
+                      <div className="space-y-1 pt-1 border-t border-stone-800/60">
+                        <div className="flex items-center justify-between px-1 text-[11px] font-bold text-stone-400 uppercase tracking-wider">
+                          <span className="flex items-center gap-1">
+                            <MessageSquare className="w-3 h-3 text-emerald-400" /> Private Chats
+                          </span>
+                          <span className="text-[10px] font-mono text-stone-500">
+                            {visiblePrivateChats.filter(p => selectedPrivateChatIds.has(p.chatId)).length}/{visiblePrivateChats.length}
+                          </span>
+                        </div>
+                        {visiblePrivateChats.length === 0 ? (
+                          <p className="text-[11px] text-stone-500 italic px-2 py-1">No private chats found.</p>
+                        ) : (
+                          visiblePrivateChats.map(p => {
+                            const isChecked = selectedPrivateChatIds.has(p.chatId);
+                            const isDelivered = deliveredRecipientIds.has(Number(p.chatId ?? p.userId));
+                            const displayTitle = p.name || (p.username ? `@${p.username}` : `User ${p.chatId}`);
+                            return (
+                              <div
+                                key={`both_p_${p.chatId}`}
+                                onClick={() => handleTogglePrivateChat(p.chatId)}
+                                className={`flex items-start gap-2.5 p-2 rounded-xl border transition-all cursor-pointer select-none ${
+                                  isChecked
+                                    ? 'bg-emerald-600/10 border-emerald-500/40 text-stone-100'
+                                    : 'bg-stone-950/40 border-stone-800/80 text-stone-300 hover:border-stone-700'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {}}
+                                  className="rounded bg-stone-900 border-stone-700 text-emerald-600 focus:ring-0 w-3.5 h-3.5 mt-0.5 cursor-pointer shrink-0"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <p className="font-semibold text-xs truncate">
+                                      {displayTitle}
+                                    </p>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {isDelivered && (
+                                        <span className="text-[9px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1 py-0.2 rounded">
+                                          Sent
+                                        </span>
+                                      )}
+                                      {p.messageCount !== undefined && (
+                                        <span className="text-[10px] text-stone-400 font-mono">
+                                          {p.messageCount} msgs
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <p className="font-mono text-[10px] text-stone-500 truncate">
+                                    ID: {p.chatId}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Status Indicator / Footer */}
+                <div className="pt-2 border-t border-stone-800/80">
+                  {totalSelectedRecipients === 0 ? (
+                    <div className="flex items-center gap-1.5 text-[11px] text-amber-400 font-medium">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Select at least one recipient</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between text-[11px] text-stone-400">
+                      <span className="truncate">{selectedSummaryText}</span>
+                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -1830,15 +2492,96 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               </p>
             </div>
 
-            <div className={`p-4 rounded-xl border ${themeBorder} ${themeInnerCardBg} text-xs space-y-2 font-mono`}>
-              <div className="flex justify-between">
-                <span className="text-stone-400">Destination:</span>
-                <span className="text-stone-200 font-bold truncate max-w-[200px]">
-                  {targetChatId === 'all'
-                    ? `All Groups (${activeGroups.length} connected)`
-                    : (selectedGroup?.chatTitle || targetChatId)}
+            <div className={`p-4 rounded-xl border ${themeBorder} ${themeInnerCardBg} text-xs space-y-2.5 font-mono`}>
+              <div className="flex justify-between items-center">
+                <span className="text-stone-400">Total Recipients:</span>
+                <span className="text-stone-200 font-bold">
+                  {lockedDestination ? '1 (Locked)' : `${totalSelectedRecipients} recipient(s)`}
                 </span>
               </div>
+
+              {!lockedDestination && (
+                <div className="flex justify-between items-center text-[11px] text-stone-400">
+                  <span>Breakdown:</span>
+                  <span className="text-stone-200 font-semibold">
+                    {activeTargets.filter(t => t.type === 'group').length} group(s), {activeTargets.filter(t => t.type === 'private').length} private chat(s)
+                  </span>
+                </div>
+              )}
+
+              {/* Duplicate Delivery Warning & Safe Retry Option */}
+              {hasAlreadyDelivered && (
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Duplicate Delivery Warning</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedGroupIds(prev => {
+                          const next = new Set(prev);
+                          alreadyDeliveredSelected.filter(t => t.type === 'group').forEach(t => next.delete(t.chatId));
+                          return next;
+                        });
+                        setSelectedPrivateChatIds(prev => {
+                          const next = new Set(prev);
+                          alreadyDeliveredSelected.filter(t => t.type === 'private').forEach(t => next.delete(t.chatId));
+                          return next;
+                        });
+                        setConfirmDuplicateRetry(false);
+                      }}
+                      className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 transition-colors"
+                    >
+                      Deselect Already Delivered ({alreadyDeliveredSelected.length})
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed font-sans">
+                    <strong>{alreadyDeliveredSelected.length}</strong> of the <strong>{activeTargets.length}</strong> selected recipient(s) already received this broadcast post:
+                    <span className="block font-mono text-[10px] text-amber-300/80 mt-1 truncate">
+                      {alreadyDeliveredSelected.map(t => t.title).join(', ')}
+                    </span>
+                  </p>
+                  <label className="flex items-start gap-2 text-[11px] text-amber-200 font-medium cursor-pointer select-none border-t border-amber-500/20 pt-2 font-sans">
+                    <input
+                      type="checkbox"
+                      checked={confirmDuplicateRetry}
+                      onChange={e => setConfirmDuplicateRetry(e.target.checked)}
+                      className="rounded bg-stone-900 border-amber-500 text-amber-500 focus:ring-0 w-3.5 h-3.5 mt-0.5 cursor-pointer shrink-0"
+                    />
+                    <span>I understand that successful recipients may receive duplicate messages and explicitly confirm this retry.</span>
+                  </label>
+                </div>
+              )}
+
+              {/* Scrollable list of recipient targets */}
+              {!lockedDestination && activeTargets.length > 0 && (
+                <div className="max-h-28 overflow-y-auto space-y-1 p-2 rounded-lg bg-stone-900/60 border border-stone-800 text-[11px] font-sans">
+                  {activeTargets.map(target => {
+                    const isDelivered = deliveredRecipientIds.has(target.chatId);
+                    return (
+                      <div key={`modal_target_${target.chatId}`} className="flex items-center justify-between text-stone-300">
+                        <span className="truncate flex items-center gap-1.5">
+                          {target.type === 'group' ? (
+                            <Users className="w-3 h-3 text-blue-400 shrink-0" />
+                          ) : (
+                            <MessageSquare className="w-3 h-3 text-emerald-400 shrink-0" />
+                          )}
+                          <span className="truncate">{target.title}</span>
+                          {isDelivered && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                              Already Sent
+                            </span>
+                          )}
+                        </span>
+                        <span className="font-mono text-stone-500 text-[10px] shrink-0">{target.chatId}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="flex justify-between">
                 <span className="text-stone-400">Content Type:</span>
                 <span className="text-blue-400 uppercase font-bold">{contentType}</span>
@@ -1869,6 +2612,13 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               )}
             </div>
 
+            {sendingProgress && (
+              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0 text-blue-400" />
+                <span>Transmitting {sendingProgress.current} of {sendingProgress.total}: <strong>{sendingProgress.targetName}</strong></span>
+              </div>
+            )}
+
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="button"
@@ -1881,11 +2631,15 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmSendBroadcast}
-                disabled={isSubmitting}
+                disabled={isSubmitting || (hasAlreadyDelivered && !confirmDuplicateRetry)}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2"
               >
                 {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Confirm & Transmit Broadcast
+                {isSubmitting
+                  ? 'Transmitting...'
+                  : hasAlreadyDelivered && !confirmDuplicateRetry
+                  ? 'Duplicate Confirmation Required'
+                  : 'Confirm & Transmit Broadcast'}
               </button>
             </div>
           </div>
@@ -2019,6 +2773,28 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                 Clear Everything
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: Fullscreen Preview Dialog */}
+      {showPreviewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className={`${themeCardBg} border rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto`}>
+            <div className="flex items-center justify-between border-b border-stone-800/80 pb-3">
+              <h3 className="text-base font-bold text-stone-100 flex items-center gap-2">
+                <Eye className="w-5 h-5 text-blue-400" />
+                Live Telegram Preview
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowPreviewModal(false)}
+                className="p-1 hover:bg-white/10 rounded-lg transition-colors text-stone-400 hover:text-stone-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {renderTelegramBubble()}
           </div>
         </div>
       )}
