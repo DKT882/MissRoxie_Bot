@@ -1496,6 +1496,13 @@ export class ModerationService {
       return { sent: false, skipped: 'ALREADY_WELCOMED_RECENTLY' };
     }
 
+    // Suppress duplicate attempts for users who recently blocked the bot
+    const lastBlocked = this.welcomedDmUsersCache.get(`blocked:${chatId}:${user.id}`) || this.welcomedDmUsersCache.get(`blocked:${user.id}`) || 0;
+    if (now - lastBlocked < 60000) {
+      console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=${isEnabled}\ntriggerMode=${triggerMode}\nresult=SKIPPED\nskipReason=USER_BLOCKED_BOT_RECENTLY`);
+      return { sent: false, skipped: 'USER_BLOCKED_BOT_RECENTLY' };
+    }
+
     // Also check cross-trigger duplicate:
     // If a user already received a join_request DM within the last 60s (via 'both' mode or auto-accept),
     // do not double-send when the resulting normal_join / chat_member update arrives.
@@ -1518,8 +1525,12 @@ export class ModerationService {
       }
     }
 
+    const title = chatTitle || settings.chatTitle || 'the group';
+    const targetDestination = (trigger === 'join_request' && options?.targetChatId)
+      ? options.targetChatId
+      : user.id;
+
     try {
-      const title = chatTitle || settings.chatTitle || 'the group';
       const rawText = welcomeDmConfig.text !== undefined ? welcomeDmConfig.text : 'You joined {groupname} 🎉';
       const formattedText = this.formatRichMessageText(rawText, user, title, chatId);
       const formattedButtons = welcomeDmConfig.mode === 'rich' || (welcomeDmConfig.buttons && welcomeDmConfig.buttons.length > 0)
@@ -1533,13 +1544,6 @@ export class ModerationService {
         mediaUploadId: welcomeDmConfig.mediaUploadId,
         buttons: formattedButtons
       };
-
-      // PRIVATE CHAT DELIVERY:
-      // For Join Request: target destination is options.targetChatId (joinRequest.user_chat_id)
-      // For Normal Join: target destination is user.id
-      const targetDestination = (trigger === 'join_request' && options?.targetChatId)
-        ? options.targetChatId
-        : user.id;
 
       const usedMethod = payload.contentType === 'photo' ? 'sendPhoto' : payload.contentType === 'video' ? 'sendVideo' : payload.contentType === 'animation' ? 'sendAnimation' : payload.contentType === 'document' ? 'sendDocument' : payload.contentType === 'sticker' ? 'sendSticker' : 'sendMessage';
 
@@ -1575,6 +1579,8 @@ export class ModerationService {
       } else {
         const errorMsg = sendRes.error || 'Telegram send failed';
         const statusCode = sendRes.result?.error_code || 'N/A';
+        const isBlocked = /blocked by the user/i.test(errorMsg) ||
+                          /user is deactivated/i.test(errorMsg);
         console.log(`[WELCOME_DM_RESPONSE]\nid=${traceId}\nsuccess=false\ntelegramStatus=${statusCode}\ntelegramError=${errorMsg}\ntelegramMessageId=none`);
         console.warn(`[WelcomeDM] Private DM delivery failed for user ${user.id} (trigger=${trigger}, destination=${targetDestination}) from group ${chatId}: ${errorMsg}`);
 
@@ -1587,6 +1593,15 @@ export class ModerationService {
           details: `Failed Welcome Private DM (${trigger}) to ${user.first_name || user.id} (destination=${targetDestination}): ${errorMsg}`
         });
 
+        // If user blocked the bot or is deactivated, cache the blocked state
+        // to prevent repeated impossible delivery attempts on duplicate updates
+        if (isBlocked) {
+          this.welcomedDmUsersCache.set(`blocked:${chatId}:${user.id}`, Date.now());
+          this.welcomedDmUsersCache.set(`blocked:${user.id}`, Date.now());
+          this.welcomedDmUsersCache.delete(dedupeKey);
+          return { sent: false, fallbackSent: false, error: errorMsg };
+        }
+
         // Fallback: ONLY apply first-contact group fallback for NORMAL joins.
         // For join requests, Telegram gives a temporary private chat permission; if it fails, do NOT send fallback to the group.
         if (trigger === 'join_request') {
@@ -1598,8 +1613,6 @@ export class ModerationService {
         const isFirstContact = /can't initiate conversation/i.test(errorMsg) ||
                                /cannot initiate conversation/i.test(errorMsg) ||
                                /bot can't initiate/i.test(errorMsg);
-        const isBlocked = /blocked by the user/i.test(errorMsg) ||
-                          /user is deactivated/i.test(errorMsg);
 
         // Fallback: If Telegram blocked first-contact and user hasn't explicitly blocked Roxie, and fallback is enabled:
         const fallbackEnabled = welcomeDmConfig.fallbackEnabled === true;
@@ -1654,6 +1667,19 @@ export class ModerationService {
       }
     } catch (err: any) {
       this.welcomedDmUsersCache.delete(dedupeKey);
+      const isBlocked = /blocked by the user|user is deactivated/i.test(err?.message || '');
+      if (isBlocked) {
+        this.welcomedDmUsersCache.set(`blocked:${chatId}:${user.id}`, Date.now());
+        this.welcomedDmUsersCache.set(`blocked:${user.id}`, Date.now());
+      }
+      db.addLog({
+        chatId,
+        chatTitle: title,
+        targetUserId: user.id,
+        targetUsername: user.username,
+        action: 'send_message',
+        details: `Failed Welcome Private DM (${trigger}) to ${user.first_name || user.id} (destination=${targetDestination}): ${err?.message || err}`
+      });
       console.error(`[WelcomeDM] Exception sending welcome DM to user ${user.id}:`, err.message);
       return { sent: false, error: err.message };
     } finally {

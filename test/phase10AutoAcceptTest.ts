@@ -170,6 +170,115 @@ async function runTests() {
     const errorLogs = db.getGroupLogs(chatId, 20);
     const hasPermissionLog = errorLogs.some(l => l.action === 'auto_accept' && l.details.includes('can_invite_users'));
     assert(hasPermissionLog, 'AUTOACCEPT-10: Missing can_invite_users right on approveChatJoinRequest logs actionable permission error');
+
+    // Restore working approveChatJoinRequest
+    (telegramApi as any).approveChatJoinRequest = async (cid: number | string, uid: number) => {
+      approvedRequests.push({ chatId: cid, userId: uid });
+      return { ok: true, result: true };
+    };
+
+    // =========================================================================
+    // TEST A & G: Blocked User Auto-Accept + Suppressed Retry Loop
+    // User blocked Roxie in private chat -> DM fails with 403, but Roxie STILL approves join request!
+    // =========================================================================
+    TelegramBotManager.clearJoinApprovalCache();
+    ModerationService.clearWelcomedDmCache();
+    approvedRequests.length = 0;
+    sentMessages.length = 0;
+
+    let daveDmCallCount = 0;
+    (telegramApi as any).sendMessage = async (id: number | string, text: string) => {
+      if (id === 800201 || id === 700201) {
+        daveDmCallCount++;
+        return { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' };
+      }
+      lastMessage = text;
+      sentMessages.push({ chatId: id, text });
+      return { ok: true, result: { message_id: 2001, chat: { id, type: Number(id) > 0 ? 'private' : 'supergroup' }, date: Date.now() } };
+    };
+
+    await (botManager as any).handleChatJoinRequest({
+      chat: { id: chatId, title: 'Test Group', type: 'supergroup' },
+      from: { id: 700201, is_bot: false, first_name: 'Dave', username: 'dave_blocked' },
+      user_chat_id: 800201,
+      date: Math.floor(Date.now() / 1000)
+    });
+
+    const daveApproved = approvedRequests.some(r => r.userId === 700201);
+    assert(daveApproved, 'TEST-A: Join request is successfully approved even when user blocked Roxie in private chat');
+
+    const groupLogsAfterDave = db.getGroupLogs(chatId, 20);
+    const daveDmFailLog = groupLogsAfterDave.find(l => l.targetUserId === 700201 && l.action === 'send_message' && l.details.includes('Failed Welcome Private DM'));
+    const daveDmSuccessLog = groupLogsAfterDave.find(l => l.targetUserId === 700201 && l.action === 'send_message' && l.details.includes('Sent Welcome Private DM'));
+    assert(daveDmFailLog !== undefined && daveDmSuccessLog === undefined, 'TEST-G1: Blocked user DM failure is accurately logged as failed and NOT recorded as delivered');
+
+    // Verify subsequent updates for the blocked user do not retry endlessly
+    const daveCallsBeforeSubsequent = daveDmCallCount;
+    // Follow-up chat_member update:
+    await (botManager as any).handleChatMemberUpdate({
+      chat: { id: chatId, title: 'Test Group', type: 'supergroup' },
+      from: { id: 999000111, is_bot: true, first_name: 'Roxie' },
+      date: Math.floor(Date.now() / 1000),
+      old_chat_member: { status: 'left', user: { id: 700201, is_bot: false, first_name: 'Dave', username: 'dave_blocked' } },
+      new_chat_member: { status: 'member', user: { id: 700201, is_bot: false, first_name: 'Dave', username: 'dave_blocked' } }
+    });
+    // Follow-up duplicate chat_join_request:
+    await (botManager as any).handleChatJoinRequest({
+      chat: { id: chatId, title: 'Test Group', type: 'supergroup' },
+      from: { id: 700201, is_bot: false, first_name: 'Dave', username: 'dave_blocked' },
+      user_chat_id: 800201,
+      date: Math.floor(Date.now() / 1000)
+    });
+    assert(daveDmCallCount === daveCallsBeforeSubsequent, 'TEST-G2: Blocked user DM does not trigger endless retry loop across follow-up chat_member or join requests');
+
+    // =========================================================================
+    // TEST B: Welcome DM throws unexpected exception -> Approval still succeeds
+    // =========================================================================
+    TelegramBotManager.clearJoinApprovalCache();
+    ModerationService.clearWelcomedDmCache();
+    approvedRequests.length = 0;
+
+    (telegramApi as any).sendMessage = async (id: number | string, text: string) => {
+      if (id === 800202 || id === 700202) {
+        throw new Error('Network socket terminated abruptly');
+      }
+      lastMessage = text;
+      sentMessages.push({ chatId: id, text });
+      return { ok: true, result: { message_id: 2002, chat: { id, type: Number(id) > 0 ? 'private' : 'supergroup' }, date: Date.now() } };
+    };
+
+    await (botManager as any).handleChatJoinRequest({
+      chat: { id: chatId, title: 'Test Group', type: 'supergroup' },
+      from: { id: 700202, is_bot: false, first_name: 'Eve', username: 'eve_throw' },
+      user_chat_id: 800202,
+      date: Math.floor(Date.now() / 1000)
+    });
+
+    const eveApproved = approvedRequests.some(r => r.userId === 700202);
+    assert(eveApproved, 'TEST-B: Join request is approved even when Welcome DM throws an unhandled exception');
+
+    // =========================================================================
+    // TEST H: Isolation: Normal users continue to work unimpeded
+    // =========================================================================
+    approvedRequests.length = 0;
+    sentMessages.length = 0;
+
+    (telegramApi as any).sendMessage = async (id: number | string, text: string) => {
+      lastMessage = text;
+      sentMessages.push({ chatId: id, text });
+      return { ok: true, result: { message_id: 2003, chat: { id, type: Number(id) > 0 ? 'private' : 'supergroup' }, date: Date.now() } };
+    };
+
+    await (botManager as any).handleChatJoinRequest({
+      chat: { id: chatId, title: 'Test Group', type: 'supergroup' },
+      from: { id: 700203, is_bot: false, first_name: 'Frank', username: 'frank_normal' },
+      user_chat_id: 800203,
+      date: Math.floor(Date.now() / 1000)
+    });
+
+    const frankApproved = approvedRequests.some(r => r.userId === 700203);
+    const frankDms = sentMessages.filter(m => m.chatId === 800203);
+    assert(frankApproved && frankDms.length === 1, 'TEST-H: Isolation preserved: normal non-blocked users receive welcome DM and are approved normally');
   } finally {
     if (fs.existsSync(groupFilePath)) {
       try { fs.unlinkSync(groupFilePath); } catch {}

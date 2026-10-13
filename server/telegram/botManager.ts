@@ -1129,6 +1129,12 @@ export class TelegramBotManager {
         }));
       } catch (err: any) {
         console.warn(`[WelcomeDM] Error sending join request welcome DM for user ${user.id}:`, err?.message);
+        errorTracker.recordError({
+          source: 'TELEGRAM',
+          severity: 'WARN',
+          message: `Non-fatal join request welcome DM error for user ${user.id}: ${err?.message || err}`,
+          chatId
+        });
       }
     }
 
@@ -1184,12 +1190,16 @@ export class TelegramBotManager {
           });
 
           // If anti-raid not triggered, process captcha/welcome
-          const raidTriggered = await ModerationService.handleAntiRaid(chatId, [user], chatTitle);
-          if (!raidTriggered) {
-            const captchaSent = await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);
-            if (!captchaSent) {
-              await ModerationService.sendWelcome(chatId, user, chatTitle);
+          try {
+            const raidTriggered = await ModerationService.handleAntiRaid(chatId, [user], chatTitle);
+            if (!raidTriggered) {
+              const captchaSent = await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);
+              if (!captchaSent) {
+                await ModerationService.sendWelcome(chatId, user, chatTitle);
+              }
             }
+          } catch (postApprovalHookErr: any) {
+            console.warn(`[AutoAccept] Post-approval hooks encountered non-fatal error for user ${user.id}:`, postApprovalHookErr?.message);
           }
         } else {
           const desc = res.description || 'Unknown Telegram error';
@@ -1275,19 +1285,26 @@ export class TelegramBotManager {
     if (isNewMemberJoin && user) {
       const me = await telegramApi.getMe().catch(() => null);
       if (user.id !== me?.result?.id) {
+        const approvalKey = `${chatId}:${user.id}`;
+        const wasRecentlyAutoApproved = (Date.now() - (TelegramBotManager.recentJoinApprovalsCache.get(approvalKey) || 0)) < 60000;
+
         // Asynchronously deliver Welcome DM to human joiners in background (non-blocking)
-        if (!user.is_bot) {
+        // If user was already approved via auto-accept, the join request DM was already attempted/evaluated
+        if (!user.is_bot && !wasRecentlyAutoApproved) {
           ModerationService.handleWelcomeDm(chatId, user, chatTitle).catch((err) => {
             console.warn(`[WelcomeDM] Background error sending welcome DM for user ${user.id}:`, err?.message);
           });
         }
 
-        const raidTriggered = await ModerationService.handleAntiRaid(chatId, [user], chatTitle);
-        if (!raidTriggered) {
-          const captchaSent = await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);
-          // If CAPTCHA was not triggered/enabled, send welcome immediately
-          if (!captchaSent) {
-            await ModerationService.sendWelcome(chatId, user, chatTitle);
+        // If user was recently auto-approved, anti-raid / captcha / welcome was already run in handleChatJoinRequest
+        if (!wasRecentlyAutoApproved) {
+          const raidTriggered = await ModerationService.handleAntiRaid(chatId, [user], chatTitle);
+          if (!raidTriggered) {
+            const captchaSent = await ModerationService.handleCaptchaOnJoin(chatId, user, chatTitle);
+            // If CAPTCHA was not triggered/enabled, send welcome immediately
+            if (!captchaSent) {
+              await ModerationService.sendWelcome(chatId, user, chatTitle);
+            }
           }
         }
       }
