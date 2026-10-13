@@ -260,14 +260,16 @@ export class MessageScheduler {
 
     const candidateIds = new Set<number>();
     if (Array.isArray(schedule.pendingDeleteMessageIds)) {
-      for (const id of schedule.pendingDeleteMessageIds) {
-        if (typeof id === 'number' && Number.isInteger(id) && id > 0) {
+      for (const rawId of schedule.pendingDeleteMessageIds) {
+        const id = typeof rawId === 'number' ? rawId : Number(rawId);
+        if (!isNaN(id) && Number.isInteger(id) && id > 0) {
           candidateIds.add(id);
         }
       }
     }
-    if (typeof schedule.lastSentMessageId === 'number' && Number.isInteger(schedule.lastSentMessageId) && schedule.lastSentMessageId > 0) {
-      candidateIds.add(schedule.lastSentMessageId);
+    const rawLastSent = typeof schedule.lastSentMessageId === 'number' ? schedule.lastSentMessageId : Number(schedule.lastSentMessageId);
+    if (!isNaN(rawLastSent) && Number.isInteger(rawLastSent) && rawLastSent > 0) {
+      candidateIds.add(rawLastSent);
     }
 
     if (candidateIds.size === 0) {
@@ -288,14 +290,14 @@ export class MessageScheduler {
       const classification = MessageScheduler.classifyDeletionResult(delRes);
 
       if (classification === 'SUCCESS' || classification === 'ALREADY_ABSENT') {
-        if (schedule.lastSentMessageId === messageId) {
+        if (Number(schedule.lastSentMessageId) === messageId) {
           lastSentMessageIdDeleted = true;
         }
         if (classification === 'ALREADY_ABSENT') {
           console.log(`[SCHEDULER_AUTO_DELETE] Message ${messageId} in chat ${schedule.chatId} was already deleted or absent. Resolved.`);
         }
       } else if (classification === 'PERMANENT_FAILURE') {
-        if (schedule.lastSentMessageId === messageId) {
+        if (Number(schedule.lastSentMessageId) === messageId) {
           lastSentMessageIdDeleted = true;
         }
         console.warn(`[SCHEDULER_AUTO_DELETE] Permanent deletion failure for schedule ${schedule.id} messageId ${messageId} in chat ${schedule.chatId}: ${delRes.description || 'Unknown error'}`);
@@ -526,7 +528,8 @@ export class MessageScheduler {
             if (freshSchedule.autoDeletePrevious) {
               const delResult = await MessageScheduler.processScheduleDeletions(freshSchedule);
               pendingDeleteIds = delResult.remainingPendingIds;
-              if (delResult.lastSentMessageIdDeleted && !pendingDeleteIds.includes(freshSchedule.lastSentMessageId!)) {
+              const numericLastSent = Number(freshSchedule.lastSentMessageId);
+              if (delResult.lastSentMessageIdDeleted && !pendingDeleteIds.includes(numericLastSent)) {
                 freshSchedule.lastSentMessageId = undefined;
                 freshSchedule.pendingDeleteMessageIds = pendingDeleteIds.length > 0 ? pendingDeleteIds : undefined;
                 db.updateSchedule(freshSchedule.id, {
@@ -537,6 +540,11 @@ export class MessageScheduler {
                 freshSchedule.pendingDeleteMessageIds = pendingDeleteIds;
                 db.updateSchedule(freshSchedule.id, {
                   pendingDeleteMessageIds: pendingDeleteIds
+                });
+              } else if (Array.isArray(freshSchedule.pendingDeleteMessageIds) && freshSchedule.pendingDeleteMessageIds.length > 0 && pendingDeleteIds.length === 0) {
+                freshSchedule.pendingDeleteMessageIds = undefined;
+                db.updateSchedule(freshSchedule.id, {
+                  pendingDeleteMessageIds: undefined
                 });
               }
             }
@@ -813,7 +821,8 @@ export class MessageScheduler {
       if (latestSchedule.autoDeletePrevious) {
         const delResult = await MessageScheduler.processScheduleDeletions(latestSchedule);
         pendingDeleteIds = delResult.remainingPendingIds;
-        if (delResult.lastSentMessageIdDeleted && !pendingDeleteIds.includes(latestSchedule.lastSentMessageId!)) {
+        const numericLastSent = Number(latestSchedule.lastSentMessageId);
+        if (delResult.lastSentMessageIdDeleted && !pendingDeleteIds.includes(numericLastSent)) {
           latestSchedule.lastSentMessageId = undefined;
           latestSchedule.pendingDeleteMessageIds = pendingDeleteIds.length > 0 ? pendingDeleteIds : undefined;
           db.updateSchedule(latestSchedule.id, {
@@ -824,6 +833,11 @@ export class MessageScheduler {
           latestSchedule.pendingDeleteMessageIds = pendingDeleteIds;
           db.updateSchedule(latestSchedule.id, {
             pendingDeleteMessageIds: pendingDeleteIds
+          });
+        } else if (Array.isArray(latestSchedule.pendingDeleteMessageIds) && latestSchedule.pendingDeleteMessageIds.length > 0 && pendingDeleteIds.length === 0) {
+          latestSchedule.pendingDeleteMessageIds = undefined;
+          db.updateSchedule(latestSchedule.id, {
+            pendingDeleteMessageIds: undefined
           });
         }
       }
@@ -859,13 +873,15 @@ export class MessageScheduler {
         this.executions++;
         metricsTracker.increment('scheduler_runs');
 
-        // Update lastRun, lastStatus, lastSentMessageId, pendingDeleteMessageIds without modifying nextRun
-        db.updateSchedule(latestSchedule.id, {
+        // Update lastRun, lastStatus, lastSentMessageId, pendingDeleteMessageIds using latest fresh state without modifying nextRun
+        const latest = db.getScheduleById(latestSchedule.id) || latestSchedule;
+        const cleanSentMessageId = typeof newSentMessageId === 'number' ? newSentMessageId : Number(newSentMessageId) || newSentMessageId;
+        db.updateSchedule(latest.id, {
           lastRun: new Date().toISOString(),
           lastStatus: 'success',
-          lastSentMessageId: newSentMessageId,
+          lastSentMessageId: cleanSentMessageId,
           pendingDeleteMessageIds: pendingDeleteIds.length > 0 ? pendingDeleteIds : undefined,
-          runsCount: (latestSchedule.runsCount || 0) + 1,
+          runsCount: (latest.runsCount || 0) + 1,
           ...(newLastMentionedUserId !== undefined ? { lastMentionedUserId: newLastMentionedUserId } : {})
         });
 
