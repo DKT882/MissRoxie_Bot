@@ -2734,6 +2734,18 @@ export class StorageManager {
 
   public updateGroupSettings(chatId: number, updates: Partial<GroupSettings>): GroupSettings {
     const current = this.getGroupSettings(chatId);
+
+    // Normalize legacy/alias field autoAcceptJoin -> autoAcceptEnabled and coerce boolean strings
+    const rawUpdates: Record<string, any> = { ...(updates as any) };
+    if (rawUpdates.autoAcceptJoin !== undefined && rawUpdates.autoAcceptEnabled === undefined) {
+      rawUpdates.autoAcceptEnabled = rawUpdates.autoAcceptJoin;
+    }
+    delete rawUpdates.autoAcceptJoin;
+    if (rawUpdates.autoAcceptEnabled !== undefined && typeof rawUpdates.autoAcceptEnabled !== 'boolean') {
+      const strVal = String(rawUpdates.autoAcceptEnabled).trim().toLowerCase();
+      rawUpdates.autoAcceptEnabled = ['true', 'on', '1', 'yes', 'enabled', 'enable'].includes(strVal);
+    }
+    updates = rawUpdates as Partial<GroupSettings>;
     
     // Check if updates are identical to current settings (idempotency check)
     let hasActualChanges = false;

@@ -204,9 +204,10 @@ async function runWelcomeDmTestSuite() {
     assert(capturedCalls.length === 1 && resRejoin.sent, 'Test 7: Genuine rejoin from kicked/left state sends welcome DM');
 
     // -------------------------------------------------------------
-    // TEST 8: JOIN EVENT SEMANTICS: chat_join_request alone -> 0 Welcome DMs
+    // TEST 8: JOIN EVENT SEMANTICS: chat_join_request alone (without auto-accept) -> 0 Welcome DMs
     // -------------------------------------------------------------
     ModerationService.clearWelcomedDmCache();
+    db.updateGroupSettings(groupAId, { autoAcceptEnabled: false });
     capturedCalls.length = 0;
     const joinRequestEvent: any = {
       chat: { id: groupAId, title: groupATitle, type: 'supergroup' },

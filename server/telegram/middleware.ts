@@ -733,7 +733,9 @@ export class TelegramMiddleware {
       | 'restrict_members'
       | 'delete_messages'
       | 'pin_messages'
-      | 'manage_chat' = 'can_restrict_members'
+      | 'manage_chat'
+      | 'can_invite_users'
+      | 'invite_users' = 'can_restrict_members'
   ): Promise<{
     allowed: boolean;
     reason?: string;
@@ -772,7 +774,8 @@ export class TelegramMiddleware {
       (normalizedPerm === 'can_restrict_members' && !botMember.can_restrict_members) ||
       (normalizedPerm === 'can_delete_messages' && !botMember.can_delete_messages) ||
       (normalizedPerm === 'can_promote_members' && !botMember.can_promote_members) ||
-      (normalizedPerm === 'can_pin_messages' && !botMember.can_pin_messages)
+      (normalizedPerm === 'can_pin_messages' && !botMember.can_pin_messages) ||
+      (normalizedPerm === 'can_invite_users' && !botMember.can_invite_users)
     ) {
       const freshBot = await this.getTargetMember(chatId, botId, true);
       if (freshBot) botMember = freshBot;
@@ -810,6 +813,14 @@ export class TelegramMiddleware {
       };
     }
 
+    if (normalizedPerm === 'can_invite_users' && !botMember.can_invite_users) {
+      return {
+        allowed: false,
+        reason: '❌ The bot requires the "Invite Users via Link" administrator permission to approve join requests.',
+        botMember
+      };
+    }
+
     return { allowed: true, botMember };
   }
 
@@ -821,10 +832,12 @@ export class TelegramMiddleware {
       | 'can_promote_members'
       | 'can_manage_chat'
       | 'can_pin_messages'
+      | 'can_invite_users'
       | 'promote_members'
       | 'restrict_members'
       | 'delete_messages'
       | 'pin_messages'
+      | 'invite_users'
       | 'manage_chat' = 'can_restrict_members'
   ) {
     return this.checkBotPermissions(chatId, permission);

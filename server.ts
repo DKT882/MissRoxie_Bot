@@ -1212,6 +1212,16 @@ export async function startServer() {
     try {
       const chatId = Number(req.params.chatId);
       const updates = req.body;
+      if (updates && typeof updates === 'object') {
+        if (updates.autoAcceptJoin !== undefined && updates.autoAcceptEnabled === undefined) {
+          updates.autoAcceptEnabled = updates.autoAcceptJoin;
+        }
+        delete updates.autoAcceptJoin;
+        if (updates.autoAcceptEnabled !== undefined && typeof updates.autoAcceptEnabled !== 'boolean') {
+          const strVal = String(updates.autoAcceptEnabled).trim().toLowerCase();
+          updates.autoAcceptEnabled = ['true', 'on', '1', 'yes', 'enabled', 'enable'].includes(strVal);
+        }
+      }
       const prevSettings = db.getGroupSettings(chatId);
 
       // Validate autoResponse configuration if provided

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { telegramApi } from './api.js';
 import { TelegramMessage, TelegramUser, TelegramChat, TelegramChatMember, ChatPermissions, TempActionRecord, CaptchaSession, PostPayload, ScheduledPostButton, WelcomeDmConfig, RichMessageConfig, TelegramChatJoinRequest } from './types.js';
 import { db } from '../db/storage.js';
@@ -1410,44 +1411,71 @@ export class ModerationService {
     options?: {
       targetChatId?: number;
       trigger?: 'normal_join' | 'join_request';
+      traceId?: string;
+      eventType?: string;
+      userChatId?: number;
+      requestPending?: boolean;
     }
   ): Promise<{ sent: boolean; fallbackSent?: boolean; token?: string; skipped?: string; error?: string; messageId?: number; fallbackMessageId?: number }> {
+    const traceId = options?.traceId || randomUUID();
+    const trigger = options?.trigger || 'normal_join';
+    const eventType = options?.eventType || (trigger === 'join_request' ? 'chat_join_request' : 'chat_member');
+    const userChatId = options?.userChatId ?? (trigger === 'join_request' ? options?.targetChatId : undefined);
+    const requestPending = options?.requestPending ?? (trigger === 'join_request');
+    const targetChatId = (trigger === 'join_request' && options?.targetChatId)
+      ? options.targetChatId
+      : (user ? user.id : undefined);
+
+    console.log(`WELCOME_DM_TRACE id=${traceId}`);
+    console.log(`[WELCOME_DM_START]\nid=${traceId}\ntrigger=${trigger}\neventType=${eventType}\ngroupId=${chatId}\nuserId=${user?.id ?? 'undefined'}\ntargetChatId=${targetChatId ?? 'undefined'}\nuserChatId=${userChatId ?? 'undefined'}\nrequestPending=${requestPending}`);
+
     if (!chatId || !user || !user.id) {
+      console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=false\ntriggerMode=none\nresult=SKIPPED\nskipReason=INVALID_PARAMETERS`);
       return { sent: false, skipped: 'INVALID_PARAMETERS' };
     }
 
     // Welcome DMs should ONLY target real human users.
     if (user.is_bot) {
+      console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=false\ntriggerMode=none\nresult=SKIPPED\nskipReason=TARGET_IS_BOT`);
       return { sent: false, skipped: 'TARGET_IS_BOT' };
     }
 
     // Exclude Telegram service accounts
     if (user.id === 777000 || user.id === 1087968824) {
+      console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=false\ntriggerMode=none\nresult=SKIPPED\nskipReason=SERVICE_ACCOUNT`);
       return { sent: false, skipped: 'SERVICE_ACCOUNT' };
     }
 
     // Exclude Roxie itself
     const me = await telegramApi.getMe().catch(() => null);
     if (me?.result?.id && user.id === me.result.id) {
+      console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=false\ntriggerMode=none\nresult=SKIPPED\nskipReason=SELF_USER`);
       return { sent: false, skipped: 'SELF_USER' };
     }
 
     const settings = db.getGroupSettings(chatId, chatTitle);
     const welcomeDmConfig = settings.welcomeDm;
+    const isEnabled = Boolean(welcomeDmConfig?.enabled);
+    const triggerMode = welcomeDmConfig?.triggerMode || 'normal_join';
 
     // Disabled by default. Only send if explicitly enabled.
     if (!welcomeDmConfig || !welcomeDmConfig.enabled) {
+      console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=${isEnabled}\ntriggerMode=${triggerMode}\nresult=SKIPPED\nskipReason=FEATURE_DISABLED`);
       return { sent: false, skipped: 'FEATURE_DISABLED' };
     }
 
-    const trigger = options?.trigger || 'normal_join';
-    const triggerMode = welcomeDmConfig.triggerMode || 'normal_join';
-
-    // Verify triggerMode matches current event trigger
+    // Verify triggerMode matches current event trigger.
+    // When autoAcceptEnabled is true on the group, join requests are immediately auto-approved by the bot.
+    // Telegram only grants temporary private-message permission via joinRequest.user_chat_id while handling
+    // the join request, so 'normal_join' (the default triggerMode) must also dispatch on join_request when
+    // autoAcceptEnabled is true, then deduplicate any subsequent chat_member update.
+    const autoAcceptJoinRequestDm = trigger === 'join_request' && Boolean(settings.autoAcceptEnabled);
     if (trigger === 'normal_join' && triggerMode === 'join_request') {
+      console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=${isEnabled}\ntriggerMode=${triggerMode}\nresult=SKIPPED\nskipReason=TRIGGER_MODE_MISMATCH`);
       return { sent: false, skipped: 'TRIGGER_MODE_MISMATCH' };
     }
-    if (trigger === 'join_request' && triggerMode === 'normal_join') {
+    if (trigger === 'join_request' && triggerMode === 'normal_join' && !autoAcceptJoinRequestDm) {
+      console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=${isEnabled}\ntriggerMode=${triggerMode}\nresult=SKIPPED\nskipReason=TRIGGER_MODE_MISMATCH`);
       return { sent: false, skipped: 'TRIGGER_MODE_MISMATCH' };
     }
 
@@ -1457,23 +1485,29 @@ export class ModerationService {
       : `${chatId}:${user.id}`;
 
     if (this.inFlightWelcomeDms.has(dedupeKey)) {
+      console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=${isEnabled}\ntriggerMode=${triggerMode}\nresult=SKIPPED\nskipReason=IN_FLIGHT`);
       return { sent: false, skipped: 'IN_FLIGHT' };
     }
 
     const now = Date.now();
     const lastWelcomed = this.welcomedDmUsersCache.get(dedupeKey) || 0;
     if (now - lastWelcomed < 60000) {
+      console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=${isEnabled}\ntriggerMode=${triggerMode}\nresult=SKIPPED\nskipReason=ALREADY_WELCOMED_RECENTLY`);
       return { sent: false, skipped: 'ALREADY_WELCOMED_RECENTLY' };
     }
 
-    // Also check cross-trigger duplicate for 'both' mode:
-    // If a user received a join_request DM within the last 60s, do not double-send on normal_join approval.
-    if (trigger === 'normal_join' && triggerMode === 'both') {
+    // Also check cross-trigger duplicate:
+    // If a user already received a join_request DM within the last 60s (via 'both' mode or auto-accept),
+    // do not double-send when the resulting normal_join / chat_member update arrives.
+    if (trigger === 'normal_join') {
       const lastJoinReq = this.welcomedDmUsersCache.get(`join_req:${chatId}:${user.id}`) || 0;
       if (now - lastJoinReq < 60000) {
+        console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=${isEnabled}\ntriggerMode=${triggerMode}\nresult=SKIPPED\nskipReason=ALREADY_WELCOMED_RECENTLY`);
         return { sent: false, skipped: 'ALREADY_WELCOMED_RECENTLY' };
       }
     }
+
+    console.log(`[WELCOME_DM_DECISION]\nid=${traceId}\nenabled=${isEnabled}\ntriggerMode=${triggerMode}\nresult=PROCEED\nskipReason=NONE`);
 
     this.inFlightWelcomeDms.add(dedupeKey);
     this.welcomedDmUsersCache.set(dedupeKey, now);
@@ -1507,6 +1541,10 @@ export class ModerationService {
         ? options.targetChatId
         : user.id;
 
+      const usedMethod = payload.contentType === 'photo' ? 'sendPhoto' : payload.contentType === 'video' ? 'sendVideo' : payload.contentType === 'animation' ? 'sendAnimation' : payload.contentType === 'document' ? 'sendDocument' : payload.contentType === 'sticker' ? 'sendSticker' : 'sendMessage';
+
+      console.log(`[WELCOME_DM_TELEGRAM_CALL]\nid=${traceId}\nmethod=${usedMethod}\nchatId=${targetDestination}`);
+
       console.log(JSON.stringify({
         event: 'WELCOME_DM_EVALUATION',
         chatId,
@@ -1524,6 +1562,7 @@ export class ModerationService {
       const sendRes = await PostSender.send(targetDestination, payload);
 
       if (sendRes.ok) {
+        console.log(`[WELCOME_DM_RESPONSE]\nid=${traceId}\nsuccess=true\ntelegramStatus=200\ntelegramError=none\ntelegramMessageId=${sendRes.messageId || 'unknown'}`);
         db.addLog({
           chatId,
           chatTitle: title,
@@ -1535,11 +1574,23 @@ export class ModerationService {
         return { sent: true, messageId: sendRes.messageId };
       } else {
         const errorMsg = sendRes.error || 'Telegram send failed';
+        const statusCode = sendRes.result?.error_code || 'N/A';
+        console.log(`[WELCOME_DM_RESPONSE]\nid=${traceId}\nsuccess=false\ntelegramStatus=${statusCode}\ntelegramError=${errorMsg}\ntelegramMessageId=none`);
         console.warn(`[WelcomeDM] Private DM delivery failed for user ${user.id} (trigger=${trigger}, destination=${targetDestination}) from group ${chatId}: ${errorMsg}`);
+
+        db.addLog({
+          chatId,
+          chatTitle: title,
+          targetUserId: user.id,
+          targetUsername: user.username,
+          action: 'send_message',
+          details: `Failed Welcome Private DM (${trigger}) to ${user.first_name || user.id} (destination=${targetDestination}): ${errorMsg}`
+        });
 
         // Fallback: ONLY apply first-contact group fallback for NORMAL joins.
         // For join requests, Telegram gives a temporary private chat permission; if it fails, do NOT send fallback to the group.
         if (trigger === 'join_request') {
+          this.welcomedDmUsersCache.delete(dedupeKey);
           return { sent: false, fallbackSent: false, error: errorMsg };
         }
 
@@ -1597,9 +1648,12 @@ export class ModerationService {
           }
         }
 
+        // Do not mark failed DM without fallback as delivered in deduplication cache
+        this.welcomedDmUsersCache.delete(dedupeKey);
         return { sent: false, fallbackSent: false, error: errorMsg };
       }
     } catch (err: any) {
+      this.welcomedDmUsersCache.delete(dedupeKey);
       console.error(`[WelcomeDM] Exception sending welcome DM to user ${user.id}:`, err.message);
       return { sent: false, error: err.message };
     } finally {
@@ -1611,7 +1665,8 @@ export class ModerationService {
    * Helper specifically for Telegram ChatJoinRequest updates.
    */
   public static async handleJoinRequestWelcomeDm(
-    joinRequest: TelegramChatJoinRequest
+    joinRequest: TelegramChatJoinRequest,
+    traceId?: string
   ): Promise<{ sent: boolean; fallbackSent?: boolean; skipped?: string; error?: string; messageId?: number }> {
     if (!joinRequest || !joinRequest.chat || !joinRequest.from || !joinRequest.user_chat_id) {
       return { sent: false, skipped: 'INVALID_PARAMETERS' };
@@ -1622,7 +1677,11 @@ export class ModerationService {
       joinRequest.chat.title,
       {
         targetChatId: joinRequest.user_chat_id,
-        trigger: 'join_request'
+        trigger: 'join_request',
+        traceId,
+        eventType: 'chat_join_request',
+        userChatId: joinRequest.user_chat_id,
+        requestPending: true
       }
     );
   }

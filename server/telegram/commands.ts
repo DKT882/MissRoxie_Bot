@@ -1402,11 +1402,13 @@ export class CommandHandler {
   private static async handleAutoAccept(ctx: CommandContext) {
     if (!(await TelegramMiddleware.requireGroup(ctx))) return;
     if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
-    const action = (ctx.args[0] || '').toLowerCase();
+    const action = (ctx.args[0] || '').trim().toLowerCase();
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
     const actor = await TelegramMiddleware.resolveActor(ctx);
-    if (action === 'on') {
-      settings.autoAcceptEnabled = true;
+    const isEnable = ['on', 'enable', 'enabled', 'true', '1', 'yes'].includes(action);
+    const isDisable = ['off', 'disable', 'disabled', 'false', '0', 'no'].includes(action);
+
+    if (isEnable) {
       db.updateGroupSettings(ctx.chatId, { autoAcceptEnabled: true });
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
@@ -1417,9 +1419,19 @@ export class CommandHandler {
         result: 'success',
         reason: 'Auto accept enabled'
       });
-      await telegramApi.sendMessage(ctx.chatId, '✅ <b>Auto Accept Join Requests</b> enabled.');
-    } else if (action === 'off') {
-      settings.autoAcceptEnabled = false;
+
+      let permWarning = '';
+      try {
+        const botPerm = await TelegramMiddleware.checkBotPermissions(ctx.chatId, 'can_invite_users');
+        if (!botPerm.allowed && botPerm.botMember && botPerm.botMember.can_invite_users === false) {
+          permWarning = '\n⚠️ <i>Warning: The bot currently lacks the "Invite Users via Link" administrator permission required by Telegram to approve join requests.</i>';
+        }
+      } catch {
+        // Ignore permission check errors in offline/mocked environments
+      }
+
+      await telegramApi.sendMessage(ctx.chatId, `✅ <b>Auto Accept Join Requests</b> enabled.${permWarning}`);
+    } else if (isDisable) {
       db.updateGroupSettings(ctx.chatId, { autoAcceptEnabled: false });
       TelegramMiddleware.logAudit({
         chatId: ctx.chatId,
@@ -1432,7 +1444,8 @@ export class CommandHandler {
       });
       await telegramApi.sendMessage(ctx.chatId, '❌ <b>Auto Accept Join Requests</b> disabled.');
     } else {
-      await telegramApi.sendMessage(ctx.chatId, `✅ <b>Auto Accept Status</b>: ${settings.autoAcceptEnabled ? 'ON' : 'OFF'}\nUsage: <code>/autoaccept <on|off></code> or <code>/autoacceptjoin <on|off></code>`);
+      const currentSettings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
+      await telegramApi.sendMessage(ctx.chatId, `✅ <b>Auto Accept Status</b>: ${currentSettings.autoAcceptEnabled ? 'ON' : 'OFF'}\nUsage: <code>/autoaccept &lt;on|off&gt;</code> or <code>/autoacceptjoin &lt;on|off&gt;</code>`);
     }
   }
 

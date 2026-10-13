@@ -521,13 +521,26 @@ export class TelegramBotManager {
       });
     }
 
+    const eventChat =
+      msg?.chat ||
+      update.chat_join_request?.chat ||
+      (update as any).chat_member?.chat ||
+      (update as any).my_chat_member?.chat ||
+      update.callback_query?.message?.chat;
+    const eventUser =
+      msg?.from ||
+      update.chat_join_request?.from ||
+      (update as any).chat_member?.new_chat_member?.user ||
+      (update as any).chat_member?.from ||
+      update.callback_query?.from;
+
     const reqCtx: TelegramRequestContext = {
       traceId,
       updateId: update.update_id,
-      chatId: msg?.chat?.id || 0,
+      chatId: eventChat?.id || 0,
       messageId: msg?.message_id || 0,
-      userId: msg?.from?.id,
-      chatType: msg?.chat?.type || 'unknown',
+      userId: eventUser?.id,
+      chatType: eventChat?.type || 'unknown',
       isCommand: isCmd,
       receivedAt
     };
@@ -1044,6 +1057,14 @@ export class TelegramBotManager {
     return { handled: true, shouldTriggerAi: isHuman };
   }
 
+  private static inFlightJoinApprovals: Set<string> = new Set();
+  private static recentJoinApprovalsCache: Map<string, number> = new Map();
+
+  public static clearJoinApprovalCache(): void {
+    this.inFlightJoinApprovals.clear();
+    this.recentJoinApprovalsCache.clear();
+  }
+
   private async handleChatJoinRequest(joinRequest: TelegramChatJoinRequest) {
     if (!joinRequest || !joinRequest.chat || !joinRequest.from) return;
     const chatId = joinRequest.chat.id;
@@ -1061,6 +1082,7 @@ export class TelegramBotManager {
     const triggerMode = welcomeDmConfig?.triggerMode || 'normal_join';
     const welcomeDmEnabled = Boolean(welcomeDmConfig?.enabled);
     const autoAcceptEnabled = Boolean(settings.autoAcceptEnabled);
+    const effectiveUserChatId = joinRequest.user_chat_id || user.id;
 
     console.log(`[JOIN_REQUEST_RECEIVED]\nchatId=${chatId}\nuserId=${user.id}\nuserChatId=${joinRequest.user_chat_id || 'undefined'}\ninviteLink=${joinRequest.invite_link?.invite_link || 'none'}`);
     console.log(`[JOIN_REQUEST_APPROVAL_ORDER] dmAttempted=BEFORE_APPROVAL`);
@@ -1072,29 +1094,33 @@ export class TelegramBotManager {
       userId: user.id,
       username: user.username || null,
       user_chat_id: joinRequest.user_chat_id || null,
+      effectiveUserChatId,
       welcomeDmEnabled,
       triggerMode,
       autoAcceptEnabled,
       receivedAt: new Date().toISOString()
     }));
 
-    // 1. Attempt Join Request Welcome Private DM first (using temporary user_chat_id)
-    if (!user.is_bot && joinRequest.user_chat_id) {
+    // 1. Attempt Join Request Welcome Private DM first (using temporary user_chat_id, falling back to user.id)
+    if (!user.is_bot && effectiveUserChatId) {
       try {
         console.log(JSON.stringify({
           event: 'JOIN_REQUEST_WELCOME_DM_DISPATCH_START',
           chatId,
           userId: user.id,
-          user_chat_id: joinRequest.user_chat_id,
+          user_chat_id: effectiveUserChatId,
           trigger: 'join_request',
           timestamp: new Date().toISOString()
         }));
-        const dmRes = await ModerationService.handleJoinRequestWelcomeDm(joinRequest);
+        const dmRes = await ModerationService.handleJoinRequestWelcomeDm({
+          ...joinRequest,
+          user_chat_id: effectiveUserChatId
+        });
         console.log(JSON.stringify({
           event: 'JOIN_REQUEST_WELCOME_DM_DISPATCH_END',
           chatId,
           userId: user.id,
-          user_chat_id: joinRequest.user_chat_id,
+          user_chat_id: effectiveUserChatId,
           sent: dmRes.sent,
           skipped: dmRes.skipped || null,
           error: dmRes.error || null,
@@ -1106,8 +1132,28 @@ export class TelegramBotManager {
       }
     }
 
-    // 2. Only after DM delivery attempt is complete, continue with existing auto-accept behavior
-    if (settings.autoAcceptEnabled) {
+    // 2. Only after DM delivery attempt is complete, continue with auto-accept behavior
+    const currentSettings = db.getGroupSettings(chatId, chatTitle);
+    if (currentSettings.autoAcceptEnabled) {
+      const approvalKey = `${chatId}:${user.id}`;
+      const now = Date.now();
+      if (TelegramBotManager.inFlightJoinApprovals.has(approvalKey)) {
+        console.log(`[AutoAccept] Skipping duplicate in-flight join request approval for user ${user.id} in chat ${chatId}`);
+        return;
+      }
+      const lastApprovedAt = TelegramBotManager.recentJoinApprovalsCache.get(approvalKey) || 0;
+      if (now - lastApprovedAt < 60000) {
+        console.log(`[AutoAccept] Skipping duplicate join request approval within 60s for user ${user.id} in chat ${chatId}`);
+        return;
+      }
+
+      TelegramBotManager.inFlightJoinApprovals.add(approvalKey);
+      if (TelegramBotManager.recentJoinApprovalsCache.size > 1000) {
+        for (const [k, ts] of TelegramBotManager.recentJoinApprovalsCache.entries()) {
+          if (now - ts > 300000) TelegramBotManager.recentJoinApprovalsCache.delete(k);
+        }
+      }
+
       console.log(`[JOIN_REQUEST_APPROVAL_ORDER] approvalExecution=AFTER_DM_ATTEMPT`);
       console.log(JSON.stringify({
         event: 'AUTO_ACCEPT_EXECUTION_START',
@@ -1122,10 +1168,12 @@ export class TelegramBotManager {
           chatId,
           userId: user.id,
           ok: res.ok,
+          error_code: res.error_code || null,
           description: res.description || null,
           timestamp: new Date().toISOString()
         }));
         if (res.ok) {
+          TelegramBotManager.recentJoinApprovalsCache.set(approvalKey, Date.now());
           db.addLog({
             chatId,
             chatTitle,
@@ -1144,10 +1192,46 @@ export class TelegramBotManager {
             }
           }
         } else {
-          console.error(`[AutoAccept] Failed to approve join request for user ${user.id} in chat ${chatId}:`, res.description);
+          const desc = res.description || 'Unknown Telegram error';
+          const isAlreadyHandled = /USER_ALREADY_PARTICIPANT|HIDE_REQUESTER_MISSING/i.test(desc);
+          const isMissingRights = /not enough rights|CHAT_ADMIN_REQUIRED|can_invite_users|need administrator rights/i.test(desc) || res.error_code === 403;
+
+          if (isAlreadyHandled) {
+            TelegramBotManager.recentJoinApprovalsCache.set(approvalKey, Date.now());
+            console.log(`[AutoAccept] Join request for user ${user.id} in chat ${chatId} was already handled (${desc}).`);
+          } else {
+            const reasonDetail = isMissingRights
+              ? `Bot lacks "Invite Users via Link" (can_invite_users) administrator permission in ${chatTitle}: ${desc}`
+              : `Telegram API rejected approveChatJoinRequest (${res.error_code || 'error'}): ${desc}`;
+            console.error(`[AutoAccept] Failed to approve join request for user ${user.id} in chat ${chatId}: ${reasonDetail}`);
+            errorTracker.recordError({
+              source: 'TELEGRAM',
+              severity: 'ERROR',
+              message: reasonDetail,
+              chatId,
+              telegramErrorCode: res.error_code ? String(res.error_code) : undefined
+            });
+            db.addLog({
+              chatId,
+              chatTitle,
+              targetUserId: user.id,
+              targetUsername: user.username,
+              action: 'auto_accept',
+              details: `Failed to auto-approve join request for ${user.first_name || user.id}: ${reasonDetail}`
+            });
+          }
         }
       } catch (err: any) {
         console.error(`[AutoAccept] Exception approving join request for user ${user.id}:`, err.message);
+        errorTracker.recordError({
+          source: 'TELEGRAM',
+          severity: 'ERROR',
+          message: err?.message || 'Exception approving join request',
+          stack: err?.stack,
+          chatId
+        });
+      } finally {
+        TelegramBotManager.inFlightJoinApprovals.delete(approvalKey);
       }
     }
   }

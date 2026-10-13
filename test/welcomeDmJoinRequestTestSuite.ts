@@ -645,6 +645,79 @@ async function runWelcomeDmJoinRequestTestSuite() {
     'Test 28: Normal join first-contact group fallback remains fully functional'
   );
 
+  // Restore mock sendMessage
+  (telegramApi as any).sendMessage = origApiSendMessage;
+
+  // ==========================================
+  // TEST 29: Failed join_request DM is NOT cached as already welcomed (retry succeeds)
+  // ==========================================
+  resetDedupeCaches();
+  db.updateGroupSettings(groupBId, {
+    welcomeDm: {
+      enabled: true,
+      text: 'Retryable welcome {first_name}!',
+      triggerMode: 'join_request'
+    }
+  });
+  let shouldFailDm = true;
+  (telegramApi as any).sendMessage = async (chatId: number | string, text: string, options?: any) => {
+    if (shouldFailDm && chatId === HUMAN_USER_1_CHAT_ID) {
+      return { ok: false, error_code: 403, description: "Forbidden: bot can't initiate conversation with a user" };
+    }
+    capturedCalls.push({ method: 'sendMessage', args: { chatId, text, options } });
+    return { ok: true, result: { message_id: 1001, chat: { id: chatId } } };
+  };
+  const firstFailedAttempt = await ModerationService.handleJoinRequestWelcomeDm({
+    chat: { id: groupBId, title: groupBTitle, type: 'supergroup' },
+    from: { id: HUMAN_USER_1_ID, is_bot: false, first_name: 'Uma' },
+    user_chat_id: HUMAN_USER_1_CHAT_ID,
+    date: Date.now()
+  });
+  shouldFailDm = false;
+  const secondRetryAttempt = await ModerationService.handleJoinRequestWelcomeDm({
+    chat: { id: groupBId, title: groupBTitle, type: 'supergroup' },
+    from: { id: HUMAN_USER_1_ID, is_bot: false, first_name: 'Uma' },
+    user_chat_id: HUMAN_USER_1_CHAT_ID,
+    date: Date.now()
+  });
+  (telegramApi as any).sendMessage = origApiSendMessage;
+  assert(
+    firstFailedAttempt.sent === false && secondRetryAttempt.sent === true,
+    'Test 29: Failed Welcome DM is evicted from deduplication cache so subsequent delivery succeeds'
+  );
+
+  // ==========================================
+  // TEST 30: Auto-Accept enabled with default triggerMode='normal_join' sends DM on join_request before approval
+  // ==========================================
+  resetDedupeCaches();
+  db.updateGroupSettings(groupAId, {
+    autoAcceptEnabled: true,
+    welcomeDm: {
+      enabled: true,
+      text: 'AutoAccept Welcome {first_name} to {groupname}!',
+      triggerMode: 'normal_join'
+    }
+  });
+  const t30Res = await ModerationService.handleJoinRequestWelcomeDm({
+    chat: { id: groupAId, title: groupATitle, type: 'supergroup' },
+    from: { id: HUMAN_USER_2_ID, is_bot: false, first_name: 'Victor' },
+    user_chat_id: HUMAN_USER_2_CHAT_ID,
+    date: Date.now()
+  });
+  const t30FollowUpNormalJoin = await ModerationService.handleWelcomeDm(
+    groupAId,
+    { id: HUMAN_USER_2_ID, is_bot: false, first_name: 'Victor' },
+    groupATitle,
+    { trigger: 'normal_join' }
+  );
+  db.updateGroupSettings(groupAId, { autoAcceptEnabled: false });
+  assert(
+    t30Res.sent === true &&
+    t30FollowUpNormalJoin.sent === false &&
+    t30FollowUpNormalJoin.skipped === 'ALREADY_WELCOMED_RECENTLY',
+    'Test 30: Auto-accept group with default triggerMode="normal_join" sends Welcome DM on join_request and suppresses duplicate on normal_join'
+  );
+
   console.log('\n================================================================');
   console.log(`📊 TEST RESULTS: ${passed} PASSED | ${failed} FAILED`);
   console.log('================================================================\n');
