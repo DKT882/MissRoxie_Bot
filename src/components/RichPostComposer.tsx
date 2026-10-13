@@ -1,12 +1,13 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Send,
   Calendar,
   Sparkles,
-  Image,
+  Image as ImageIcon,
   Video,
   Film,
   FileText,
+  Music,
   Type,
   Plus,
   Trash2,
@@ -21,7 +22,11 @@ import {
   RotateCcw,
   Check,
   Clock,
-  Upload
+  Radio,
+  Eye,
+  Link2,
+  Upload,
+  Paperclip
 } from 'lucide-react';
 
 export type ComposerContentType = 'text' | 'photo' | 'video' | 'animation' | 'document';
@@ -33,6 +38,23 @@ export interface ComposerButton {
   text: string;
   url: string;
   style?: PostButtonStyle;
+}
+
+export type MediaAttachmentType = 'image' | 'video' | 'gif' | 'audio' | 'document';
+
+export interface MediaLinkItem {
+  id: string;
+  type: MediaAttachmentType;
+  url: string;
+}
+
+export interface UploadedMediaItemState {
+  id: string;
+  filename: string;
+  size: number;
+  mimeType: string;
+  contentType: ComposerContentType;
+  localPreviewUrl: string;
 }
 
 export interface RichPostComposerProps {
@@ -146,19 +168,13 @@ export function formatComposerButtons(buttonGrid: ComposerButton[][]): Array<Arr
     .filter(row => row.length > 0);
 }
 
-function validateMediaReference(ref?: string, hasUploadedMedia?: boolean): { valid: boolean; error?: string } {
-  if (hasUploadedMedia) {
-    return { valid: true };
-  }
+export function validateMediaReference(ref?: string): { valid: boolean; error?: string } {
   if (!ref || typeof ref !== 'string') {
-    return { valid: false, error: 'Media reference (uploaded file, Telegram file_id, or HTTPS URL) is required.' };
+    return { valid: false, error: 'Media URL is required.' };
   }
   const trimmed = ref.trim();
   if (!trimmed) {
-    return { valid: false, error: 'Media reference cannot be empty.' };
-  }
-  if (trimmed.startsWith('upl_') || trimmed.startsWith('upload:')) {
-    return { valid: true };
+    return { valid: false, error: 'Media URL cannot be empty.' };
   }
   if (
     trimmed.startsWith('blob:') ||
@@ -168,7 +184,7 @@ function validateMediaReference(ref?: string, hasUploadedMedia?: boolean): { val
   ) {
     return {
       valid: false,
-      error: 'Local browser file preview has not been uploaded to backend yet. Please choose a local file using the upload button or enter a valid Telegram file_id or https:// URL.'
+      error: 'Local browser file URLs cannot be delivered directly. Please upload via Upload File or provide a public HTTP/HTTPS URL.'
     };
   }
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
@@ -183,11 +199,41 @@ function validateMediaReference(ref?: string, hasUploadedMedia?: boolean): { val
   if (trimmed.length < 5 || trimmed.includes(' ') || trimmed.includes('\\')) {
     return {
       valid: false,
-      error: 'Invalid Telegram file_id format.'
+      error: 'Invalid media link or Telegram file_id format.'
     };
   }
   return { valid: true };
 }
+
+// Safe Image Preview Component with fallback on load error or CORS restriction
+const SafeImagePreview: React.FC<{ url: string; alt?: string; className?: string }> = ({ url, alt = 'Media preview', className }) => {
+  const [loadError, setLoadError] = useState<boolean>(false);
+
+  useEffect(() => {
+    setLoadError(false);
+  }, [url]);
+
+  if (loadError) {
+    return (
+      <div className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
+        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+        <span className="text-[11px] leading-tight">
+          Image preview unavailable or restricted by remote server headers. Telegram will download directly from this link upon broadcast.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt={alt}
+      onError={() => setLoadError(true)}
+      className={className || "max-h-48 max-w-full rounded-lg object-contain bg-black/30 border border-stone-800"}
+      loading="lazy"
+    />
+  );
+};
 
 export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   groups,
@@ -206,43 +252,65 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     ? 'bg-stone-950 border-stone-800 text-stone-100 placeholder:text-stone-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
     : 'bg-white border-stone-300 text-stone-900 placeholder:text-stone-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500';
 
-  // Form State
+  // Filter Active Groups
+  const activeGroups = useMemo(() => {
+    return groups.filter(g => !g.botLeft && !g.unavailable);
+  }, [groups]);
+
+  // Destination State
   const initialChatId = lockedDestination?.chatId !== undefined
     ? lockedDestination.chatId
-    : (selectedChatId && selectedChatId !== 'all' ? selectedChatId : (groups[0]?.chatId || ''));
+    : (selectedChatId && selectedChatId !== 'all' ? selectedChatId : (activeGroups[0]?.chatId || 'all'));
   const [targetChatId, setTargetChatId] = useState<number | string>(initialChatId);
 
-  // Keep targetChatId in sync if lockedDestination changes
-  React.useEffect(() => {
+  // Sync targetChatId when props change
+  useEffect(() => {
     if (lockedDestination?.chatId !== undefined) {
       setTargetChatId(lockedDestination.chatId);
+    } else if (selectedChatId && selectedChatId !== 'all') {
+      setTargetChatId(selectedChatId);
     }
-  }, [lockedDestination?.chatId]);
-  const [contentType, setContentType] = useState<ComposerContentType>('text');
+  }, [lockedDestination?.chatId, selectedChatId]);
+
+  // Selected Group resolution
+  const selectedGroup = useMemo(() => {
+    if (targetChatId === 'all') return null;
+    return groups.find(g => String(g.chatId) === String(targetChatId));
+  }, [groups, targetChatId]);
+
+  // Post Content State
   const [text, setText] = useState<string>('');
-  const [mediaFileId, setMediaFileId] = useState<string>('');
-  const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string>('');
+
+  // Media Attachment Mode: 'url' | 'upload'
+  const [mediaAttachmentTab, setMediaAttachmentTab] = useState<'url' | 'upload'>('url');
+
+  // URL-based Media Links State
+  const [mediaLinks, setMediaLinks] = useState<MediaLinkItem[]>([]);
+  const [activeMediaInputType, setActiveMediaInputType] = useState<MediaAttachmentType | null>(null);
+  const [newMediaUrl, setNewMediaUrl] = useState<string>('');
+  const [newMediaUrlError, setNewMediaUrlError] = useState<string | null>(null);
+
+  // Local File Upload State
+  const [uploadedMedia, setUploadedMedia] = useState<UploadedMediaItemState | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'uploaded' | 'error'>('idle');
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Delivery Options
   const [pinAfterSend, setPinAfterSend] = useState<boolean>(false);
   const [replyToLatest, setReplyToLatest] = useState<boolean>(false);
   const [protectContent, setProtectContent] = useState<boolean>(false);
 
-  // Local Media Upload State
-  const [uploadedMediaId, setUploadedMediaId] = useState<string | null>(null);
-  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
-  const [uploadedFileSize, setUploadedFileSize] = useState<number | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'uploaded' | 'error'>('idle');
-  const [uploadError, setUploadError] = useState<string | null>(null);
-
-  // 2D Button Grid State: rows of buttons
+  // 2D Button Grid State
   const [buttonGrid, setButtonGrid] = useState<ComposerButton[][]>([]);
 
-  // UI Preview-Only Theme Selector (Client theme preview simulation)
+  // Preview Theme
   const [previewTheme, setPreviewTheme] = useState<'default' | 'dark' | 'light' | 'midnight' | 'emerald'>('default');
 
-  // Dialog & Action States
+  // Modals & Action States
   const [showSendModal, setShowSendModal] = useState<boolean>(false);
   const [showScheduleModal, setShowScheduleModal] = useState<boolean>(false);
   const [showClearModal, setShowClearModal] = useState<boolean>(false);
+  const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
 
   // Scheduling State
   const defaultScheduleDate = useMemo(() => {
@@ -262,7 +330,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   const [scheduleDate, setScheduleDate] = useState<string>(defaultScheduleDate);
   const [scheduleTime, setScheduleTime] = useState<string>(defaultScheduleTime);
 
-  // Status & Notification
+  // Submitting status & notification
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [notification, setNotification] = useState<{
     type: 'success' | 'error';
@@ -271,32 +339,93 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     details?: string;
   } | null>(null);
 
-  // Filter Active Groups
-  const activeGroups = useMemo(() => {
-    return groups.filter(g => !g.botLeft && !g.unavailable);
-  }, [groups]);
+  // Primary URL media item
+  const primaryMedia = mediaLinks[0] || null;
 
-  const selectedGroup = useMemo(() => {
-    return groups.find(g => String(g.chatId) === String(targetChatId));
-  }, [groups, targetChatId]);
+  // Effective Content Type calculation
+  const contentType: ComposerContentType = useMemo(() => {
+    if (uploadedMedia) {
+      return uploadedMedia.contentType;
+    }
+    if (!primaryMedia) return 'text';
+    switch (primaryMedia.type) {
+      case 'image':
+        return 'photo';
+      case 'video':
+        return 'video';
+      case 'gif':
+        return 'animation';
+      case 'audio':
+        return 'document'; // Audio delivered as document on existing Telegram backend
+      case 'document':
+        return 'document';
+      default:
+        return 'text';
+    }
+  }, [uploadedMedia, primaryMedia]);
 
-  // Character limit calculation
+  // Character Limit calculation
   const maxChars = contentType === 'text' ? 4096 : 1024;
   const isOverCharLimit = text.length > maxChars;
+
+  // Media link URL add handler
+  const handleAddMediaLink = () => {
+    if (!activeMediaInputType) return;
+    const trimmed = newMediaUrl.trim();
+    if (!trimmed) {
+      setNewMediaUrlError('Please enter a URL link.');
+      return;
+    }
+
+    if (!isValidHttpUrl(trimmed)) {
+      setNewMediaUrlError('Invalid URL format. Links must begin with http:// or https:// (e.g. https://example.com/media.jpg).');
+      return;
+    }
+
+    // Auto-detect GIF URL if not already selected
+    let effectiveType = activeMediaInputType;
+    if (trimmed.toLowerCase().endsWith('.gif') || trimmed.toLowerCase().includes('.gif?')) {
+      effectiveType = 'gif';
+    }
+
+    const newItem: MediaLinkItem = {
+      id: `media_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      type: effectiveType,
+      url: trimmed
+    };
+
+    setMediaLinks(prev => [...prev, newItem]);
+    setNewMediaUrl('');
+    setNewMediaUrlError(null);
+    setActiveMediaInputType(null);
+  };
+
+  const handleRemoveMediaLink = (id: string) => {
+    setMediaLinks(prev => prev.filter(item => item.id !== id));
+  };
 
   // Local File Upload Handler
   const handleLocalFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const isGif = file.type === 'image/gif' || file.name.toLowerCase().endsWith('.gif');
-    if (isGif && contentType !== 'animation') {
-      setContentType('animation');
+    const lowerName = file.name.toLowerCase();
+    const isGif = file.type === 'image/gif' || lowerName.endsWith('.gif');
+    const isVideo = file.type.startsWith('video/') || lowerName.endsWith('.mp4') || lowerName.endsWith('.mov') || lowerName.endsWith('.mkv') || lowerName.endsWith('.webm');
+    const isPhoto = file.type.startsWith('image/') && !isGif;
+
+    let targetUploadType: 'photo' | 'video' | 'animation' | 'document' = 'document';
+    if (isGif) {
+      targetUploadType = 'animation';
+    } else if (isPhoto) {
+      targetUploadType = 'photo';
+    } else if (isVideo) {
+      targetUploadType = 'video';
+    } else {
+      targetUploadType = 'document';
     }
 
-    // Set immediate local visual preview
     const localUrl = URL.createObjectURL(file);
-    setMediaPreviewUrl(localUrl);
     setUploadStatus('uploading');
     setUploadError(null);
 
@@ -304,8 +433,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       const formData = new FormData();
       formData.append('file', file);
 
-      const targetType = isGif ? 'animation' : contentType;
-      const res = await fetch(`/api/dashboard/posts/upload-media?type=${targetType}`, {
+      const res = await fetch(`/api/dashboard/posts/upload-media?type=${targetUploadType}`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: getAuthHeaders(),
@@ -314,12 +442,17 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to upload local media file.');
+        throw new Error(data.error || 'Failed to upload local media file to server.');
       }
 
-      setUploadedMediaId(data.mediaUploadId);
-      setUploadedFileName(data.filename || file.name);
-      setUploadedFileSize(data.size || file.size);
+      setUploadedMedia({
+        id: data.mediaUploadId,
+        filename: data.filename || file.name,
+        size: data.size || file.size,
+        mimeType: data.mimeType || file.type,
+        contentType: targetUploadType,
+        localPreviewUrl: localUrl
+      });
       setUploadStatus('uploaded');
       setUploadError(null);
     } catch (err: any) {
@@ -328,58 +461,44 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     }
   };
 
-  const handleClearUploadedFile = () => {
-    setUploadedMediaId(null);
-    setUploadedFileName(null);
-    setUploadedFileSize(null);
+  const handleClearUploadedMedia = () => {
+    if (uploadedMedia?.localPreviewUrl) {
+      try {
+        URL.revokeObjectURL(uploadedMedia.localPreviewUrl);
+      } catch {}
+    }
+    setUploadedMedia(null);
     setUploadStatus('idle');
     setUploadError(null);
-    setMediaPreviewUrl('');
   };
 
   // Validation Checks
   const validationErrors = useMemo(() => {
     const errors: string[] = [];
     if (!targetChatId) {
-      errors.push('Please select a target chat destination.');
+      errors.push('Please select a target destination scope.');
     }
     if (contentType === 'text' && !text.trim()) {
-      errors.push('Message text is required for text posts.');
+      errors.push('Message text is required for text-only posts.');
     }
-    if (contentType !== 'text') {
-      if (uploadStatus === 'uploading') {
-        errors.push('Media file is currently uploading. Please wait.');
-      } else {
-        const mediaVal = validateMediaReference(mediaFileId, Boolean(uploadedMediaId));
-        if (!mediaVal.valid) {
-          errors.push(mediaVal.error || `Media file_id, URL, or local upload is required for ${contentType} posts.`);
-        }
+    if (uploadStatus === 'uploading') {
+      errors.push('Local file is currently uploading. Please wait for upload to complete.');
+    }
+    if (mediaLinks.length > 0 && !uploadedMedia) {
+      const mediaVal = validateMediaReference(primaryMedia?.url);
+      if (!mediaVal.valid) {
+        errors.push(mediaVal.error || 'Please provide a valid media URL.');
       }
     }
     if (isOverCharLimit) {
-      errors.push(`Content exceeds maximum allowed length (${text.length}/${maxChars} chars).`);
+      errors.push(`Text length exceeds maximum allowed (${text.length}/${maxChars} characters).`);
     }
-    // Button validation
     const btnErrors = validateButtonGrid(buttonGrid);
     errors.push(...btnErrors);
     return errors;
-  }, [targetChatId, contentType, text, mediaFileId, uploadedMediaId, uploadStatus, isOverCharLimit, maxChars, buttonGrid]);
+  }, [targetChatId, contentType, text, uploadStatus, mediaLinks, uploadedMedia, primaryMedia, isOverCharLimit, maxChars, buttonGrid]);
 
   const isFormValid = validationErrors.length === 0;
-
-  const isLocalMediaActive = useMemo(() => {
-    if (contentType === 'text') return false;
-    return Boolean(
-      uploadedMediaId ||
-      (mediaFileId && (
-        mediaFileId.startsWith('upl_') ||
-        mediaFileId.startsWith('upload:') ||
-        mediaFileId.startsWith('blob:') ||
-        mediaFileId.startsWith('data:') ||
-        mediaFileId.startsWith('local_preview_')
-      ))
-    );
-  }, [contentType, uploadedMediaId, mediaFileId]);
 
   // Scheduled date computation
   const computedScheduleTime = useMemo(() => {
@@ -457,155 +576,14 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setButtonGrid([]);
   }, []);
 
-  // Format payload for backend submission
-  const buildPostPayload = useCallback(() => {
-    const formattedButtons = formatComposerButtons(buttonGrid);
-
-    const mediaId = uploadedMediaId ? `upload:${uploadedMediaId}` : (mediaFileId.trim() || undefined);
-
-    let effectiveContentType = contentType;
-    if (uploadedFileName && (uploadedFileName.toLowerCase().endsWith('.gif') || uploadedFileName.toLowerCase().includes('.gif'))) {
-      effectiveContentType = 'animation';
-    } else if (mediaFileId && (mediaFileId.toLowerCase().endsWith('.gif') || mediaFileId.toLowerCase().includes('.gif'))) {
-      effectiveContentType = 'animation';
-    }
-
-    return {
-      contentType: effectiveContentType,
-      text: text.trim() || undefined,
-      mediaFileId: effectiveContentType !== 'text' ? mediaId : undefined,
-      mediaUploadId: effectiveContentType !== 'text' ? (uploadedMediaId || undefined) : undefined,
-      buttons: formattedButtons.length > 0 ? formattedButtons : undefined,
-      pinAfterSend,
-      replyToLatest,
-      protectContent
-    };
-  }, [contentType, text, mediaFileId, uploadedMediaId, uploadedFileName, buttonGrid, pinAfterSend, replyToLatest, protectContent]);
-
-  // Send Now Handler
-  const handleConfirmSendNow = async () => {
-    if (!isFormValid || isSubmitting) return;
-    setIsSubmitting(true);
-    setNotification(null);
-
-    try {
-      const payload = buildPostPayload();
-      const res = await fetch('/api/dashboard/posts/send', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: getAuthHeaders({
-          'Content-Type': 'application/json'
-        }),
-        body: JSON.stringify({
-          chatId: Number(targetChatId),
-          payload
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to dispatch rich post to Telegram.');
-      }
-
-      setShowSendModal(false);
-      const targetLabel = lockedDestination?.title || selectedGroup?.chatTitle || `Chat ${targetChatId}`;
-      setNotification({
-        type: 'success',
-        title: 'Post Sent Successfully!',
-        message: `Your ${contentType.toUpperCase()} post was delivered to ${targetLabel}.`,
-        details: data.result?.messageId ? `Telegram Message ID: #${data.result.messageId}` : undefined
-      });
-
-      if (onRefresh) onRefresh();
-    } catch (err: any) {
-      setNotification({
-        type: 'error',
-        title: 'Delivery Failed',
-        message: err.message || 'An error occurred while communicating with Telegram.'
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Open Schedule Dialog Handler
-  const handleOpenScheduleModal = () => {
-    if (isLocalMediaActive) {
-      setNotification({
-        type: 'error',
-        title: 'Local Media Cannot Be Scheduled',
-        message: 'Local media cannot be scheduled on the current hosting setup. Use a Telegram file_id or public HTTPS media URL for scheduled posts.'
-      });
-      return;
-    }
-    setShowScheduleModal(true);
-  };
-
-  // Schedule Handler
-  const handleConfirmSchedule = async () => {
-    if (!isFormValid || !computedScheduleTime || !computedScheduleTime.isFuture || isSubmitting) return;
-
-    if (isLocalMediaActive) {
-      setNotification({
-        type: 'error',
-        title: 'Scheduling Not Supported for Local Media',
-        message: 'Local media cannot be scheduled on the current hosting setup. Use a Telegram file_id or public HTTPS media URL for scheduled posts.'
-      });
-      setShowScheduleModal(false);
-      return;
-    }
-
-    setIsSubmitting(true);
-    setNotification(null);
-
-    try {
-      const payload = buildPostPayload();
-      const res = await fetch('/api/dashboard/posts/schedule', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: getAuthHeaders({
-          'Content-Type': 'application/json'
-        }),
-        body: JSON.stringify({
-          chatId: Number(targetChatId),
-          payload,
-          nextRun: computedScheduleTime.isoString,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to create schedule record.');
-      }
-
-      setShowScheduleModal(false);
-      const targetLabel = lockedDestination?.title || selectedGroup?.chatTitle || `Chat ${targetChatId}`;
-      setNotification({
-        type: 'success',
-        title: 'Post Scheduled Successfully!',
-        message: `Scheduled for ${computedScheduleTime.formatted} to ${targetLabel}.`,
-        details: data.schedule?.id ? `Schedule ID: [${data.schedule.id}]` : undefined
-      });
-
-      if (onRefresh) onRefresh();
-    } catch (err: any) {
-      setNotification({
-        type: 'error',
-        title: 'Scheduling Failed',
-        message: err.message || 'An error occurred while saving the schedule.'
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Clear / Reset Handler
+  // Reset Composer
   const handleResetComposer = () => {
     setText('');
-    setMediaFileId('');
-    setMediaPreviewUrl('');
-    handleClearUploadedFile();
+    setMediaLinks([]);
+    handleClearUploadedMedia();
+    setActiveMediaInputType(null);
+    setNewMediaUrl('');
+    setNewMediaUrlError(null);
     setButtonGrid([]);
     setPinAfterSend(false);
     setReplyToLatest(false);
@@ -614,7 +592,208 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setNotification(null);
   };
 
-  const isDirty = Boolean(text.trim() || mediaFileId.trim() || uploadedMediaId || buttonGrid.length > 0);
+  const isDirty = Boolean(text.trim() || mediaLinks.length > 0 || uploadedMedia || buttonGrid.length > 0);
+
+  // Build Post Payload for Existing Backend
+  const buildPostPayload = useCallback(() => {
+    const formattedButtons = formatComposerButtons(buttonGrid);
+
+    // If local file uploaded, use mediaUploadId
+    if (uploadedMedia) {
+      return {
+        contentType: uploadedMedia.contentType,
+        text: text.trim() || undefined,
+        mediaUploadId: uploadedMedia.id,
+        mediaFileId: `upload:${uploadedMedia.id}`,
+        buttons: formattedButtons.length > 0 ? formattedButtons : undefined,
+        pinAfterSend,
+        replyToLatest,
+        protectContent
+      };
+    }
+
+    const mediaUrl = primaryMedia?.url?.trim() || undefined;
+
+    return {
+      contentType,
+      text: text.trim() || undefined,
+      mediaFileId: contentType !== 'text' ? mediaUrl : undefined,
+      buttons: formattedButtons.length > 0 ? formattedButtons : undefined,
+      pinAfterSend,
+      replyToLatest,
+      protectContent
+    };
+  }, [uploadedMedia, contentType, text, primaryMedia, buttonGrid, pinAfterSend, replyToLatest, protectContent]);
+
+  // Send Broadcast Action
+  const handleConfirmSendBroadcast = async () => {
+    if (!isFormValid || isSubmitting) return;
+    setIsSubmitting(true);
+    setNotification(null);
+
+    try {
+      const payload = buildPostPayload();
+
+      // Case A: Broadcast across all active groups
+      if (targetChatId === 'all') {
+        const targetGroups = activeGroups;
+        if (targetGroups.length === 0) {
+          throw new Error('No active connected groups available for broadcast.');
+        }
+
+        // If text-only post, use existing multi-group /api/dashboard/broadcast
+        if (contentType === 'text') {
+          const broadcastId = `bcast_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+          const res = await fetch('/api/dashboard/broadcast', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+              broadcastId,
+              groupIds: targetGroups.map(g => g.chatId),
+              message: text.trim()
+            })
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.error || 'Multi-group broadcast request failed.');
+          }
+
+          setShowSendModal(false);
+          setNotification({
+            type: 'success',
+            title: 'Broadcast Complete!',
+            message: `Delivered text broadcast to ${data.sent || targetGroups.length} of ${data.total || targetGroups.length} connected groups.`,
+            details: data.failed > 0 ? `${data.failed} group(s) encountered delivery errors.` : undefined
+          });
+        } else {
+          // If rich media post, sequentially dispatch to each active group using existing /api/dashboard/posts/send
+          let successCount = 0;
+          let failCount = 0;
+
+          for (const g of targetGroups) {
+            try {
+              const res = await fetch('/api/dashboard/posts/send', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({
+                  chatId: g.chatId,
+                  payload
+                })
+              });
+              const data = await res.json();
+              if (res.ok && data.success) {
+                successCount++;
+              } else {
+                failCount++;
+              }
+            } catch {
+              failCount++;
+            }
+          }
+
+          setShowSendModal(false);
+          setNotification({
+            type: successCount > 0 ? 'success' : 'error',
+            title: successCount > 0 ? 'Media Broadcast Complete!' : 'Broadcast Failed',
+            message: `Delivered ${contentType.toUpperCase()} broadcast to ${successCount} group(s).${failCount > 0 ? ` (${failCount} failed)` : ''}`
+          });
+        }
+      } else {
+        // Case B: Single Group or Private Chat destination
+        const res = await fetch('/api/dashboard/posts/send', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            chatId: Number(targetChatId),
+            payload
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to dispatch broadcast post to Telegram.');
+        }
+
+        setShowSendModal(false);
+        const targetLabel = lockedDestination?.title || selectedGroup?.chatTitle || `Chat ${targetChatId}`;
+        setNotification({
+          type: 'success',
+          title: 'Broadcast Sent Successfully!',
+          message: `Your ${contentType.toUpperCase()} post was delivered to ${targetLabel}.`,
+          details: data.result?.messageId ? `Telegram Message ID: #${data.result.messageId}` : undefined
+        });
+      }
+
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      setNotification({
+        type: 'error',
+        title: 'Broadcast Delivery Failed',
+        message: err.message || 'An error occurred while communicating with Telegram.'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Schedule Broadcast Action
+  const handleConfirmSchedule = async () => {
+    if (!isFormValid || !computedScheduleTime || !computedScheduleTime.isFuture || isSubmitting) return;
+
+    if (uploadedMedia) {
+      setNotification({
+        type: 'error',
+        title: 'Local Media Cannot Be Scheduled',
+        message: 'Local media uploads are stored in transient server memory and can only be transmitted immediately via Send Broadcast. To schedule a broadcast for later, please use a direct HTTPS URL.'
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setNotification(null);
+
+    try {
+      const payload = buildPostPayload();
+      const sendTargetChatId = targetChatId === 'all' ? (activeGroups[0]?.chatId || 0) : Number(targetChatId);
+
+      const res = await fetch('/api/dashboard/posts/schedule', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          chatId: sendTargetChatId,
+          payload,
+          nextRun: computedScheduleTime.isoString,
+          name: `Broadcast: ${text.slice(0, 30) || contentType.toUpperCase()}`
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to schedule post.');
+      }
+
+      setShowScheduleModal(false);
+      setNotification({
+        type: 'success',
+        title: 'Post Scheduled Successfully!',
+        message: `Your post is queued for automatic transmission on ${computedScheduleTime.formatted}.`
+      });
+
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      setNotification({
+        type: 'error',
+        title: 'Scheduling Failed',
+        message: err.message || 'An error occurred while registering scheduled post.'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -623,15 +802,15 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold flex items-center gap-2 text-stone-100">
-              <Sparkles className="w-6 h-6 text-amber-400" />
-              Rich Post Composer
+              <Radio className="w-5 h-5 text-blue-500" />
+              Broadcast Post Composer
             </h2>
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
-              Unified PostSender
+              Unified Composer
             </span>
           </div>
           <p className={`text-xs ${themeMutedText} mt-1`}>
-            Visually compose rich Telegram broadcasts, photos, media captions, and 2D interactive inline buttons.
+            Compose and broadcast text announcements, photos, videos, animations, audio, and documents across Telegram groups.
           </p>
         </div>
 
@@ -649,9 +828,9 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
 
           <button
             type="button"
-            onClick={handleOpenScheduleModal}
+            onClick={() => setShowScheduleModal(true)}
             disabled={!isFormValid || isSubmitting}
-            className={`px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 shadow-sm`}
+            className="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
           >
             <Calendar className="w-4 h-4" />
             Schedule...
@@ -659,12 +838,21 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
 
           <button
             type="button"
+            onClick={() => setShowPreviewModal(true)}
+            className="lg:hidden px-3.5 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 border border-stone-700"
+          >
+            <Eye className="w-4 h-4" />
+            Preview
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowSendModal(true)}
             disabled={!isFormValid || isSubmitting}
-            className={`px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 shadow-sm`}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 shadow-sm"
           >
             <Send className="w-4 h-4" />
-            Send Now
+            Send Broadcast
           </button>
         </div>
       </div>
@@ -706,18 +894,20 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT COLUMN: Composer Form (7 cols) */}
         <div className={`lg:col-span-7 ${themeCardBg} border rounded-2xl p-6 space-y-6 shadow-sm`}>
-          {/* Section 1: Target Destination */}
+          
+          {/* Section 1: Broadcast Destination Scope */}
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center justify-between">
-              <span>1. Target Destination</span>
-              {(lockedDestination?.chatId !== undefined || selectedGroup) && (
+              <span>1. Broadcast Destination</span>
+              {targetChatId !== 'all' && (
                 <span className="text-[11px] font-normal text-blue-400 font-mono">
-                  Chat ID: {lockedDestination?.chatId ?? selectedGroup?.chatId}
+                  Target ID: {lockedDestination?.chatId ?? selectedGroup?.chatId ?? targetChatId}
                 </span>
               )}
             </label>
+
             {lockedDestination ? (
-              <div className={`w-full px-3 py-2.5 rounded-xl text-xs font-medium border ${themeBorder} ${themeInnerCardBg} flex items-center justify-between`}>
+              <div className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border ${themeBorder} ${themeInnerCardBg} flex items-center justify-between`}>
                 <div className="flex items-center gap-2">
                   <span className="text-sm">{lockedDestination.type === 'private' ? '👤' : '👥'}</span>
                   <span className="font-semibold text-stone-200">
@@ -731,11 +921,11 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             ) : (
               <select
                 value={targetChatId}
-                onChange={e => setTargetChatId(e.target.value)}
-                className={`w-full px-3 py-2.5 rounded-xl text-xs font-medium border ${themeInputBg} outline-none`}
+                onChange={e => setTargetChatId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border ${themeInputBg} outline-none`}
               >
-                <option value="" disabled>
-                  -- Select Target Group --
+                <option value="all">
+                  📢 [ All Connected Groups ] ({activeGroups.length} active)
                 </option>
                 {activeGroups.map(g => (
                   <option key={g.chatId} value={g.chatId}>
@@ -746,178 +936,11 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             )}
           </div>
 
-          {/* Section 2: Content Type */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-stone-300 block">
-              2. Content Type
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {[
-                { type: 'text' as const, label: 'Text', icon: Type },
-                { type: 'photo' as const, label: 'Photo', icon: Image },
-                { type: 'video' as const, label: 'Video', icon: Video },
-                { type: 'animation' as const, label: 'GIF', icon: Film },
-                { type: 'document' as const, label: 'Document', icon: FileText }
-              ].map(item => {
-                const Icon = item.icon;
-                const isSelected = contentType === item.type;
-                return (
-                  <button
-                    key={item.type}
-                    type="button"
-                    onClick={() => setContentType(item.type)}
-                    className={`px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all ${
-                      isSelected
-                        ? 'bg-blue-600/20 border-blue-500 text-blue-400 shadow-sm'
-                        : `${themeInnerCardBg} ${themeBorder} ${themeMutedText} hover:text-stone-200 hover:border-stone-700`
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Section 3: Media Input (if not text) */}
-          {contentType !== 'text' && (
-            <div className="space-y-4 p-4 rounded-xl border border-stone-800 bg-stone-950/40">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center gap-1.5">
-                  <Upload className="w-3.5 h-3.5 text-blue-400" />
-                  <span>3. Media ({contentType.toUpperCase()})</span>
-                </label>
-                <span className="text-[10px] text-stone-400">
-                  {contentType === 'photo' && 'Max 10 MB (JPEG, PNG, WEBP)'}
-                  {contentType === 'video' && 'Max 50 MB (MP4, MOV, MKV)'}
-                  {contentType === 'animation' && 'Max 15 MB (GIF, MP4)'}
-                  {contentType === 'document' && 'Max 50 MB (All safe documents)'}
-                </span>
-              </div>
-
-              {/* Local File Upload Box */}
-              <div className={`p-3.5 rounded-xl border ${uploadedMediaId ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-stone-800 bg-stone-900/40'} space-y-2.5`}>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
-                    <Upload className="w-3.5 h-3.5 text-blue-400" />
-                    Upload from Computer:
-                  </span>
-                  {uploadedMediaId && (
-                    <button
-                      type="button"
-                      onClick={handleClearUploadedFile}
-                      className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 font-semibold"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      Remove File
-                    </button>
-                  )}
-                </div>
-
-                {uploadStatus === 'idle' && !uploadedMediaId && (
-                  <div>
-                    <input
-                      type="file"
-                      id="local-media-file-input"
-                      accept={
-                        contentType === 'photo'
-                          ? 'image/jpeg,image/png,image/webp,image/*'
-                          : contentType === 'video'
-                          ? 'video/mp4,video/quicktime,video/x-matroska,video/*'
-                          : contentType === 'animation'
-                          ? 'image/gif,video/mp4'
-                          : '*/*'
-                      }
-                      onChange={handleLocalFileSelect}
-                      className="text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer text-stone-400"
-                    />
-                  </div>
-                )}
-
-                {uploadStatus === 'uploading' && (
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs">
-                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                    <span>Uploading file to Roxie media store...</span>
-                  </div>
-                )}
-
-                {uploadStatus === 'uploaded' && uploadedMediaId && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span className="font-semibold truncate">{uploadedFileName || 'Uploaded File'}</span>
-                        {uploadedFileSize && (
-                          <span className="text-[11px] opacity-80 shrink-0 font-mono">
-                            ({(uploadedFileSize / (1024 * 1024)).toFixed(2)} MB)
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-                        Ready for Send Now
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-stone-400 px-1">
-                      ⚡ Local media is delivered immediately via <strong>Send Now</strong>. To schedule a post for later, use a Telegram file_id or public HTTPS URL.
-                    </p>
-                  </div>
-                )}
-
-                {uploadStatus === 'error' && (
-                  <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs space-y-2">
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                      <p>{uploadError || 'Upload failed. Please try a different file.'}</p>
-                    </div>
-                    <div className="pt-1">
-                      <input
-                        type="file"
-                        accept={
-                          contentType === 'photo'
-                            ? 'image/*'
-                            : contentType === 'video'
-                            ? 'video/*'
-                            : contentType === 'animation'
-                            ? 'image/gif,video/mp4'
-                            : '*/*'
-                        }
-                        onChange={handleLocalFileSelect}
-                        className="text-xs file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-[11px] file:font-semibold file:bg-stone-800 file:text-stone-300 hover:file:bg-stone-700 cursor-pointer text-stone-400"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Manual URL or file_id alternative */}
-              {!uploadedMediaId && (
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center justify-between text-[11px] text-stone-400">
-                    <span>Or enter Telegram file_id / Public HTTPS URL:</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={mediaFileId}
-                    onChange={e => {
-                      setMediaFileId(e.target.value);
-                      if (isValidHttpUrl(e.target.value)) {
-                        setMediaPreviewUrl(e.target.value);
-                      }
-                    }}
-                    placeholder={`Paste Telegram ${contentType} file_id or https://... address`}
-                    className={`w-full px-3 py-2 rounded-xl text-xs border ${themeInputBg} outline-none font-mono`}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Section 4: Text / Caption */}
+          {/* Section 2: Post Content / Caption */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold uppercase tracking-wider text-stone-300">
-                {contentType === 'text' ? '3. Message Text (HTML Supported)' : '4. Caption (Optional)'}
+                {!uploadedMedia && mediaLinks.length === 0 ? '2. Message Text (HTML Supported)' : '2. Caption (Optional)'}
               </label>
               <span
                 className={`text-[11px] font-mono ${
@@ -929,59 +952,491 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             </div>
 
             <textarea
-              rows={contentType === 'text' ? 6 : 4}
+              rows={!uploadedMedia && mediaLinks.length === 0 ? 5 : 3}
               value={text}
               onChange={e => setText(e.target.value)}
               placeholder={
-                contentType === 'text'
-                  ? 'Write your message here... Supports HTML formatting (<b>bold</b>, <i>italic</i>, <code>code</code>, etc.)'
-                  : 'Add an optional caption for your media post...'
+                !uploadedMedia && mediaLinks.length === 0
+                  ? 'Enter broadcast message here... Supports HTML formatting (<b>bold</b>, <i>italic</i>, <code>code</code>, etc.)'
+                  : 'Add an optional caption for your media broadcast post...'
               }
-              className={`w-full p-3 rounded-xl text-xs border ${themeInputBg} outline-none resize-y font-sans`}
+              className={`w-full p-3.5 rounded-xl text-xs border ${themeInputBg} outline-none resize-y font-sans`}
             />
+          </div>
 
-            {/* Delivery Options */}
-            <div className="pt-2 flex flex-wrap items-center gap-4 text-xs">
-              <label className="flex items-center gap-2 cursor-pointer text-stone-300 select-none">
-                <input
-                  type="checkbox"
-                  checked={pinAfterSend}
-                  onChange={e => setPinAfterSend(e.target.checked)}
-                  className="rounded bg-stone-950 border-stone-700 text-blue-600 focus:ring-0 w-4 h-4 cursor-pointer"
-                />
-                <Pin className="w-3.5 h-3.5 text-amber-400" />
-                <span>Pin after send</span>
+          {/* Section 3: Media Attachments (URL Links & Local File Upload) */}
+          <div className="space-y-3.5 p-4 rounded-xl border border-stone-800 bg-stone-950/40">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center gap-1.5">
+                <Paperclip className="w-3.5 h-3.5 text-blue-400" />
+                <span>3. Media Attachments</span>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer text-stone-300 select-none">
-                <input
-                  type="checkbox"
-                  checked={replyToLatest}
-                  onChange={e => setReplyToLatest(e.target.checked)}
-                  className="rounded bg-stone-950 border-stone-700 text-blue-600 focus:ring-0 w-4 h-4 cursor-pointer"
-                />
-                <Reply className="w-3.5 h-3.5 text-blue-400" />
-                <span>Reply to latest message</span>
-              </label>
+              {/* Input Mode Selector: By URL vs Upload File */}
+              <div className="flex items-center gap-1 p-0.5 rounded-lg bg-stone-900 border border-stone-800 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setMediaAttachmentTab('url')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
+                    mediaAttachmentTab === 'url'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-stone-400 hover:text-stone-200'
+                  }`}
+                >
+                  <Link2 className="w-3 h-3" />
+                  Media URL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMediaAttachmentTab('upload')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
+                    mediaAttachmentTab === 'upload'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-stone-400 hover:text-stone-200'
+                  }`}
+                >
+                  <Upload className="w-3 h-3" />
+                  Upload File
+                </button>
+              </div>
+            </div>
 
-              <label className="flex items-center gap-2 cursor-pointer text-stone-300 select-none">
-                <input
-                  type="checkbox"
-                  checked={protectContent}
-                  onChange={e => setProtectContent(e.target.checked)}
-                  className="rounded bg-stone-950 border-stone-700 text-blue-600 focus:ring-0 w-4 h-4 cursor-pointer"
-                />
-                <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Protect content (Forwarding restriction)</span>
-              </label>
+            {/* TAB 1: Media URLs */}
+            {mediaAttachmentTab === 'url' && (
+              <div className="space-y-3 animate-in fade-in duration-150">
+                <div className="text-[11px] text-stone-400 flex items-center justify-between">
+                  <span>Add direct media links for Telegram delivery:</span>
+                  <span className="text-[10px] text-stone-500">HTTP / HTTPS URLs</span>
+                </div>
+
+                {/* Media Type Selector Buttons */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {[
+                    { type: 'image' as const, label: 'Image', icon: ImageIcon },
+                    { type: 'video' as const, label: 'Video', icon: Video },
+                    { type: 'gif' as const, label: 'GIF', icon: Film },
+                    { type: 'audio' as const, label: 'Audio', icon: Music },
+                    { type: 'document' as const, label: 'Document', icon: FileText }
+                  ].map(item => {
+                    const Icon = item.icon;
+                    const isCurrentActive = activeMediaInputType === item.type;
+                    return (
+                      <button
+                        key={item.type}
+                        type="button"
+                        onClick={() => {
+                          if (activeMediaInputType === item.type) {
+                            setActiveMediaInputType(null);
+                            setNewMediaUrlError(null);
+                          } else {
+                            setActiveMediaInputType(item.type);
+                            setNewMediaUrl('');
+                            setNewMediaUrlError(null);
+                          }
+                        }}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all ${
+                          isCurrentActive
+                            ? 'bg-blue-600/20 border-blue-500 text-blue-400 shadow-sm'
+                            : `${themeInnerCardBg} ${themeBorder} ${themeMutedText} hover:text-stone-200 hover:border-stone-700`
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        <span>+ {item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Revealed URL Input for Selected Media Type */}
+                {activeMediaInputType && (
+                  <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 space-y-2.5 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between text-xs font-semibold text-stone-200">
+                      <span className="flex items-center gap-1.5">
+                        <Link2 className="w-3.5 h-3.5 text-blue-400" />
+                        Enter {activeMediaInputType.toUpperCase()} URL:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveMediaInputType(null);
+                          setNewMediaUrl('');
+                          setNewMediaUrlError(null);
+                        }}
+                        className="text-[11px] text-stone-400 hover:text-stone-200"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <div className="flex-1 relative">
+                        <input
+                          type="url"
+                          value={newMediaUrl}
+                          onChange={e => {
+                            setNewMediaUrl(e.target.value);
+                            if (newMediaUrlError) setNewMediaUrlError(null);
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddMediaLink();
+                            }
+                          }}
+                          placeholder={
+                            activeMediaInputType === 'image'
+                              ? 'https://example.com/image.jpg'
+                              : activeMediaInputType === 'video'
+                              ? 'https://example.com/video.mp4'
+                              : activeMediaInputType === 'gif'
+                              ? 'https://example.com/animation.gif'
+                              : activeMediaInputType === 'audio'
+                              ? 'https://example.com/audio.mp3'
+                              : 'https://example.com/document.pdf'
+                          }
+                          className={`w-full px-3 py-2 rounded-xl text-xs border ${themeInputBg} outline-none font-mono`}
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAddMediaLink}
+                        disabled={!newMediaUrl.trim()}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add Link
+                      </button>
+                    </div>
+
+                    {newMediaUrlError && (
+                      <p className="text-[11px] text-red-400 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        {newMediaUrlError}
+                      </p>
+                    )}
+
+                    <p className="text-[10px] text-stone-400">
+                      {activeMediaInputType === 'audio'
+                        ? '🎵 Note: Audio URLs are dispatched via Telegram document delivery by existing bot backend.'
+                        : 'Provide a direct public HTTP or HTTPS media link accessible to Telegram servers.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: Local File Upload */}
+            {mediaAttachmentTab === 'upload' && (
+              <div className="space-y-3 animate-in fade-in duration-150">
+                <div className={`p-4 rounded-xl border ${uploadedMedia ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-stone-800 bg-stone-900/40'} space-y-3`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5 text-blue-400" />
+                      Select Local File:
+                    </span>
+                    <span className="text-[10px] text-stone-400">
+                      Photo (10MB) • GIF (15MB) • Video/Doc (50MB)
+                    </span>
+                  </div>
+
+                  {!uploadedMedia && uploadStatus !== 'uploading' && (
+                    <div className="space-y-2">
+                      <input
+                        type="file"
+                        id="broadcast-local-file-input"
+                        accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/x-matroska,audio/mpeg,audio/wav,audio/ogg,application/pdf,application/zip,text/plain,*/*"
+                        onChange={handleLocalFileSelect}
+                        className="text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer text-stone-400"
+                      />
+                      <p className="text-[11px] text-stone-400">
+                        ⚡ Local media uploaded to Roxie is delivered directly to Telegram via immediate broadcast.
+                      </p>
+                    </div>
+                  )}
+
+                  {uploadStatus === 'uploading' && (
+                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs">
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                      <span>Uploading file to Roxie media store...</span>
+                    </div>
+                  )}
+
+                  {uploadedMedia && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span className="font-semibold truncate">{uploadedMedia.filename}</span>
+                          <span className="text-[11px] opacity-80 shrink-0 font-mono">
+                            ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            Ready ({uploadedMedia.contentType.toUpperCase()})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleClearUploadedMedia}
+                            className="text-red-400 hover:text-red-300 p-1"
+                            title="Remove uploaded file"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-stone-400">
+                        File stored in Roxie server memory. Will be transmitted with your broadcast.
+                      </p>
+                    </div>
+                  )}
+
+                  {uploadStatus === 'error' && (
+                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs space-y-2">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                        <p>{uploadError || 'File upload failed. Please try a different file.'}</p>
+                      </div>
+                      <div>
+                        <input
+                          type="file"
+                          accept="image/*,video/*,audio/*,.pdf,.zip,*/*"
+                          onChange={handleLocalFileSelect}
+                          className="text-xs file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-[11px] file:font-semibold file:bg-stone-800 file:text-stone-300 hover:file:bg-stone-700 cursor-pointer text-stone-400"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Attached Media Items List (Both URL Links & Uploaded File) */}
+            <div className="space-y-2 pt-1 border-t border-stone-800/80">
+              <div className="flex items-center justify-between text-xs text-stone-400">
+                <span className="font-semibold text-stone-300">
+                  Active Attachments ({uploadedMedia ? 1 : mediaLinks.length})
+                </span>
+                {(uploadedMedia || mediaLinks.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMediaLinks([]);
+                      handleClearUploadedMedia();
+                    }}
+                    className="text-[11px] text-red-400 hover:underline"
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
+
+              {!uploadedMedia && mediaLinks.length === 0 ? (
+                <div className={`p-3.5 rounded-xl border ${themeBorder} ${themeInnerCardBg} text-center space-y-1`}>
+                  <p className="text-xs text-stone-400">No media attached (Text-only broadcast).</p>
+                  <p className="text-[11px] text-stone-500">
+                    Use the controls above to attach a media URL or upload a local file.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {/* Uploaded Local File Item */}
+                  {uploadedMedia && (
+                    <div className={`p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-2`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                            LOCAL UPLOAD • {uploadedMedia.contentType.toUpperCase()}
+                          </span>
+                          <span className="text-xs font-mono text-stone-200 truncate">
+                            {uploadedMedia.filename} ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleClearUploadedMedia}
+                          className="text-[11px] text-red-400 hover:text-red-300 font-semibold flex items-center gap-1 shrink-0 p-1 hover:bg-red-500/10 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      </div>
+
+                      {/* Preview for uploaded file */}
+                      {uploadedMedia.contentType === 'photo' && (
+                        <div className="pt-1">
+                          <img
+                            src={uploadedMedia.localPreviewUrl}
+                            alt="Uploaded preview"
+                            className="max-h-48 max-w-full rounded-lg object-contain bg-black/30 border border-stone-800"
+                          />
+                        </div>
+                      )}
+                      {uploadedMedia.contentType === 'animation' && (
+                        <div className="pt-1">
+                          <img
+                            src={uploadedMedia.localPreviewUrl}
+                            alt="Uploaded GIF"
+                            className="max-h-48 max-w-full rounded-lg object-contain bg-black/30 border border-stone-800"
+                          />
+                        </div>
+                      )}
+                      {uploadedMedia.contentType === 'video' && (
+                        <div className="pt-1">
+                          <video
+                            src={uploadedMedia.localPreviewUrl}
+                            controls
+                            className="max-h-48 max-w-full rounded-lg bg-black/40 border border-stone-800"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* URL Media Items */}
+                  {!uploadedMedia && mediaLinks.map((item, index) => (
+                    <div
+                      key={item.id}
+                      className={`p-3 rounded-xl border ${themeBorder} ${themeInnerCardBg} space-y-2`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                              item.type === 'image'
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : item.type === 'video'
+                                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                : item.type === 'gif'
+                                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                                : item.type === 'audio'
+                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+                            }`}
+                          >
+                            {index === 0 ? `Primary: ${item.type}` : item.type}
+                          </span>
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs font-mono text-stone-300 hover:text-blue-400 truncate flex items-center gap-1"
+                            title={item.url}
+                          >
+                            <span className="truncate">{item.url}</span>
+                            <ExternalLink className="w-3 h-3 shrink-0 opacity-60" />
+                          </a>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMediaLink(item.id)}
+                          className="text-[11px] text-red-400 hover:text-red-300 font-semibold flex items-center gap-1 shrink-0 p-1 hover:bg-red-500/10 rounded-lg transition-colors"
+                          title="Remove media link"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      </div>
+
+                      {/* Preview for item */}
+                      {item.type === 'image' && (
+                        <div className="pt-1">
+                          <SafeImagePreview url={item.url} />
+                        </div>
+                      )}
+
+                      {item.type === 'gif' && (
+                        <div className="pt-1">
+                          {item.url.toLowerCase().endsWith('.gif') ? (
+                            <SafeImagePreview url={item.url} />
+                          ) : (
+                            <div className="p-2 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
+                              <Film className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                              <span>GIF Animation link configured for Telegram delivery.</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {item.type === 'video' && (
+                        <div className="p-2 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
+                          <Video className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          <span>Video link configured for Telegram video player delivery.</span>
+                        </div>
+                      )}
+
+                      {item.type === 'audio' && (
+                        <div className="p-2 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
+                          <Music className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span>Audio link configured for Telegram document/audio delivery.</span>
+                        </div>
+                      )}
+
+                      {item.type === 'document' && (
+                        <div className="p-2 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
+                          <FileText className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          <span>Document/File link configured for Telegram document delivery.</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {!uploadedMedia && mediaLinks.length > 1 && (
+                    <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300 flex items-start gap-2">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
+                      <span>
+                        Note: Telegram PostSender delivers the primary attachment (<strong>{mediaLinks[0].type.toUpperCase()}</strong>) with this broadcast. Multi-item albums require backend <code>sendMediaGroup</code> support.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Section 5: Interactive Inline Button Grid Builder */}
+          {/* Section 4: Delivery Options */}
+          <div className="pt-1 flex flex-wrap items-center gap-4 text-xs">
+            <label className="flex items-center gap-2 cursor-pointer text-stone-300 select-none">
+              <input
+                type="checkbox"
+                checked={pinAfterSend}
+                onChange={e => setPinAfterSend(e.target.checked)}
+                className="rounded bg-stone-950 border-stone-700 text-blue-600 focus:ring-0 w-4 h-4 cursor-pointer"
+              />
+              <Pin className="w-3.5 h-3.5 text-amber-400" />
+              <span>Pin post after broadcast</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer text-stone-300 select-none">
+              <input
+                type="checkbox"
+                checked={replyToLatest}
+                onChange={e => setReplyToLatest(e.target.checked)}
+                className="rounded bg-stone-950 border-stone-700 text-blue-600 focus:ring-0 w-4 h-4 cursor-pointer"
+              />
+              <Reply className="w-3.5 h-3.5 text-blue-400" />
+              <span>Reply to latest message</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer text-stone-300 select-none">
+              <input
+                type="checkbox"
+                checked={protectContent}
+                onChange={e => setProtectContent(e.target.checked)}
+                className="rounded bg-stone-950 border-stone-700 text-blue-600 focus:ring-0 w-4 h-4 cursor-pointer"
+              />
+              <Shield className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Protect content (restrict forwarding)</span>
+            </label>
+          </div>
+
+          {/* Section 5: Inline URL Buttons Builder */}
           <div className="space-y-3 pt-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center gap-1.5">
-                <span>{contentType === 'text' ? '4. Inline URL Buttons' : '5. Inline URL Buttons'}</span>
+                <span>4. Inline URL Buttons</span>
                 <span className="text-[10px] font-normal text-stone-400">
                   ({buttonGrid.reduce((sum, r) => sum + r.length, 0)} total)
                 </span>
@@ -1102,7 +1557,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             )}
           </div>
 
-          {/* Validation Warnings if any */}
+          {/* Validation Warnings */}
           {validationErrors.length > 0 && isDirty && (
             <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs space-y-1">
               <p className="font-bold flex items-center gap-1.5">
@@ -1130,7 +1585,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                 value={previewTheme}
                 onChange={e => setPreviewTheme(e.target.value as any)}
                 className="bg-stone-900 border border-stone-700 text-stone-300 rounded px-1.5 py-0.5 text-[10px] outline-none"
-                title="UI Preview Only: Simulate how buttons & posts look in different Telegram client themes."
+                title="Simulate Telegram client theme"
               >
                 <option value="default">Default Slate</option>
                 <option value="dark">Dark Obsidian</option>
@@ -1141,7 +1596,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             </div>
           </div>
 
-          {/* Telegram Phone / Chat Bubble Container */}
+          {/* Telegram Bubble Container */}
           <div
             className={`rounded-2xl border ${themeBorder} overflow-hidden shadow-lg ${
               previewTheme === 'light'
@@ -1165,15 +1620,17 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                 </div>
                 <div>
                   <p className="text-xs font-bold leading-tight">
-                    {selectedGroup?.chatTitle || selectedGroup?.title || 'Selected Chat'}
+                    {targetChatId === 'all'
+                      ? '📢 All Connected Groups'
+                      : (selectedGroup?.chatTitle || selectedGroup?.title || `Chat ${targetChatId}`)}
                   </p>
                   <p className="text-[10px] text-stone-400 font-mono">
                     @{botUsername}
                   </p>
                 </div>
               </div>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-semibold">
-                {contentType.toUpperCase()}
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-semibold uppercase">
+                {contentType}
               </span>
             </div>
 
@@ -1202,32 +1659,79 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                   </div>
                 )}
 
-                {/* Media Preview if attached */}
-                {contentType !== 'text' && (
+                {/* Media Preview: Uploaded local media preview */}
+                {uploadedMedia && (
                   <div className="rounded-xl overflow-hidden bg-black/40 border border-stone-700/50 flex items-center justify-center min-h-[140px] max-h-[260px] relative">
-                    {mediaPreviewUrl ? (
-                      contentType === 'photo' || contentType === 'animation' ? (
-                        <img
-                          src={mediaPreviewUrl}
-                          alt="Media preview"
-                          className="w-full h-full object-cover max-h-[260px]"
-                        />
-                      ) : (
-                        <video
-                          src={mediaPreviewUrl}
-                          controls
-                          className="w-full max-h-[260px]"
-                        />
-                      )
+                    {uploadedMedia.contentType === 'photo' || uploadedMedia.contentType === 'animation' ? (
+                      <img
+                        src={uploadedMedia.localPreviewUrl}
+                        alt="Local media preview"
+                        className="w-full h-full object-cover max-h-[260px]"
+                      />
+                    ) : uploadedMedia.contentType === 'video' ? (
+                      <video
+                        src={uploadedMedia.localPreviewUrl}
+                        controls
+                        className="w-full max-h-[260px]"
+                      />
+                    ) : uploadedMedia.mimeType.startsWith('audio/') ? (
+                      <div className="text-center p-6 space-y-2 text-stone-300">
+                        <Music className="w-10 h-10 mx-auto text-amber-400" />
+                        <p className="text-xs font-semibold">{uploadedMedia.filename}</p>
+                        <p className="text-[10px] text-stone-400 font-mono">
+                          Local Audio Upload ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
+                        </p>
+                      </div>
                     ) : (
-                      <div className="text-center p-4 space-y-1 text-stone-400">
-                        {contentType === 'photo' && <Image className="w-8 h-8 mx-auto text-stone-500" />}
-                        {contentType === 'video' && <Video className="w-8 h-8 mx-auto text-stone-500" />}
-                        {contentType === 'animation' && <Film className="w-8 h-8 mx-auto text-stone-500" />}
-                        {contentType === 'document' && <FileText className="w-8 h-8 mx-auto text-stone-500" />}
-                        <p className="text-xs font-semibold capitalize">{contentType} Post</p>
-                        <p className="text-[10px] text-stone-500 font-mono truncate max-w-[200px]">
-                          {mediaFileId || 'No media specified'}
+                      <div className="text-center p-6 space-y-2 text-stone-300">
+                        <FileText className="w-10 h-10 mx-auto text-indigo-400" />
+                        <p className="text-xs font-semibold">{uploadedMedia.filename}</p>
+                        <p className="text-[10px] text-stone-400 font-mono">
+                          Local Document Upload ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Media Preview: URL media preview */}
+                {!uploadedMedia && primaryMedia && (
+                  <div className="rounded-xl overflow-hidden bg-black/40 border border-stone-700/50 flex items-center justify-center min-h-[140px] max-h-[260px] relative">
+                    {primaryMedia.type === 'image' || (primaryMedia.type === 'gif' && primaryMedia.url.toLowerCase().endsWith('.gif')) ? (
+                      <SafeImagePreview
+                        url={primaryMedia.url}
+                        className="w-full h-full object-cover max-h-[260px]"
+                      />
+                    ) : primaryMedia.type === 'video' ? (
+                      <div className="text-center p-6 space-y-2 text-stone-300">
+                        <Video className="w-10 h-10 mx-auto text-blue-400" />
+                        <p className="text-xs font-semibold">Video Media Link</p>
+                        <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
+                          {primaryMedia.url}
+                        </p>
+                      </div>
+                    ) : primaryMedia.type === 'audio' ? (
+                      <div className="text-center p-6 space-y-2 text-stone-300">
+                        <Music className="w-10 h-10 mx-auto text-amber-400" />
+                        <p className="text-xs font-semibold">Audio Media Link</p>
+                        <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
+                          {primaryMedia.url}
+                        </p>
+                      </div>
+                    ) : primaryMedia.type === 'gif' ? (
+                      <div className="text-center p-6 space-y-2 text-stone-300">
+                        <Film className="w-10 h-10 mx-auto text-purple-400" />
+                        <p className="text-xs font-semibold">GIF Animation Link</p>
+                        <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
+                          {primaryMedia.url}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="text-center p-6 space-y-2 text-stone-300">
+                        <FileText className="w-10 h-10 mx-auto text-indigo-400" />
+                        <p className="text-xs font-semibold">Document / File Link</p>
+                        <p className="text-[10px] text-stone-400 font-mono truncate max-w-[220px]">
+                          {primaryMedia.url}
                         </p>
                       </div>
                     )}
@@ -1303,24 +1807,23 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             </div>
           </div>
 
-          {/* Telegram Theme & Styling Disclaimer */}
           <div className="p-3 rounded-xl bg-stone-900/60 border border-stone-800 text-[11px] text-stone-400 flex items-start gap-2">
             <Shield className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
             <p>
-              <strong className="text-stone-300">Telegram Bot API Button Styles:</strong> Buttons support official Telegram styles (Primary, Success, Danger). Per-message bubble/background colors are not provided by the Telegram Bot API and are rendered per client theme.
+              <strong className="text-stone-300">Telegram Bot Delivery:</strong> Media files can be delivered via public HTTP/HTTPS links or direct local file upload to Roxie. Supports text-only, media-only, and media with caption broadcasts.
             </p>
           </div>
         </div>
       </div>
 
-      {/* MODAL 1: Send Now Confirmation */}
+      {/* MODAL 1: Send Broadcast Confirmation */}
       {showSendModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
           <div className={`${themeCardBg} border rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl`}>
             <div>
               <h3 className="text-base font-bold text-stone-100 flex items-center gap-2">
-                <Send className="w-5 h-5 text-blue-400" />
-                Confirm Immediate Delivery
+                <Radio className="w-5 h-5 text-blue-400" />
+                Confirm Broadcast Delivery
               </h3>
               <p className={`text-xs ${themeMutedText} mt-1`}>
                 This post will be transmitted directly to Telegram via Roxie's PostSender engine.
@@ -1329,15 +1832,29 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
 
             <div className={`p-4 rounded-xl border ${themeBorder} ${themeInnerCardBg} text-xs space-y-2 font-mono`}>
               <div className="flex justify-between">
-                <span className="text-stone-400">Target Chat:</span>
+                <span className="text-stone-400">Destination:</span>
                 <span className="text-stone-200 font-bold truncate max-w-[200px]">
-                  {selectedGroup?.chatTitle || targetChatId}
+                  {targetChatId === 'all'
+                    ? `All Groups (${activeGroups.length} connected)`
+                    : (selectedGroup?.chatTitle || targetChatId)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-stone-400">Content Type:</span>
                 <span className="text-blue-400 uppercase font-bold">{contentType}</span>
               </div>
+              {uploadedMedia && (
+                <div className="flex justify-between text-emerald-400">
+                  <span>Local File:</span>
+                  <span className="truncate max-w-[200px]">{uploadedMedia.filename}</span>
+                </div>
+              )}
+              {!uploadedMedia && primaryMedia && (
+                <div className="flex justify-between">
+                  <span className="text-stone-400">Media Link:</span>
+                  <span className="text-stone-200 truncate max-w-[200px]">{primaryMedia.url}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-stone-400">Buttons:</span>
                 <span className="text-stone-200">
@@ -1363,12 +1880,12 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               </button>
               <button
                 type="button"
-                onClick={handleConfirmSendNow}
+                onClick={handleConfirmSendBroadcast}
                 disabled={isSubmitting}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2"
               >
                 {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Confirm Send
+                Confirm & Transmit Broadcast
               </button>
             </div>
           </div>
@@ -1382,12 +1899,25 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             <div>
               <h3 className="text-base font-bold text-stone-100 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-purple-400" />
-                Schedule Post
+                Schedule Broadcast
               </h3>
               <p className={`text-xs ${themeMutedText} mt-1`}>
                 Set the delivery date and time for automatic dispatch via Roxie's scheduler.
               </p>
             </div>
+
+            {/* Local Media Warning in Schedule Modal */}
+            {uploadedMedia && (
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Local File Upload Cannot Be Scheduled</p>
+                  <p className="mt-0.5 text-[11px] opacity-90">
+                    Local media uploads are stored in transient server memory and can only be transmitted immediately via Send Broadcast. To schedule a broadcast for later, please use a direct HTTPS URL.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Date & Time Pickers */}
             <div className="grid grid-cols-2 gap-3">
@@ -1436,19 +1966,6 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               </div>
             )}
 
-            {/* Local Media Warning in Schedule Modal */}
-            {isLocalMediaActive && (
-              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2.5">
-                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold">Local Media Cannot Be Scheduled</p>
-                  <p className="mt-0.5 text-[11px] opacity-90">
-                    Local media cannot be scheduled on the current hosting setup. Use a Telegram file_id or public HTTPS media URL for scheduled posts.
-                  </p>
-                </div>
-              </div>
-            )}
-
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="button"
@@ -1461,7 +1978,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmSchedule}
-                disabled={!computedScheduleTime || !computedScheduleTime.isFuture || isSubmitting || isLocalMediaActive}
+                disabled={!computedScheduleTime || !computedScheduleTime.isFuture || isSubmitting || Boolean(uploadedMedia)}
                 className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2"
               >
                 {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
@@ -1482,7 +1999,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                 Reset Composer?
               </h3>
               <p className={`text-xs ${themeMutedText} mt-1`}>
-                Are you sure you want to clear your draft text, media reference, and button grid?
+                Are you sure you want to clear your draft text, media attachments, and button grid?
               </p>
             </div>
 

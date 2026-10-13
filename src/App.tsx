@@ -245,8 +245,8 @@ export default function App() {
 
   const isDark = theme === 'dark';
 
-  // Navigation
-  const [activeNav, setActiveNav] = useState<string>('overview');
+  // Navigation (Default to Groups)
+  const [activeNav, setActiveNav] = useState<string>('groups');
   const [selectedChatId, setSelectedChatId] = useState<number | 'all'>('all');
   const [activeGroupDetailId, setActiveGroupDetailId] = useState<number | null>(null);
   const [groupDetailTab, setGroupDetailTab] = useState<
@@ -2487,179 +2487,43 @@ export default function App() {
               </select>
             </div>
 
-            {/* Navigation Menu with Categorized Headers */}
-            <nav className="space-y-4 overflow-y-auto flex-1 pr-1 text-xs">
-              
-              {/* Core Section */}
-              <div className="space-y-1">
-                <button
-                  onClick={() => { setActiveNav('overview'); setActiveGroupDetailId(null); }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium transition-colors ${
-                    activeNav === 'overview' && !activeGroupDetailId
-                      ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 font-semibold' 
-                      : `${themeMutedText} hover:bg-stone-800/20`
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Activity className="w-4 h-4" />
-                    <span>🏠 Overview</span>
-                  </div>
-                  {activeNav === 'overview' && !activeGroupDetailId && <ChevronRight className="w-3.5 h-3.5" />}
-                </button>
-
-                <button
-                  onClick={() => { setActiveNav('control-center'); setActiveGroupDetailId(null); }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium transition-colors ${
-                    activeNav === 'control-center' && !activeGroupDetailId
-                      ? 'bg-purple-600/10 text-purple-400 border border-purple-500/20 font-semibold' 
-                      : `${themeMutedText} hover:bg-stone-800/20`
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Sliders className="w-4 h-4 text-purple-400" />
-                    <span>⚙️ Control Center</span>
-                  </div>
-                  {activeNav === 'control-center' && !activeGroupDetailId && <ChevronRight className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-
-              {/* TELEGRAM Category */}
-              <div className="space-y-1">
-                <div className={`px-3 text-[10px] font-bold uppercase tracking-wider ${themeMutedText}`}>Telegram</div>
-                {[
-                  { id: 'groups', label: '👥 Groups', icon: Users },
-                  { id: 'private-chats', label: '💬 Private Chats', icon: MessageSquare, badge: privateChats.length },
-                  { id: 'messages', label: '📨 Messages', icon: FileText }
-                ].map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeNav === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => { setActiveNav(item.id); if (item.id === 'groups') setActiveGroupDetailId(null); }}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium transition-colors ${
-                        isActive 
-                          ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 font-semibold' 
-                          : `${themeMutedText} hover:bg-stone-800/20`
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <Icon className="w-4 h-4" />
-                        <span>{item.label}</span>
-                      </div>
+            {/* Navigation Menu - Simplified to 3 Primary Options */}
+            <nav className="space-y-1.5 overflow-y-auto flex-1 pr-1 text-xs">
+              {[
+                { id: 'groups', label: '👥 Groups', icon: Users, badge: groups.length },
+                { id: 'private-chats', label: '💬 Private Chats', icon: MessageSquare, badge: privateChats.length },
+                { id: 'broadcast', label: '📣 Broadcast', icon: Radio }
+              ].map((item) => {
+                const Icon = item.icon;
+                const isActive = activeNav === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveNav(item.id);
+                      if (item.id === 'groups') setActiveGroupDetailId(null);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-colors ${
+                      isActive 
+                        ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 font-semibold' 
+                        : `${themeMutedText} hover:bg-stone-800/20`
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Icon className="w-4 h-4" />
+                      <span>{item.label}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
                       {item.badge !== undefined && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-500 font-bold font-mono">
                           {item.badge}
                         </span>
                       )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* MANAGEMENT Category */}
-              <div className="space-y-1">
-                <div className={`px-3 text-[10px] font-bold uppercase tracking-wider ${themeMutedText}`}>Management</div>
-                {[
-                  { id: 'moderators', label: '👮 Moderators', icon: Shield },
-                  { id: 'stickers', label: '🎨 Stickers', icon: Smile },
-                  { id: 'commands', label: '🤖 Commands', icon: ListChecks },
-                  { id: 'settings', label: '⚙️ Settings', icon: Settings },
-                  { id: 'permissions', label: '🔐 Permissions', icon: Lock }
-                ].map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeNav === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        setActiveNav(item.id);
-                        if (item.id === 'settings' && activeGroupDetailId) {
-                          setGroupDetailTab('general');
-                        } else if (item.id === 'moderators' && activeGroupDetailId) {
-                          setGroupDetailTab('moderators');
-                        } else if (item.id === 'permissions' && activeGroupDetailId) {
-                          setGroupDetailTab('permissions');
-                        }
-                      }}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium transition-colors ${
-                        isActive 
-                          ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 font-semibold' 
-                          : `${themeMutedText} hover:bg-stone-800/20`
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <Icon className="w-4 h-4" />
-                        <span>{item.label}</span>
-                      </div>
                       {isActive && <ChevronRight className="w-3.5 h-3.5" />}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* ACTIONS Category */}
-              <div className="space-y-1">
-                <div className={`px-3 text-[10px] font-bold uppercase tracking-wider ${themeMutedText}`}>Actions</div>
-                {[
-                  { id: 'rich-post', label: '✨ Rich Post Composer', icon: Sparkles },
-                  { id: 'schedules', label: '⏰ Schedules & Rules', icon: Clock, badge: schedulesList.length },
-                  { id: 'send-message', label: '📢 Send Message', icon: Send },
-                  { id: 'broadcast', label: '📣 Broadcast', icon: Radio }
-                ].map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeNav === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => setActiveNav(item.id)}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium transition-colors ${
-                        isActive 
-                          ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 font-semibold' 
-                          : `${themeMutedText} hover:bg-stone-800/20`
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <Icon className="w-4 h-4" />
-                        <span>{item.label}</span>
-                      </div>
-                      {isActive && <ChevronRight className="w-3.5 h-3.5" />}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* SYSTEM Category */}
-              <div className="space-y-1">
-                <div className={`px-3 text-[10px] font-bold uppercase tracking-wider ${themeMutedText}`}>System</div>
-                {[
-                  { id: 'audit', label: '📋 Activity Log', icon: Database },
-                  { id: 'health-diagnostics', label: '📊 Health & Diagnostics', icon: Activity },
-                  { id: 'live-verify', label: '🛡️ Live Verification', icon: ShieldCheck },
-                  { id: 'live-checklist', label: '✅ Live Test Checklist (46)', icon: ListChecks }
-                ].map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeNav === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => setActiveNav(item.id)}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium transition-colors ${
-                        isActive 
-                          ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 font-semibold' 
-                          : `${themeMutedText} hover:bg-stone-800/20`
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <Icon className="w-4 h-4" />
-                        <span>{item.label}</span>
-                      </div>
-                      {isActive && <ChevronRight className="w-3.5 h-3.5" />}
-                    </button>
-                  );
-                })}
-              </div>
-
+                    </div>
+                  </button>
+                );
+              })}
             </nav>
           </div>
 
@@ -6171,123 +6035,15 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: BROADCAST */}
+          {/* TAB: BROADCAST (UNIFIED POST COMPOSER) */}
           {activeNav === 'broadcast' && (
-            <div className={`${themeCardBg} border rounded-2xl p-6 space-y-6 max-w-3xl`}>
-              <div>
-                <h3 className="text-sm font-bold flex items-center gap-2">
-                  <Radio className="w-4 h-4 text-blue-500" /> Multi-Group Broadcast
-                </h3>
-                <p className={`text-xs ${themeMutedText}`}>Broadcast announcements across multiple selected groups with rate-limiting & error isolation.</p>
-              </div>
-
-              {broadcastResult && (
-                <div className={`p-4 rounded-xl text-xs border ${broadcastResult.failed === 0 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-amber-500/10 border-amber-500/20 text-amber-500'}`}>
-                  Broadcast Complete: Sent to {broadcastResult.sent} of {broadcastResult.total} groups. {broadcastResult.failed > 0 && `(${broadcastResult.failed} failed)`}
-                </div>
-              )}
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold">Select Target Groups ({broadcastSelectedGroups.length} selected)</label>
-                    <div className="flex items-center gap-2 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => setBroadcastSelectedGroups(groups.filter(g => !g.botLeft).map(g => g.chatId))}
-                        className="text-blue-500 hover:underline"
-                      >
-                        Select All
-                      </button>
-                      <span>•</span>
-                      <button
-                        type="button"
-                        onClick={() => setBroadcastSelectedGroups([])}
-                        className="text-stone-400 hover:underline"
-                      >
-                        Deselect All
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1">
-                    {groups.filter(g => !g.botLeft).map(g => {
-                      const isChecked = broadcastSelectedGroups.includes(g.chatId);
-                      return (
-                        <label key={g.chatId} className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 flex items-center gap-3 cursor-pointer text-xs`}>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setBroadcastSelectedGroups([...broadcastSelectedGroups, g.chatId]);
-                              } else {
-                                setBroadcastSelectedGroups(broadcastSelectedGroups.filter(id => id !== g.chatId));
-                              }
-                            }}
-                            className="w-4 h-4 rounded text-blue-600"
-                          />
-                          <span className="font-semibold truncate">{g.chatTitle}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold block">Announcement Message</label>
-                  <textarea
-                    rows={4}
-                    placeholder="Enter broadcast announcement..."
-                    value={broadcastContent}
-                    onChange={(e) => setBroadcastContent(e.target.value)}
-                    className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 text-xs focus:outline-none focus:border-blue-500`}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowBroadcastConfirm(true)}
-                  disabled={broadcasting || broadcastSelectedGroups.length === 0 || !broadcastContent.trim()}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 flex items-center gap-2 shadow-sm"
-                >
-                  <Radio className="w-3.5 h-3.5" />
-                  {broadcasting ? 'Broadcasting...' : `Broadcast to ${broadcastSelectedGroups.length} Groups`}
-                </button>
-              </div>
-
-              {/* Confirmation Modal */}
-              {showBroadcastConfirm && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-                  <div className={`${themeCardBg} border rounded-2xl p-6 max-w-md w-full space-y-4 shadow-xl`}>
-                    <h3 className="text-sm font-bold flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-500" /> Confirm Broadcast
-                    </h3>
-                    <p className="text-xs">
-                      You are about to transmit this announcement to <strong className="text-blue-500">{broadcastSelectedGroups.length} groups</strong>. Proceed?
-                    </p>
-                    <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 text-xs max-h-32 overflow-y-auto`}>
-                      {broadcastContent}
-                    </div>
-                    <div className="flex items-center justify-end gap-2 pt-2">
-                      <button
-                        onClick={() => setShowBroadcastConfirm(false)}
-                        className={`px-3 py-1.5 ${themeInnerCardBg} border ${themeBorder} rounded-xl text-xs`}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleBroadcast}
-                        className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold"
-                      >
-                        Confirm Broadcast
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-            </div>
+            <RichPostComposer
+              groups={groups}
+              selectedChatId={selectedChatId}
+              theme={theme}
+              onRefresh={refreshCurrentView}
+              botUsername={botInfo?.username || 'MissRoxie_Bot'}
+            />
           )}
 
           {/* TAB: STICKER CENTER */}
