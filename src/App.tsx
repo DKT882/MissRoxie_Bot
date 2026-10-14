@@ -4,6 +4,7 @@ import {
   AlertCircle, 
   RefreshCw, 
   Bot, 
+  Menu,
   Terminal, 
   Settings, 
   ListChecks, 
@@ -249,6 +250,22 @@ export default function App() {
   const [activeNav, setActiveNav] = useState<string>('groups');
   const [selectedChatId, setSelectedChatId] = useState<number | 'all'>('all');
   const [activeGroupDetailId, setActiveGroupDetailId] = useState<number | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+
+  // Auto-scroll to top on view changes (tab switch or group detail toggle)
+  useEffect(() => {
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  }, [activeNav, activeGroupDetailId]);
+
+  // Unified single-view tab navigation handler
+  const handleNavSelect = useCallback((navId: string) => {
+    setActiveNav(navId);
+    setActiveGroupDetailId(null);
+    setMobileMenuOpen(false);
+  }, []);
   const [groupDetailTab, setGroupDetailTab] = useState<
     | 'overview'
     | 'welcome_dm'
@@ -2383,34 +2400,44 @@ export default function App() {
     <div className={`h-screen overflow-hidden ${themeBg} flex flex-col font-sans transition-colors duration-200`}>
       
       {/* Top Banner / Global Header */}
-      <header className={`${themeHeaderBg} border-b px-6 py-3.5 flex flex-col md:flex-row items-center justify-between gap-4 shrink-0 shadow-sm`}>
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/20">
-            <Bot className="w-6 h-6" />
+      <header className={`${themeHeaderBg} border-b px-3 sm:px-6 py-2.5 sm:py-3.5 flex flex-row items-center justify-between gap-2 sm:gap-4 shrink-0 shadow-sm`}>
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          {/* Mobile Hamburger Menu Button */}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(prev => !prev)}
+            className={`lg:hidden p-2 rounded-xl border ${themeBorder} ${themeInnerCardBg} hover:opacity-80 transition-colors text-stone-200 shrink-0`}
+            aria-label="Toggle navigation menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/20 shrink-0">
+            <Bot className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <h1 className="text-base font-bold tracking-tight flex items-center gap-2">
+          <div className="min-w-0">
+            <h1 className="text-sm sm:text-base font-bold tracking-tight flex items-center gap-1.5 sm:gap-2 truncate">
               ROXIE CONTROL CENTER
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 font-semibold uppercase tracking-wider">
+              <span className="hidden sm:inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 font-semibold uppercase tracking-wider shrink-0">
                 Telegram Core
               </span>
             </h1>
-            <p className={`text-xs ${themeMutedText}`}>Multi-Group Moderation, Direct Chats, Security & Broadcast Operations</p>
+            <p className={`hidden md:block text-xs ${themeMutedText} truncate`}>Multi-Group Moderation, Direct Chats, Security & Broadcast Operations</p>
           </div>
         </div>
 
         {/* Status Indicators, Theme Toggle & Test Button */}
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           {session ? (
-            <div className={`flex items-center gap-2 ${themeInnerCardBg} px-3 py-1.5 rounded-xl border ${themeBorder} text-xs`}>
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span className="font-semibold text-xs">{operator?.username || session.username}</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-400 font-mono font-bold">
+            <div className={`flex items-center gap-1.5 sm:gap-2 ${themeInnerCardBg} px-2 sm:px-3 py-1.5 rounded-xl border ${themeBorder} text-xs`}>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+              <span className="font-semibold text-xs truncate max-w-[90px] sm:max-w-none">{operator?.username || session.username}</span>
+              <span className="hidden sm:inline-block text-[10px] px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-400 font-mono font-bold">
                 {session.role}
               </span>
               <button
                 onClick={handleAdminLogout}
-                className="ml-1 text-[11px] text-rose-400 hover:text-rose-300 font-medium hover:underline flex items-center gap-1"
+                className="ml-1 text-[11px] text-rose-400 hover:text-rose-300 font-medium hover:underline flex items-center gap-1 shrink-0"
                 title="Log out of Admin session"
               >
                 <LogOut className="w-3 h-3" />
@@ -2420,46 +2447,159 @@ export default function App() {
           ) : (
             <button
               onClick={() => { setLoginError(null); setShowLoginModal(true); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm shrink-0"
               title="Operator / Admin Login"
             >
               <Lock className="w-3.5 h-3.5" />
-              <span>Admin Login</span>
+              <span className="hidden sm:inline">Admin Login</span>
             </button>
           )}
 
-          <div className={`flex items-center gap-2 ${themeInnerCardBg} px-3 py-1.5 rounded-xl border ${themeBorder} text-xs`}>
-            <span className={`w-2.5 h-2.5 rounded-full ${isPolling ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+          <div className={`hidden sm:flex items-center gap-2 ${themeInnerCardBg} px-3 py-1.5 rounded-xl border ${themeBorder} text-xs`}>
+            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isPolling ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
             <span className="font-medium text-xs">
-              {isPolling ? '🟢 Online & Polling' : '🟡 Polling Inactive'}
+              {isPolling ? '🟢 Online' : '🟡 Inactive'}
             </span>
           </div>
 
           <button
             onClick={toggleTheme}
-            className={`p-2 rounded-xl border ${themeBorder} ${themeInnerCardBg} hover:opacity-80 transition-colors text-xs flex items-center gap-1.5`}
+            className={`p-2 rounded-xl border ${themeBorder} ${themeInnerCardBg} hover:opacity-80 transition-colors text-xs flex items-center gap-1.5 shrink-0`}
             title={`Switch to ${isDark ? 'Light' : 'Dark'} Mode`}
           >
             {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-blue-600" />}
-            <span className="text-[11px] font-medium hidden sm:inline">{isDark ? 'Light' : 'Dark'}</span>
+            <span className="text-[11px] font-medium hidden md:inline">{isDark ? 'Light' : 'Dark'}</span>
           </button>
 
           <button
             onClick={handleTestConnection}
             disabled={testingConnection}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 shadow-sm"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 shadow-sm shrink-0"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} />
-            {testingConnection ? 'Testing...' : 'Test Connection'}
+            <span className="hidden sm:inline">{testingConnection ? 'Testing...' : 'Test Connection'}</span>
           </button>
         </div>
       </header>
 
+      {/* Mobile Navigation Drawer Overlay */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+
+          {/* Drawer Container */}
+          <aside className={`fixed inset-y-0 left-0 w-72 max-w-[85vw] ${themeSidebarBg} border-r ${themeBorder} p-4 space-y-4 flex flex-col justify-between h-full shadow-2xl z-10 animate-in slide-in-from-left duration-200`}>
+            <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
+              {/* Drawer Header */}
+              <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                <div className="flex items-center gap-2">
+                  <Bot className="w-5 h-5 text-blue-500" />
+                  <span className="font-bold text-sm text-stone-100">Roxie Menu</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="p-1.5 rounded-lg hover:bg-stone-800 text-stone-400 hover:text-stone-200"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Group Scope Selector */}
+              <div className="space-y-1.5 shrink-0">
+                <label className={`text-[11px] font-semibold ${themeMutedText} uppercase tracking-wider flex items-center gap-1.5`}>
+                  <Users className="w-3.5 h-3.5" /> Group Scope
+                </label>
+                <select
+                  value={selectedChatId}
+                  onChange={(e) => {
+                    const val = e.target.value === 'all' ? 'all' : Number(e.target.value);
+                    setSelectedChatId(val);
+                    if (val !== 'all') {
+                      setActiveGroupDetailId(val);
+                      setActiveNav('groups');
+                    } else {
+                      setActiveGroupDetailId(null);
+                    }
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-500 transition-colors`}
+                >
+                  <option value="all">🟢 [ All Groups ] ({groups.length})</option>
+                  {groups.map((g) => (
+                    <option key={g.chatId} value={g.chatId}>
+                      {g.botLeft ? '⚫' : '🟢'} {g.chatTitle} ({g.chatId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Navigation Menu */}
+              <nav className="space-y-1.5 overflow-y-auto flex-1 pr-1 text-xs">
+                {[
+                  { id: 'groups', label: '👥 Groups', icon: Users, badge: groups.length },
+                  { id: 'private-chats', label: '💬 Private Chats', icon: MessageSquare, badge: privateChats.length },
+                  { id: 'broadcast', label: '📣 Broadcast', icon: Radio }
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeNav === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleNavSelect(item.id)}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-colors min-h-[44px] ${
+                        isActive
+                          ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 font-semibold'
+                          : `${themeMutedText} hover:bg-stone-800/20`
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Icon className="w-4 h-4" />
+                        <span>{item.label}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {item.badge !== undefined && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-500 font-bold font-mono">
+                            {item.badge}
+                          </span>
+                        )}
+                        {isActive && <ChevronRight className="w-3.5 h-3.5" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
+
+            {/* Sidebar Footer info */}
+            <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 text-[11px] ${themeMutedText} space-y-1.5 shrink-0`}>
+              <div className="flex justify-between">
+                <span>Bot Username:</span>
+                <span className="font-mono font-semibold">@{botInfo?.username || 'MissRoxie_Bot'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Connected Groups:</span>
+                <span className="font-bold text-blue-500">{groups.length}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Security Engine:</span>
+                <span className="text-emerald-500 font-semibold">Active</span>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+
       {/* Main Layout */}
       <div className="flex-1 flex flex-col lg:flex-row h-[calc(100vh-65px)] overflow-hidden">
         
-        {/* Sidebar Navigation */}
-        <aside className={`w-full lg:w-72 ${themeSidebarBg} border-r p-4 space-y-4 flex flex-col justify-between h-full overflow-hidden shrink-0`}>
+        {/* Desktop Sidebar Navigation */}
+        <aside className={`hidden lg:flex lg:w-72 ${themeSidebarBg} border-r p-4 space-y-4 flex-col justify-between h-full overflow-hidden shrink-0`}>
           <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
             
             {/* Group Scope Selector */}
@@ -2474,6 +2614,9 @@ export default function App() {
                   setSelectedChatId(val);
                   if (val !== 'all') {
                     setActiveGroupDetailId(val);
+                    setActiveNav('groups');
+                  } else {
+                    setActiveGroupDetailId(null);
                   }
                 }}
                 className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-500 transition-colors`}
@@ -2499,10 +2642,7 @@ export default function App() {
                 return (
                   <button
                     key={item.id}
-                    onClick={() => {
-                      setActiveNav(item.id);
-                      if (item.id === 'groups') setActiveGroupDetailId(null);
-                    }}
+                    onClick={() => handleNavSelect(item.id)}
                     className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-colors ${
                       isActive 
                         ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 font-semibold' 
@@ -2545,7 +2685,7 @@ export default function App() {
         </aside>
 
         {/* Content Area - Scrollable */}
-        <main className="flex-1 p-6 space-y-6 overflow-y-auto h-full">
+        <main ref={mainScrollRef as any} className="flex-1 p-3 sm:p-6 pb-24 lg:pb-6 space-y-6 overflow-y-auto h-full">
           
           {/* Global Search & Export Header */}
           <div className={`sticky top-0 z-30 ${themeCardBg} backdrop-blur-md border rounded-2xl p-3.5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3`}>
@@ -3068,7 +3208,7 @@ export default function App() {
           )}
 
           {/* TAB: GROUP DETAIL VIEW WITH INNER TABS */}
-          {activeGroupDetailId && groupDetails && (
+          {activeNav === 'groups' && activeGroupDetailId && groupDetails && (
             <div className="space-y-6">
               
               {/* Group Detail Header */}
@@ -5408,7 +5548,7 @@ export default function App() {
             <div className={`${themeCardBg} border rounded-2xl h-[calc(100vh-170px)] flex flex-col md:flex-row overflow-hidden`}>
               
               {/* Left Pane: Users list */}
-              <div className={`w-full md:w-80 border-r ${themeBorder} p-4 flex flex-col space-y-3 shrink-0 overflow-hidden`}>
+              <div className={`w-full md:w-80 border-r ${themeBorder} p-3 sm:p-4 flex flex-col space-y-3 shrink-0 overflow-hidden ${activePrivateChatId ? 'hidden md:flex' : 'flex'}`}>
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
                     <MessageSquare className="w-3.5 h-3.5 text-blue-500" /> Private Conversations ({privateChats.length})
@@ -5451,20 +5591,31 @@ export default function App() {
               </div>
 
               {/* Right Pane: Conversation Thread */}
-              <div className="flex-1 flex flex-col h-full overflow-hidden">
+              <div className={`flex-1 flex flex-col h-full overflow-hidden ${!activePrivateChatId ? 'hidden md:flex' : 'flex'}`}>
                 {activePrivateChatId ? (
                   <>
                     {/* Thread Header */}
-                    <div className={`p-4 border-b ${themeBorder} flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0`}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold text-sm">
+                    <div className={`p-3 sm:p-4 border-b ${themeBorder} flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0`}>
+                      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                        {/* Mobile Back to List Button */}
+                        <button
+                          type="button"
+                          onClick={() => setActivePrivateChatId(null)}
+                          className="md:hidden p-2 rounded-xl border border-stone-700 bg-stone-800/80 hover:bg-stone-700 text-stone-200 text-xs flex items-center gap-1 shrink-0"
+                          title="Back to conversations list"
+                        >
+                          <ArrowLeft className="w-4 h-4" />
+                          <span className="font-semibold text-xs">Back</span>
+                        </button>
+
+                        <div className="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
                           {privateChats.find(c => c.chatId === activePrivateChatId)?.name?.slice(0, 1) || 'U'}
                         </div>
-                        <div>
-                          <h4 className="text-xs font-bold">
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold truncate">
                             {privateChats.find(c => c.chatId === activePrivateChatId)?.name || `Chat ${activePrivateChatId}`}
                           </h4>
-                          <span className={`text-[11px] font-mono ${themeMutedText}`}>
+                          <span className={`text-[10px] sm:text-[11px] font-mono ${themeMutedText} truncate block`}>
                             Chat ID: {activePrivateChatId} • Detected Language: {privateChats.find(c => c.chatId === activePrivateChatId)?.language || 'English'}
                           </span>
                         </div>
@@ -6378,7 +6529,7 @@ export default function App() {
           )}
 
           {/* LOADING FALLBACK FOR GROUP DETAILS */}
-          {activeGroupDetailId && !groupDetails && (
+          {activeNav === 'groups' && activeGroupDetailId && !groupDetails && (
             <div className={`${themeCardBg} border rounded-2xl p-12 text-center space-y-4`}>
               <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto" />
               <div>
@@ -6505,6 +6656,40 @@ export default function App() {
           )}
 
         </main>
+
+        {/* Mobile Bottom Navigation Bar (1-Tap Tab Switching) */}
+        <nav className={`lg:hidden fixed bottom-0 left-0 right-0 z-30 ${themeHeaderBg} border-t ${themeBorder} px-3 py-1.5 flex items-center justify-around backdrop-blur-lg shadow-lg`}>
+          {[
+            { id: 'groups', label: 'Groups', icon: Users, badge: groups.length },
+            { id: 'private-chats', label: 'Private Chats', icon: MessageSquare, badge: privateChats.length },
+            { id: 'broadcast', label: 'Broadcast', icon: Radio },
+          ].map((item) => {
+            const Icon = item.icon;
+            const isActive = activeNav === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => handleNavSelect(item.id)}
+                className={`flex-1 flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all min-h-[48px] relative ${
+                  isActive
+                    ? 'text-blue-500 font-bold bg-blue-500/10'
+                    : `${themeMutedText} hover:text-stone-200 font-medium`
+                }`}
+              >
+                <div className="relative">
+                  <Icon className={`w-5 h-5 ${isActive ? 'text-blue-500' : ''}`} />
+                  {item.badge !== undefined && item.badge > 0 && (
+                    <span className="absolute -top-1 -right-3 text-[9px] min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center font-mono">
+                      {item.badge}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] mt-0.5 leading-tight">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
       {/* Add Sticker Pack Modal */}

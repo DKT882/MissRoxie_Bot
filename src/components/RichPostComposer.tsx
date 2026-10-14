@@ -45,6 +45,78 @@ export interface ComposerButton {
 
 export type MediaAttachmentType = 'image' | 'video' | 'gif' | 'audio' | 'document';
 
+export type CompositionType = 'image' | 'video' | 'gif' | 'audio' | 'document';
+
+export interface CompositionOptionConfig {
+  type: CompositionType;
+  label: string;
+  shortLabel: string;
+  icon: React.ComponentType<{ className?: string }>;
+  urlPlaceholder: string;
+  acceptFiles: string;
+  fileHint: string;
+  backendContentType: ComposerContentType;
+  description: string;
+}
+
+export const COMPOSITION_OPTIONS: CompositionOptionConfig[] = [
+  {
+    type: 'image',
+    label: 'Text + Image',
+    shortLabel: 'Image',
+    icon: ImageIcon,
+    urlPlaceholder: 'https://example.com/image.jpg',
+    acceptFiles: 'image/jpeg,image/png,image/webp',
+    fileHint: 'JPEG, PNG, WEBP (Max 10MB)',
+    backendContentType: 'photo',
+    description: 'Photo broadcast with mandatory caption text.'
+  },
+  {
+    type: 'video',
+    label: 'Text + Video',
+    shortLabel: 'Video',
+    icon: Video,
+    urlPlaceholder: 'https://example.com/video.mp4',
+    acceptFiles: 'video/mp4,video/quicktime,video/x-matroska,video/webm',
+    fileHint: 'MP4, MOV, MKV, WEBM (Max 50MB)',
+    backendContentType: 'video',
+    description: 'Video broadcast with mandatory caption text.'
+  },
+  {
+    type: 'gif',
+    label: 'Text + GIF',
+    shortLabel: 'GIF',
+    icon: Film,
+    urlPlaceholder: 'https://example.com/animation.gif',
+    acceptFiles: 'image/gif',
+    fileHint: 'GIF animation (Max 15MB)',
+    backendContentType: 'animation',
+    description: 'Looping GIF animation broadcast with mandatory caption text.'
+  },
+  {
+    type: 'audio',
+    label: 'Text + Audio',
+    shortLabel: 'Audio',
+    icon: Music,
+    urlPlaceholder: 'https://example.com/audio.mp3',
+    acceptFiles: 'audio/mpeg,audio/wav,audio/ogg,audio/m4a,audio/flac',
+    fileHint: 'MP3, WAV, OGG, M4A, FLAC (Max 50MB)',
+    backendContentType: 'document',
+    description: 'Audio document broadcast with mandatory caption text.'
+  },
+  {
+    type: 'document',
+    label: 'Text + Document',
+    shortLabel: 'Document',
+    icon: FileText,
+    urlPlaceholder: 'https://example.com/document.pdf',
+    acceptFiles: 'application/pdf,application/zip,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,*/*',
+    fileHint: 'PDF, DOCX, ZIP, TXT, etc. (Max 50MB)',
+    backendContentType: 'document',
+    description: 'Document / file broadcast with mandatory caption text.'
+  }
+];
+
 export interface MediaLinkItem {
   id: string;
   type: MediaAttachmentType;
@@ -535,12 +607,20 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   // Post Content State
   const [text, setText] = useState<string>('');
 
+  // Selected Single-Media Composition Type (Default: 'image' -> Text + Image)
+  const [selectedCompositionType, setSelectedCompositionType] = useState<CompositionType>('image');
+  const [pendingSwitchType, setPendingSwitchType] = useState<CompositionType | null>(null);
+
+  // Active composition option config
+  const activeOption = useMemo(() => {
+    return COMPOSITION_OPTIONS.find(o => o.type === selectedCompositionType) || COMPOSITION_OPTIONS[0];
+  }, [selectedCompositionType]);
+
   // Media Attachment Mode: 'url' | 'upload'
   const [mediaAttachmentTab, setMediaAttachmentTab] = useState<'url' | 'upload'>('url');
 
-  // URL-based Media Links State
+  // URL-based Media Link State (Enforcing strictly 1 item)
   const [mediaLinks, setMediaLinks] = useState<MediaLinkItem[]>([]);
-  const [activeMediaInputType, setActiveMediaInputType] = useState<MediaAttachmentType | null>(null);
   const [newMediaUrl, setNewMediaUrl] = useState<string>('');
   const [newMediaUrlError, setNewMediaUrlError] = useState<string | null>(null);
 
@@ -593,33 +673,20 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     details?: string;
   } | null>(null);
 
-  // Primary URL media item
+  // Primary URL media item & active attachment existence
   const primaryMedia = mediaLinks[0] || null;
+  const hasActiveAttachment = Boolean(uploadedMedia || primaryMedia);
 
-  // Effective Content Type calculation
+  // Effective Content Type calculation: maps to Telegram backend types
   const contentType: ComposerContentType = useMemo(() => {
     if (uploadedMedia) {
       return uploadedMedia.contentType;
     }
-    if (!primaryMedia) return 'text';
-    switch (primaryMedia.type) {
-      case 'image':
-        return 'photo';
-      case 'video':
-        return 'video';
-      case 'gif':
-        return 'animation';
-      case 'audio':
-        return 'document'; // Audio delivered as document on existing Telegram backend
-      case 'document':
-        return 'document';
-      default:
-        return 'text';
-    }
-  }, [uploadedMedia, primaryMedia]);
+    return activeOption.backendContentType;
+  }, [uploadedMedia, activeOption]);
 
-  // Character Limit calculation
-  const maxChars = contentType === 'text' ? 4096 : 1024;
+  // Character Limit calculation: Telegram caption limit is strictly 1024 characters for all media posts
+  const maxChars = 1024;
   const isOverCharLimit = text.length > maxChars;
 
   // Reset session delivery records when core message content or media changes
@@ -628,12 +695,23 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setConfirmDuplicateRetry(false);
   }, [text, primaryMedia?.url, uploadedMedia?.id, contentType]);
 
-  // Media link URL add handler
+  // Clear uploaded local media
+  const handleClearUploadedMedia = () => {
+    if (uploadedMedia?.localPreviewUrl) {
+      try {
+        URL.revokeObjectURL(uploadedMedia.localPreviewUrl);
+      } catch {}
+    }
+    setUploadedMedia(null);
+    setUploadStatus('idle');
+    setUploadError(null);
+  };
+
+  // Media link URL add handler: replaces existing attachment to enforce single media
   const handleAddMediaLink = () => {
-    if (!activeMediaInputType) return;
     const trimmed = newMediaUrl.trim();
     if (!trimmed) {
-      setNewMediaUrlError('Please enter a URL link.');
+      setNewMediaUrlError('Please enter a valid media URL.');
       return;
     }
 
@@ -642,10 +720,13 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       return;
     }
 
-    // Auto-detect GIF URL if not already selected
-    let effectiveType = activeMediaInputType;
+    // Auto-detect GIF URL if gif extension is detected
+    let effectiveType = selectedCompositionType;
     if (trimmed.toLowerCase().endsWith('.gif') || trimmed.toLowerCase().includes('.gif?')) {
       effectiveType = 'gif';
+      if (selectedCompositionType !== 'gif') {
+        setSelectedCompositionType('gif');
+      }
     }
 
     const newItem: MediaLinkItem = {
@@ -654,33 +735,32 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       url: trimmed
     };
 
-    setMediaLinks(prev => [...prev, newItem]);
+    // Strictly enforce single media attachment
+    handleClearUploadedMedia();
+    setMediaLinks([newItem]);
     setNewMediaUrl('');
     setNewMediaUrlError(null);
-    setActiveMediaInputType(null);
   };
 
-  const handleRemoveMediaLink = (id: string) => {
-    setMediaLinks(prev => prev.filter(item => item.id !== id));
+  const handleRemoveMediaLink = (id?: string) => {
+    setMediaLinks([]);
   };
 
-  // Local File Upload Handler
+  // Local File Upload Handler: replaces existing attachment to enforce single media
   const handleLocalFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const lowerName = file.name.toLowerCase();
-    const isGif = file.type === 'image/gif' || lowerName.endsWith('.gif');
-    const isVideo = file.type.startsWith('video/') || lowerName.endsWith('.mp4') || lowerName.endsWith('.mov') || lowerName.endsWith('.mkv') || lowerName.endsWith('.webm');
-    const isPhoto = file.type.startsWith('image/') && !isGif;
+    // Clear any existing URL link: single media only
+    setMediaLinks([]);
 
     let targetUploadType: 'photo' | 'video' | 'animation' | 'document' = 'document';
-    if (isGif) {
-      targetUploadType = 'animation';
-    } else if (isPhoto) {
+    if (selectedCompositionType === 'image') {
       targetUploadType = 'photo';
-    } else if (isVideo) {
+    } else if (selectedCompositionType === 'video') {
       targetUploadType = 'video';
+    } else if (selectedCompositionType === 'gif') {
+      targetUploadType = 'animation';
     } else {
       targetUploadType = 'document';
     }
@@ -721,25 +801,42 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     }
   };
 
-  const handleClearUploadedMedia = () => {
-    if (uploadedMedia?.localPreviewUrl) {
-      try {
-        URL.revokeObjectURL(uploadedMedia.localPreviewUrl);
-      } catch {}
+  // Composition Type Selection & Replacement Confirmation
+  const handleSelectCompositionType = (targetType: CompositionType) => {
+    if (targetType === selectedCompositionType) return;
+    if (hasActiveAttachment) {
+      // Prompt user before replacing currently attached media
+      setPendingSwitchType(targetType);
+    } else {
+      setSelectedCompositionType(targetType);
+      setNewMediaUrl('');
+      setNewMediaUrlError(null);
     }
-    setUploadedMedia(null);
-    setUploadStatus('idle');
-    setUploadError(null);
   };
 
-  // Validation Checks
+  const handleConfirmTypeSwitch = () => {
+    if (!pendingSwitchType) return;
+    handleClearUploadedMedia();
+    setMediaLinks([]);
+    setNewMediaUrl('');
+    setNewMediaUrlError(null);
+    setSelectedCompositionType(pendingSwitchType);
+    setPendingSwitchType(null);
+  };
+
+  // Validation Checks: enforces mandatory text + mandatory single media
   const validationErrors = useMemo(() => {
     const errors: string[] = [];
     if (!lockedDestination && totalSelectedRecipients === 0) {
       errors.push('Please select at least one recipient (group or private chat) from the recipients panel.');
     }
-    if (contentType === 'text' && !text.trim()) {
-      errors.push('Message text is required for text-only posts.');
+    // Mandatory text validation
+    if (!text.trim()) {
+      errors.push('Message text / caption is required.');
+    }
+    // Mandatory single media attachment validation
+    if (!uploadedMedia && mediaLinks.length === 0) {
+      errors.push(`A media attachment (${activeOption.shortLabel}) is required for ${activeOption.label} broadcasts.`);
     }
     if (uploadStatus === 'uploading') {
       errors.push('Local file is currently uploading. Please wait for upload to complete.');
@@ -751,12 +848,12 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       }
     }
     if (isOverCharLimit) {
-      errors.push(`Text length exceeds maximum allowed (${text.length}/${maxChars} characters).`);
+      errors.push(`Caption text exceeds Telegram limit of ${maxChars} characters (${text.length}/${maxChars}).`);
     }
     const btnErrors = validateButtonGrid(buttonGrid);
     errors.push(...btnErrors);
     return errors;
-  }, [lockedDestination, totalSelectedRecipients, contentType, text, uploadStatus, mediaLinks, uploadedMedia, primaryMedia, isOverCharLimit, maxChars, buttonGrid]);
+  }, [lockedDestination, totalSelectedRecipients, text, uploadedMedia, mediaLinks, activeOption, uploadStatus, primaryMedia, isOverCharLimit, maxChars, buttonGrid]);
 
   const isFormValid = validationErrors.length === 0;
 
@@ -847,7 +944,6 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setText('');
     setMediaLinks([]);
     handleClearUploadedMedia();
-    setActiveMediaInputType(null);
     setNewMediaUrl('');
     setNewMediaUrlError(null);
     setButtonGrid([]);
@@ -858,6 +954,8 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setNotification(null);
     setDeliveredRecipientIds(new Set());
     setConfirmDuplicateRetry(false);
+    setSelectedCompositionType('image');
+    setPendingSwitchType(null);
   };
 
   const isDirty = Boolean(text.trim() || mediaLinks.length > 0 || uploadedMedia || buttonGrid.length > 0);
@@ -1145,7 +1243,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
           </div>
         </div>
         <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-semibold uppercase">
-          {contentType}
+          {activeOption.label}
         </span>
       </div>
 
@@ -1253,6 +1351,19 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             </div>
           )}
 
+          {/* Placeholder when no media is attached */}
+          {!uploadedMedia && !primaryMedia && (
+            <div className="rounded-xl p-4 bg-stone-900/60 border border-dashed border-stone-700/80 text-center space-y-1">
+              <div className="flex items-center justify-center gap-1.5 text-xs text-stone-300 font-semibold">
+                <activeOption.icon className="w-4 h-4 text-blue-400" />
+                <span>Waiting for {activeOption.shortLabel} attachment...</span>
+              </div>
+              <p className="text-[10px] text-stone-500">
+                Attach a media URL or upload a local file in the composer
+              </p>
+            </div>
+          )}
+
           {/* Text / Caption Content */}
           {text.trim() ? (
             <div
@@ -1260,8 +1371,8 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               dangerouslySetInnerHTML={{ __html: text.replace(/\n/g, '<br/>') }}
             />
           ) : (
-            <p className="text-xs italic text-stone-500">
-              {contentType === 'text' ? '(Empty message content)' : '(No caption provided)'}
+            <p className="text-xs italic text-amber-400/80">
+              (Message text is required)
             </p>
           )}
 
@@ -1338,16 +1449,16 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             </span>
           </div>
           <p className={`text-xs ${themeMutedText} mt-1`}>
-            Compose and broadcast text announcements, photos, videos, animations, audio, and documents across Telegram groups.
+            Compose and broadcast rich posts across Telegram groups and private chats using Text + Single Media models (Image, Video, GIF, Audio, Document).
           </p>
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-2 w-full sm:w-auto">
           <button
             type="button"
             onClick={() => (isDirty ? setShowClearModal(true) : handleResetComposer())}
-            className={`px-3 py-2 ${themeInnerCardBg} hover:opacity-80 border ${themeBorder} rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 text-stone-300`}
+            className={`flex-1 sm:flex-initial px-3 py-2 ${themeInnerCardBg} hover:opacity-80 border ${themeBorder} rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 text-stone-300 min-h-[40px]`}
             title="Reset composer fields"
           >
             <RotateCcw className="w-3.5 h-3.5 text-stone-400" />
@@ -1358,7 +1469,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             type="button"
             onClick={() => setShowScheduleModal(true)}
             disabled={!isFormValid || isSubmitting}
-            className="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+            className="flex-1 sm:flex-initial px-3.5 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm min-h-[40px]"
           >
             <Calendar className="w-4 h-4" />
             Schedule...
@@ -1367,7 +1478,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
           <button
             type="button"
             onClick={() => setShowPreviewModal(true)}
-            className="px-3.5 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 border border-stone-700"
+            className="flex-1 sm:flex-initial px-3.5 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 border border-stone-700 min-h-[40px]"
           >
             <Eye className="w-4 h-4" />
             Preview
@@ -1377,7 +1488,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             type="button"
             onClick={() => setShowSendModal(true)}
             disabled={!isFormValid || isSubmitting}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 shadow-sm"
+            className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm min-h-[40px]"
           >
             <Send className="w-4 h-4" />
             Send Broadcast
@@ -1450,463 +1561,383 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               </div>
             )}
 
-          {/* Section 2: Post Content / Caption */}
+          {/* Section 2: Post Content / Caption (Mandatory) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold uppercase tracking-wider text-stone-300">
-                {!uploadedMedia && mediaLinks.length === 0 ? '2. Message Text (HTML Supported)' : '2. Caption (Optional)'}
+              <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center gap-1.5">
+                <Type className="w-3.5 h-3.5 text-blue-400" />
+                <span>2. Message Text (Mandatory)</span>
               </label>
               <span
                 className={`text-[11px] font-mono ${
                   isOverCharLimit ? 'text-red-400 font-bold' : themeMutedText
                 }`}
               >
-                {text.length} / {maxChars} chars
+                {text.length} / {maxChars} chars (Caption Limit)
               </span>
             </div>
 
             <textarea
-              rows={!uploadedMedia && mediaLinks.length === 0 ? 5 : 3}
+              rows={4}
               value={text}
               onChange={e => setText(e.target.value)}
-              placeholder={
-                !uploadedMedia && mediaLinks.length === 0
-                  ? 'Enter broadcast message here... Supports HTML formatting (<b>bold</b>, <i>italic</i>, <code>code</code>, etc.)'
-                  : 'Add an optional caption for your media broadcast post...'
-              }
+              placeholder={`Enter mandatory broadcast message text here... Delivered as caption with your attached ${activeOption.shortLabel.toLowerCase()}. Supports HTML formatting (<b>bold</b>, <i>italic</i>, <code>code</code>, etc.)`}
               className={`w-full p-3.5 rounded-xl text-xs border ${themeInputBg} outline-none resize-y font-sans`}
             />
           </div>
 
-          {/* Section 3: Media Attachments (URL Links & Local File Upload) */}
-          <div className="space-y-3.5 p-4 rounded-xl border border-stone-800 bg-stone-950/40">
-            <div className="flex items-center justify-between">
+          {/* Section 3: Media Selection & Attachment (Single Choice Enforced) */}
+          <div className="space-y-4 p-4 rounded-xl border border-stone-800 bg-stone-950/40">
+            <div className="space-y-1">
               <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center gap-1.5">
                 <Paperclip className="w-3.5 h-3.5 text-blue-400" />
-                <span>3. Media Attachments</span>
+                <span>3. Media Attachment (Select 1 Model)</span>
               </label>
-
-              {/* Input Mode Selector: By URL vs Upload File */}
-              <div className="flex items-center gap-1 p-0.5 rounded-lg bg-stone-900 border border-stone-800 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => setMediaAttachmentTab('url')}
-                  className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
-                    mediaAttachmentTab === 'url'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-stone-400 hover:text-stone-200'
-                  }`}
-                >
-                  <Link2 className="w-3 h-3" />
-                  Media URL
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMediaAttachmentTab('upload')}
-                  className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
-                    mediaAttachmentTab === 'upload'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-stone-400 hover:text-stone-200'
-                  }`}
-                >
-                  <Upload className="w-3 h-3" />
-                  Upload File
-                </button>
-              </div>
+              <p className="text-[11px] text-stone-400">
+                Choose a single media composition model. All broadcasts enforce mandatory text plus one media attachment.
+              </p>
             </div>
 
-            {/* TAB 1: Media URLs */}
-            {mediaAttachmentTab === 'url' && (
-              <div className="space-y-3 animate-in fade-in duration-150">
-                <div className="text-[11px] text-stone-400 flex items-center justify-between">
-                  <span>Add direct media links for Telegram delivery:</span>
-                  <span className="text-[10px] text-stone-500">HTTP / HTTPS URLs</span>
-                </div>
-
-                {/* Media Type Selector Buttons */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                  {[
-                    { type: 'image' as const, label: 'Image', icon: ImageIcon },
-                    { type: 'video' as const, label: 'Video', icon: Video },
-                    { type: 'gif' as const, label: 'GIF', icon: Film },
-                    { type: 'audio' as const, label: 'Audio', icon: Music },
-                    { type: 'document' as const, label: 'Document', icon: FileText }
-                  ].map(item => {
-                    const Icon = item.icon;
-                    const isCurrentActive = activeMediaInputType === item.type;
-                    return (
-                      <button
-                        key={item.type}
-                        type="button"
-                        onClick={() => {
-                          if (activeMediaInputType === item.type) {
-                            setActiveMediaInputType(null);
-                            setNewMediaUrlError(null);
-                          } else {
-                            setActiveMediaInputType(item.type);
-                            setNewMediaUrl('');
-                            setNewMediaUrlError(null);
-                          }
-                        }}
-                        className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all ${
-                          isCurrentActive
-                            ? 'bg-blue-600/20 border-blue-500 text-blue-400 shadow-sm'
-                            : `${themeInnerCardBg} ${themeBorder} ${themeMutedText} hover:text-stone-200 hover:border-stone-700`
-                        }`}
-                      >
-                        <Icon className="w-3.5 h-3.5" />
-                        <span>+ {item.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Revealed URL Input for Selected Media Type */}
-                {activeMediaInputType && (
-                  <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 space-y-2.5 animate-in fade-in duration-150">
-                    <div className="flex items-center justify-between text-xs font-semibold text-stone-200">
-                      <span className="flex items-center gap-1.5">
-                        <Link2 className="w-3.5 h-3.5 text-blue-400" />
-                        Enter {activeMediaInputType.toUpperCase()} URL:
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveMediaInputType(null);
-                          setNewMediaUrl('');
-                          setNewMediaUrlError(null);
-                        }}
-                        className="text-[11px] text-stone-400 hover:text-stone-200"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <div className="flex-1 relative">
-                        <input
-                          type="url"
-                          value={newMediaUrl}
-                          onChange={e => {
-                            setNewMediaUrl(e.target.value);
-                            if (newMediaUrlError) setNewMediaUrlError(null);
-                          }}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleAddMediaLink();
-                            }
-                          }}
-                          placeholder={
-                            activeMediaInputType === 'image'
-                              ? 'https://example.com/image.jpg'
-                              : activeMediaInputType === 'video'
-                              ? 'https://example.com/video.mp4'
-                              : activeMediaInputType === 'gif'
-                              ? 'https://example.com/animation.gif'
-                              : activeMediaInputType === 'audio'
-                              ? 'https://example.com/audio.mp3'
-                              : 'https://example.com/document.pdf'
-                          }
-                          className={`w-full px-3 py-2 rounded-xl text-xs border ${themeInputBg} outline-none font-mono`}
-                        />
+            {/* 5-Choice Single-Choice Selector (Radio Cards) */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+              {COMPOSITION_OPTIONS.map(opt => {
+                const Icon = opt.icon;
+                const isSelected = selectedCompositionType === opt.type;
+                return (
+                  <button
+                    key={opt.type}
+                    type="button"
+                    onClick={() => handleSelectCompositionType(opt.type)}
+                    className={`p-2.5 rounded-xl text-left border transition-all flex flex-col justify-between gap-1.5 relative last:col-span-2 sm:last:col-span-1 min-h-[60px] ${
+                      isSelected
+                        ? 'bg-blue-600/15 border-blue-500 text-blue-300 ring-1 ring-blue-500/40 shadow-sm'
+                        : `${themeInnerCardBg} ${themeBorder} text-stone-400 hover:text-stone-200 hover:border-stone-700`
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <Icon className={`w-4 h-4 ${isSelected ? 'text-blue-400' : 'text-stone-400'}`} />
+                      <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${
+                        isSelected ? 'border-blue-500 bg-blue-500' : 'border-stone-600'
+                      }`}>
+                        {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                       </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold truncate leading-tight">{opt.label}</p>
+                      <p className="text-[10px] opacity-75 font-mono truncate">{opt.shortLabel}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
 
-                      <button
-                        type="button"
-                        onClick={handleAddMediaLink}
-                        disabled={!newMediaUrl.trim()}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shrink-0"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        Add Link
-                      </button>
+            {/* Input Controls Scoped to Active Composition Type */}
+            <div className="pt-2 border-t border-stone-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-stone-200">
+                    Attach {activeOption.shortLabel}:
+                  </span>
+                  <span className="text-[10px] text-stone-500 font-mono">
+                    (Single media only)
+                  </span>
+                </div>
+
+                {/* Mode Selector: Media URL vs Upload File */}
+                <div className="flex items-center gap-1 p-0.5 rounded-lg bg-stone-900 border border-stone-800 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setMediaAttachmentTab('url')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
+                      mediaAttachmentTab === 'url'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-stone-400 hover:text-stone-200'
+                    }`}
+                  >
+                    <Link2 className="w-3 h-3" />
+                    Media URL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMediaAttachmentTab('upload')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
+                      mediaAttachmentTab === 'upload'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-stone-400 hover:text-stone-200'
+                    }`}
+                  >
+                    <Upload className="w-3 h-3" />
+                    Upload File
+                  </button>
+                </div>
+              </div>
+
+              {/* Mode A: Scoped URL Input */}
+              {mediaAttachmentTab === 'url' && (
+                <div className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 space-y-2.5 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between text-xs font-semibold text-stone-200">
+                    <span className="flex items-center gap-1.5">
+                      <Link2 className="w-3.5 h-3.5 text-blue-400" />
+                      Provide {activeOption.shortLabel} URL:
+                    </span>
+                    <span className="text-[10px] text-stone-400">Direct HTTP / HTTPS link</span>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <div className="flex-1 relative">
+                      <input
+                        type="url"
+                        value={newMediaUrl}
+                        onChange={e => {
+                          setNewMediaUrl(e.target.value);
+                          if (newMediaUrlError) setNewMediaUrlError(null);
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddMediaLink();
+                          }
+                        }}
+                        placeholder={activeOption.urlPlaceholder}
+                        className={`w-full px-3 py-2 rounded-xl text-xs border ${themeInputBg} outline-none font-mono`}
+                      />
                     </div>
 
-                    {newMediaUrlError && (
-                      <p className="text-[11px] text-red-400 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3 shrink-0" />
-                        {newMediaUrlError}
-                      </p>
+                    <button
+                      type="button"
+                      onClick={handleAddMediaLink}
+                      disabled={!newMediaUrl.trim()}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      {hasActiveAttachment ? 'Replace Link' : 'Attach Link'}
+                    </button>
+                  </div>
+
+                  {newMediaUrlError && (
+                    <p className="text-[11px] text-red-400 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 shrink-0" />
+                      {newMediaUrlError}
+                    </p>
+                  )}
+
+                  <p className="text-[10px] text-stone-400">
+                    {activeOption.type === 'audio'
+                      ? '🎵 Note: Audio URLs are dispatched via Telegram document delivery by existing bot backend.'
+                      : `Provide a direct public HTTP or HTTPS link to your ${activeOption.shortLabel.toLowerCase()} file.`}
+                  </p>
+                </div>
+              )}
+
+              {/* Mode B: Scoped File Upload */}
+              {mediaAttachmentTab === 'upload' && (
+                <div className="space-y-3 animate-in fade-in duration-150">
+                  <div className={`p-4 rounded-xl border ${uploadedMedia ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-stone-800 bg-stone-900/40'} space-y-3`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
+                        <Upload className="w-3.5 h-3.5 text-blue-400" />
+                        Select Local {activeOption.shortLabel} File:
+                      </span>
+                      <span className="text-[10px] text-stone-400">
+                        {activeOption.fileHint}
+                      </span>
+                    </div>
+
+                    {uploadStatus !== 'uploading' && (
+                      <div className="space-y-2">
+                        <input
+                          type="file"
+                          key={`file-input-${selectedCompositionType}`}
+                          id="broadcast-local-file-input"
+                          accept={activeOption.acceptFiles}
+                          onChange={handleLocalFileSelect}
+                          className="text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer text-stone-400"
+                        />
+                        <p className="text-[11px] text-stone-400">
+                          ⚡ Selecting a local file will upload it to server memory and attach it as your single media item.
+                        </p>
+                      </div>
                     )}
 
-                    <p className="text-[10px] text-stone-400">
-                      {activeMediaInputType === 'audio'
-                        ? '🎵 Note: Audio URLs are dispatched via Telegram document delivery by existing bot backend.'
-                        : 'Provide a direct public HTTP or HTTPS media link accessible to Telegram servers.'}
+                    {uploadStatus === 'uploading' && (
+                      <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs">
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                        <span>Uploading {activeOption.shortLabel} to Roxie media store...</span>
+                      </div>
+                    )}
+
+                    {uploadStatus === 'error' && (
+                      <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs space-y-2">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                          <p>{uploadError || 'File upload failed. Please try a different file.'}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Active Single Attachment Display */}
+              <div className="space-y-2 pt-2 border-t border-stone-800/80">
+                <div className="flex items-center justify-between text-xs text-stone-400">
+                  <span className="font-semibold text-stone-300">
+                    Active Media Attachment ({hasActiveAttachment ? 1 : 0}/1)
+                  </span>
+                  {hasActiveAttachment && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMediaLinks([]);
+                        handleClearUploadedMedia();
+                      }}
+                      className="text-[11px] text-red-400 hover:underline flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      Remove Attachment
+                    </button>
+                  )}
+                </div>
+
+                {!hasActiveAttachment ? (
+                  <div className={`p-4 rounded-xl border border-dashed border-stone-800 ${themeInnerCardBg} text-center space-y-1`}>
+                    <p className="text-xs text-amber-400/90 font-semibold flex items-center justify-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                      Media attachment required
+                    </p>
+                    <p className="text-[11px] text-stone-500">
+                      Use Media URL or Upload File above to attach 1 {activeOption.shortLabel.toLowerCase()} to complete your {activeOption.label} post.
                     </p>
                   </div>
-                )}
-              </div>
-            )}
-
-            {/* TAB 2: Local File Upload */}
-            {mediaAttachmentTab === 'upload' && (
-              <div className="space-y-3 animate-in fade-in duration-150">
-                <div className={`p-4 rounded-xl border ${uploadedMedia ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-stone-800 bg-stone-900/40'} space-y-3`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
-                      <Upload className="w-3.5 h-3.5 text-blue-400" />
-                      Select Local File:
-                    </span>
-                    <span className="text-[10px] text-stone-400">
-                      Photo (10MB) • GIF (15MB) • Video/Doc (50MB)
-                    </span>
-                  </div>
-
-                  {!uploadedMedia && uploadStatus !== 'uploading' && (
-                    <div className="space-y-2">
-                      <input
-                        type="file"
-                        id="broadcast-local-file-input"
-                        accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/x-matroska,audio/mpeg,audio/wav,audio/ogg,application/pdf,application/zip,text/plain,*/*"
-                        onChange={handleLocalFileSelect}
-                        className="text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer text-stone-400"
-                      />
-                      <p className="text-[11px] text-stone-400">
-                        ⚡ Local media uploaded to Roxie is delivered directly to Telegram via immediate broadcast.
-                      </p>
-                    </div>
-                  )}
-
-                  {uploadStatus === 'uploading' && (
-                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs">
-                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                      <span>Uploading file to Roxie media store...</span>
-                    </div>
-                  )}
-
-                  {uploadedMedia && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                          <span className="font-semibold truncate">{uploadedMedia.filename}</span>
-                          <span className="text-[11px] opacity-80 shrink-0 font-mono">
-                            ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                            Ready ({uploadedMedia.contentType.toUpperCase()})
-                          </span>
+                ) : (
+                  <div className="space-y-2">
+                    {/* Render Uploaded File */}
+                    {uploadedMedia && (
+                      <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                              LOCAL {activeOption.shortLabel.toUpperCase()}
+                            </span>
+                            <span className="text-xs font-mono text-stone-200 truncate">
+                              {uploadedMedia.filename} ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
+                            </span>
+                          </div>
                           <button
                             type="button"
                             onClick={handleClearUploadedMedia}
-                            className="text-red-400 hover:text-red-300 p-1"
-                            title="Remove uploaded file"
+                            className="text-[11px] text-red-400 hover:text-red-300 font-semibold flex items-center gap-1 shrink-0 p-1 hover:bg-red-500/10 rounded-lg transition-colors"
+                            title="Remove attachment"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
+                            <span>Remove</span>
                           </button>
                         </div>
-                      </div>
-                      <p className="text-[11px] text-stone-400">
-                        File stored in Roxie server memory. Will be transmitted with your broadcast.
-                      </p>
-                    </div>
-                  )}
 
-                  {uploadStatus === 'error' && (
-                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs space-y-2">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                        <p>{uploadError || 'File upload failed. Please try a different file.'}</p>
+                        {/* Preview for uploaded media */}
+                        {(uploadedMedia.contentType === 'photo' || uploadedMedia.contentType === 'animation') && (
+                          <div className="pt-1">
+                            <img
+                              src={uploadedMedia.localPreviewUrl}
+                              alt="Uploaded preview"
+                              className="max-h-48 max-w-full rounded-lg object-contain bg-black/30 border border-stone-800"
+                            />
+                          </div>
+                        )}
+                        {uploadedMedia.contentType === 'video' && (
+                          <div className="pt-1">
+                            <video
+                              src={uploadedMedia.localPreviewUrl}
+                              controls
+                              className="max-h-48 max-w-full rounded-lg bg-black/40 border border-stone-800"
+                            />
+                          </div>
+                        )}
+                        {uploadedMedia.contentType === 'document' && (
+                          <div className="p-2.5 rounded-lg bg-black/30 text-xs text-stone-300 flex items-center gap-2">
+                            {uploadedMedia.mimeType.startsWith('audio/') ? (
+                              <Music className="w-4 h-4 text-amber-400 shrink-0" />
+                            ) : (
+                              <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
+                            )}
+                            <span className="truncate">{uploadedMedia.filename}</span>
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <input
-                          type="file"
-                          accept="image/*,video/*,audio/*,.pdf,.zip,*/*"
-                          onChange={handleLocalFileSelect}
-                          className="text-xs file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-[11px] file:font-semibold file:bg-stone-800 file:text-stone-300 hover:file:bg-stone-700 cursor-pointer text-stone-400"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+                    )}
 
-            {/* Attached Media Items List (Both URL Links & Uploaded File) */}
-            <div className="space-y-2 pt-1 border-t border-stone-800/80">
-              <div className="flex items-center justify-between text-xs text-stone-400">
-                <span className="font-semibold text-stone-300">
-                  Active Attachments ({uploadedMedia ? 1 : mediaLinks.length})
-                </span>
-                {(uploadedMedia || mediaLinks.length > 0) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMediaLinks([]);
-                      handleClearUploadedMedia();
-                    }}
-                    className="text-[11px] text-red-400 hover:underline"
-                  >
-                    Clear All
-                  </button>
+                    {/* Render URL Media Item */}
+                    {!uploadedMedia && primaryMedia && (
+                      <div className={`p-3.5 rounded-xl border ${themeBorder} ${themeInnerCardBg} space-y-2`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-400 border border-blue-500/30 shrink-0">
+                              {activeOption.shortLabel.toUpperCase()} URL
+                            </span>
+                            <a
+                              href={primaryMedia.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs font-mono text-stone-300 hover:text-blue-400 truncate flex items-center gap-1"
+                              title={primaryMedia.url}
+                            >
+                              <span className="truncate">{primaryMedia.url}</span>
+                              <ExternalLink className="w-3 h-3 shrink-0 opacity-60" />
+                            </a>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setMediaLinks([])}
+                            className="text-[11px] text-red-400 hover:text-red-300 font-semibold flex items-center gap-1 shrink-0 p-1 hover:bg-red-500/10 rounded-lg transition-colors"
+                            title="Remove attachment"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Remove</span>
+                          </button>
+                        </div>
+
+                        {/* Preview for URL */}
+                        {primaryMedia.type === 'image' && (
+                          <div className="pt-1">
+                            <SafeImagePreview url={primaryMedia.url} />
+                          </div>
+                        )}
+                        {primaryMedia.type === 'gif' && (
+                          <div className="pt-1">
+                            {primaryMedia.url.toLowerCase().endsWith('.gif') ? (
+                              <SafeImagePreview url={primaryMedia.url} />
+                            ) : (
+                              <div className="p-2 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
+                                <Film className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                                <span>GIF Animation link configured for Telegram delivery.</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {primaryMedia.type === 'video' && (
+                          <div className="p-2.5 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
+                            <Video className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                            <span className="truncate">Video link: {primaryMedia.url}</span>
+                          </div>
+                        )}
+                        {primaryMedia.type === 'audio' && (
+                          <div className="p-2.5 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
+                            <Music className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span className="truncate">Audio link: {primaryMedia.url}</span>
+                          </div>
+                        )}
+                        {primaryMedia.type === 'document' && (
+                          <div className="p-2.5 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
+                            <FileText className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                            <span className="truncate">Document link: {primaryMedia.url}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-
-              {!uploadedMedia && mediaLinks.length === 0 ? (
-                <div className={`p-3.5 rounded-xl border ${themeBorder} ${themeInnerCardBg} text-center space-y-1`}>
-                  <p className="text-xs text-stone-400">No media attached (Text-only broadcast).</p>
-                  <p className="text-[11px] text-stone-500">
-                    Use the controls above to attach a media URL or upload a local file.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {/* Uploaded Local File Item */}
-                  {uploadedMedia && (
-                    <div className={`p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-2`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-                            LOCAL UPLOAD • {uploadedMedia.contentType.toUpperCase()}
-                          </span>
-                          <span className="text-xs font-mono text-stone-200 truncate">
-                            {uploadedMedia.filename} ({(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB)
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleClearUploadedMedia}
-                          className="text-[11px] text-red-400 hover:text-red-300 font-semibold flex items-center gap-1 shrink-0 p-1 hover:bg-red-500/10 rounded-lg transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Remove</span>
-                        </button>
-                      </div>
-
-                      {/* Preview for uploaded file */}
-                      {uploadedMedia.contentType === 'photo' && (
-                        <div className="pt-1">
-                          <img
-                            src={uploadedMedia.localPreviewUrl}
-                            alt="Uploaded preview"
-                            className="max-h-48 max-w-full rounded-lg object-contain bg-black/30 border border-stone-800"
-                          />
-                        </div>
-                      )}
-                      {uploadedMedia.contentType === 'animation' && (
-                        <div className="pt-1">
-                          <img
-                            src={uploadedMedia.localPreviewUrl}
-                            alt="Uploaded GIF"
-                            className="max-h-48 max-w-full rounded-lg object-contain bg-black/30 border border-stone-800"
-                          />
-                        </div>
-                      )}
-                      {uploadedMedia.contentType === 'video' && (
-                        <div className="pt-1">
-                          <video
-                            src={uploadedMedia.localPreviewUrl}
-                            controls
-                            className="max-h-48 max-w-full rounded-lg bg-black/40 border border-stone-800"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* URL Media Items */}
-                  {!uploadedMedia && mediaLinks.map((item, index) => (
-                    <div
-                      key={item.id}
-                      className={`p-3 rounded-xl border ${themeBorder} ${themeInnerCardBg} space-y-2`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${
-                              item.type === 'image'
-                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                : item.type === 'video'
-                                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                                : item.type === 'gif'
-                                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                                : item.type === 'audio'
-                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                                : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
-                            }`}
-                          >
-                            {index === 0 ? `Primary: ${item.type}` : item.type}
-                          </span>
-                          <a
-                            href={item.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs font-mono text-stone-300 hover:text-blue-400 truncate flex items-center gap-1"
-                            title={item.url}
-                          >
-                            <span className="truncate">{item.url}</span>
-                            <ExternalLink className="w-3 h-3 shrink-0 opacity-60" />
-                          </a>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveMediaLink(item.id)}
-                          className="text-[11px] text-red-400 hover:text-red-300 font-semibold flex items-center gap-1 shrink-0 p-1 hover:bg-red-500/10 rounded-lg transition-colors"
-                          title="Remove media link"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Remove</span>
-                        </button>
-                      </div>
-
-                      {/* Preview for item */}
-                      {item.type === 'image' && (
-                        <div className="pt-1">
-                          <SafeImagePreview url={item.url} />
-                        </div>
-                      )}
-
-                      {item.type === 'gif' && (
-                        <div className="pt-1">
-                          {item.url.toLowerCase().endsWith('.gif') ? (
-                            <SafeImagePreview url={item.url} />
-                          ) : (
-                            <div className="p-2 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
-                              <Film className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                              <span>GIF Animation link configured for Telegram delivery.</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {item.type === 'video' && (
-                        <div className="p-2 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
-                          <Video className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                          <span>Video link configured for Telegram video player delivery.</span>
-                        </div>
-                      )}
-
-                      {item.type === 'audio' && (
-                        <div className="p-2 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
-                          <Music className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                          <span>Audio link configured for Telegram document/audio delivery.</span>
-                        </div>
-                      )}
-
-                      {item.type === 'document' && (
-                        <div className="p-2 rounded bg-black/20 text-[11px] text-stone-400 flex items-center gap-2">
-                          <FileText className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                          <span>Document/File link configured for Telegram document delivery.</span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-
-                  {!uploadedMedia && mediaLinks.length > 1 && (
-                    <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300 flex items-start gap-2">
-                      <Sparkles className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
-                      <span>
-                        Note: Telegram PostSender delivers the primary attachment (<strong>{mediaLinks[0].type.toUpperCase()}</strong>) with this broadcast. Multi-item albums require backend <code>sendMediaGroup</code> support.
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 
@@ -2115,7 +2146,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             <div className="p-3 rounded-xl bg-stone-900/60 border border-stone-800 text-[11px] text-stone-400 flex items-start gap-2">
               <Shield className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
               <p>
-                <strong className="text-stone-300">Telegram Bot Delivery:</strong> Media files can be delivered via public HTTP/HTTPS links or direct local file upload to Roxie. Supports text-only, media-only, and media with caption broadcasts.
+                <strong className="text-stone-300">Telegram Bot Delivery:</strong> Media files can be delivered via public HTTP/HTTPS links or direct local file upload to Roxie. Supports Text + Image, Text + Video, Text + GIF, Text + Audio, and Text + Document broadcasts.
               </p>
             </div>
           </div>
@@ -2217,7 +2248,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                 </div>
 
                 {/* Scrollable Recipient List */}
-                <div className="max-h-[380px] xl:max-h-[440px] overflow-y-auto space-y-1.5 pr-1 text-xs">
+                <div className="max-h-[260px] sm:max-h-[320px] lg:max-h-[380px] xl:max-h-[440px] overflow-y-auto space-y-1.5 pr-1 text-xs">
                   {/* Category: Groups Only */}
                   {recipientType === 'groups' && (
                     <>
@@ -2478,10 +2509,50 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
         </div>
       </div>
 
+      {/* MODAL 0: Media Attachment Replacement Prompt */}
+      {pendingSwitchType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className={`${themeCardBg} border rounded-2xl max-w-md w-full p-4 sm:p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto`}>
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-stone-100">
+                  Replace Existing Media Attachment?
+                </h3>
+                <p className={`text-xs ${themeMutedText} leading-relaxed`}>
+                  You already have an attachment configured ({uploadedMedia ? uploadedMedia.filename : primaryMedia?.url}).
+                  Switching to <strong>{COMPOSITION_OPTIONS.find(o => o.type === pendingSwitchType)?.label}</strong> will replace your currently attached media.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setPendingSwitchType(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-400 hover:text-stone-200 hover:bg-stone-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmTypeSwitch}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                Replace & Switch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL 1: Send Broadcast Confirmation */}
       {showSendModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className={`${themeCardBg} border rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl`}>
+          <div className={`${themeCardBg} border rounded-2xl max-w-md w-full p-4 sm:p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto`}>
             <div>
               <h3 className="text-base font-bold text-stone-100 flex items-center gap-2">
                 <Radio className="w-5 h-5 text-blue-400" />
@@ -2493,6 +2564,15 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             </div>
 
             <div className={`p-4 rounded-xl border ${themeBorder} ${themeInnerCardBg} text-xs space-y-2.5 font-mono`}>
+              {/* Composition Model Requirement 5 */}
+              <div className="flex justify-between items-center pb-1.5 border-b border-stone-800">
+                <span className="text-stone-400">Broadcast Type:</span>
+                <span className="text-blue-400 font-bold flex items-center gap-1.5 font-sans">
+                  <activeOption.icon className="w-3.5 h-3.5" />
+                  {activeOption.label} Broadcast
+                </span>
+              </div>
+
               <div className="flex justify-between items-center">
                 <span className="text-stone-400">Total Recipients:</span>
                 <span className="text-stone-200 font-bold">
@@ -2508,6 +2588,34 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                   </span>
                 </div>
               )}
+
+              {/* Message Text Caption Preview */}
+              <div className="space-y-1 pt-1 font-sans">
+                <span className="text-stone-400 text-[11px] font-mono">Message Text / Caption:</span>
+                <div className="p-2.5 rounded-lg bg-stone-900/80 border border-stone-800 text-stone-200 text-xs whitespace-pre-wrap max-h-24 overflow-y-auto leading-relaxed">
+                  {text.trim()}
+                </div>
+              </div>
+
+              {/* Attached Media Display */}
+              <div className="space-y-1 pt-1 font-sans">
+                <span className="text-stone-400 text-[11px] font-mono">Attached Media:</span>
+                <div className="p-2 rounded-lg bg-stone-900/60 border border-stone-800 text-stone-200 text-xs flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-blue-500/20 text-blue-400 border border-blue-500/30 shrink-0 font-mono">
+                      {uploadedMedia ? `LOCAL ${activeOption.shortLabel.toUpperCase()}` : `${activeOption.shortLabel.toUpperCase()} URL`}
+                    </span>
+                    <span className="truncate font-mono text-[11px]">
+                      {uploadedMedia ? uploadedMedia.filename : primaryMedia?.url}
+                    </span>
+                  </div>
+                  {uploadedMedia && (
+                    <span className="text-[10px] text-stone-400 font-mono shrink-0">
+                      {(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB
+                    </span>
+                  )}
+                </div>
+              </div>
 
               {/* Duplicate Delivery Warning & Safe Retry Option */}
               {hasAlreadyDelivered && (
@@ -2583,22 +2691,6 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               )}
 
               <div className="flex justify-between">
-                <span className="text-stone-400">Content Type:</span>
-                <span className="text-blue-400 uppercase font-bold">{contentType}</span>
-              </div>
-              {uploadedMedia && (
-                <div className="flex justify-between text-emerald-400">
-                  <span>Local File:</span>
-                  <span className="truncate max-w-[200px]">{uploadedMedia.filename}</span>
-                </div>
-              )}
-              {!uploadedMedia && primaryMedia && (
-                <div className="flex justify-between">
-                  <span className="text-stone-400">Media Link:</span>
-                  <span className="text-stone-200 truncate max-w-[200px]">{primaryMedia.url}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
                 <span className="text-stone-400">Buttons:</span>
                 <span className="text-stone-200">
                   {buttonGrid.reduce((sum, r) => sum + r.length, 0)} in {buttonGrid.length} row(s)
@@ -2649,7 +2741,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       {/* MODAL 2: Schedule Post Dialog */}
       {showScheduleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className={`${themeCardBg} border rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl`}>
+          <div className={`${themeCardBg} border rounded-2xl max-w-md w-full p-4 sm:p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto`}>
             <div>
               <h3 className="text-base font-bold text-stone-100 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-purple-400" />
@@ -2658,6 +2750,23 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               <p className={`text-xs ${themeMutedText} mt-1`}>
                 Set the delivery date and time for automatic dispatch via Roxie's scheduler.
               </p>
+            </div>
+
+            {/* Composition Model Summary */}
+            <div className={`p-3 rounded-xl border ${themeBorder} ${themeInnerCardBg} text-xs space-y-1.5`}>
+              <div className="flex justify-between items-center pb-1 border-b border-stone-800">
+                <span className="text-stone-400">Broadcast Model:</span>
+                <span className="text-purple-400 font-bold flex items-center gap-1.5">
+                  <activeOption.icon className="w-3.5 h-3.5" />
+                  {activeOption.label}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-[11px] text-stone-300">
+                <span className="text-stone-400">Attached Media:</span>
+                <span className="truncate max-w-[220px] font-mono">
+                  {uploadedMedia ? uploadedMedia.filename : primaryMedia?.url || 'None'}
+                </span>
+              </div>
             </div>
 
             {/* Local Media Warning in Schedule Modal */}
@@ -2746,7 +2855,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       {/* MODAL 3: Clear Confirmation */}
       {showClearModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className={`${themeCardBg} border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl`}>
+          <div className={`${themeCardBg} border rounded-2xl max-w-sm w-full p-4 sm:p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto`}>
             <div>
               <h3 className="text-base font-bold text-stone-100 flex items-center gap-2">
                 <RotateCcw className="w-5 h-5 text-amber-400" />
@@ -2780,7 +2889,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       {/* MODAL 4: Fullscreen Preview Dialog */}
       {showPreviewModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className={`${themeCardBg} border rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto`}>
+          <div className={`${themeCardBg} border rounded-2xl max-w-xl w-full p-4 sm:p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto`}>
             <div className="flex items-center justify-between border-b border-stone-800/80 pb-3">
               <h3 className="text-base font-bold text-stone-100 flex items-center gap-2">
                 <Eye className="w-5 h-5 text-blue-400" />
