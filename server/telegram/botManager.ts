@@ -876,6 +876,10 @@ export class TelegramBotManager {
 
     // 3. Check Smart User Protection & Moderation (for human users)
     if (isHuman) {
+      // 3a. Check Targeted Promotional Spam Protection (forwarded promo, tables, buttons, CTAs, adult ads)
+      const promoSpamIntercepted = await ModerationService.handlePromotionalSpam(message);
+      if (promoSpamIntercepted) return { handled: true, shouldTriggerAi: false };
+
       const smartProtected = await SmartProtectionService.handleMessage(message);
       if (smartProtected) return { handled: true, shouldTriggerAi: false };
 

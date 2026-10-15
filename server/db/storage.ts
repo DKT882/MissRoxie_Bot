@@ -878,8 +878,8 @@ export class StorageManager {
         linksWhitelist: this.getLinkWhitelist(chatId),
         approvedUsers: this.getApprovedUsers(chatId),
         freedUsers: this.getFreedUsers(chatId),
-        warnings: (this.data.warnings || []).filter((w: any) => w.groupId === chatId).slice(-200),
-        tempActions: (this.data.tempActions || []).filter((t: any) => t.groupId === chatId).slice(-200),
+        warnings: (this.data.warnings || []).filter((w: any) => w.groupId === chatId || w.chatId === chatId).slice(-200),
+        tempActions: (this.data.tempActions || []).filter((t: any) => t.groupId === chatId || t.chatId === chatId).slice(-200),
         abuseWords: abuseWordsList
       },
       ai: {
@@ -3186,6 +3186,7 @@ export class StorageManager {
       id: Math.random().toString(36).substring(2, 9),
       timestamp: new Date().toISOString(),
       count,
+      groupId: record.chatId,
       ...record
     };
     this.data.warnings.push(newRecord);

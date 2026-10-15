@@ -377,6 +377,9 @@ export interface GroupSettings {
   fileProtection?: boolean;
   customAbusiveWords?: string[];
   abuseWords?: string[];
+  // Targeted Promotional Spam Protection
+  promotionalSpamProtection?: boolean;
+  promotionalSpamThreshold?: number;
   // Phase 10 Smart Automation & Advanced Group Management
   automodEnabled?: boolean;
   mediaAction?: 'delete' | 'reason' | 'warn';
@@ -511,6 +514,7 @@ export interface GroupStickerPackConfig {
 export interface WarningRecord {
   id: string;
   chatId: number;
+  groupId?: number;
   userId: number;
   userUsername?: string;
   userFirstName?: string;
@@ -519,6 +523,28 @@ export interface WarningRecord {
   reason: string;
   count?: number;
   timestamp: string;
+  isPromotionalSpam?: boolean;
+}
+
+export interface PromotionalSpamSignals {
+  isForwarded: boolean;
+  hasTableFormatting: boolean;
+  buttonCount: number;
+  urlCount: number;
+  telegramDestinationCount: number;
+  hasCallToAction: boolean;
+  hasAdultContent: boolean;
+  callToActionMatches: string[];
+  adultMatches: string[];
+  tableIndicators: string[];
+}
+
+export interface PromotionalSpamAnalysis {
+  isSpam: boolean;
+  score: number;
+  threshold: number;
+  reasons: string[];
+  signals: PromotionalSpamSignals;
 }
 
 export interface StickerFreeUser {

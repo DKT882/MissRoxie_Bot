@@ -4,6 +4,7 @@ import { TelegramMessage, TelegramUser, TelegramChat, TelegramChatMember, ChatPe
 import { db } from '../db/storage.js';
 import { TelegramMiddleware } from './middleware.js';
 import { ContentPolicyEngine } from './policyEngine.js';
+import { ContentProtectionService } from './contentProtection.js';
 import { PostSender, sanitizeInlineButtons } from './postSender.js';
 import { WelcomeDmFallbackService } from './welcomeDmFallback.js';
 
@@ -190,6 +191,16 @@ export class ModerationService {
     this.inFlightGoodbyes.clear();
     this.welcomedDmUsersCache.clear();
     this.inFlightWelcomeDms.clear();
+  }
+
+  private static processedPromoSpamMessageIds: Set<string> = new Set();
+  private static inFlightPromoSpamUsers: Set<string> = new Set();
+  private static recentSpamWarnings: Map<string, number> = new Map();
+
+  public static clearPromotionalSpamCache(): void {
+    this.processedPromoSpamMessageIds.clear();
+    this.inFlightPromoSpamUsers.clear();
+    this.recentSpamWarnings.clear();
   }
 
   /**
@@ -498,6 +509,272 @@ export class ModerationService {
     }
 
     return true;
+  }
+
+  /**
+   * Safe, bounded bulk message deletion helper for a specific user in a group.
+   * Never deletes other users' messages or crosses chat boundaries.
+   * Handles Telegram batch deleteMessages with fallback to individual deleteMessage.
+   */
+  public static async safeDeleteUserMessages(
+    chatId: number,
+    messageIds: number[]
+  ): Promise<number> {
+    if (!messageIds || messageIds.length === 0) return 0;
+    const uniqueIds = Array.from(new Set(messageIds)).sort((a, b) => a - b);
+    let deletedCount = 0;
+    const successfullyDeletedIds: number[] = [];
+
+    const batchSize = 100;
+    for (let i = 0; i < uniqueIds.length; i += batchSize) {
+      const batch = uniqueIds.slice(i, i + batchSize);
+      try {
+        const bulkRes = await telegramApi.deleteMessages(chatId, batch);
+        if (bulkRes && bulkRes.ok) {
+          deletedCount += batch.length;
+          successfullyDeletedIds.push(...batch);
+        } else {
+          // Fallback to individual deletion
+          for (const id of batch) {
+            try {
+              const res = await telegramApi.deleteMessage(chatId, id);
+              if (res && res.ok) {
+                deletedCount++;
+                successfullyDeletedIds.push(id);
+              }
+            } catch {
+              // Ignore single message deletion failure
+            }
+          }
+        }
+      } catch {
+        // Fallback to individual deletion on network or API failure
+        for (const id of batch) {
+          try {
+            const res = await telegramApi.deleteMessage(chatId, id);
+            if (res && res.ok) {
+              deletedCount++;
+              successfullyDeletedIds.push(id);
+            }
+          } catch {
+            // Ignore single message deletion failure
+          }
+        }
+      }
+    }
+
+    if (successfullyDeletedIds.length > 0) {
+      db.untrackMessages(chatId, successfullyDeletedIds);
+    }
+
+    return deletedCount;
+  }
+
+  /**
+   * Targeted Promotional Spam Detection & Automatic Moderation Handler.
+   * Intercepts multi-signal promotional spam (forwarded promos, tables, grids, inline buttons, adult ads).
+   * 1st Offense: Deletes offending and other user messages + issues exactly 1 persistent warning.
+   * Repeat Offense after warning: Deletes messages + permanently bans offender.
+   */
+  public static async handlePromotionalSpam(message: TelegramMessage): Promise<boolean> {
+    if (!TelegramMiddleware.isGroup(message)) return false;
+    if (!message.from) return false;
+
+    // 1. Bot & Roxie Self Safeguards
+    if (message.from.is_bot) return false;
+    const meRes = await telegramApi.getMe().catch(() => null);
+    const botId = meRes?.result?.id || db.getCurrentBotId() || 0;
+    if (botId && message.from.id === botId) return false;
+
+    const textOrCaption = message.text || message.caption || '';
+    const trimmed = textOrCaption.trim();
+    if (trimmed.startsWith('/') || trimmed.startsWith('!')) return false;
+
+    // Check if scheduled message or internal bot reply
+    if ((message as any).isScheduled || (message as any).isBotReply) return false;
+
+    const chatId = message.chat.id;
+    const userId = message.from.id;
+    const settings = db.getGroupSettings(chatId, message.chat.title);
+
+    // Group-level disable toggle
+    if (settings.promotionalSpamProtection === false) return false;
+
+    // 2. Administrator & Authorized User Protections
+    // (Forwarded message metadata does not bypass sender authorization)
+    const isAdmin = await TelegramMiddleware.isAdmin(chatId, userId, message);
+    if (isAdmin) return false;
+
+    if (db.isUserApproved(chatId, userId)) return false;
+
+    // 3. Deduplication & Idempotency Guards
+    const msgKey = `${chatId}:${message.message_id}`;
+    if (this.processedPromoSpamMessageIds.has(msgKey)) {
+      return true;
+    }
+
+    const userLockKey = `${chatId}:${userId}`;
+    const now = Date.now();
+
+    // In-flight burst protection: if first offense for this user is in flight, delete concurrent message silently
+    if (this.inFlightPromoSpamUsers.has(userLockKey)) {
+      this.processedPromoSpamMessageIds.add(msgKey);
+      await telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
+      db.untrackMessages(chatId, [message.message_id]);
+      return true;
+    }
+
+    // Debounce window: if warning was issued in the last 4 seconds for this user in this group, delete message without duplicate warning
+    const lastWarnTime = this.recentSpamWarnings.get(userLockKey) || 0;
+    if (now - lastWarnTime < 4000) {
+      this.processedPromoSpamMessageIds.add(msgKey);
+      await telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
+      db.untrackMessages(chatId, [message.message_id]);
+      return true;
+    }
+
+    // 4. Multi-Signal Detection Analysis
+    const analysis = ContentProtectionService.analyzePromotionalSpam(message, chatId, settings);
+    if (!analysis.isSpam) {
+      return false;
+    }
+
+    // Confirmed promotional spam match
+    this.processedPromoSpamMessageIds.add(msgKey);
+    if (this.processedPromoSpamMessageIds.size > 2000) {
+      const it = this.processedPromoSpamMessageIds.values();
+      for (let i = 0; i < 500; i++) {
+        const val = it.next().value;
+        if (val) this.processedPromoSpamMessageIds.delete(val);
+      }
+    }
+
+    const username = message.from.username
+      ? `@${message.from.username}`
+      : [message.from.first_name, message.from.last_name].filter(Boolean).join(' ') || `User ${userId}`;
+
+    // 5. Delete offending message immediately
+    let deletedCount = 0;
+    const delMsgRes = await telegramApi.deleteMessage(chatId, message.message_id).catch(() => null);
+    if (delMsgRes && (delMsgRes.ok || delMsgRes === true)) {
+      deletedCount++;
+    }
+    db.untrackMessages(chatId, [message.message_id]);
+
+    // 6. Delete sender's other removable messages in the same group
+    const otherMsgIds = db.getMessagesByUser(chatId, userId, message.message_id, 100).filter((id) => id !== message.message_id);
+    const otherDeleted = await this.safeDeleteUserMessages(chatId, otherMsgIds);
+    deletedCount += otherDeleted;
+
+    // 7. Check existing warning history in Roxie's authoritative storage for this group
+    const userWarnings = db.getUserWarnings(chatId, userId);
+    const hasPriorWarning = userWarnings.some(
+      (w) => (w.reason && w.reason.includes('Promotional link spam')) || w.isPromotionalSpam === true
+    );
+
+    if (!hasPriorWarning) {
+      // --- FIRST CONFIRMED OFFENSE: ISSUE ONE WARNING ---
+      this.inFlightPromoSpamUsers.add(userLockKey);
+      this.recentSpamWarnings.set(userLockKey, now);
+
+      try {
+        db.addWarning({
+          chatId,
+          groupId: chatId,
+          userId,
+          userUsername: message.from.username,
+          userFirstName: message.from.first_name,
+          adminId: botId || 0,
+          adminUsername: 'RoxieAutoMod',
+          reason: 'Promotional link spam',
+          isPromotionalSpam: true
+        } as any);
+
+        const warningNotice =
+          `⚠️ <b>Warning 1/1:</b> Promotional link spam is not allowed in this group.\n\n` +
+          `👤 <b>${escapeHtml(username)}</b>, your message and other removable messages have been deleted (${deletedCount} total).\n` +
+          `<b>Repeating this offense will result in a permanent ban.</b>`;
+
+        await telegramApi.sendMessage(chatId, warningNotice).catch((err) => {
+          console.warn(`[AutoMod] Failed to send promotional spam warning to chat ${chatId}:`, err);
+        });
+
+        db.addLog({
+          chatId,
+          chatTitle: message.chat.title,
+          targetUserId: userId,
+          targetUsername: message.from.username,
+          adminUserId: botId || 0,
+          adminUsername: 'RoxieAutoMod',
+          action: 'warn',
+          result: 'success',
+          reason: `Promotional spam detected (score ${analysis.score.toFixed(1)}/${analysis.threshold}, signals: ${analysis.reasons.join('; ')}). Deleted ${deletedCount} messages. Issued Warning 1/1.`
+        });
+      } finally {
+        setTimeout(() => {
+          this.inFlightPromoSpamUsers.delete(userLockKey);
+        }, 3000);
+      }
+
+      return true;
+    } else {
+      // --- REPEAT OFFENSE: PERMANENT BAN ---
+      let banSucceeded = false;
+      let banErrorDesc = '';
+
+      try {
+        const banRes = await telegramApi.banChatMember(chatId, userId);
+        if (banRes && banRes.ok) {
+          banSucceeded = true;
+        } else {
+          banErrorDesc = banRes?.description || 'Permission issue or Telegram API rejection';
+        }
+      } catch (err: any) {
+        banErrorDesc = err?.message || 'Telegram ban member request failed';
+      }
+
+      if (banSucceeded) {
+        db.addLog({
+          chatId,
+          chatTitle: message.chat.title,
+          targetUserId: userId,
+          targetUsername: message.from.username,
+          adminUserId: botId || 0,
+          adminUsername: 'RoxieAutoMod',
+          action: 'auto_ban',
+          result: 'success',
+          reason: `Repeat promotional spam offense after previous warning (score ${analysis.score.toFixed(1)}/${analysis.threshold}). User permanently banned. Deleted ${deletedCount} messages.`
+        });
+
+        const banNotice =
+          `🚨 <b>PERMANENT BAN</b>\n\n` +
+          `👤 <b>${escapeHtml(username)}</b> has been permanently banned from the group for repeat promotional spam violations.\n` +
+          `🗑️ <i>${deletedCount} offending message(s) removed.</i>`;
+
+        await telegramApi.sendMessage(chatId, banNotice).catch(() => {});
+      } else {
+        // Report failure accurately without claiming ban succeeded
+        db.addLog({
+          chatId,
+          chatTitle: message.chat.title,
+          targetUserId: userId,
+          targetUsername: message.from.username,
+          adminUserId: botId || 0,
+          adminUsername: 'RoxieAutoMod',
+          action: 'auto_ban',
+          result: 'error',
+          reason: `Failed to permanently ban user for repeat promotional spam: ${banErrorDesc}. Deleted ${deletedCount} messages.`
+        });
+
+        const failNotice =
+          `⚠️ <b>Failed to ban ${escapeHtml(username)}:</b> ${escapeHtml(banErrorDesc)}.\n` +
+          `🗑️ <i>${deletedCount} offending message(s) were deleted.</i>`;
+
+        await telegramApi.sendMessage(chatId, failNotice).catch(() => {});
+      }
+
+      return true;
+    }
   }
 
   /**
