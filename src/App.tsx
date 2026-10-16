@@ -60,6 +60,7 @@ import {
 } from 'lucide-react';
 import { RichPostComposer, ComposerContentType, ComposerButton, PostButtonStyle } from './components/RichPostComposer';
 import { RichMessageEditor, RichMessageConfigData } from './components/RichMessageEditor';
+import { MentionAllComposer } from './components/MentionAllComposer';
 
 const LIVE_TESTS = [
   { id: 'LIVE-01', title: 'Bot responds to /ping' },
@@ -248,6 +249,7 @@ export default function App() {
 
   // Navigation (Default to Groups)
   const [activeNav, setActiveNav] = useState<string>('groups');
+  const [broadcastSubTab, setBroadcastSubTab] = useState<'standard' | 'mention-all'>('standard');
   const [selectedChatId, setSelectedChatId] = useState<number | 'all'>('all');
   const [activeGroupDetailId, setActiveGroupDetailId] = useState<number | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
@@ -6187,16 +6189,54 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: BROADCAST (UNIFIED POST COMPOSER) */}
+          {/* TAB: BROADCAST (UNIFIED POST COMPOSER & MENTION ALL) */}
           {activeNav === 'broadcast' && (
-            <RichPostComposer
-              groups={groups}
-              privateChats={privateChats}
-              selectedChatId={selectedChatId}
-              theme={theme}
-              onRefresh={refreshCurrentView}
-              botUsername={botInfo?.username || 'MissRoxie_Bot'}
-            />
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 border-b border-stone-800 pb-3">
+                <button
+                  type="button"
+                  onClick={() => setBroadcastSubTab('standard')}
+                  className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors ${
+                    broadcastSubTab === 'standard'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : `${themeInnerCardBg} text-stone-300 hover:text-white border ${themeBorder}`
+                  }`}
+                >
+                  <Radio className="w-4 h-4" />
+                  Standard Broadcast
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBroadcastSubTab('mention-all')}
+                  className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors ${
+                    broadcastSubTab === 'mention-all'
+                      ? 'bg-purple-600 text-white shadow-sm'
+                      : `${themeInnerCardBg} text-stone-300 hover:text-white border ${themeBorder}`
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  Mention All (@all)
+                </button>
+              </div>
+
+              {broadcastSubTab === 'standard' ? (
+                <RichPostComposer
+                  groups={groups}
+                  privateChats={privateChats}
+                  selectedChatId={selectedChatId}
+                  theme={theme}
+                  onRefresh={refreshCurrentView}
+                  botUsername={botInfo?.username || 'MissRoxie_Bot'}
+                />
+              ) : (
+                <MentionAllComposer
+                  groups={groups}
+                  selectedChatId={typeof selectedChatId === 'number' ? selectedChatId : null}
+                  theme={theme}
+                  onRefresh={refreshCurrentView}
+                />
+              )}
+            </div>
           )}
 
           {/* TAB: STICKER CENTER */}

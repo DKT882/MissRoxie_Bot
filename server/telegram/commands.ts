@@ -10,6 +10,15 @@ import { mapTelegramError } from './errorMapper.js';
 import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand, CachedMember, ScheduledPostButton, PostPayload } from './types.js';
 import { mtprotoParticipantService, MtprotoParticipantService } from './mtprotoParticipantService.js';
 import {
+  mentionAllService,
+  MentionAllService,
+  type ActiveAllOperation,
+  ALL_MESSAGE_INTERVAL_MS,
+  ALL_MENTION_EMOJIS
+} from './mentionAllService.js';
+export type { ActiveAllOperation };
+export { ALL_MESSAGE_INTERVAL_MS, ALL_MENTION_EMOJIS };
+import {
   COMMAND_CATALOG,
   getCatalogItem,
   getCatalogByCategory,
@@ -279,58 +288,21 @@ interface PermissionEditorSession {
   createdAt: number;
 }
 
-export interface ActiveAllOperation {
-  chatId: number;
-  operationId: string;
-  actorUserId: number;
-  actorUsername?: string;
-  actorDisplayName?: string;
-  startedAt: number;
-  abortController: AbortController;
-  totalBatches: number;
-  sentBatches: number;
-  mentionsCount: number;
-  isCancelled: boolean;
-  cancelledBy?: {
-    userId: number;
-    username?: string;
-    displayName?: string;
-  };
-  completionResolve: () => void;
-  completionPromise: Promise<void>;
-}
-
-export const ALL_MESSAGE_INTERVAL_MS = 20_000;
-
 export class CommandHandler {
-  public static allMessageIntervalMs: number | null = null;
-  public static activeAllOperations: Map<number, ActiveAllOperation> = new Map();
+  public static get allMessageIntervalMs(): number | null {
+    return mentionAllService.allMessageIntervalMs;
+  }
+  public static set allMessageIntervalMs(val: number | null) {
+    mentionAllService.allMessageIntervalMs = val;
+  }
+  public static get activeAllOperations(): Map<number, ActiveAllOperation> {
+    return mentionAllService.activeOperations;
+  }
   private static sayCooldowns: Map<number, number> = new Map();
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
 
   public static abortableSleep(ms: number, signal?: AbortSignal): Promise<boolean> {
-    if (!signal) {
-      return new Promise((resolve) => setTimeout(() => resolve(true), ms));
-    }
-    if (signal.aborted) {
-      return Promise.resolve(false);
-    }
-    if (ms <= 0) {
-      return Promise.resolve(true);
-    }
-    return new Promise((resolve) => {
-      let timer: NodeJS.Timeout | null = null;
-      const onAbort = () => {
-        if (timer) clearTimeout(timer);
-        signal.removeEventListener('abort', onAbort);
-        resolve(false);
-      };
-      timer = setTimeout(() => {
-        signal.removeEventListener('abort', onAbort);
-        resolve(true);
-      }, ms);
-      signal.addEventListener('abort', onAbort);
-    });
+    return MentionAllService.abortableSleep(ms, signal);
   }
 
   private static catalogMap = new Map<string, CommandCatalogItem>(
@@ -4340,60 +4312,7 @@ export class CommandHandler {
     chatId: number,
     botId?: number
   ): Promise<CachedMember[]> {
-    // 1. Refresh administrators to ensure latest admins are cached in group members
-    try {
-      const adminRes = await telegramApi.getChatAdministrators(chatId);
-      if (adminRes.ok && Array.isArray(adminRes.result)) {
-        for (const admin of adminRes.result) {
-          if (admin.user && !admin.user.is_bot) {
-            db.cacheUser(admin.user, chatId);
-          }
-        }
-      }
-    } catch {
-      // Non-blocking: fallback to already stored members
-    }
-
-    const primaryMembers = db.getGroupMembersList(chatId) || [];
-    const secondaryMembers = db.getGroupMembers(chatId) || [];
-
-    const seenUserIds = new Set<number>();
-    const eligibleMembers: CachedMember[] = [];
-    const allCandidateMembers = [...primaryMembers, ...secondaryMembers];
-
-    for (const m of allCandidateMembers) {
-      if (!m || !m.userId) continue;
-      const uid = Number(m.userId);
-      if (isNaN(uid) || uid <= 0) continue;
-      if (uid === 1087968824 || uid === 777000) continue;
-      if (botId && uid === botId) continue;
-      if (seenUserIds.has(uid)) continue;
-
-      const rawUname = (m.username || '').trim();
-      const cleanUname = rawUname.replace(/^@/, '').trim();
-      const lowerUname = cleanUname.toLowerCase();
-      const firstName = (m.firstName || '').trim();
-
-      // Exclude bots (via explicit is_bot flag only)
-      if ((m as any).is_bot === true || (m as any).isBot === true) {
-        continue;
-      }
-
-      // Exclude deleted accounts if identifiable
-      if (firstName.toLowerCase() === 'deleted account' || cleanUname.toLowerCase() === 'deletedaccount') {
-        continue;
-      }
-
-      seenUserIds.add(uid);
-      eligibleMembers.push({
-        userId: uid,
-        username: cleanUname || undefined,
-        firstName: firstName || 'Member',
-        lastSeen: (m as any).lastSeen || (m as any).lastActive || new Date().toISOString()
-      });
-    }
-
-    return eligibleMembers;
+    return mentionAllService.getEligibleGroupMembers(chatId, botId);
   }
 
   public static buildAllMentionsChunks(
@@ -4402,56 +4321,7 @@ export class CommandHandler {
     botId?: number,
     chunkSize: number = 10
   ): { mentions: string[]; chunks: string[] } {
-    const seenUserIds = new Set<number>();
-    const mentions: string[] = [];
-    const emojis = CommandHandler.ALL_MENTION_EMOJIS;
-
-    for (const m of members) {
-      if (!m || !m.userId) continue;
-      const uid = Number(m.userId);
-      if (isNaN(uid) || uid <= 0) continue;
-      if (uid === 1087968824 || uid === 777000) continue;
-      if (botId && uid === botId) continue;
-      if (seenUserIds.has(uid)) continue;
-
-      const rawUname = (m.username || '').trim();
-      const cleanUname = rawUname.replace(/^@/, '').trim();
-      const lowerUname = cleanUname.toLowerCase();
-      const firstName = (m.firstName || '').trim();
-
-      // Exclude bots (via explicit is_bot flag only)
-      if ((m as any).is_bot === true || (m as any).isBot === true) {
-        continue;
-      }
-
-      // Exclude deleted accounts if identifiable
-      if (firstName.toLowerCase() === 'deleted account' || cleanUname.toLowerCase() === 'deletedaccount') {
-        continue;
-      }
-
-      seenUserIds.add(uid);
-
-      const emoji = emojis[Math.floor(Math.random() * emojis.length)];
-      mentions.push(`<a href="tg://user?id=${uid}">${emoji}</a>`);
-    }
-
-    if (mentions.length === 0) {
-      return { mentions: [], chunks: [] };
-    }
-
-    const chunks: string[] = [];
-    const cleanDefaultMsg = (defaultMsg || '').trim();
-    for (let i = 0; i < mentions.length; i += chunkSize) {
-      const chunkMentions = mentions.slice(i, i + chunkSize);
-      const emojiRow = chunkMentions.join('');
-      if (cleanDefaultMsg) {
-        chunks.push(`${cleanDefaultMsg}\n\n${emojiRow}`);
-      } else {
-        chunks.push(emojiRow);
-      }
-    }
-
-    return { mentions, chunks };
+    return MentionAllService.buildAllMentionsChunks(members, defaultMsg, botId, chunkSize);
   }
 
   private static async handleAll(ctx: CommandContext) {
@@ -4477,147 +4347,128 @@ export class CommandHandler {
       return;
     }
 
-    const abortController = new AbortController();
-    let completionResolve!: () => void;
-    const completionPromise = new Promise<void>((resolve) => {
-      completionResolve = resolve;
+    // Get bot ID to exclude self
+    const botId = (await telegramApi.getMe())?.result?.id;
+
+    if (ctx.args[0]?.toLowerCase() === 'status') {
+      const isMtprotoConfigured = mtprotoParticipantService.isConfigured();
+      let eligibleCount = 0;
+      let modeText = '';
+
+      if (isMtprotoConfigured && process.env.NODE_ENV !== 'test') {
+        const fetchResult = await mtprotoParticipantService.fetchGroupParticipants(ctx.chatId, botId);
+        if (fetchResult.status === 'FULL_FETCH' || fetchResult.status === 'PARTIAL_FETCH') {
+          eligibleCount = fetchResult.eligibleCount;
+          modeText = `MTProto Enumeration (${fetchResult.status === 'FULL_FETCH' ? 'Full' : 'Partial: ' + fetchResult.uniqueCount + '/' + fetchResult.telegramTotal})`;
+        } else {
+          modeText = `MTProto Error: ${fetchResult.error || 'Fetch failed'}`;
+        }
+      } else {
+        const cached = await CommandHandler.getAllEligibleGroupMembers(ctx.chatId, botId);
+        eligibleCount = cached.length;
+        modeText = isMtprotoConfigured ? 'MTProto Enumeration' : 'Observed Cache Fallback (MTProto not configured)';
+      }
+
+      const estimatedMessages = Math.ceil(eligibleCount / 10);
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `ℹ️ <b>/all Command Status</b>\n\n` +
+        `<b>Member Source:</b> ${modeText}\n` +
+        `<b>Eligible Members Available:</b> ${eligibleCount}\n` +
+        `<b>Estimated Messages:</b> ${estimatedMessages}\n` +
+        `<b>Batch Size:</b> 10 members / message\n` +
+        `<b>Usage:</b> <code>/all [custom message text]</code>\n\n` +
+        `<i>Note: Mentions all eligible members directly through Telegram member enumeration in 10-member emoji batches.</i>`,
+        { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
+      );
+      return;
+    }
+
+    const customText = CommandHandler.getCommandText(ctx, 0);
+
+    const reply = ctx.message.reply_to_message;
+    let repliedPhotoId: string | undefined;
+    let repliedAnimationId: string | undefined;
+    let repliedVideoId: string | undefined;
+    let repliedDocumentId: string | undefined;
+
+    if (reply) {
+      if (reply.photo && reply.photo.length > 0) {
+        repliedPhotoId = reply.photo[reply.photo.length - 1].file_id;
+      } else if (reply.animation) {
+        repliedAnimationId = reply.animation.file_id;
+      } else if (reply.video) {
+        repliedVideoId = reply.video.file_id;
+      } else if (reply.document) {
+        repliedDocumentId = reply.document.file_id;
+      }
+    }
+
+    const targetReplyId = reply?.message_id || ctx.message.message_id;
+
+    const startRes = await mentionAllService.startOperation({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor: {
+        actorUserId: actor.actorUserId,
+        actorUsername: actor.actorUsername,
+        actorDisplayName: actor.actorDisplayName,
+        actorRank: actor.actorRank
+      },
+      source: 'command',
+      messageText: customText || '',
+      targetReplyId,
+      media: {
+        contentType: repliedPhotoId ? 'photo' : (repliedAnimationId ? 'animation' : (repliedVideoId ? 'video' : (repliedDocumentId ? 'document' : 'text'))),
+        repliedPhotoId,
+        repliedAnimationId,
+        repliedVideoId,
+        repliedDocumentId
+      },
+      awaitWorker: process.env.NODE_ENV === 'test'
     });
 
-    const operation: ActiveAllOperation = {
-      chatId: ctx.chatId,
-      operationId: `all_${ctx.chatId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      actorUserId: actor.actorUserId,
-      actorUsername: actor.actorUsername,
-      actorDisplayName: actor.actorDisplayName,
-      startedAt: Date.now(),
-      abortController,
-      totalBatches: 0,
-      sentBatches: 0,
-      mentionsCount: 0,
-      isCancelled: false,
-      completionResolve,
-      completionPromise
-    };
-
-    CommandHandler.activeAllOperations.set(ctx.chatId, operation);
-    mtprotoParticipantService.acquireChatLock(ctx.chatId);
-
-    let workerDispatched = false;
-    try {
-      // Get bot ID to exclude self
-      const botId = (await telegramApi.getMe())?.result?.id;
-
-      if (ctx.args[0]?.toLowerCase() === 'status') {
-        const isMtprotoConfigured = mtprotoParticipantService.isConfigured();
-        let eligibleCount = 0;
-        let modeText = '';
-
-        if (isMtprotoConfigured && process.env.NODE_ENV !== 'test') {
-          const fetchResult = await mtprotoParticipantService.fetchGroupParticipants(ctx.chatId, botId);
-          if (fetchResult.status === 'FULL_FETCH' || fetchResult.status === 'PARTIAL_FETCH') {
-            eligibleCount = fetchResult.eligibleCount;
-            modeText = `MTProto Enumeration (${fetchResult.status === 'FULL_FETCH' ? 'Full' : 'Partial: ' + fetchResult.uniqueCount + '/' + fetchResult.telegramTotal})`;
-          } else {
-            modeText = `MTProto Error: ${fetchResult.error || 'Fetch failed'}`;
-          }
-        } else {
-          const cached = await CommandHandler.getAllEligibleGroupMembers(ctx.chatId, botId);
-          eligibleCount = cached.length;
-          modeText = isMtprotoConfigured ? 'MTProto Enumeration' : 'Observed Cache Fallback (MTProto not configured)';
-        }
-
-        const estimatedMessages = Math.ceil(eligibleCount / 10);
+    if (!startRes.ok) {
+      if (startRes.status === 'already_running') {
         await telegramApi.sendMessage(
           ctx.chatId,
-          `ℹ️ <b>/all Command Status</b>\n\n` +
-          `<b>Member Source:</b> ${modeText}\n` +
-          `<b>Eligible Members Available:</b> ${eligibleCount}\n` +
-          `<b>Estimated Messages:</b> ${estimatedMessages}\n` +
-          `<b>Batch Size:</b> 10 members / message\n` +
-          `<b>Usage:</b> <code>/all [custom message text]</code>\n\n` +
-          `<i>Note: Mentions all eligible members directly through Telegram member enumeration in 10-member emoji batches.</i>`,
-          { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
+          '⏳ An /all broadcast is already in progress for this group. Please wait for it to complete.',
+          { reply_to_message_id: ctx.message.message_id }
         );
-        return;
-      }
+      } else if (startRes.status === 'mtproto_error') {
+        const errorMsg = startRes.error || 'Failed to retrieve group participants via MTProto.';
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `❌ ${errorMsg}`,
+          { reply_to_message_id: ctx.message.message_id }
+        );
 
-      if (operation.abortController.signal.aborted || operation.isCancelled) {
-        return;
-      }
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor,
+          command: 'all',
+          action: 'all_broadcast',
+          result: 'error',
+          details: `MTProto participant fetch failed: ${startRes.error || 'UNKNOWN'}`
+        });
+      } else if (startRes.status === 'mtproto_partial') {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `⚠️ ${startRes.error}`,
+          { reply_to_message_id: ctx.message.message_id }
+        );
 
-      let members: CachedMember[] = [];
-      const isMtprotoConfigured = mtprotoParticipantService.isConfigured();
-
-      if (isMtprotoConfigured) {
-        const fetchRes = await mtprotoParticipantService.fetchGroupParticipants(ctx.chatId, botId);
-
-        if (fetchRes.status === 'FETCH_FAILED') {
-          const errorMsg = fetchRes.error || 'Failed to retrieve group participants via MTProto.';
-          await telegramApi.sendMessage(
-            ctx.chatId,
-            `❌ ${errorMsg}`,
-            { reply_to_message_id: ctx.message.message_id }
-          );
-
-          TelegramMiddleware.logAudit({
-            chatId: ctx.chatId,
-            chatTitle: ctx.chatTitle,
-            actor,
-            command: 'all',
-            action: 'all_broadcast',
-            result: 'error',
-            details: `MTProto participant fetch failed: ${fetchRes.errorCode || 'UNKNOWN'}`
-          });
-          return;
-        }
-
-        if (fetchRes.status === 'PARTIAL_FETCH') {
-          const restrictionMsg = fetchRes.diagnosticMessage ||
-            `Telegram did not allow Roxie to retrieve the complete member list for this group (${fetchRes.uniqueCount}/${fetchRes.telegramTotal} available due to Telegram visibility restrictions).`;
-          await telegramApi.sendMessage(
-            ctx.chatId,
-            `⚠️ ${restrictionMsg}`,
-            { reply_to_message_id: ctx.message.message_id }
-          );
-
-          TelegramMiddleware.logAudit({
-            chatId: ctx.chatId,
-            chatTitle: ctx.chatTitle,
-            actor,
-            command: 'all',
-            action: 'warn',
-            result: 'error',
-            details: `MTProto partial fetch: ${fetchRes.uniqueCount}/${fetchRes.telegramTotal}`
-          });
-          return;
-        }
-
-        // FULL_FETCH: Use authoritative fresh MTProto participant list
-        members = fetchRes.members;
-      } else {
-        // Fallback for tests or unconfigured environments
-        if (process.env.NODE_ENV === 'test') {
-          members = await CommandHandler.getAllEligibleGroupMembers(ctx.chatId, botId);
-        } else {
-          await telegramApi.sendMessage(
-            ctx.chatId,
-            '⚠️ MTProto is not configured on this server. Please configure TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_BOT_TOKEN for full group member enumeration.',
-            { reply_to_message_id: ctx.message.message_id }
-          );
-          return;
-        }
-      }
-
-      if (operation.abortController.signal.aborted || operation.isCancelled) {
-        return;
-      }
-
-      const customText = CommandHandler.getCommandText(ctx, 0);
-      const defaultMsg = customText || '';
-
-      const { mentions, chunks } = CommandHandler.buildAllMentionsChunks(members, defaultMsg, botId, 10);
-
-      if (mentions.length === 0) {
+        TelegramMiddleware.logAudit({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          actor,
+          command: 'all',
+          action: 'warn',
+          result: 'error',
+          details: `MTProto partial fetch: ${startRes.error}`
+        });
+      } else if (startRes.status === 'no_members') {
         await telegramApi.sendMessage(
           ctx.chatId,
           '⚠️ No eligible group members found to mention.',
@@ -4633,221 +4484,12 @@ export class CommandHandler {
           result: 'success',
           details: 'Tried /all but 0 eligible members available'
         });
-        return;
-      }
-
-      const reply = ctx.message.reply_to_message;
-      let repliedPhotoId: string | undefined;
-      let repliedAnimationId: string | undefined;
-      let repliedVideoId: string | undefined;
-      let repliedDocumentId: string | undefined;
-
-      if (reply) {
-        if (reply.photo && reply.photo.length > 0) {
-          repliedPhotoId = reply.photo[reply.photo.length - 1].file_id;
-        } else if (reply.animation) {
-          repliedAnimationId = reply.animation.file_id;
-        } else if (reply.video) {
-          repliedVideoId = reply.video.file_id;
-        } else if (reply.document) {
-          repliedDocumentId = reply.document.file_id;
-        }
-      }
-
-      const targetReplyId = reply?.message_id || ctx.message.message_id;
-
-      operation.totalBatches = chunks.length;
-      operation.mentionsCount = mentions.length;
-
-      if (operation.abortController.signal.aborted || operation.isCancelled) {
-        return;
-      }
-
-      workerDispatched = true;
-      const workerPromise = CommandHandler.executeAllBroadcastWorker(
-        ctx.chatId,
-        ctx.chatTitle,
-        actor,
-        chunks,
-        targetReplyId,
-        {
-          repliedPhotoId,
-          repliedAnimationId,
-          repliedVideoId,
-          repliedDocumentId
-        },
-        mentions.length,
-        operation
-      );
-
-      if (process.env.NODE_ENV === 'test') {
-        await workerPromise;
-      } else {
-        // In production: Dispatch asynchronously so the message processing queue
-        // and global concurrency slot are immediately freed for real-time operations in this chat & other chats.
-        workerPromise.catch((err) => {
-          console.error(`[ALL] Background broadcast worker unhandled exception:`, err);
-        });
-      }
-    } finally {
-      if (!workerDispatched) {
-        CommandHandler.activeAllOperations.delete(ctx.chatId);
-        mtprotoParticipantService.releaseChatLock(ctx.chatId);
-        operation.completionResolve();
-      }
-    }
-  }
-
-  private static async executeAllBroadcastWorker(
-    chatId: number,
-    chatTitle: string | undefined,
-    actor: ActorResolution,
-    chunks: string[],
-    targetReplyId: number,
-    mediaInfo: {
-      repliedPhotoId?: string;
-      repliedAnimationId?: string;
-      repliedVideoId?: string;
-      repliedDocumentId?: string;
-    },
-    mentionsCount: number,
-    operation: ActiveAllOperation
-  ): Promise<void> {
-    try {
-      for (let i = 0; i < chunks.length; i++) {
-        // Cooperative cancellation check before each batch
-        if (operation.abortController.signal.aborted || operation.isCancelled) {
-          console.log(`[ALL] Broadcast stopped cooperatively before batch ${i + 1}/${chunks.length} for chatId=${chatId}`);
-          break;
-        }
-
-        const chunkText = chunks[i];
-        console.log(`[ALL] sending batch=${i + 1}/${chunks.length}`);
-
-        let sendSuccess = false;
-        let batchAttempts = 0;
-        const maxBatchAttempts = 3;
-
-        while (!sendSuccess && batchAttempts <= maxBatchAttempts) {
-          if (operation.abortController.signal.aborted || operation.isCancelled) {
-            break;
-          }
-
-          batchAttempts++;
-          let sendRes: any;
-          try {
-            if (mediaInfo.repliedPhotoId || mediaInfo.repliedAnimationId || mediaInfo.repliedVideoId || mediaInfo.repliedDocumentId) {
-              if (mediaInfo.repliedPhotoId) {
-                sendRes = await telegramApi.sendPhoto(chatId, mediaInfo.repliedPhotoId, {
-                  caption: chunkText,
-                  parse_mode: 'HTML',
-                  reply_to_message_id: i === 0 ? targetReplyId : undefined
-                });
-              } else if (mediaInfo.repliedAnimationId) {
-                sendRes = await telegramApi.sendAnimation(chatId, mediaInfo.repliedAnimationId, {
-                  caption: chunkText,
-                  parse_mode: 'HTML',
-                  reply_to_message_id: i === 0 ? targetReplyId : undefined
-                });
-              } else if (mediaInfo.repliedVideoId) {
-                sendRes = await telegramApi.sendVideo(chatId, mediaInfo.repliedVideoId, {
-                  caption: chunkText,
-                  parse_mode: 'HTML',
-                  reply_to_message_id: i === 0 ? targetReplyId : undefined
-                });
-              } else if (mediaInfo.repliedDocumentId) {
-                sendRes = await telegramApi.sendDocument(chatId, mediaInfo.repliedDocumentId, {
-                  caption: chunkText,
-                  parse_mode: 'HTML',
-                  reply_to_message_id: i === 0 ? targetReplyId : undefined
-                });
-              }
-            } else {
-              sendRes = await telegramApi.sendMessage(chatId, chunkText, {
-                reply_to_message_id: i === 0 ? targetReplyId : undefined,
-                parse_mode: 'HTML'
-              });
-            }
-          } catch (sendErr: any) {
-            console.warn(`[ALL] Exception on sending batch ${i + 1}: ${sendErr.message}`);
-          }
-
-          if (sendRes && sendRes.ok) {
-            sendSuccess = true;
-          } else if (sendRes && sendRes.error_code === 429) {
-            const retryAfterSec = sendRes.parameters?.retry_after || 2;
-            console.warn(`[ALL] 429 flood wait on batch ${i + 1}. Retrying in ${retryAfterSec}s...`);
-            if (batchAttempts <= maxBatchAttempts) {
-              const completed = await CommandHandler.abortableSleep(retryAfterSec * 1000, operation.abortController.signal);
-              if (!completed || operation.isCancelled) {
-                console.log(`[ALL] 429 flood wait aborted by cancellation for chatId=${chatId}`);
-                break;
-              }
-            } else {
-              sendSuccess = true; // Exceeded max retries for this batch, proceed to avoid blocking forever
-            }
-          } else {
-            sendSuccess = true;
-          }
-        }
-
-        if (operation.abortController.signal.aborted || operation.isCancelled) {
-          if (sendSuccess) {
-            operation.sentBatches = i + 1;
-          }
-          break;
-        }
-
-        if (sendSuccess) {
-          operation.sentBatches = i + 1;
-        }
-
-        // Fixed interval pacing (20 seconds / 20_000ms) between consecutive /all mention messages
-        if (i < chunks.length - 1) {
-          const pacingMs = CommandHandler.allMessageIntervalMs !== null
-            ? CommandHandler.allMessageIntervalMs
-            : (process.env.NODE_ENV === 'test' ? 10 : ALL_MESSAGE_INTERVAL_MS);
-          if (pacingMs > 0) {
-            const completed = await CommandHandler.abortableSleep(pacingMs, operation.abortController.signal);
-            if (!completed || operation.isCancelled) {
-              console.log(`[ALL] Pacing delay aborted by cancellation for chatId=${chatId}`);
-              break;
-            }
-          }
-        }
-      }
-
-      if (operation.isCancelled) {
-        console.log(`[ALL] Broadcast stopped chatId=${chatId} after ${operation.sentBatches}/${chunks.length} batches`);
-        TelegramMiddleware.logAudit({
-          chatId,
-          chatTitle,
-          actor,
-          command: 'all',
-          action: 'all_broadcast',
-          result: 'success',
-          details: `Broadcast stopped by ${operation.cancelledBy?.displayName || operation.cancelledBy?.username || 'admin'}. Sent ${operation.sentBatches} of ${chunks.length} batch(es)`
-        });
-      } else {
-        console.log(`[ALL] completed batches=${chunks.length}`);
-        TelegramMiddleware.logAudit({
-          chatId,
-          chatTitle,
-          actor,
-          command: 'all',
-          action: 'all_broadcast',
-          result: 'success',
-          details: `Mentioned ${mentionsCount} members across ${chunks.length} message(s)`
-        });
-      }
-    } catch (workerErr: any) {
-      console.error(`[ALL] Worker error in chatId=${chatId}:`, workerErr);
-    } finally {
-      try {
-        CommandHandler.activeAllOperations.delete(chatId);
-        mtprotoParticipantService.releaseChatLock(chatId);
-      } finally {
-        operation.completionResolve();
+      } else if (startRes.error) {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `⚠️ ${startRes.error}`,
+          { reply_to_message_id: ctx.message.message_id }
+        );
       }
     }
   }
@@ -4884,36 +4526,28 @@ export class CommandHandler {
       return;
     }
 
-    // Mark as cancelled and trigger cooperative abort
-    op.isCancelled = true;
-    op.cancelledBy = {
+    const stopRes = await mentionAllService.stopOperation(ctx.chatId, {
       userId: actor.actorUserId,
       username: actor.actorUsername,
       displayName: actor.actorDisplayName
-    };
-    op.abortController.abort();
-
-    // Await the worker's confirmed completion so lock is never cleared prematurely while worker is mid-flight
-    await op.completionPromise;
-
-    const stopMessage = op.totalBatches > 0
-      ? `⏹️ <b>/all Broadcast Stopped</b>\n\nBroadcast stopped by ${actor.actorDisplayName}.\nSent <b>${op.sentBatches}</b> of <b>${op.totalBatches}</b> batch(es).`
-      : `⏹️ <b>/all Broadcast Stopped</b>\n\nBroadcast stopped by ${actor.actorDisplayName} before batches were dispatched.`;
-
-    await telegramApi.sendMessage(ctx.chatId, stopMessage, {
-      reply_to_message_id: ctx.message.message_id,
-      parse_mode: 'HTML'
     });
 
-    TelegramMiddleware.logAudit({
-      chatId: ctx.chatId,
-      chatTitle: ctx.chatTitle,
-      actor,
-      command: 'stopall',
-      action: 'all_broadcast',
-      result: 'success',
-      details: `Stopped /all broadcast after ${op.sentBatches} of ${op.totalBatches} batch(es)`
-    });
+    if (stopRes.ok) {
+      await telegramApi.sendMessage(ctx.chatId, stopRes.message, {
+        reply_to_message_id: ctx.message.message_id,
+        parse_mode: 'HTML'
+      });
+
+      TelegramMiddleware.logAudit({
+        chatId: ctx.chatId,
+        chatTitle: ctx.chatTitle,
+        actor,
+        command: 'stopall',
+        action: 'all_broadcast',
+        result: 'success',
+        details: `Stopped /all broadcast after ${stopRes.sentBatches ?? 0} of ${stopRes.totalBatches ?? 0} batch(es)`
+      });
+    }
   }
 
 

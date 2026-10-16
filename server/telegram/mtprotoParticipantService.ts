@@ -4,9 +4,11 @@ import { CachedMember, TelegramMessageEntity } from './types.js';
 import { logDebug } from '../observability/logger.js';
 
 export type ParticipantFetchStatus = 'FULL_FETCH' | 'PARTIAL_FETCH' | 'FETCH_FAILED';
+export type MtprotoAuthMode = 'USER' | 'BOT' | 'NONE';
 
 export interface ParticipantFetchResult {
   status: ParticipantFetchStatus;
+  authMode: MtprotoAuthMode;
   telegramTotal: number;
   fetchedCount: number;
   uniqueCount: number;
@@ -21,7 +23,7 @@ export interface ParticipantFetchResult {
 
 export class MTProtoNotConfiguredError extends Error {
   public readonly code = 'NOT_CONFIGURED';
-  constructor(message: string = 'MTProto client is not configured on this server (missing TELEGRAM_API_ID, TELEGRAM_API_HASH, or TELEGRAM_BOT_TOKEN).') {
+  constructor(message: string = 'MTProto client is not configured on this server (missing TELEGRAM_API_ID, TELEGRAM_API_HASH, and either TELEGRAM_MT_PROTO_SESSION or TELEGRAM_BOT_TOKEN).') {
     super(message);
     this.name = 'MTProtoNotConfiguredError';
   }
@@ -86,6 +88,7 @@ export class MtprotoParticipantService {
   private client: TelegramClient | null = null;
   private isConnecting: boolean = false;
   private isConnected: boolean = false;
+  private currentMode: MtprotoAuthMode = 'NONE';
   private connectPromise: Promise<TelegramClient> | null = null;
 
   // Active chat fetch locks to prevent concurrent /all operations for the same group
@@ -98,28 +101,51 @@ export class MtprotoParticipantService {
     return MtprotoParticipantService.instance;
   }
 
-  public isConfigured(): boolean {
+  public getAuthMode(): MtprotoAuthMode {
     const apiId = process.env.TELEGRAM_API_ID?.trim();
     const apiHash = process.env.TELEGRAM_API_HASH?.trim();
+    if (!apiId || !apiHash || isNaN(Number(apiId))) {
+      return 'NONE';
+    }
+
+    const userSession = (process.env.TELEGRAM_MT_PROTO_SESSION || process.env.TELEGRAM_STRING_SESSION)?.trim();
+    if (userSession && userSession.length > 0) {
+      return 'USER';
+    }
+
     const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
-    return Boolean(apiId && apiHash && botToken && !isNaN(Number(apiId)));
+    if (botToken && botToken.length > 0) {
+      return 'BOT';
+    }
+
+    return 'NONE';
+  }
+
+  public isConfigured(): boolean {
+    return this.getAuthMode() !== 'NONE';
   }
 
   public getConfigurationStatus(): {
     isConfigured: boolean;
+    mode: MtprotoAuthMode;
     hasApiId: boolean;
     hasApiHash: boolean;
+    hasUserSession: boolean;
     hasBotToken: boolean;
     isConnected: boolean;
   } {
     const apiId = process.env.TELEGRAM_API_ID?.trim();
     const apiHash = process.env.TELEGRAM_API_HASH?.trim();
+    const userSession = (process.env.TELEGRAM_MT_PROTO_SESSION || process.env.TELEGRAM_STRING_SESSION)?.trim();
     const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
+    const mode = this.getAuthMode();
 
     return {
-      isConfigured: this.isConfigured(),
+      isConfigured: mode !== 'NONE',
+      mode,
       hasApiId: Boolean(apiId && !isNaN(Number(apiId))),
       hasApiHash: Boolean(apiHash && apiHash.length > 0),
+      hasUserSession: Boolean(userSession && userSession.length > 0),
       hasBotToken: Boolean(botToken && botToken.length > 0),
       isConnected: this.isConnected
     };
@@ -142,7 +168,14 @@ export class MtprotoParticipantService {
   }
 
   public async getClient(): Promise<TelegramClient> {
-    if (this.client && this.isConnected) {
+    const mode = this.getAuthMode();
+    if (mode === 'NONE') {
+      throw new MTProtoNotConfiguredError(
+        'MTProto credentials (TELEGRAM_API_ID, TELEGRAM_API_HASH, and either TELEGRAM_MT_PROTO_SESSION or TELEGRAM_BOT_TOKEN) are not configured.'
+      );
+    }
+
+    if (this.client && this.isConnected && this.currentMode === mode) {
       return this.client;
     }
 
@@ -151,47 +184,80 @@ export class MtprotoParticipantService {
     }
 
     this.connectPromise = (async () => {
-      if (!this.isConfigured()) {
-        throw new MTProtoNotConfiguredError(
-          'MTProto credentials (TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN) are not configured.'
-        );
-      }
-
       const apiId = parseInt(process.env.TELEGRAM_API_ID!.trim(), 10);
       const apiHash = process.env.TELEGRAM_API_HASH!.trim();
-      const botToken = process.env.TELEGRAM_BOT_TOKEN!.trim();
 
-      const stringSession = new StringSession('');
-      const client = new TelegramClient(stringSession, apiId, apiHash, {
-        connectionRetries: 3,
-        autoReconnect: true,
-        useWSS: false,
-        timeout: 25000
-      });
-
-      console.log('[MTProto] Connecting client with bot authorization...');
-      try {
-        await client.start({
-          botAuthToken: botToken
+      if (mode === 'USER') {
+        const sessionString = (process.env.TELEGRAM_MT_PROTO_SESSION || process.env.TELEGRAM_STRING_SESSION)!.trim();
+        const stringSession = new StringSession(sessionString);
+        const client = new TelegramClient(stringSession, apiId, apiHash, {
+          connectionRetries: 3,
+          autoReconnect: true,
+          useWSS: false,
+          timeout: 25000
         });
-        const me = await client.getMe();
-        if (!me) {
-          throw new MTProtoAuthError('Telegram client connected but could not retrieve authenticated bot account.');
+
+        console.log('[MTProto] Connecting client with USER session...');
+        try {
+          await client.connect();
+          const me = await client.getMe();
+          if (!me) {
+            throw new MTProtoAuthError('Telegram client connected but could not retrieve authenticated user account.');
+          }
+          this.client = client;
+          this.isConnected = true;
+          this.currentMode = 'USER';
+          const userId = (me as any).id?.toString() || 'unknown';
+          console.log(`[MTProto] Authenticated in USER mode (userId=${userId}, isBot=${Boolean((me as any).bot)})`);
+          return client;
+        } catch (err: any) {
+          this.isConnected = false;
+          this.client = null;
+          this.currentMode = 'NONE';
+          if (err.message && (err.message.includes('AUTH_KEY') || err.message.includes('SESSION_REVOKED') || err.message.includes('401') || err.message.includes('SESSION_PASSWORD_NEEDED'))) {
+            throw new MTProtoAuthError(`MTProto user session invalid or revoked: ${err.message}`);
+          }
+          throw err;
+        } finally {
+          this.connectPromise = null;
         }
-        this.client = client;
-        this.isConnected = true;
-        const botUsername = (me as any).username || 'MissRoxie_Bot';
-        console.log(`[MTProto] authenticated as bot username=${botUsername}`);
-        return client;
-      } catch (err: any) {
-        this.isConnected = false;
-        this.client = null;
-        if (err.message && (err.message.includes('AUTH_KEY') || err.message.includes('SESSION_REVOKED') || err.message.includes('401') || err.message.includes('BOT_TOKEN_INVALID'))) {
-          throw new MTProtoAuthError(`MTProto bot authentication failed or token invalid: ${err.message}`);
+      } else {
+        // mode === 'BOT'
+        const botToken = process.env.TELEGRAM_BOT_TOKEN!.trim();
+        const stringSession = new StringSession('');
+        const client = new TelegramClient(stringSession, apiId, apiHash, {
+          connectionRetries: 3,
+          autoReconnect: true,
+          useWSS: false,
+          timeout: 25000
+        });
+
+        console.log('[MTProto] Connecting client with BOT token authorization...');
+        try {
+          await client.start({
+            botAuthToken: botToken
+          });
+          const me = await client.getMe();
+          if (!me) {
+            throw new MTProtoAuthError('Telegram client connected but could not retrieve authenticated bot account.');
+          }
+          this.client = client;
+          this.isConnected = true;
+          this.currentMode = 'BOT';
+          const botUsername = (me as any).username || 'MissRoxie_Bot';
+          console.log(`[MTProto] Authenticated in BOT mode (username=${botUsername}, isBot=true)`);
+          return client;
+        } catch (err: any) {
+          this.isConnected = false;
+          this.client = null;
+          this.currentMode = 'NONE';
+          if (err.message && (err.message.includes('AUTH_KEY') || err.message.includes('SESSION_REVOKED') || err.message.includes('401') || err.message.includes('BOT_TOKEN_INVALID'))) {
+            throw new MTProtoAuthError(`MTProto bot authentication failed or token invalid: ${err.message}`);
+          }
+          throw err;
+        } finally {
+          this.connectPromise = null;
         }
-        throw err;
-      } finally {
-        this.connectPromise = null;
       }
     })();
 
@@ -207,6 +273,7 @@ export class MtprotoParticipantService {
       }
       this.client = null;
       this.isConnected = false;
+      this.currentMode = 'NONE';
     }
   }
 
@@ -362,9 +429,11 @@ export class MtprotoParticipantService {
     const startedAt = Date.now();
     logDebug({ event: 'MTPROTO_FETCH_START', chatId, botId, timestamp: startedAt });
 
-    if (!this.isConfigured()) {
+    const mode = this.getAuthMode();
+    if (mode === 'NONE') {
       return {
         status: 'FETCH_FAILED',
+        authMode: 'NONE',
         telegramTotal: 0,
         fetchedCount: 0,
         uniqueCount: 0,
@@ -372,7 +441,7 @@ export class MtprotoParticipantService {
         eligibleCount: 0,
         members: [],
         errorCode: 'NOT_CONFIGURED',
-        error: 'MTProto is not configured (missing TELEGRAM_API_ID, TELEGRAM_API_HASH, or TELEGRAM_BOT_TOKEN).',
+        error: 'MTProto is not configured (missing TELEGRAM_API_ID, TELEGRAM_API_HASH, and either TELEGRAM_MT_PROTO_SESSION or TELEGRAM_BOT_TOKEN).',
         isComplete: false,
         diagnosticMessage: 'MTProto credentials not configured on the server.'
       };
@@ -384,6 +453,7 @@ export class MtprotoParticipantService {
     } catch (err: any) {
       return {
         status: 'FETCH_FAILED',
+        authMode: mode,
         telegramTotal: 0,
         fetchedCount: 0,
         uniqueCount: 0,
@@ -403,6 +473,7 @@ export class MtprotoParticipantService {
     } catch (err: any) {
       return {
         status: 'FETCH_FAILED',
+        authMode: mode,
         telegramTotal: 0,
         fetchedCount: 0,
         uniqueCount: 0,
@@ -417,7 +488,7 @@ export class MtprotoParticipantService {
     }
 
     console.log(`[ALL] starting full Telegram member fetch chatId=${chatId}`);
-    console.log('[MTProto] fetching participants...');
+    console.log(`[MTProto] fetching participants with authMode=${mode}...`);
 
     const userMap = new Map<number, Api.User>();
     let totalReported = 0;
@@ -535,6 +606,7 @@ export class MtprotoParticipantService {
       if (fetchErr instanceof MTProtoPermissionError) {
         return {
           status: 'FETCH_FAILED',
+          authMode: mode,
           telegramTotal: totalReported,
           fetchedCount: totalFetchedRecords,
           uniqueCount: userMap.size,
@@ -551,6 +623,7 @@ export class MtprotoParticipantService {
       if (fetchErr instanceof MTProtoFloodWaitError) {
         return {
           status: 'FETCH_FAILED',
+          authMode: mode,
           telegramTotal: totalReported,
           fetchedCount: totalFetchedRecords,
           uniqueCount: userMap.size,
@@ -567,6 +640,7 @@ export class MtprotoParticipantService {
       if (fetchErr instanceof MTProtoGroupResolutionError) {
         return {
           status: 'FETCH_FAILED',
+          authMode: mode,
           telegramTotal: totalReported,
           fetchedCount: totalFetchedRecords,
           uniqueCount: userMap.size,
@@ -582,6 +656,7 @@ export class MtprotoParticipantService {
 
       return {
         status: 'FETCH_FAILED',
+        authMode: mode,
         telegramTotal: totalReported,
         fetchedCount: totalFetchedRecords,
         uniqueCount: userMap.size,
@@ -617,20 +692,20 @@ export class MtprotoParticipantService {
         continue;
       }
 
+      // 3. Exclude bots using Telegram's actual u.bot flag ONLY (no username heuristics)
+      if (u.bot === true) {
+        excludedCount++;
+        continue;
+      }
+
       const rawUsername = (u.username || '').trim().replace(/^@/, '');
       const lowerUsername = rawUsername.toLowerCase();
       const firstName = (u.firstName || '').trim();
       const lastName = (u.lastName || '').trim();
 
-      // 3. Exclude bots (via flag or username heuristic)
-      if (u.bot || lowerUsername.endsWith('bot') || lowerUsername.includes('bot')) {
-        excludedCount++;
-        continue;
-      }
-
       // 4. Exclude deleted accounts
       if (
-        u.deleted ||
+        u.deleted === true ||
         firstName.toLowerCase() === 'deleted account' ||
         lowerUsername === 'deletedaccount'
       ) {
@@ -659,20 +734,24 @@ export class MtprotoParticipantService {
     let diagnosticMessage: string | undefined;
 
     if (totalReported > 0) {
-      // If Telegram reported 500+ members but we only retrieved 20 or less due to visibility restrictions
       if (uniqueCount < totalReported && totalReported > 50 && uniqueCount <= 20) {
         status = 'PARTIAL_FETCH';
         isComplete = false;
-        diagnosticMessage = `Telegram did not allow Roxie to retrieve the complete member list for this group (Retrieved ${uniqueCount} of ${totalReported} reported members).`;
+        diagnosticMessage = mode === 'BOT'
+          ? `Telegram bot-token MTProto limitation: retrieved ${uniqueCount} of ${totalReported} members (mostly administrators). Configure TELEGRAM_MT_PROTO_SESSION for full supergroup participant enumeration.`
+          : `Telegram participant visibility or chat restrictions resulted in partial participant enumeration (${uniqueCount}/${totalReported} members available).`;
       } else if (uniqueCount < totalReported && uniqueCount < Math.floor(totalReported * 0.5)) {
         status = 'PARTIAL_FETCH';
         isComplete = false;
-        diagnosticMessage = `Telegram visibility restrictions resulted in partial enumeration (${uniqueCount}/${totalReported} available).`;
+        diagnosticMessage = mode === 'BOT'
+          ? `Telegram bot-token MTProto limitation: retrieved ${uniqueCount} of ${totalReported} members. Configure TELEGRAM_MT_PROTO_SESSION for full supergroup participant enumeration.`
+          : `Telegram participant visibility or chat restrictions resulted in partial participant enumeration (${uniqueCount}/${totalReported} members available).`;
       }
     }
 
     return {
       status,
+      authMode: mode,
       telegramTotal: totalReported || uniqueCount,
       fetchedCount: totalFetchedRecords,
       uniqueCount,

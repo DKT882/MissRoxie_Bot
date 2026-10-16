@@ -20,6 +20,7 @@ import { PostPayload, PostContentType, ScheduledPostButton, WelcomeDmConfig, Tel
 import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
 import { ModerationService } from './server/telegram/moderation.js';
 import { messageScheduler, normalizeTriggerKeyword } from './server/telegram/scheduler.js';
+import { mentionAllService } from './server/telegram/mentionAllService.js';
 
 dotenv.config();
 
@@ -2507,6 +2508,225 @@ export async function startServer() {
   app.post('/api/dashboard/posts/schedule', handleScheduleRichPost);
   app.post('/api/dashboard/groups/:chatId/rich-post/schedule', handleScheduleRichPost);
   app.post('/api/dashboard/private/:userId/rich-post/schedule', handleScheduleRichPost);
+
+  // --- Admin-Only Mention All (@all) Dashboard APIs ---
+  const handleMentionAllStart = async (req: express.Request, res: express.Response) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+      }
+
+      const rawChatId = req.params.chatId || req.body?.chatId;
+      const numChatId = Number(rawChatId);
+      if (!numChatId || isNaN(numChatId)) {
+        return res.status(400).json({ error: 'Valid target group chatId is required.' });
+      }
+
+      if (numChatId >= 0) {
+        return res.status(400).json({ error: 'Mention All can only be run in group chats (negative chatId).' });
+      }
+
+      const isGroupConnected = db.getConnectedGroups().some(g => g.chatId === numChatId || Number(g.chatId) === numChatId);
+      if (!isGroupConnected) {
+        return res.status(404).json({ error: 'Target group not found in database.' });
+      }
+
+      const groupSettings = db.getGroupSettings(numChatId);
+      const chatTitle = groupSettings.chatTitle || `Group ${numChatId}`;
+
+      type MentionContentType = 'text' | 'photo' | 'video' | 'animation' | 'document';
+      const rawContentType = req.body?.contentType || 'text';
+      const validTypes: MentionContentType[] = ['text', 'photo', 'video', 'animation', 'document'];
+      if (!validTypes.includes(rawContentType as MentionContentType)) {
+        return res.status(400).json({ error: `Unsupported content type: ${rawContentType}` });
+      }
+      const contentType = rawContentType as MentionContentType;
+
+      const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      const maxTextLen = contentType === 'text' ? 3500 : 600;
+      if (text.length > maxTextLen) {
+        return res.status(400).json({
+          error: `Text/caption exceeds allowed limit for Mention All (${text.length}/${maxTextLen} characters to preserve room for Telegram mentions).`
+        });
+      }
+
+      let normalizedMediaId: string | undefined = undefined;
+      let mediaUploadId: string | undefined = undefined;
+
+      if (contentType !== 'text') {
+        const uploadCandidate = req.body?.mediaUploadId ||
+          (req.body?.mediaFileId?.startsWith('upl_') ? req.body.mediaFileId : (req.body?.mediaFileId?.startsWith('upload:') ? req.body.mediaFileId.substring(7) : undefined));
+
+        if (uploadCandidate) {
+          const item = mediaUploadStore.getMedia(uploadCandidate);
+          if (!item) {
+            return res.status(400).json({ error: `Uploaded media file (${uploadCandidate}) has expired or is invalid. Please re-upload the file.` });
+          }
+          mediaUploadId = item.id;
+          normalizedMediaId = `upload:${item.id}`;
+        } else if (req.body?.mediaFileId) {
+          const mediaCheck = validateMediaReference(req.body.mediaFileId);
+          if (!mediaCheck.valid) {
+            return res.status(400).json({ error: mediaCheck.error || `Invalid media reference for ${contentType} broadcast.` });
+          }
+          normalizedMediaId = mediaCheck.normalized;
+        } else {
+          return res.status(400).json({ error: `Media reference is required for ${contentType} broadcast.` });
+        }
+      }
+
+      const actor = {
+        actorUserId: auth.session?.userId,
+        actorUsername: auth.session?.username || auth.operatorUsername,
+        actorDisplayName: auth.session?.displayName || auth.session?.username || auth.operatorUsername || 'Dashboard Admin'
+      };
+
+      const startRes = await mentionAllService.startOperation({
+        chatId: numChatId,
+        chatTitle,
+        actor,
+        source: 'dashboard',
+        messageText: text,
+        media: {
+          contentType,
+          mediaUploadId,
+          mediaFileId: normalizedMediaId
+        },
+        awaitWorker: process.env.NODE_ENV === 'test'
+      });
+
+      if (!startRes.ok) {
+        if (startRes.status === 'already_running') {
+          return res.status(409).json({
+            ok: false,
+            status: 'already_running',
+            error: 'An /all broadcast is already in progress for this group. Please wait for it to complete.'
+          });
+        }
+        if (startRes.status === 'no_members') {
+          return res.status(400).json({
+            ok: false,
+            status: 'no_members',
+            error: 'No eligible group members found to mention.'
+          });
+        }
+        return res.status(400).json({
+          ok: false,
+          status: startRes.status,
+          error: startRes.error || 'Failed to start Mention All operation.'
+        });
+      }
+
+      return res.json({
+        ok: true,
+        status: 'running',
+        operation: {
+          operationId: startRes.operation?.operationId,
+          chatId: startRes.operation?.chatId,
+          source: startRes.operation?.source,
+          contentType: startRes.operation?.contentType,
+          totalBatches: startRes.operation?.totalBatches,
+          mentionsCount: startRes.operation?.mentionsCount,
+          startedAt: startRes.operation?.startedAt
+        }
+      });
+    } catch (err: any) {
+      console.error('[API] /api/dashboard/mention-all/start error:', err);
+      return res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  };
+
+  const handleMentionAllStop = async (req: express.Request, res: express.Response) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+      }
+
+      const rawChatId = req.params.chatId || req.body?.chatId;
+      const numChatId = Number(rawChatId);
+      if (!numChatId || isNaN(numChatId)) {
+        return res.status(400).json({ error: 'Valid target group chatId is required.' });
+      }
+
+      const stopRes = await mentionAllService.stopOperation(numChatId, {
+        userId: auth.session?.userId,
+        username: auth.session?.username || auth.operatorUsername,
+        displayName: auth.session?.displayName || auth.session?.username || auth.operatorUsername || 'Dashboard Admin'
+      });
+
+      if (!stopRes.ok) {
+        if (stopRes.status === 'not_running') {
+          return res.status(404).json({
+            ok: false,
+            status: 'not_running',
+            message: stopRes.message
+          });
+        }
+        if (stopRes.status === 'already_stopping') {
+          return res.status(409).json({
+            ok: false,
+            status: 'already_stopping',
+            message: stopRes.message,
+            sentBatches: stopRes.sentBatches,
+            totalBatches: stopRes.totalBatches
+          });
+        }
+        return res.status(400).json({ ok: false, error: stopRes.message });
+      }
+
+      return res.json({
+        ok: true,
+        status: 'stopped',
+        message: stopRes.message,
+        sentBatches: stopRes.sentBatches,
+        totalBatches: stopRes.totalBatches
+      });
+    } catch (err: any) {
+      console.error('[API] /api/dashboard/mention-all/stop error:', err);
+      return res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  };
+
+  app.post('/api/dashboard/mention-all/start', handleMentionAllStart);
+  app.post('/api/dashboard/groups/:chatId/mention-all/start', handleMentionAllStart);
+
+  app.post('/api/dashboard/mention-all/stop', handleMentionAllStop);
+  app.post('/api/dashboard/groups/:chatId/mention-all/stop', handleMentionAllStop);
+
+  app.get('/api/dashboard/mention-all/status/:chatId', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+      }
+
+      const numChatId = Number(req.params.chatId);
+      if (!numChatId || isNaN(numChatId)) {
+        return res.status(400).json({ error: 'Valid group chatId is required.' });
+      }
+
+      const status = mentionAllService.getOperationStatus(numChatId);
+      return res.json(status);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  });
+
+  app.get('/api/dashboard/mention-all/active', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+      }
+
+      const activeList = mentionAllService.getActiveOperationsList();
+      return res.json({ activeOperations: activeList });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  });
 
   // --- Scheduled Messages & Rules Dashboard APIs ---
   app.get('/api/dashboard/schedules', (req, res) => {
