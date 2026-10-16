@@ -1307,6 +1307,19 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     auditLogged: true,
     scopes: ['group', 'admin']
   },
+  {
+    command: '/stopall',
+    category: 'Announcements',
+    description: 'Stop the active /all broadcast in the current group.',
+    syntax: '/stopall',
+    example: '/stopall',
+    permission: 'Admin',
+    targetType: 'None',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    scopes: ['group', 'admin']
+  },
 
   // ==================== SCHEDULER ====================
   {
@@ -1613,16 +1626,35 @@ export function getAdminCatalog(): CommandCatalogItem[] {
 }
 
 export function getCommandsForTelegramScope(
-  _scope?: 'all_chat_administrators' | 'all_group_chats' | 'all_private_chats' | 'default'
+  scope?: 'all_chat_administrators' | 'all_group_chats' | 'all_private_chats' | 'default'
 ): Array<{ command: string; description: string }> {
+  // Ordinary group chats and default scopes must have NO commands registered,
+  // making the Telegram slash-command menu completely admin-only in group chats
+  // and preventing any command exposure to ordinary members via fallback.
+  if (scope === 'all_group_chats' || scope === 'default' || !scope) {
+    return [];
+  }
+
   // Official Telegram Bot API constraint: at most 100 commands per scope
   const TELEGRAM_MAX_COMMANDS_PER_SCOPE = 100;
   const seen = new Set<string>();
   const result: Array<{ command: string; description: string }> = [];
 
-  // Expose full COMMAND_CATALOG without scope-based visibility filtering (excluding suggestInTelegramMenu: false)
   for (const item of COMMAND_CATALOG) {
     if (item.suggestInTelegramMenu === false) continue;
+
+    if (scope === 'all_chat_administrators') {
+      // Group administrators: administrative and group commands
+      const isGroupOrAdmin = item.scopes?.includes('group') || item.scopes?.includes('admin');
+      if (!isGroupOrAdmin) continue;
+    } else if (scope === 'all_private_chats') {
+      // Private chats (DMs)
+      const isPrivateScope = item.scopes?.includes('private');
+      if (!isPrivateScope) continue;
+    } else {
+      continue;
+    }
+
     const rawCmd = item.command.replace(/^\//, '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 32);
     if (rawCmd && !seen.has(rawCmd)) {
       seen.add(rawCmd);

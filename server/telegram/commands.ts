@@ -103,6 +103,7 @@ export const TELEGRAM_SUGGESTED_COMMANDS: readonly BotCommand[] = Object.freeze(
   { command: "adminlog", description: "Moderation logs" },
   { command: "say", description: "Broadcast message" },
   { command: "all", description: "Mention all" },
+  { command: "stopall", description: "Stop broadcast" },
   { command: "schedule", description: "Schedule message" },
   { command: "listschedules", description: "List schedules" },
   { command: "deleteschedule", description: "Delete schedule" },
@@ -141,94 +142,107 @@ export const ADMIN_COMMANDS: BotCommand[] = [...TELEGRAM_SUGGESTED_COMMANDS];
 
 export async function registerBotCommands(): Promise<{
   adminCommandsSet: boolean;
-  defaultCommandsCleared: boolean;
+  groupCommandsSet: boolean;
+  privateCommandsSet: boolean;
+  defaultCommandsSet: boolean;
+  defaultCommandsCleared?: boolean;
   errors?: string[];
 }> {
   const errors: string[] = [];
 
-  // Authoritative command list (<= 100 per Telegram API constraint)
-  const authoritativeCommands = [...TELEGRAM_SUGGESTED_COMMANDS];
+  // Derive scoped command lists from authoritative command catalog
+  const adminCommands = getCommandsForTelegramScope('all_chat_administrators');
+  const groupCommands = getCommandsForTelegramScope('all_group_chats');
+  const privateCommands = getCommandsForTelegramScope('all_private_chats');
+  const defaultCommands = getCommandsForTelegramScope('default');
 
-  if (authoritativeCommands.length > 100) {
-    throw new Error(`Fatal: Authoritative Telegram suggestion list must contain at most 100 commands, got ${authoritativeCommands.length}`);
+  // Verify <= 100 commands per scope constraint enforced by Telegram Bot API
+  if (adminCommands.length > 100) {
+    throw new Error(`Fatal: all_chat_administrators command count must be <= 100, got ${adminCommands.length}`);
   }
-
-  const uniqueCommandNames = new Set(authoritativeCommands.map(c => c.command));
-  if (uniqueCommandNames.size !== authoritativeCommands.length) {
-    throw new Error(`Fatal: Unique command count mismatch, got ${uniqueCommandNames.size} vs ${authoritativeCommands.length}`);
+  if (groupCommands.length > 100) {
+    throw new Error(`Fatal: all_group_chats command count must be <= 100, got ${groupCommands.length}`);
+  }
+  if (privateCommands.length > 100) {
+    throw new Error(`Fatal: all_private_chats command count must be <= 100, got ${privateCommands.length}`);
+  }
+  if (defaultCommands.length > 100) {
+    throw new Error(`Fatal: default command count must be <= 100, got ${defaultCommands.length}`);
   }
 
   // 1. Clear any stale language-specific command overrides
   await telegramApi.deleteMyCommands({ type: 'all_chat_administrators' }, 'en').catch(() => {});
   await telegramApi.deleteMyCommands({ type: 'all_group_chats' }, 'en').catch(() => {});
+  await telegramApi.deleteMyCommands({ type: 'all_private_chats' }, 'en').catch(() => {});
+  await telegramApi.deleteMyCommands({ type: 'default' }, 'en').catch(() => {});
 
-  // 2. Register authoritative commands for administrators scope
+  // 2. Register authoritative administrative commands for administrators scope
   console.log(JSON.stringify({
     event: 'TELEGRAM_SET_COMMANDS_PAYLOAD',
     scope: 'all_chat_administrators',
-    command_count: authoritativeCommands.length,
-    unique_command_count: uniqueCommandNames.size,
-    command_names: authoritativeCommands.map(c => c.command)
+    command_count: adminCommands.length,
+    command_names: adminCommands.map(c => c.command)
   }));
-  const adminRes = await telegramApi.setMyCommands(authoritativeCommands, {
+  const adminRes = await telegramApi.setMyCommands(adminCommands, {
     type: 'all_chat_administrators'
-  });
+  }).catch((err: any) => ({ ok: false, description: err.message, error_code: 500 }));
+
   if (adminRes.ok) {
-    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_chat_administrators', count: authoritativeCommands.length, commands: authoritativeCommands.map(c => c.command) }));
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_chat_administrators', count: adminCommands.length, commands: adminCommands.map(c => c.command) }));
   } else {
     console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'all_chat_administrators', error_code: adminRes.error_code, description: adminRes.description }));
     errors.push(`Failed to set admin commands: ${adminRes.description}`);
   }
 
-  // 3. Register authoritative commands for group chats scope
+  // 3. Register empty command list for group chats scope (ordinary members see NO commands in group chats)
   console.log(JSON.stringify({
     event: 'TELEGRAM_SET_COMMANDS_PAYLOAD',
     scope: 'all_group_chats',
-    command_count: authoritativeCommands.length,
-    unique_command_count: uniqueCommandNames.size,
-    command_names: authoritativeCommands.map(c => c.command)
+    command_count: groupCommands.length,
+    command_names: groupCommands.map(c => c.command)
   }));
-  const groupRes = await telegramApi.setMyCommands(authoritativeCommands, {
+  const groupRes = await telegramApi.setMyCommands(groupCommands, {
     type: 'all_group_chats'
-  });
+  }).catch((err: any) => ({ ok: false, description: err.message, error_code: 500 }));
+
   if (groupRes.ok) {
-    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_group_chats', count: authoritativeCommands.length, commands: authoritativeCommands.map(c => c.command) }));
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_group_chats', count: groupCommands.length, commands: groupCommands.map(c => c.command) }));
   } else {
     console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'all_group_chats', error_code: groupRes.error_code, description: groupRes.description }));
     errors.push(`Failed to set group commands: ${groupRes.description}`);
   }
 
-  // 4. Register authoritative commands for private chats scope
+  // 4. Register private commands for private chats scope
   console.log(JSON.stringify({
     event: 'TELEGRAM_SET_COMMANDS_PAYLOAD',
     scope: 'all_private_chats',
-    command_count: authoritativeCommands.length,
-    unique_command_count: uniqueCommandNames.size,
-    command_names: authoritativeCommands.map(c => c.command)
+    command_count: privateCommands.length,
+    command_names: privateCommands.map(c => c.command)
   }));
-  const privateRes = await telegramApi.setMyCommands(authoritativeCommands, {
+  const privateRes = await telegramApi.setMyCommands(privateCommands, {
     type: 'all_private_chats'
-  });
+  }).catch((err: any) => ({ ok: false, description: err.message, error_code: 500 }));
+
   if (privateRes.ok) {
-    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_private_chats', count: authoritativeCommands.length, commands: authoritativeCommands.map(c => c.command) }));
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'all_private_chats', count: privateCommands.length, commands: privateCommands.map(c => c.command) }));
   } else {
     console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'all_private_chats', error_code: privateRes.error_code, description: privateRes.description }));
     errors.push(`Failed to set private commands: ${privateRes.description}`);
   }
 
-  // 5. Register authoritative commands for default scope
+  // 5. Register empty command list for default fallback scope (preventing any command leakage to non-admins)
   console.log(JSON.stringify({
     event: 'TELEGRAM_SET_COMMANDS_PAYLOAD',
     scope: 'default',
-    command_count: authoritativeCommands.length,
-    unique_command_count: uniqueCommandNames.size,
-    command_names: authoritativeCommands.map(c => c.command)
+    command_count: defaultCommands.length,
+    command_names: defaultCommands.map(c => c.command)
   }));
-  const defaultRes = await telegramApi.setMyCommands(authoritativeCommands, {
+  const defaultRes = await telegramApi.setMyCommands(defaultCommands, {
     type: 'default'
-  });
+  }).catch((err: any) => ({ ok: false, description: err.message, error_code: 500 }));
+
   if (defaultRes.ok) {
-    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'default', count: authoritativeCommands.length, commands: authoritativeCommands.map(c => c.command) }));
+    console.log(JSON.stringify({ event: 'COMMAND_REGISTRATION_SUCCESS', scope: 'default', count: defaultCommands.length, commands: defaultCommands.map(c => c.command) }));
   } else {
     console.error(JSON.stringify({ event: 'COMMAND_REGISTRATION_FAILED', scope: 'default', error_code: defaultRes.error_code, description: defaultRes.description }));
     errors.push(`Failed to set default commands: ${defaultRes.description}`);
@@ -236,15 +250,18 @@ export async function registerBotCommands(): Promise<{
 
   const allSucceeded = adminRes.ok && groupRes.ok && privateRes.ok && defaultRes.ok;
   if (allSucceeded) {
-    console.log(`COMMAND_MENU_AUTHORITATIVE: ${authoritativeCommands.length} commands confirmed by Telegram`);
-    console.log(`TELEGRAM_SCOPE_VERIFICATION: all_chat_administrators=${authoritativeCommands.length} all_group_chats=${authoritativeCommands.length} all_private_chats=${authoritativeCommands.length} default=${authoritativeCommands.length}`);
+    console.log(`COMMAND_MENU_SCOPES_CONFIGURED: admin=${adminCommands.length} group=${groupCommands.length} private=${privateCommands.length} default=${defaultCommands.length}`);
+    console.log(`TELEGRAM_SCOPE_VERIFICATION: all_chat_administrators=${adminCommands.length} all_group_chats=${groupCommands.length} all_private_chats=${privateCommands.length} default=${defaultCommands.length}`);
   } else {
     console.error(`COMMAND_REGISTRATION_FAILED: Registration incomplete. Errors: ${errors.join(', ')}`);
   }
 
   return {
-    adminCommandsSet: adminRes.ok && groupRes.ok && privateRes.ok,
-    defaultCommandsCleared: defaultRes.ok,
+    adminCommandsSet: Boolean(adminRes.ok),
+    groupCommandsSet: Boolean(groupRes.ok),
+    privateCommandsSet: Boolean(privateRes.ok),
+    defaultCommandsSet: Boolean(defaultRes.ok),
+    defaultCommandsCleared: Boolean(defaultRes.ok),
     errors: errors.length > 0 ? errors : undefined
   };
 }
@@ -262,12 +279,59 @@ interface PermissionEditorSession {
   createdAt: number;
 }
 
+export interface ActiveAllOperation {
+  chatId: number;
+  operationId: string;
+  actorUserId: number;
+  actorUsername?: string;
+  actorDisplayName?: string;
+  startedAt: number;
+  abortController: AbortController;
+  totalBatches: number;
+  sentBatches: number;
+  mentionsCount: number;
+  isCancelled: boolean;
+  cancelledBy?: {
+    userId: number;
+    username?: string;
+    displayName?: string;
+  };
+  completionResolve: () => void;
+  completionPromise: Promise<void>;
+}
+
 export const ALL_MESSAGE_INTERVAL_MS = 20_000;
 
 export class CommandHandler {
   public static allMessageIntervalMs: number | null = null;
+  public static activeAllOperations: Map<number, ActiveAllOperation> = new Map();
   private static sayCooldowns: Map<number, number> = new Map();
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
+
+  public static abortableSleep(ms: number, signal?: AbortSignal): Promise<boolean> {
+    if (!signal) {
+      return new Promise((resolve) => setTimeout(() => resolve(true), ms));
+    }
+    if (signal.aborted) {
+      return Promise.resolve(false);
+    }
+    if (ms <= 0) {
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      let timer: NodeJS.Timeout | null = null;
+      const onAbort = () => {
+        if (timer) clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+        resolve(false);
+      };
+      timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(true);
+      }, ms);
+      signal.addEventListener('abort', onAbort);
+    });
+  }
 
   private static catalogMap = new Map<string, CommandCatalogItem>(
     COMMAND_CATALOG.flatMap(item => {
@@ -315,7 +379,7 @@ export class CommandHandler {
   ]);
 
   public static readonly SENSITIVE_COMMANDS = new Set<string>([
-    '/say', '/announce', '/all',
+    '/say', '/announce', '/all', '/stopall',
     '/schedule', '/listschedules', '/deleteschedule',
     '/welcome', '/setwelcome', '/goodbye', '/setgoodbye', '/autodeljoin',
     '/ban', '/unban', '/kick', '/mute', '/unmute',
@@ -645,6 +709,9 @@ export class CommandHandler {
         return true;
       case '/all':
         await this.handleAll(ctx);
+        return true;
+      case '/stopall':
+        await this.handleStopAll(ctx);
         return true;
       case '/announce':
       case '/say':
@@ -4400,8 +4467,8 @@ export class CommandHandler {
       return;
     }
 
-    // Acquire per-chat lock to prevent concurrent /all operations for the same group
-    if (!mtprotoParticipantService.acquireChatLock(ctx.chatId)) {
+    // Check per-chat lock to prevent concurrent /all operations for the same group
+    if (CommandHandler.activeAllOperations.has(ctx.chatId) || mtprotoParticipantService.isChatLocked(ctx.chatId)) {
       await telegramApi.sendMessage(
         ctx.chatId,
         '⏳ An /all broadcast is already in progress for this group. Please wait for it to complete.',
@@ -4409,6 +4476,31 @@ export class CommandHandler {
       );
       return;
     }
+
+    const abortController = new AbortController();
+    let completionResolve!: () => void;
+    const completionPromise = new Promise<void>((resolve) => {
+      completionResolve = resolve;
+    });
+
+    const operation: ActiveAllOperation = {
+      chatId: ctx.chatId,
+      operationId: `all_${ctx.chatId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      actorUserId: actor.actorUserId,
+      actorUsername: actor.actorUsername,
+      actorDisplayName: actor.actorDisplayName,
+      startedAt: Date.now(),
+      abortController,
+      totalBatches: 0,
+      sentBatches: 0,
+      mentionsCount: 0,
+      isCancelled: false,
+      completionResolve,
+      completionPromise
+    };
+
+    CommandHandler.activeAllOperations.set(ctx.chatId, operation);
+    mtprotoParticipantService.acquireChatLock(ctx.chatId);
 
     let workerDispatched = false;
     try {
@@ -4446,6 +4538,10 @@ export class CommandHandler {
           `<i>Note: Mentions all eligible members directly through Telegram member enumeration in 10-member emoji batches.</i>`,
           { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
         );
+        return;
+      }
+
+      if (operation.abortController.signal.aborted || operation.isCancelled) {
         return;
       }
 
@@ -4512,6 +4608,10 @@ export class CommandHandler {
         }
       }
 
+      if (operation.abortController.signal.aborted || operation.isCancelled) {
+        return;
+      }
+
       const customText = CommandHandler.getCommandText(ctx, 0);
       const defaultMsg = customText || '';
 
@@ -4556,6 +4656,13 @@ export class CommandHandler {
 
       const targetReplyId = reply?.message_id || ctx.message.message_id;
 
+      operation.totalBatches = chunks.length;
+      operation.mentionsCount = mentions.length;
+
+      if (operation.abortController.signal.aborted || operation.isCancelled) {
+        return;
+      }
+
       workerDispatched = true;
       const workerPromise = CommandHandler.executeAllBroadcastWorker(
         ctx.chatId,
@@ -4569,7 +4676,8 @@ export class CommandHandler {
           repliedVideoId,
           repliedDocumentId
         },
-        mentions.length
+        mentions.length,
+        operation
       );
 
       if (process.env.NODE_ENV === 'test') {
@@ -4583,7 +4691,9 @@ export class CommandHandler {
       }
     } finally {
       if (!workerDispatched) {
+        CommandHandler.activeAllOperations.delete(ctx.chatId);
         mtprotoParticipantService.releaseChatLock(ctx.chatId);
+        operation.completionResolve();
       }
     }
   }
@@ -4600,10 +4710,17 @@ export class CommandHandler {
       repliedVideoId?: string;
       repliedDocumentId?: string;
     },
-    mentionsCount: number
+    mentionsCount: number,
+    operation: ActiveAllOperation
   ): Promise<void> {
     try {
       for (let i = 0; i < chunks.length; i++) {
+        // Cooperative cancellation check before each batch
+        if (operation.abortController.signal.aborted || operation.isCancelled) {
+          console.log(`[ALL] Broadcast stopped cooperatively before batch ${i + 1}/${chunks.length} for chatId=${chatId}`);
+          break;
+        }
+
         const chunkText = chunks[i];
         console.log(`[ALL] sending batch=${i + 1}/${chunks.length}`);
 
@@ -4612,6 +4729,10 @@ export class CommandHandler {
         const maxBatchAttempts = 3;
 
         while (!sendSuccess && batchAttempts <= maxBatchAttempts) {
+          if (operation.abortController.signal.aborted || operation.isCancelled) {
+            break;
+          }
+
           batchAttempts++;
           let sendRes: any;
           try {
@@ -4657,7 +4778,11 @@ export class CommandHandler {
             const retryAfterSec = sendRes.parameters?.retry_after || 2;
             console.warn(`[ALL] 429 flood wait on batch ${i + 1}. Retrying in ${retryAfterSec}s...`);
             if (batchAttempts <= maxBatchAttempts) {
-              await new Promise(r => setTimeout(r, retryAfterSec * 1000));
+              const completed = await CommandHandler.abortableSleep(retryAfterSec * 1000, operation.abortController.signal);
+              if (!completed || operation.isCancelled) {
+                console.log(`[ALL] 429 flood wait aborted by cancellation for chatId=${chatId}`);
+                break;
+              }
             } else {
               sendSuccess = true; // Exceeded max retries for this batch, proceed to avoid blocking forever
             }
@@ -4666,33 +4791,129 @@ export class CommandHandler {
           }
         }
 
+        if (operation.abortController.signal.aborted || operation.isCancelled) {
+          if (sendSuccess) {
+            operation.sentBatches = i + 1;
+          }
+          break;
+        }
+
+        if (sendSuccess) {
+          operation.sentBatches = i + 1;
+        }
+
         // Fixed interval pacing (20 seconds / 20_000ms) between consecutive /all mention messages
         if (i < chunks.length - 1) {
           const pacingMs = CommandHandler.allMessageIntervalMs !== null
             ? CommandHandler.allMessageIntervalMs
             : (process.env.NODE_ENV === 'test' ? 10 : ALL_MESSAGE_INTERVAL_MS);
           if (pacingMs > 0) {
-            await new Promise(resolve => setTimeout(resolve, pacingMs));
+            const completed = await CommandHandler.abortableSleep(pacingMs, operation.abortController.signal);
+            if (!completed || operation.isCancelled) {
+              console.log(`[ALL] Pacing delay aborted by cancellation for chatId=${chatId}`);
+              break;
+            }
           }
         }
       }
 
-      console.log(`[ALL] completed batches=${chunks.length}`);
-
-      TelegramMiddleware.logAudit({
-        chatId,
-        chatTitle,
-        actor,
-        command: 'all',
-        action: 'all_broadcast',
-        result: 'success',
-        details: `Mentioned ${mentionsCount} members across ${chunks.length} message(s)`
-      });
+      if (operation.isCancelled) {
+        console.log(`[ALL] Broadcast stopped chatId=${chatId} after ${operation.sentBatches}/${chunks.length} batches`);
+        TelegramMiddleware.logAudit({
+          chatId,
+          chatTitle,
+          actor,
+          command: 'all',
+          action: 'all_broadcast',
+          result: 'success',
+          details: `Broadcast stopped by ${operation.cancelledBy?.displayName || operation.cancelledBy?.username || 'admin'}. Sent ${operation.sentBatches} of ${chunks.length} batch(es)`
+        });
+      } else {
+        console.log(`[ALL] completed batches=${chunks.length}`);
+        TelegramMiddleware.logAudit({
+          chatId,
+          chatTitle,
+          actor,
+          command: 'all',
+          action: 'all_broadcast',
+          result: 'success',
+          details: `Mentioned ${mentionsCount} members across ${chunks.length} message(s)`
+        });
+      }
     } catch (workerErr: any) {
       console.error(`[ALL] Worker error in chatId=${chatId}:`, workerErr);
     } finally {
-      mtprotoParticipantService.releaseChatLock(chatId);
+      try {
+        CommandHandler.activeAllOperations.delete(chatId);
+        mtprotoParticipantService.releaseChatLock(chatId);
+      } finally {
+        operation.completionResolve();
+      }
     }
+  }
+
+  private static async handleStopAll(ctx: CommandContext): Promise<void> {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+    if (actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '❌ You don\'t have permission to use /stopall.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    const op = CommandHandler.activeAllOperations.get(ctx.chatId);
+    if (!op) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        'ℹ️ There is no active /all broadcast running in this group.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    if (op.isCancelled) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '⏳ The active /all broadcast is already stopping. Please wait.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+      return;
+    }
+
+    // Mark as cancelled and trigger cooperative abort
+    op.isCancelled = true;
+    op.cancelledBy = {
+      userId: actor.actorUserId,
+      username: actor.actorUsername,
+      displayName: actor.actorDisplayName
+    };
+    op.abortController.abort();
+
+    // Await the worker's confirmed completion so lock is never cleared prematurely while worker is mid-flight
+    await op.completionPromise;
+
+    const stopMessage = op.totalBatches > 0
+      ? `⏹️ <b>/all Broadcast Stopped</b>\n\nBroadcast stopped by ${actor.actorDisplayName}.\nSent <b>${op.sentBatches}</b> of <b>${op.totalBatches}</b> batch(es).`
+      : `⏹️ <b>/all Broadcast Stopped</b>\n\nBroadcast stopped by ${actor.actorDisplayName} before batches were dispatched.`;
+
+    await telegramApi.sendMessage(ctx.chatId, stopMessage, {
+      reply_to_message_id: ctx.message.message_id,
+      parse_mode: 'HTML'
+    });
+
+    TelegramMiddleware.logAudit({
+      chatId: ctx.chatId,
+      chatTitle: ctx.chatTitle,
+      actor,
+      command: 'stopall',
+      action: 'all_broadcast',
+      result: 'success',
+      details: `Stopped /all broadcast after ${op.sentBatches} of ${op.totalBatches} batch(es)`
+    });
   }
 
 

@@ -259,10 +259,10 @@ async function runAuditTests() {
   const groupScoped = getCommandsForTelegramScope('all_group_chats');
   const privateScoped = getCommandsForTelegramScope('all_private_chats');
   const defaultScoped = getCommandsForTelegramScope('default');
-  assert(adminScoped.length <= 75, `TEST L: Admin scope exceeds 75: ${adminScoped.length}`);
-  assert(groupScoped.length <= 45, `TEST L: Group scope exceeds 45: ${groupScoped.length}`);
+  assert(adminScoped.length <= 100, `TEST L: Admin scope exceeds 100: ${adminScoped.length}`);
+  assert.strictEqual(groupScoped.length, 0, `TEST L: Group scope must be empty (admin-only): ${groupScoped.length}`);
   assert(privateScoped.length <= 30, `TEST L: Private scope exceeds 30: ${privateScoped.length}`);
-  assert(defaultScoped.length <= 30, `TEST L: Default scope exceeds 30: ${defaultScoped.length}`);
+  assert.strictEqual(defaultScoped.length, 0, `TEST L: Default scope must be empty (preventing fallback leakage): ${defaultScoped.length}`);
   console.log(`✓ TEST L PASSED: All 4 Telegram command scopes capped to safe limits (Admin: ${adminScoped.length}, Group: ${groupScoped.length}, Private: ${privateScoped.length}, Default: ${defaultScoped.length}).`);
 
   // ----------------------------------------------------

@@ -64,12 +64,17 @@ async function runTests() {
 
   for (const s of scopes) {
     const list = getCommandsForTelegramScope(s);
-    assert(list.length > 0, `Scope ${s} returned empty command list`);
-    assert(list.length <= 100, `Scope ${s} exceeded 100 commands limit: ${list.length}`);
-    const names = list.map(c => c.command);
-    const uniqueNames = new Set(names);
-    assert.strictEqual(names.length, uniqueNames.size, `Scope ${s} contains duplicate command names`);
-    console.log(`✓ Scope "${s}": ${list.length} commands (<= 100, deduplicated)`);
+    if (s === 'all_group_chats' || s === 'default') {
+      assert.strictEqual(list.length, 0, `Scope ${s} must be empty to ensure admin-only menu in group chats`);
+      console.log(`✓ Scope "${s}": 0 commands (completely hidden from ordinary group members)`);
+    } else {
+      assert(list.length > 0, `Scope ${s} returned empty command list`);
+      assert(list.length <= 100, `Scope ${s} exceeded 100 commands limit: ${list.length}`);
+      const names = list.map(c => c.command);
+      const uniqueNames = new Set(names);
+      assert.strictEqual(names.length, uniqueNames.size, `Scope ${s} contains duplicate command names`);
+      console.log(`✓ Scope "${s}": ${list.length} commands (<= 100, deduplicated)`);
+    }
   }
 
   // TEST 4: Protected Real Groups Normalization & Identification
