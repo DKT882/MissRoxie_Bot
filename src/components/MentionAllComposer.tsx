@@ -15,10 +15,12 @@ import {
   Sparkles,
   Shield,
   X,
-  Radio
+  Radio,
+  Lock,
+  Layers
 } from 'lucide-react';
 
-interface GroupItem {
+export interface GroupItem {
   chatId?: number | string;
   id?: number | string;
   chatTitle?: string;
@@ -27,14 +29,150 @@ interface GroupItem {
   memberCount?: number;
 }
 
-interface MentionAllComposerProps {
+export interface MentionAllComposerProps {
   groups: GroupItem[];
   selectedChatId?: number | null;
+  lockToSelectedGroup?: boolean;
   theme?: 'dark' | 'light';
   onRefresh?: () => void;
 }
 
 export type MentionContentType = 'text' | 'photo' | 'video' | 'animation' | 'document';
+
+export type MentionContentFormat =
+  | 'text'
+  | 'photo'
+  | 'video'
+  | 'animation'
+  | 'document'
+  | 'text_photo'
+  | 'text_video'
+  | 'text_animation'
+  | 'text_document';
+
+export interface FormatConfig {
+  id: MentionContentFormat;
+  label: string;
+  category: 'text' | 'media' | 'combo';
+  categoryLabel: string;
+  baseType: MentionContentType;
+  requiresMedia: boolean;
+  requiresText: boolean;
+  maxTextLen: number;
+  icon: React.ComponentType<{ className?: string }>;
+  description: string;
+}
+
+export const FORMAT_CONFIGS: Record<MentionContentFormat, FormatConfig> = {
+  text: {
+    id: 'text',
+    label: 'Text',
+    category: 'text',
+    categoryLabel: 'Text Only',
+    baseType: 'text',
+    requiresMedia: false,
+    requiresText: true,
+    maxTextLen: 3500,
+    icon: FileText,
+    description: 'Standard text announcement'
+  },
+  photo: {
+    id: 'photo',
+    label: 'Photo',
+    category: 'media',
+    categoryLabel: 'Media Only',
+    baseType: 'photo',
+    requiresMedia: true,
+    requiresText: false,
+    maxTextLen: 700,
+    icon: Image,
+    description: 'Photo broadcast with optional caption'
+  },
+  video: {
+    id: 'video',
+    label: 'Video',
+    category: 'media',
+    categoryLabel: 'Media Only',
+    baseType: 'video',
+    requiresMedia: true,
+    requiresText: false,
+    maxTextLen: 700,
+    icon: Video,
+    description: 'Video broadcast with optional caption'
+  },
+  animation: {
+    id: 'animation',
+    label: 'GIF / Animation',
+    category: 'media',
+    categoryLabel: 'Media Only',
+    baseType: 'animation',
+    requiresMedia: true,
+    requiresText: false,
+    maxTextLen: 700,
+    icon: Film,
+    description: 'GIF broadcast with optional caption'
+  },
+  document: {
+    id: 'document',
+    label: 'Document / File',
+    category: 'media',
+    categoryLabel: 'Media Only',
+    baseType: 'document',
+    requiresMedia: true,
+    requiresText: false,
+    maxTextLen: 700,
+    icon: Sparkles,
+    description: 'File broadcast with optional caption'
+  },
+  text_photo: {
+    id: 'text_photo',
+    label: 'Text + Photo',
+    category: 'combo',
+    categoryLabel: 'Combined',
+    baseType: 'photo',
+    requiresMedia: true,
+    requiresText: true,
+    maxTextLen: 700,
+    icon: Image,
+    description: 'Text announcement with attached photo'
+  },
+  text_video: {
+    id: 'text_video',
+    label: 'Text + Video',
+    category: 'combo',
+    categoryLabel: 'Combined',
+    baseType: 'video',
+    requiresMedia: true,
+    requiresText: true,
+    maxTextLen: 700,
+    icon: Video,
+    description: 'Text announcement with attached video'
+  },
+  text_animation: {
+    id: 'text_animation',
+    label: 'Text + GIF',
+    category: 'combo',
+    categoryLabel: 'Combined',
+    baseType: 'animation',
+    requiresMedia: true,
+    requiresText: true,
+    maxTextLen: 700,
+    icon: Film,
+    description: 'Text announcement with attached GIF'
+  },
+  text_document: {
+    id: 'text_document',
+    label: 'Text + Document',
+    category: 'combo',
+    categoryLabel: 'Combined',
+    baseType: 'document',
+    requiresMedia: true,
+    requiresText: true,
+    maxTextLen: 700,
+    icon: Sparkles,
+    description: 'Text announcement with attached document'
+  }
+};
 
 interface OperationStatus {
   active: boolean;
@@ -82,6 +220,7 @@ function getAuthHeaders(extraHeaders: Record<string, string> = {}): Record<strin
 export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
   groups,
   selectedChatId,
+  lockToSelectedGroup = false,
   theme = 'dark',
   onRefresh
 }) => {
@@ -93,7 +232,7 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
     return firstGroup ? Number(firstGroup.chatId || firstGroup.id) : '';
   });
 
-  const [contentType, setContentType] = useState<MentionContentType>('text');
+  const [format, setFormat] = useState<MentionContentFormat>('text');
   const [announcementText, setAnnouncementText] = useState('');
   const [mediaSource, setMediaSource] = useState<'upload' | 'url'>('upload');
   const [mediaFileId, setMediaFileId] = useState('');
@@ -129,9 +268,17 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
       .filter(g => !isNaN(g.chatId) && g.chatId < 0);
   }, [groups]);
 
+  // Current locked/selected group information
+  const currentSelectedGroup = useMemo(() => {
+    if (!targetGroupId) return null;
+    return groupOptions.find(g => g.chatId === Number(targetGroupId)) || null;
+  }, [groupOptions, targetGroupId]);
+
   // Sync if selectedChatId changes externally or groups load asynchronously
   useEffect(() => {
-    if (selectedChatId && Number(selectedChatId) < 0) {
+    if (lockToSelectedGroup && selectedChatId && Number(selectedChatId) < 0) {
+      setTargetGroupId(Number(selectedChatId));
+    } else if (selectedChatId && Number(selectedChatId) < 0 && targetGroupId === '') {
       setTargetGroupId(Number(selectedChatId));
     } else if (targetGroupId === '' && groups && groups.length > 0) {
       const firstGroup = groups.find(g => Number(g.chatId || g.id) < 0);
@@ -139,7 +286,7 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
         setTargetGroupId(Number(firstGroup.chatId || firstGroup.id));
       }
     }
-  }, [selectedChatId, groups]);
+  }, [selectedChatId, lockToSelectedGroup, groups]);
 
   // Fetch status of active operation for targetGroupId
   const fetchStatus = async (chatId: number) => {
@@ -189,6 +336,8 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
     };
   }, [targetGroupId]);
 
+  const currentConfig = FORMAT_CONFIGS[format];
+
   // Handle local file upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -200,8 +349,9 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
     const formData = new FormData();
     formData.append('file', file);
 
+    const baseType = currentConfig.baseType;
     try {
-      const res = await fetch(`/api/dashboard/posts/upload-media?type=${contentType}`, {
+      const res = await fetch(`/api/dashboard/posts/upload-media?type=${baseType}`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: getAuthHeaders(),
@@ -233,24 +383,25 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
   };
 
   // Character limits
-  const maxChars = contentType === 'text' ? 3500 : 600;
+  const maxChars = currentConfig.maxTextLen;
   const currentChars = announcementText.length;
   const isOverLimit = currentChars > maxChars;
 
   // Validation
   const isTargetGroupValid = typeof targetGroupId === 'number' && targetGroupId < 0;
-  const isMediaConfigured =
-    contentType === 'text' ||
-    (mediaSource === 'upload' ? Boolean(mediaUploadId) : Boolean(mediaFileId.trim()));
+  const hasMedia = mediaSource === 'upload' ? Boolean(mediaUploadId) : Boolean(mediaFileId.trim());
+  const isMediaValid = !currentConfig.requiresMedia || hasMedia;
+  const hasText = announcementText.trim().length > 0;
+  const isTextValid = !currentConfig.requiresText || hasText;
   const isOperationActive = Boolean(opStatus?.active);
 
   const canStart =
     isTargetGroupValid &&
     !isOperationActive &&
     !isOverLimit &&
-    isMediaConfigured &&
-    !isSubmitting &&
-    (contentType !== 'text' || announcementText.trim().length > 0);
+    isMediaValid &&
+    isTextValid &&
+    !isSubmitting;
 
   // Start Mention All
   const handleStartMentionAll = async () => {
@@ -260,13 +411,14 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
     setFeedback(null);
 
     try {
+      const baseContentType = currentConfig.baseType;
       const payload: any = {
         chatId: targetGroupId,
-        contentType,
+        contentType: baseContentType,
         text: announcementText.trim()
       };
 
-      if (contentType !== 'text') {
+      if (currentConfig.requiresMedia) {
         if (mediaSource === 'upload' && mediaUploadId) {
           payload.mediaUploadId = mediaUploadId;
         } else if (mediaFileId.trim()) {
@@ -427,7 +579,7 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
         </div>
       )}
 
-      {/* Target Group Selector (Explicit Requirement) */}
+      {/* Target Group Selector or Locked Group Badge */}
       <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-2`}>
         <div className="flex items-center justify-between">
           <label className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
@@ -435,11 +587,33 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
             Target Telegram Group <span className="text-rose-500">*</span>
           </label>
           <span className={`text-[11px] ${themeMutedText}`}>
-            Explicit group selection required
+            {lockToSelectedGroup ? 'Group locked to current view' : 'Explicit group selection required'}
           </span>
         </div>
 
-        {groupOptions.length === 0 ? (
+        {lockToSelectedGroup ? (
+          <div className="flex items-center justify-between p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-purple-600/20 text-purple-300">
+                <Lock className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-bold text-stone-100 flex items-center gap-2">
+                  <span>{currentSelectedGroup?.title || `Group ${targetGroupId}`}</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-600/25 text-purple-300 border border-purple-500/30">
+                    Locked to this Group
+                  </span>
+                </div>
+                <div className={`text-[11px] ${themeMutedText} font-mono mt-0.5`}>
+                  Chat ID: {targetGroupId} {currentSelectedGroup?.memberCount ? `• ${currentSelectedGroup.memberCount} members` : ''}
+                </div>
+              </div>
+            </div>
+            <span className="text-[11px] text-purple-300/80 font-medium hidden sm:inline">
+              Mismatch Protected
+            </span>
+          </div>
+        ) : groupOptions.length === 0 ? (
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -548,49 +722,70 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
         )}
       </div>
 
-      {/* Content Type Selector */}
-      <div className="space-y-2">
-        <label className="text-xs font-semibold text-stone-200">Content Type</label>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          {[
-            { id: 'text', label: 'Text Only', icon: FileText },
-            { id: 'photo', label: 'Photo', icon: Image },
-            { id: 'video', label: 'Video', icon: Video },
-            { id: 'animation', label: 'GIF / Animation', icon: Film },
-            { id: 'document', label: 'Document', icon: Sparkles }
-          ].map((type) => {
-            const Icon = type.icon;
-            const isSelected = contentType === type.id;
+      {/* Content Format Selector (9 Formats Supported) */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
+            <Layers className="w-4 h-4 text-purple-400" />
+            Announcement Format <span className="text-rose-500">*</span>
+          </label>
+          <span className={`text-[11px] ${themeMutedText}`}>
+            9 supported content format options
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+          {Object.values(FORMAT_CONFIGS).map((cfg) => {
+            const Icon = cfg.icon;
+            const isSelected = format === cfg.id;
             return (
               <button
-                key={type.id}
+                key={cfg.id}
                 type="button"
                 disabled={isOperationActive}
                 onClick={() => {
-                  setContentType(type.id as MentionContentType);
-                  clearAttachment();
+                  setFormat(cfg.id);
+                  if (!cfg.requiresMedia && cfg.category === 'text') {
+                    clearAttachment();
+                  }
                 }}
-                className={`p-3 rounded-xl border text-xs font-medium flex flex-col items-center justify-center gap-1.5 transition-colors ${
+                className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between gap-2 ${
                   isSelected
-                    ? 'bg-purple-600/15 border-purple-500 text-purple-300 shadow-sm'
-                    : `${themeInnerCardBg} ${themeBorder} text-stone-400 hover:text-stone-200`
+                    ? 'bg-purple-600/15 border-purple-500 text-purple-200 shadow-sm ring-1 ring-purple-500/40'
+                    : `${themeInnerCardBg} ${themeBorder} text-stone-400 hover:text-stone-200 hover:border-stone-700`
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isSelected ? 'text-purple-400' : 'text-stone-400'}`} />
-                <span>{type.label}</span>
+                <div className="flex items-center justify-between w-full">
+                  <Icon className={`w-4 h-4 ${isSelected ? 'text-purple-400' : 'text-stone-400'}`} />
+                  <span
+                    className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                      cfg.category === 'text'
+                        ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                        : cfg.category === 'combo'
+                        ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                        : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    }`}
+                  >
+                    {cfg.categoryLabel}
+                  </span>
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-stone-200">{cfg.label}</div>
+                  <div className={`text-[10px] ${themeMutedText} line-clamp-1`}>{cfg.description}</div>
+                </div>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Media Attachment Configuration (When not Text-Only) */}
-      {contentType !== 'text' && (
+      {/* Media Attachment Configuration (When Format Requires Media) */}
+      {currentConfig.requiresMedia && (
         <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-4 space-y-3`}>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <label className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
               <Upload className="w-4 h-4 text-purple-400" />
-              Media Attachment ({contentType.toUpperCase()}) <span className="text-rose-500">*</span>
+              {currentConfig.label} Attachment <span className="text-rose-500">*</span>
             </label>
             <div className="flex items-center gap-2 text-xs">
               <button
@@ -624,11 +819,11 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
                 disabled={isOperationActive || isUploading}
                 onChange={handleFileUpload}
                 accept={
-                  contentType === 'photo'
+                  currentConfig.baseType === 'photo'
                     ? 'image/*'
-                    : contentType === 'video'
+                    : currentConfig.baseType === 'video'
                     ? 'video/*'
-                    : contentType === 'animation'
+                    : currentConfig.baseType === 'animation'
                     ? 'image/gif,video/mp4'
                     : '*/*'
                 }
@@ -657,7 +852,7 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
                 >
                   <Upload className="w-5 h-5 text-stone-400" />
                   <span className="text-xs text-stone-300">
-                    {isUploading ? 'Uploading to server...' : `Click to browse and upload ${contentType}`}
+                    {isUploading ? 'Uploading to server...' : `Click to browse and upload ${currentConfig.label}`}
                   </span>
                   <span className={`text-[10px] ${themeMutedText}`}>
                     Media is cached after the first batch and sent to all member groups without re-uploading.
@@ -670,7 +865,7 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
               <input
                 type="text"
                 disabled={isOperationActive}
-                placeholder={`Enter Telegram file_id or public direct HTTPS URL for ${contentType}...`}
+                placeholder={`Enter Telegram file_id or public direct HTTPS URL for ${currentConfig.label}...`}
                 value={mediaFileId}
                 onChange={(e) => setMediaFileId(e.target.value)}
                 className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-2.5 text-xs text-stone-200 focus:outline-none focus:border-purple-500 font-mono`}
@@ -686,9 +881,18 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
       {/* Announcement Text / Caption Field */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-stone-200">
-            {contentType === 'text' ? 'Announcement Message' : 'Media Caption'}
-            {contentType === 'text' && <span className="text-rose-500"> *</span>}
+          <label className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
+            <FileText className="w-4 h-4 text-purple-400" />
+            {currentConfig.category === 'text'
+              ? 'Announcement Message'
+              : currentConfig.category === 'combo'
+              ? 'Announcement Text & Caption'
+              : 'Announcement Caption'}
+            {currentConfig.requiresText ? (
+              <span className="text-rose-500"> * (Required)</span>
+            ) : (
+              <span className={`text-[11px] font-normal ${themeMutedText}`}> (Optional)</span>
+            )}
           </label>
           <span
             className={`text-[11px] font-mono ${
@@ -696,18 +900,20 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
             }`}
           >
             {currentChars} / {maxChars} characters
-            {contentType !== 'text' && ' (Telegram caption limit)'}
+            {currentConfig.requiresMedia && ' (Safe caption headroom)'}
           </span>
         </div>
 
         <textarea
-          rows={4}
+          rows={currentConfig.category === 'text' ? 5 : 3}
           disabled={isOperationActive}
           value={announcementText}
           onChange={(e) => setAnnouncementText(e.target.value)}
           placeholder={
-            contentType === 'text'
+            currentConfig.category === 'text'
               ? 'Enter your announcement text here. 10 member mentions will be appended as interactive emojis to each message batch...'
+              : currentConfig.category === 'combo'
+              ? 'Enter your announcement text. Both text and media will be delivered together with 10 member mentions...'
               : 'Enter an optional announcement caption. 10 member mentions will be appended to each media batch...'
           }
           className={`w-full ${themeInnerCardBg} border ${
@@ -717,6 +923,11 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
         {isOverLimit && (
           <p className="text-[11px] text-rose-400 flex items-center gap-1">
             <AlertCircle className="w-3.5 h-3.5" /> Character limit exceeded. Shorten text to leave room for Telegram member mention hyperlinks.
+          </p>
+        )}
+        {currentConfig.requiresText && announcementText.trim().length === 0 && (
+          <p className="text-[11px] text-amber-400 flex items-center gap-1">
+            <AlertCircle className="w-3.5 h-3.5" /> Announcement text is required for this format.
           </p>
         )}
       </div>

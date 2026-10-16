@@ -2544,7 +2544,7 @@ export async function startServer() {
       const contentType = rawContentType as MentionContentType;
 
       const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-      const maxTextLen = contentType === 'text' ? 3500 : 600;
+      const maxTextLen = contentType === 'text' ? 3500 : 700;
       if (text.length > maxTextLen) {
         return res.status(400).json({
           error: `Text/caption exceeds allowed limit for Mention All (${text.length}/${maxTextLen} characters to preserve room for Telegram mentions).`

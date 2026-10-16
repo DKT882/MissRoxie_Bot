@@ -271,6 +271,9 @@ export default function App() {
   const [groupDetailTab, setGroupDetailTab] = useState<
     | 'overview'
     | 'welcome_dm'
+    | 'welcome_goodbye'
+    | 'rich_post'
+    | 'mention_all'
     | 'general'
     | 'moderation'
     | 'content_protection'
@@ -2790,12 +2793,6 @@ export default function App() {
 
                   <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
                     <button
-                      onClick={() => { handleNavSelect('broadcast'); setBroadcastSubTab('mention-all'); }}
-                      className="flex-1 md:flex-none px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm"
-                    >
-                      <Users className="w-4 h-4 text-purple-200" /> Mention All (@all)
-                    </button>
-                    <button
                       onClick={() => { handleNavSelect('broadcast'); setBroadcastSubTab('standard'); }}
                       className="flex-1 md:flex-none px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm"
                     >
@@ -3112,12 +3109,6 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
-                    onClick={() => { handleNavSelect('broadcast'); setBroadcastSubTab('mention-all'); }}
-                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm"
-                  >
-                    <Users className="w-3.5 h-3.5" /> Mention All (@all)
-                  </button>
-                  <button
                     onClick={() => { handleNavSelect('broadcast'); setBroadcastSubTab('standard'); }}
                     className={`px-3 py-1.5 ${themeInnerCardBg} hover:opacity-80 text-stone-300 border ${themeBorder} rounded-xl text-xs font-semibold flex items-center gap-1.5`}
                   >
@@ -3279,6 +3270,7 @@ export default function App() {
                     { id: 'overview', label: '📊 Overview' },
                     { id: 'welcome_goodbye', label: '👋 Welcome & Goodbye' },
                     { id: 'rich_post', label: '✨ Rich Post' },
+                    { id: 'mention_all', label: '📢 Mention All (@all)' },
                     { id: 'general', label: '⚙️ General' },
                     { id: 'moderation', label: '🛡️ Moderation' },
                     { id: 'content_protection', label: '🔒 Content Protection' },
@@ -3462,63 +3454,31 @@ export default function App() {
                 </div>
               )}
 
-              {/* INNER TAB: GROUP RICH POST / MENTION ALL COMPOSER */}
+              {/* INNER TAB: GROUP RICH POST */}
               {groupDetailTab === 'rich_post' && (
-                <div className="space-y-4">
-                  <div className={`flex items-center gap-2 border-b ${themeBorder} pb-3`}>
-                    <button
-                      type="button"
-                      onClick={() => setBroadcastSubTab('standard')}
-                      className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-                        broadcastSubTab === 'standard'
-                          ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500/50'
-                          : `${themeInnerCardBg} ${isDark ? 'text-stone-300 hover:text-white' : 'text-stone-700 hover:text-stone-900'} border ${themeBorder}`
-                      }`}
-                    >
-                      <Radio className="w-4 h-4 text-blue-400" />
-                      <span>Standard Group Post</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBroadcastSubTab('mention-all')}
-                      className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-                        broadcastSubTab === 'mention-all'
-                          ? 'bg-purple-600 text-white shadow-sm ring-1 ring-purple-500/50'
-                          : `${themeInnerCardBg} ${isDark ? 'text-stone-300 hover:text-white' : 'text-stone-700 hover:text-stone-900'} border ${themeBorder}`
-                      }`}
-                    >
-                      <Users className="w-4 h-4 text-purple-400" />
-                      <span>Mention All (@all)</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                        broadcastSubTab === 'mention-all' ? 'bg-purple-700/60 text-purple-100' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                      }`}>
-                        @all
-                      </span>
-                    </button>
-                  </div>
+                <RichPostComposer
+                  groups={groups}
+                  selectedChatId={groupDetails.chatId}
+                  lockedDestination={{
+                    type: 'group',
+                    chatId: groupDetails.chatId,
+                    title: groupDetails.chatTitle
+                  }}
+                  theme={theme}
+                  onRefresh={refreshCurrentView}
+                  botUsername={botInfo?.username || 'MissRoxie_Bot'}
+                />
+              )}
 
-                  {broadcastSubTab === 'standard' ? (
-                    <RichPostComposer
-                      groups={groups}
-                      selectedChatId={groupDetails.chatId}
-                      lockedDestination={{
-                        type: 'group',
-                        chatId: groupDetails.chatId,
-                        title: groupDetails.chatTitle
-                      }}
-                      theme={theme}
-                      onRefresh={refreshCurrentView}
-                      botUsername={botInfo?.username || 'MissRoxie_Bot'}
-                    />
-                  ) : (
-                    <MentionAllComposer
-                      groups={groups}
-                      selectedChatId={groupDetails.chatId}
-                      theme={theme}
-                      onRefresh={refreshCurrentView}
-                    />
-                  )}
-                </div>
+              {/* INNER TAB: GROUP MENTION ALL (@ALL) */}
+              {groupDetailTab === 'mention_all' && (
+                <MentionAllComposer
+                  groups={groups}
+                  selectedChatId={groupDetails.chatId}
+                  lockToSelectedGroup={true}
+                  theme={theme}
+                  onRefresh={refreshCurrentView}
+                />
               )}
 
               {/* INNER TAB: GROUP STORED MESSAGES */}
@@ -5822,59 +5782,16 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: RICH POST COMPOSER (PHASE 4) / BROADCAST UNIFIED */}
+          {/* TAB: RICH POST COMPOSER */}
           {activeNav === 'rich-post' && (
-            <div className="space-y-4">
-              <div className={`flex items-center gap-2 border-b ${themeBorder} pb-3`}>
-                <button
-                  type="button"
-                  onClick={() => setBroadcastSubTab('standard')}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-                    broadcastSubTab === 'standard'
-                      ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500/50'
-                      : `${themeInnerCardBg} ${isDark ? 'text-stone-300 hover:text-white' : 'text-stone-700 hover:text-stone-900'} border ${themeBorder}`
-                  }`}
-                >
-                  <Radio className="w-4 h-4 text-blue-400" />
-                  <span>Standard Broadcast</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBroadcastSubTab('mention-all')}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-                    broadcastSubTab === 'mention-all'
-                      ? 'bg-purple-600 text-white shadow-sm ring-1 ring-purple-500/50'
-                      : `${themeInnerCardBg} ${isDark ? 'text-stone-300 hover:text-white' : 'text-stone-700 hover:text-stone-900'} border ${themeBorder}`
-                  }`}
-                >
-                  <Users className="w-4 h-4 text-purple-400" />
-                  <span>Mention All (@all)</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                    broadcastSubTab === 'mention-all' ? 'bg-purple-700/60 text-purple-100' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                  }`}>
-                    @all
-                  </span>
-                </button>
-              </div>
-
-              {broadcastSubTab === 'standard' ? (
-                <RichPostComposer
-                  groups={groups}
-                  privateChats={privateChats}
-                  selectedChatId={selectedChatId}
-                  theme={theme}
-                  onRefresh={refreshCurrentView}
-                  botUsername={botInfo?.username || 'MissRoxie_Bot'}
-                />
-              ) : (
-                <MentionAllComposer
-                  groups={groups}
-                  selectedChatId={typeof selectedChatId === 'number' ? selectedChatId : null}
-                  theme={theme}
-                  onRefresh={refreshCurrentView}
-                />
-              )}
-            </div>
+            <RichPostComposer
+              groups={groups}
+              privateChats={privateChats}
+              selectedChatId={selectedChatId}
+              theme={theme}
+              onRefresh={refreshCurrentView}
+              botUsername={botInfo?.username || 'MissRoxie_Bot'}
+            />
           )}
 
           {/* TAB: SEND MESSAGE */}
