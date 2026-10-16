@@ -2798,15 +2798,26 @@ export async function startServer() {
       }
       const triggerKeyword = rawTrigger && rawTrigger.length > 0 ? normalizeTriggerKeyword(rawTrigger) : undefined;
 
+      const resolvedScheduleType = scheduleType || 'interval';
+      let resolvedIntervalMs = intervalMs ? Number(intervalMs) : undefined;
+      let resolvedIntervalFormatted = intervalFormatted || undefined;
+      if (resolvedScheduleType === 'daily') {
+        resolvedIntervalMs = resolvedIntervalMs || 86400000;
+        resolvedIntervalFormatted = resolvedIntervalFormatted || '1 day';
+      } else if (resolvedScheduleType === 'one_time') {
+        resolvedIntervalMs = undefined;
+        resolvedIntervalFormatted = undefined;
+      }
+
       const newSchedule = db.addSchedule({
         chatId: numChatId,
         chatTitle: req.body.chatTitle || `Chat ${numChatId}`,
         name: name || (text.slice(0, 30) || 'Scheduled Message'),
         message: text,
         messageText: text,
-        scheduleType: scheduleType || 'interval',
-        intervalMs: intervalMs ? Number(intervalMs) : undefined,
-        intervalFormatted: intervalFormatted || undefined,
+        scheduleType: resolvedScheduleType,
+        intervalMs: resolvedIntervalMs,
+        intervalFormatted: resolvedIntervalFormatted,
         nextRun: nextRun || new Date(Date.now() + 60000).toISOString(),
         timezone: timezone || 'UTC',
         contentType: contentType || 'text',
@@ -2887,6 +2898,29 @@ export async function startServer() {
           updates.inlineKeyboard = undefined;
         } else {
           updates.inlineKeyboard = sanitizeDashboardInlineKeyboard(updates.inlineKeyboard);
+        }
+      }
+
+      if ('scheduleType' in updates) {
+        if (updates.scheduleType === 'daily') {
+          updates.intervalMs = updates.intervalMs || 86400000;
+          updates.intervalFormatted = updates.intervalFormatted || '1 day';
+        } else if (updates.scheduleType === 'one_time') {
+          updates.intervalMs = undefined;
+          updates.intervalFormatted = undefined;
+          delete updates.intervalStr;
+        }
+      }
+
+      if ('nextRun' in updates) {
+        if (updates.nextRun === '' || updates.nextRun === null || updates.nextRun === undefined) {
+          updates.nextRun = '';
+        } else {
+          const parsedDate = new Date(updates.nextRun);
+          if (isNaN(parsedDate.getTime())) {
+            return res.status(400).json({ error: 'Invalid nextRun date format.' });
+          }
+          updates.nextRun = parsedDate.toISOString();
         }
       }
 

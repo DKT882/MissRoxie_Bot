@@ -149,6 +149,10 @@ async function run() {
   };
 
   try {
+    // Pre-clear any lingering test schedules for test chats
+    db.getGroupSchedules(testChatA).forEach(s => db.deleteSchedule(testChatA, s.id));
+    db.getGroupSchedules(testChatB).forEach(s => db.deleteSchedule(testChatB, s.id));
+
     // ------------------------------------------------------------------------
     // TEST 1: Editing message text causes the next execution to send the new text
     // ------------------------------------------------------------------------

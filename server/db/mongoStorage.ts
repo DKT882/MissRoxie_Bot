@@ -463,6 +463,43 @@ export class MongoStorageService {
     }
   }
 
+  public static async updateGroupSchedules(chatId: string | number, schedules: any[], targetBotId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
+      if (!collection) return false;
+
+      const normChatId = String(chatId);
+      const numChatId = Number(chatId);
+      const now = new Date();
+
+      const filter: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (targetBotId !== undefined && targetBotId !== null) {
+        filter.botId = targetBotId;
+      }
+
+      const res = await collection.updateOne(
+        filter,
+        {
+          $set: {
+            schedules: (schedules || []).slice(-50),
+            updatedAt: now
+          }
+        }
+      );
+
+      if (res.matchedCount === 0) {
+        return false;
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to update schedules for group ${chatId}: ${err?.message}`);
+      return false;
+    }
+  }
+
   public static async getAllGroups(botId?: number): Promise<MongoGroupDocument[]> {
     try {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();

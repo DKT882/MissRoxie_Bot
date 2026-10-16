@@ -1939,6 +1939,7 @@ export default function App() {
       };
 
       if (newScheduleForm.scheduleType === 'interval') {
+        payload.scheduleType = 'interval';
         payload.intervalFormatted = newScheduleForm.intervalStr || '1h';
         const rawStr = (newScheduleForm.intervalStr || '1h').toLowerCase().trim();
         const match = rawStr.match(/^(\d+(?:\.\d+)?)\s*(m(?:in(?:ute)?s?)?|h(?:(?:ou)?rs?)?|d(?:ays?)?)$/);
@@ -1957,12 +1958,25 @@ export default function App() {
         }
         payload.intervalMs = calculatedMs;
 
-        if (editingSchedule && editingSchedule.nextRun && (newScheduleForm.intervalStr || '1h').trim().toLowerCase() === (editingSchedule.intervalFormatted || '1h').trim().toLowerCase()) {
+        if (editingSchedule && editingSchedule.nextRun && (
+          (newScheduleForm.intervalStr || '1h').trim().toLowerCase() === (editingSchedule.intervalFormatted || '1h').trim().toLowerCase() ||
+          payload.intervalMs === editingSchedule.intervalMs
+        )) {
           payload.nextRun = editingSchedule.nextRun;
         } else {
           payload.nextRun = new Date(Date.now() + payload.intervalMs).toISOString();
         }
+      } else if (newScheduleForm.scheduleType === 'daily') {
+        payload.scheduleType = 'daily';
+        payload.intervalMs = 86400000;
+        payload.intervalFormatted = '1 day';
+        const dateStr = `${newScheduleForm.nextRunDate}T${newScheduleForm.nextRunTime || '12:00'}:00`;
+        const parsedDate = new Date(dateStr);
+        payload.nextRun = isNaN(parsedDate.getTime()) ? new Date(Date.now() + 86400000).toISOString() : parsedDate.toISOString();
       } else {
+        payload.scheduleType = 'one_time';
+        payload.intervalMs = null;
+        payload.intervalFormatted = null;
         const dateStr = `${newScheduleForm.nextRunDate}T${newScheduleForm.nextRunTime || '12:00'}:00`;
         const parsedDate = new Date(dateStr);
         payload.nextRun = isNaN(parsedDate.getTime()) ? new Date(Date.now() + 3600000).toISOString() : parsedDate.toISOString();
@@ -5340,14 +5354,18 @@ export default function App() {
                         onClick={() => {
                           setEditingSchedule(null);
                           setScheduleFormError(null);
+                          const now = new Date();
+                          const pad = (n: number) => String(n).padStart(2, '0');
+                          const defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+                          const defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
                           setNewScheduleForm({
                             chatId: activeGroupDetailId,
                             name: '',
                             message: '',
                             scheduleType: 'interval',
                             intervalStr: '1h',
-                            nextRunDate: new Date().toISOString().split('T')[0],
-                            nextRunTime: '12:00',
+                            nextRunDate: defaultDate,
+                            nextRunTime: defaultTime,
                             timezone: 'UTC',
                             contentType: 'text',
                             mediaFileId: '',
@@ -5440,14 +5458,16 @@ export default function App() {
                                 onClick={() => {
                                   setEditingSchedule(s);
                                   setScheduleFormError(null);
-                                  let defaultDate = new Date().toISOString().split('T')[0];
-                                  let defaultTime = '12:00';
+                                  const now = new Date();
+                                  const pad = (n: number) => String(n).padStart(2, '0');
+                                  let defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+                                  let defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
                                   if (s.nextRun) {
                                     try {
                                       const d = new Date(s.nextRun);
                                       if (!isNaN(d.getTime())) {
-                                        defaultDate = d.toISOString().split('T')[0];
-                                        defaultTime = d.toISOString().split('T')[1].slice(0, 5);
+                                        defaultDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+                                        defaultTime = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
                                       }
                                     } catch {}
                                   }
@@ -5923,14 +5943,18 @@ export default function App() {
                       onClick={() => {
                         setEditingSchedule(null);
                         setScheduleFormError(null);
+                        const now = new Date();
+                        const pad = (n: number) => String(n).padStart(2, '0');
+                        const defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+                        const defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
                         setNewScheduleForm({
                           chatId: groups[0]?.chatId || '',
                           name: '',
                           message: '',
                           scheduleType: 'interval',
                           intervalStr: '1h',
-                          nextRunDate: new Date().toISOString().split('T')[0],
-                          nextRunTime: '12:00',
+                          nextRunDate: defaultDate,
+                          nextRunTime: defaultTime,
                           timezone: 'UTC',
                           contentType: 'text',
                           mediaFileId: '',
@@ -6066,14 +6090,16 @@ export default function App() {
                                 onClick={() => {
                                   setEditingSchedule(s);
                                   setScheduleFormError(null);
-                                  let defaultDate = new Date().toISOString().split('T')[0];
-                                  let defaultTime = '12:00';
+                                  const now = new Date();
+                                  const pad = (n: number) => String(n).padStart(2, '0');
+                                  let defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+                                  let defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
                                   if (s.nextRun) {
                                     try {
                                       const d = new Date(s.nextRun);
                                       if (!isNaN(d.getTime())) {
-                                        defaultDate = d.toISOString().split('T')[0];
-                                        defaultTime = d.toISOString().split('T')[1].slice(0, 5);
+                                        defaultDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+                                        defaultTime = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
                                       }
                                     } catch {}
                                   }

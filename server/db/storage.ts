@@ -1297,16 +1297,18 @@ export class StorageManager {
       this.data.notes[key] = rawNotes;
     }
     const rawSchedules = data.schedules || data.statistics?.schedules;
-    if (Array.isArray(rawSchedules) && rawSchedules.length > 0) {
+    if (Array.isArray(rawSchedules)) {
       if (!this.data.schedules) this.data.schedules = [];
-      const existingScheduleIds = new Set(this.data.schedules.map((s: any) => s.id));
-      const incomingSchedules = rawSchedules.slice(-50);
-      for (const s of incomingSchedules) {
-        if (s?.id && !existingScheduleIds.has(s.id)) {
-          this.data.schedules.push(s);
-          existingScheduleIds.add(s.id);
-        }
-      }
+      const numChatId = Number(chatId);
+      const incomingSchedules = rawSchedules
+        .filter((s: any) => s && s.id)
+        .slice(-50)
+        .map((s: any) => ({
+          ...s,
+          chatId: numChatId
+        }));
+      const otherGroupSchedules = this.data.schedules.filter((s: any) => Number(s.chatId) !== numChatId);
+      this.data.schedules = [...otherGroupSchedules, ...incomingSchedules];
     }
 
     // 7. Activity logs
@@ -4709,6 +4711,36 @@ export class StorageManager {
     return members;
   }
 
+  public syncGroupSchedulesToMongo(chatId: number | string): void {
+    const numId = Number(chatId);
+    if (isNaN(numId) || numId >= 0) return;
+    const currentSchedules = this.getGroupSchedules(numId).slice(-50);
+    const targetBotId = this.currentBotId ?? undefined;
+
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.updateGroupSchedules(numId, currentSchedules, targetBotId)
+        .then((ok) => {
+          if (!ok) {
+            const rawData = this.buildGroupDataObject(numId);
+            const safeData = this.sanitizeGroupData(rawData);
+            return MongoStorageService.saveGroup(safeData, targetBotId, this.currentBotUsername ?? undefined);
+          }
+          return true;
+        })
+        .then((finalOk) => {
+          if (!finalOk) {
+            this.markGroupMongoDirty(numId, 'updateGroupSchedules', 'matchedCount 0 or write rejected');
+          }
+        })
+        .catch((mongoErr) => {
+          console.warn(`[Storage] Background MongoDB schedules sync failed for group ${numId}: ${mongoErr?.message}`);
+          this.markGroupMongoDirty(numId, 'updateGroupSchedules', mongoErr?.message);
+        });
+    } else {
+      this.markGroupMongoDirty(numId, 'updateGroupSchedules', 'Mongo not connected');
+    }
+  }
+
   // --- Scheduled Messages ---
   public getAllSchedules(): ScheduledMessage[] {
     return [...this.data.schedules];
@@ -4728,6 +4760,7 @@ export class StorageManager {
     };
     this.data.schedules.push(newSchedule);
     this.scheduleSave(schedule.chatId);
+    this.syncGroupSchedulesToMongo(schedule.chatId);
     return newSchedule;
   }
 
@@ -4752,6 +4785,7 @@ export class StorageManager {
     const changed = initial > this.data.schedules.length;
     if (changed && targetChatId !== undefined) {
       this.scheduleSave(targetChatId);
+      this.syncGroupSchedulesToMongo(targetChatId);
     }
     return changed;
   }
@@ -4795,8 +4829,10 @@ export class StorageManager {
 
     if (oldChatId && oldChatId !== s.chatId) {
       this.scheduleSave(oldChatId);
+      this.syncGroupSchedulesToMongo(oldChatId);
     }
     this.scheduleSave(s.chatId);
+    this.syncGroupSchedulesToMongo(s.chatId);
     return s;
   }
 
@@ -4805,6 +4841,7 @@ export class StorageManager {
     if (!s) return null;
     s.enabled = enabled !== undefined ? enabled : !s.enabled;
     this.scheduleSave(s.chatId);
+    this.syncGroupSchedulesToMongo(s.chatId);
     return s;
   }
 
@@ -4838,6 +4875,7 @@ export class StorageManager {
       }
       s.runsCount = (s.runsCount || 0) + 1;
       this.scheduleSave(s.chatId);
+      this.syncGroupSchedulesToMongo(s.chatId);
     }
   }
 

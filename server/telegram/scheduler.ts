@@ -505,8 +505,9 @@ export class MessageScheduler {
             }
 
             // Immediately advance nextRun in memory/storage so any concurrent check cannot pick it up
-            const hasInterval = freshSchedule.intervalMs && freshSchedule.intervalMs > 0 && freshSchedule.scheduleType !== 'one_time';
-            const intermediateNextRun = hasInterval ? new Date(now + freshSchedule.intervalMs!).toISOString() : '';
+            const hasInterval = ((freshSchedule.intervalMs && freshSchedule.intervalMs > 0) || freshSchedule.scheduleType === 'daily') && freshSchedule.scheduleType !== 'one_time';
+            const effectiveIntervalMs = freshSchedule.intervalMs && freshSchedule.intervalMs > 0 ? freshSchedule.intervalMs : (freshSchedule.scheduleType === 'daily' ? 86400000 : 0);
+            const intermediateNextRun = hasInterval ? new Date(now + effectiveIntervalMs).toISOString() : '';
 
             // Distributed & in-memory atomic claim before Telegram dispatch
             const claimed = await db.claimScheduleExecution(
@@ -572,9 +573,10 @@ export class MessageScheduler {
 
               // Calculate next run time and update lastSentMessageId and pendingDeleteMessageIds using latest state
               const latest = db.getScheduleById(freshSchedule.id) || freshSchedule;
-              const latestHasInterval = latest.intervalMs && latest.intervalMs > 0 && latest.scheduleType !== 'one_time';
+              const latestHasInterval = ((latest.intervalMs && latest.intervalMs > 0) || latest.scheduleType === 'daily') && latest.scheduleType !== 'one_time';
+              const latestIntervalMs = latest.intervalMs && latest.intervalMs > 0 ? latest.intervalMs : (latest.scheduleType === 'daily' ? 86400000 : 0);
               if (latestHasInterval) {
-                const nextDate = new Date(now + latest.intervalMs!).toISOString();
+                const nextDate = new Date(now + latestIntervalMs).toISOString();
                 db.updateScheduleNextRun(latest.id, nextDate, 'success', undefined, newSentMessageId, pendingDeleteIds);
                 if (newLastMentionedUserId !== undefined) {
                   db.updateSchedule(latest.id, { lastMentionedUserId: newLastMentionedUserId });
