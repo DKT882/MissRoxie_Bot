@@ -129,12 +129,17 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
       .filter(g => !isNaN(g.chatId) && g.chatId < 0);
   }, [groups]);
 
-  // Sync if selectedChatId changes externally
+  // Sync if selectedChatId changes externally or groups load asynchronously
   useEffect(() => {
     if (selectedChatId && Number(selectedChatId) < 0) {
       setTargetGroupId(Number(selectedChatId));
+    } else if (targetGroupId === '' && groups && groups.length > 0) {
+      const firstGroup = groups.find(g => Number(g.chatId || g.id) < 0);
+      if (firstGroup) {
+        setTargetGroupId(Number(firstGroup.chatId || firstGroup.id));
+      }
     }
-  }, [selectedChatId]);
+  }, [selectedChatId, groups]);
 
   // Fetch status of active operation for targetGroupId
   const fetchStatus = async (chatId: number) => {
@@ -148,6 +153,11 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
         const data: OperationStatus = await res.json();
         setOpStatus(data);
         return data;
+      } else if (res.status === 401 || res.status === 403) {
+        setFeedback({
+          type: 'error',
+          text: 'Operator session required or expired. Please ensure you are logged in as an administrator.'
+        });
       }
     } catch (err) {
       console.error('Failed to poll mention-all status:', err);
@@ -429,23 +439,43 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
           </span>
         </div>
 
-        <select
-          value={targetGroupId}
-          onChange={(e) => setTargetGroupId(e.target.value ? Number(e.target.value) : '')}
-          disabled={isOperationActive}
-          className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-2.5 text-xs focus:outline-none focus:border-purple-500 font-sans text-stone-200`}
-        >
-          <option value="">-- Select Target Telegram Group --</option>
-          {groupOptions.map((g) => (
-            <option key={g.chatId} value={g.chatId}>
-              {g.title} ({g.chatId}){g.memberCount ? ` • ${g.memberCount} members` : ''}
-            </option>
-          ))}
-        </select>
-        {!isTargetGroupValid && (
-          <p className="text-[11px] text-amber-400 flex items-center gap-1 mt-1">
-            <AlertCircle className="w-3.5 h-3.5" /> Please select a connected group before starting Mention All.
-          </p>
+        {groupOptions.length === 0 ? (
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>No connected Telegram groups detected. Roxie must be added as an administrator to at least one group.</span>
+            </div>
+            {onRefresh && (
+              <button
+                type="button"
+                onClick={onRefresh}
+                className="px-2.5 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 rounded-lg text-xs font-semibold shrink-0"
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <select
+              value={targetGroupId}
+              onChange={(e) => setTargetGroupId(e.target.value ? Number(e.target.value) : '')}
+              disabled={isOperationActive}
+              className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-2.5 text-xs focus:outline-none focus:border-purple-500 font-sans text-stone-200`}
+            >
+              <option value="">-- Select Target Telegram Group --</option>
+              {groupOptions.map((g) => (
+                <option key={g.chatId} value={g.chatId}>
+                  {g.title} ({g.chatId}){g.memberCount ? ` • ${g.memberCount} members` : ''}
+                </option>
+              ))}
+            </select>
+            {!isTargetGroupValid && (
+              <p className="text-[11px] text-amber-400 flex items-center gap-1 mt-1">
+                <AlertCircle className="w-3.5 h-3.5" /> Please select a connected group before starting Mention All.
+              </p>
+            )}
+          </>
         )}
       </div>
 

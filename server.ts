@@ -3747,8 +3747,19 @@ export async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production' || fs.existsSync(path.join(process.cwd(), 'dist', 'index.html'));
   if (isProduction) {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      }
+    }));
     app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else {
@@ -3763,8 +3774,19 @@ export async function startServer() {
       console.warn('[Roxie Server] Vite dev server failed to start, falling back to static files:', viteErr.message);
       const distPath = path.join(process.cwd(), 'dist');
       if (fs.existsSync(distPath)) {
-        app.use(express.static(distPath));
+        app.use(express.static(distPath, {
+          setHeaders: (res, filePath) => {
+            if (filePath.endsWith('.html')) {
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+              res.setHeader('Pragma', 'no-cache');
+              res.setHeader('Expires', '0');
+            }
+          }
+        }));
         app.get('*', (req, res) => {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
           res.sendFile(path.join(distPath, 'index.html'));
         });
       }
