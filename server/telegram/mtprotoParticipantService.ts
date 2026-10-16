@@ -2,6 +2,7 @@ import { TelegramClient, Api, utils } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { CachedMember, TelegramMessageEntity } from './types.js';
 import { logDebug } from '../observability/logger.js';
+import { telegramApi } from './api.js';
 
 export type ParticipantFetchStatus = 'FULL_FETCH' | 'PARTIAL_FETCH' | 'FETCH_FAILED';
 export type MtprotoAuthMode = 'USER' | 'BOT' | 'NONE';
@@ -152,14 +153,19 @@ export class MtprotoParticipantService {
   /**
    * Generates a non-sensitive fingerprint of the active credentials without exposing or logging secrets.
    */
-  private getSessionFingerprint(): string {
-    const sessionStr = (process.env.TELEGRAM_MT_PROTO_SESSION || process.env.TELEGRAM_STRING_SESSION || process.env.TELEGRAM_BOT_TOKEN || '').trim();
+  private getSessionFingerprint(mode?: MtprotoAuthMode): string {
+    const targetMode = mode || this.getAuthMode();
+    const sessionStr = (
+      targetMode === 'USER'
+        ? (process.env.TELEGRAM_MT_PROTO_SESSION || process.env.TELEGRAM_STRING_SESSION || '')
+        : (process.env.TELEGRAM_BOT_TOKEN || '')
+    ).trim();
     if (!sessionStr) return 'none';
     let hash = 0;
     for (let i = 0; i < sessionStr.length; i++) {
       hash = ((hash << 5) - hash + sessionStr.charCodeAt(i)) | 0;
     }
-    return `len_${sessionStr.length}_h_${Math.abs(hash)}`;
+    return `${targetMode}_len_${sessionStr.length}_h_${Math.abs(hash)}`;
   }
 
   public getAuthMode(): MtprotoAuthMode {
@@ -288,6 +294,24 @@ export class MtprotoParticipantService {
     this.disconnect().catch(() => {});
   }
 
+  public getAuthenticatedUser(): {
+    id: string;
+    username?: string;
+    firstName?: string;
+    isBot: boolean;
+  } | null {
+    return this.authenticatedUser;
+  }
+
+  public setAuthenticatedUserForTesting(user: {
+    id: string;
+    username?: string;
+    firstName?: string;
+    isBot: boolean;
+  } | null): void {
+    this.authenticatedUser = user;
+  }
+
   public acquireChatLock(chatId: number): boolean {
     if (MtprotoParticipantService.activeChatLocks.has(chatId)) {
       return false;
@@ -304,8 +328,8 @@ export class MtprotoParticipantService {
     return MtprotoParticipantService.activeChatLocks.has(chatId);
   }
 
-  public async getClient(): Promise<TelegramClient> {
-    const mode = this.getAuthMode();
+  public async getClient(forceMode?: MtprotoAuthMode): Promise<TelegramClient> {
+    const mode = forceMode || this.getAuthMode();
     if (mode === 'NONE') {
       throw new MTProtoNotConfiguredError(
         'MTProto credentials (TELEGRAM_API_ID, TELEGRAM_API_HASH, and either TELEGRAM_MT_PROTO_SESSION or TELEGRAM_BOT_TOKEN) are not configured.'
@@ -316,8 +340,17 @@ export class MtprotoParticipantService {
       return this.client;
     }
 
+    if (this.client && this.currentMode !== mode) {
+      try {
+        await this.client.disconnect();
+      } catch {}
+      this.client = null;
+      this.isConnected = false;
+      this.currentMode = 'NONE';
+    }
+
     // Fast-fail non-retryable fatal authentication errors for the same credentials
-    const currentFingerprint = this.getSessionFingerprint();
+    const currentFingerprint = this.getSessionFingerprint(mode);
     if (this.lastFatalAuthError && this.lastFatalAuthError.fingerprint === currentFingerprint) {
       throw new MTProtoAuthError(
         this.lastFatalAuthError.message,
@@ -569,11 +602,20 @@ export class MtprotoParticipantService {
 
   /**
    * Resolves a Bot API chat ID to an MTProto channel entity / Api.InputChannel.
-   * Properly resolves Telegram supergroups (-100...) using the authenticated MTProto bot session
-   * and retrieves the real MTProto access hash without ever treating the channel ID as a PeerUser
-   * and without calling user-only methods like messages.getDialogs.
+   * Handles:
+   * 1. In-memory entity cache lookup.
+   * 2. Direct resolution via client.getInputEntity.
+   * 3. Fallback: Public supergroup username resolution via Bot API getChat.
+   * 4. Fallback: In USER mode (user session), warms entity cache via GetDialogs.
+   * 5. Retry entity cache lookup after fallbacks.
+   * 6. Multi-identity diagnostic: distinguishes Bot API @MissRoxie_Bot admin rights from
+   *    MTProto user session membership so operators receive exact actionable guidance.
    */
-  public async resolvePeerEntity(client: TelegramClient, chatId: number | string): Promise<Api.InputChannel> {
+  public async resolvePeerEntity(
+    client: TelegramClient,
+    chatId: number | string,
+    botId?: number
+  ): Promise<Api.InputChannel> {
     const rawIdStr = String(chatId).trim();
     console.log(`[MTProto] resolving chat=${rawIdStr}`);
 
@@ -635,29 +677,180 @@ export class MtprotoParticipantService {
       }
     }
 
-    // 3. Retry cache lookup after direct resolution attempt
+    // 3. Fallback: If not resolved yet, check if supergroup has a public username via Bot API
     if (!resolvedInputChannel) {
       try {
-        if (client._entityCache) {
+        const chatInfo = await telegramApi.getChat(chatId).catch(() => null);
+        if (chatInfo?.ok && chatInfo.result?.username) {
+          console.log(`[MTProto] Supergroup ${rawIdStr} has public username @${chatInfo.result.username}. Resolving via username...`);
+          const entity = await client.getInputEntity('@' + chatInfo.result.username);
+          resolvedInputChannel = this.toInputChannel(entity);
+        }
+      } catch (err: any) {
+        logDebug({
+          event: 'MTPROTO_USERNAME_RESOLVE_FAILED',
+          chatId: rawIdStr,
+          error: err?.message
+        });
+      }
+    }
+
+    // 4. Fallback: In USER mode (non-bot user session), warm entity cache via GetDialogs
+    if (!resolvedInputChannel && this.getAuthMode() === 'USER' && !this.authenticatedUser?.isBot) {
+      try {
+        console.log(`[MTProto] Dialog cache miss for ${rawIdStr} in USER mode. Fetching dialogs to warm entity cache...`);
+        let dialogs: any = null;
+        if (typeof (client as any).invoke === 'function') {
+          dialogs = await client.invoke(
+            new Api.messages.GetDialogs({
+              offsetDate: 0,
+              offsetId: 0,
+              offsetPeer: new Api.InputPeerEmpty(),
+              limit: 100,
+              hash: BigInt(0) as any
+            })
+          );
+        } else if (typeof (client as any).getDialogs === 'function') {
+          dialogs = await (client as any).getDialogs({ limit: 100 });
+        }
+
+        if (dialogs && client._entityCache) {
+          client._entityCache.add(dialogs);
           const cached = client._entityCache.get(rawIdStr);
           resolvedInputChannel = this.toInputChannel(cached);
         }
+      } catch (dialogErr: any) {
+        logDebug({
+          event: 'MTPROTO_GET_DIALOGS_WARMUP_FAILED',
+          chatId: rawIdStr,
+          error: dialogErr?.message
+        });
+      }
+    }
+
+    // 5. Retry cache lookup after fallbacks
+    if (!resolvedInputChannel && client._entityCache) {
+      try {
+        const cached = client._entityCache.get(rawIdStr);
+        resolvedInputChannel = this.toInputChannel(cached);
       } catch {
         // Cache miss
       }
     }
 
-    // 4. Verify channel entity resolution succeeded and bot has access
+    // 6. If still unresolved, run targeted multi-identity diagnosis to provide an accurate, actionable message
     if (!resolvedInputChannel) {
-      throw new MTProtoGroupResolutionError(
-        `Failed to resolve Telegram chat ${rawIdStr} on MTProto: Roxie bot cannot access this supergroup. Please ensure @MissRoxie_Bot is an administrator in the supergroup.`
-      );
+      const diagnosticError = await this.diagnoseResolutionFailure(chatId, rawIdStr, botId);
+      throw new MTProtoGroupResolutionError(diagnosticError);
     }
 
     console.log('[MTProto] resolved entity type=Channel');
     console.log('[MTProto] channel entity resolved successfully');
 
     return resolvedInputChannel;
+  }
+
+  /**
+   * Diagnostic helper: safely queries Bot API for @MissRoxie_Bot administrator status
+   * and (in USER mode) the authenticated MTProto user account membership.
+   * Produces an accurate, actionable diagnostic message without leaking sensitive credentials.
+   */
+  public async diagnoseResolutionFailure(
+    chatId: number | string,
+    rawIdStr: string,
+    botId?: number
+  ): Promise<string> {
+    const mode = this.getAuthMode();
+    let botMe: any = null;
+    let botChatMember: any = null;
+    let botError: string | null = null;
+
+    try {
+      const meRes = await telegramApi.getMe();
+      botMe = meRes?.ok ? meRes.result : null;
+    } catch (e: any) {
+      botError = e?.message;
+    }
+
+    const effectiveBotId = botId || botMe?.id;
+    const botUsername = botMe?.username ? `@${botMe.username}` : '@MissRoxie_Bot';
+
+    if (effectiveBotId) {
+      try {
+        const memberRes = await telegramApi.getChatMember(chatId, effectiveBotId, true);
+        if (memberRes?.ok && memberRes.result) {
+          botChatMember = memberRes.result;
+        } else if (memberRes?.description) {
+          botError = memberRes.description;
+        }
+      } catch (e: any) {
+        botError = e?.message;
+      }
+    }
+
+    const isBotAdmin = botChatMember?.status === 'administrator' || botChatMember?.status === 'creator';
+    const isBotMember = isBotAdmin || botChatMember?.status === 'member' || botChatMember?.status === 'restricted';
+
+    // In USER mode, participant enumeration is executed by the authenticated MTProto user account
+    if (mode === 'USER') {
+      const authUser = this.authenticatedUser;
+      const userIdentifier = authUser?.username
+        ? `@${authUser.username}`
+        : (authUser?.id ? `account ID ${authUser.id}` : 'authenticated MTProto user account');
+      let userChatMember: any = null;
+      let userNotMember = false;
+
+      if (authUser?.id) {
+        const numUserId = Number(authUser.id);
+        if (!isNaN(numUserId)) {
+          try {
+            const userRes = await telegramApi.getChatMember(chatId, numUserId, true);
+            if (userRes?.ok && userRes.result) {
+              userChatMember = userRes.result;
+              if (userChatMember.status === 'left' || userChatMember.status === 'kicked') {
+                userNotMember = true;
+              }
+            } else if (
+              userRes?.description?.includes('USER_NOT_PARTICIPANT') ||
+              userRes?.description?.includes('user not found') ||
+              userRes?.description?.includes('not found') ||
+              userRes?.error_code === 400
+            ) {
+              userNotMember = true;
+            }
+          } catch {
+            // Safe fallback
+          }
+        }
+      }
+
+      if (userNotMember) {
+        if (isBotAdmin) {
+          return `Failed to resolve Telegram chat ${rawIdStr} on MTProto: The authenticated MTProto session user (${userIdentifier}) is NOT a member of this supergroup. ${botUsername} is an administrator, but Telegram requires the MTProto user session account to also be a member of private supergroups to access them. Please add ${userIdentifier} to this supergroup.`;
+        } else {
+          return `Failed to resolve Telegram chat ${rawIdStr} on MTProto: Neither ${botUsername} nor the MTProto session user (${userIdentifier}) have required access. Please ensure ${botUsername} is an administrator and add ${userIdentifier} to the supergroup.`;
+        }
+      }
+
+      if (!isBotAdmin) {
+        if (!isBotMember) {
+          return `Failed to resolve Telegram chat ${rawIdStr} on MTProto: ${botUsername} is not in this supergroup. Please add ${botUsername} and promote it to administrator.`;
+        }
+        return `Failed to resolve Telegram chat ${rawIdStr} on MTProto: ${botUsername} is a member but not an administrator. Please ensure ${botUsername} is granted administrator privileges in the supergroup.`;
+      }
+
+      return `Failed to resolve Telegram chat ${rawIdStr} on MTProto: MTProto user session (${userIdentifier}) cannot access this private supergroup. Please verify ${userIdentifier} is an active member or administrator in the supergroup.`;
+    }
+
+    // In BOT or NONE mode
+    if (!isBotAdmin) {
+      if (!isBotMember) {
+        return `Failed to resolve Telegram chat ${rawIdStr} on MTProto: ${botUsername} cannot access this chat (${botError || 'not a member'}). Please add ${botUsername} to the supergroup and grant administrator privileges.`;
+      }
+      return `Failed to resolve Telegram chat ${rawIdStr} on MTProto: ${botUsername} is not an administrator in this supergroup. Please promote ${botUsername} to administrator.`;
+    }
+
+    return `Failed to resolve Telegram chat ${rawIdStr} on MTProto in BOT mode: Telegram restricts bots from enumerating private channels via MTProto without a user session. Please configure TELEGRAM_MT_PROTO_SESSION for full member enumeration.`;
   }
 
   /**
@@ -715,27 +908,56 @@ export class MtprotoParticipantService {
     }
 
     let inputPeer: Api.InputChannel;
+    let effectiveClient = client;
+    let effectiveMode = mode;
     try {
-      inputPeer = await this.resolvePeerEntity(client, chatId);
+      inputPeer = await this.resolvePeerEntity(client, chatId, botId);
     } catch (err: any) {
-      return {
-        status: 'FETCH_FAILED',
-        authMode: mode,
-        telegramTotal: 0,
-        fetchedCount: 0,
-        uniqueCount: 0,
-        excludedCount: 0,
-        eligibleCount: 0,
-        members: [],
-        errorCode: err.code || 'GROUP_RESOLUTION_FAILED',
-        error: err.message || 'Could not resolve group peer on MTProto.',
-        isComplete: false,
-        diagnosticMessage: `Group resolution error: ${err.message}`
-      };
+      const hasBotToken = Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim());
+      if (mode === 'USER' && hasBotToken) {
+        console.log(`[MTProto] USER mode resolution failed for ${chatId}: ${err.message}. Attempting fallback to BOT mode...`);
+        try {
+          const botClient = await this.getClient('BOT');
+          inputPeer = await this.resolvePeerEntity(botClient, chatId, botId);
+          effectiveClient = botClient;
+          effectiveMode = 'BOT';
+          console.log(`[MTProto] Fallback to BOT mode succeeded for chat ${chatId}`);
+        } catch (botErr: any) {
+          return {
+            status: 'FETCH_FAILED',
+            authMode: mode,
+            telegramTotal: 0,
+            fetchedCount: 0,
+            uniqueCount: 0,
+            excludedCount: 0,
+            eligibleCount: 0,
+            members: [],
+            errorCode: err.code || botErr.code || 'GROUP_RESOLUTION_FAILED',
+            error: err.message || botErr.message || 'Could not resolve group peer on MTProto.',
+            isComplete: false,
+            diagnosticMessage: `Group resolution error: ${err.message}`
+          };
+        }
+      } else {
+        return {
+          status: 'FETCH_FAILED',
+          authMode: mode,
+          telegramTotal: 0,
+          fetchedCount: 0,
+          uniqueCount: 0,
+          excludedCount: 0,
+          eligibleCount: 0,
+          members: [],
+          errorCode: err.code || 'GROUP_RESOLUTION_FAILED',
+          error: err.message || 'Could not resolve group peer on MTProto.',
+          isComplete: false,
+          diagnosticMessage: `Group resolution error: ${err.message}`
+        };
+      }
     }
 
     console.log(`[ALL] starting full Telegram member fetch chatId=${chatId}`);
-    console.log(`[MTProto] fetching participants with authMode=${mode}...`);
+    console.log(`[MTProto] fetching participants with authMode=${effectiveMode}...`);
 
     const userMap = new Map<number, Api.User>();
     let totalReported = 0;
@@ -752,7 +974,7 @@ export class MtprotoParticipantService {
         pages++;
         let res: any;
         try {
-          res = await client.invoke(
+          res = await effectiveClient.invoke(
             new Api.channels.GetParticipants({
               channel: inputPeer,
               filter,
@@ -853,7 +1075,7 @@ export class MtprotoParticipantService {
       if (fetchErr instanceof MTProtoPermissionError) {
         return {
           status: 'FETCH_FAILED',
-          authMode: mode,
+          authMode: effectiveMode,
           telegramTotal: totalReported,
           fetchedCount: totalFetchedRecords,
           uniqueCount: userMap.size,
@@ -870,7 +1092,7 @@ export class MtprotoParticipantService {
       if (fetchErr instanceof MTProtoFloodWaitError) {
         return {
           status: 'FETCH_FAILED',
-          authMode: mode,
+          authMode: effectiveMode,
           telegramTotal: totalReported,
           fetchedCount: totalFetchedRecords,
           uniqueCount: userMap.size,
@@ -887,7 +1109,7 @@ export class MtprotoParticipantService {
       if (fetchErr instanceof MTProtoGroupResolutionError) {
         return {
           status: 'FETCH_FAILED',
-          authMode: mode,
+          authMode: effectiveMode,
           telegramTotal: totalReported,
           fetchedCount: totalFetchedRecords,
           uniqueCount: userMap.size,
@@ -903,7 +1125,7 @@ export class MtprotoParticipantService {
 
       return {
         status: 'FETCH_FAILED',
-        authMode: mode,
+        authMode: effectiveMode,
         telegramTotal: totalReported,
         fetchedCount: totalFetchedRecords,
         uniqueCount: userMap.size,
@@ -984,13 +1206,13 @@ export class MtprotoParticipantService {
       if (uniqueCount < totalReported && totalReported > 50 && uniqueCount <= 20) {
         status = 'PARTIAL_FETCH';
         isComplete = false;
-        diagnosticMessage = mode === 'BOT'
+        diagnosticMessage = effectiveMode === 'BOT'
           ? `Telegram bot-token MTProto limitation: retrieved ${uniqueCount} of ${totalReported} members (mostly administrators). Configure TELEGRAM_MT_PROTO_SESSION for full supergroup participant enumeration.`
           : `Telegram participant visibility or chat restrictions resulted in partial participant enumeration (${uniqueCount}/${totalReported} members available).`;
       } else if (uniqueCount < totalReported && uniqueCount < Math.floor(totalReported * 0.5)) {
         status = 'PARTIAL_FETCH';
         isComplete = false;
-        diagnosticMessage = mode === 'BOT'
+        diagnosticMessage = effectiveMode === 'BOT'
           ? `Telegram bot-token MTProto limitation: retrieved ${uniqueCount} of ${totalReported} members. Configure TELEGRAM_MT_PROTO_SESSION for full supergroup participant enumeration.`
           : `Telegram participant visibility or chat restrictions resulted in partial participant enumeration (${uniqueCount}/${totalReported} members available).`;
       }
@@ -998,7 +1220,7 @@ export class MtprotoParticipantService {
 
     return {
       status,
-      authMode: mode,
+      authMode: effectiveMode,
       telegramTotal: totalReported || uniqueCount,
       fetchedCount: totalFetchedRecords,
       uniqueCount,

@@ -105,6 +105,7 @@ async function runTests() {
   // Test 7: Incomplete fetch detection
   const incompleteResult: ParticipantFetchResult = {
     status: 'PARTIAL_FETCH',
+    authMode: 'USER',
     telegramTotal: 537,
     fetchedCount: 20,
     uniqueCount: 20,
@@ -119,6 +120,7 @@ async function runTests() {
   // Test 8: Telegram-reported total mismatch
   const mismatchResult: ParticipantFetchResult = {
     status: 'PARTIAL_FETCH',
+    authMode: 'USER',
     telegramTotal: 1000,
     fetchedCount: 150,
     uniqueCount: 150,
@@ -129,15 +131,15 @@ async function runTests() {
   };
   assert(mismatchResult.telegramTotal !== mismatchResult.uniqueCount && mismatchResult.status === 'PARTIAL_FETCH', 'Test 8: Total mismatch (1000 reported vs 150 fetched) correctly tracked');
 
-  // Test 9: Bot exclusion
+  // Test 9: Bot exclusion via strict flag (human with 'bot' in username is preserved)
   const mixedUsers = [
     { userId: 301, firstName: 'Alice', username: 'alice', is_bot: false, lastSeen: '2026-09-22T00:00:00.000Z' },
     { userId: 302, firstName: 'SpamBot', username: 'group_spambot', is_bot: true, lastSeen: '2026-09-22T00:00:00.000Z' },
-    { userId: 303, firstName: 'HelperBot', username: 'helper_bot', is_bot: false, lastSeen: '2026-09-22T00:00:00.000Z' },
+    { userId: 303, firstName: 'RobotFan', username: 'robot_fan', is_bot: false, lastSeen: '2026-09-22T00:00:00.000Z' },
     { userId: 304, firstName: 'Bob', username: 'bob', is_bot: false, lastSeen: '2026-09-22T00:00:00.000Z' }
   ];
   const filteredMixed = CommandHandler.buildAllMentionsChunks(mixedUsers as any, '', undefined, 10);
-  assert(filteredMixed.mentions.length === 2, 'Test 9: Bots (is_bot: true or username ending with bot) are excluded');
+  assert(filteredMixed.mentions.length === 3, 'Test 9: Only is_bot: true is excluded; humans with "bot" in username are preserved');
 
   // Test 10: Roxie self exclusion
   const botId = 99999;
@@ -323,10 +325,10 @@ async function runTests() {
       'Test 28: Missing TELEGRAM_BOT_TOKEN returns isConfigured=false'
     );
   } finally {
-    process.env.TELEGRAM_API_ID = prevApiId;
-    process.env.TELEGRAM_API_HASH = prevApiHash;
-    process.env.TELEGRAM_BOT_TOKEN = prevBotToken;
-    process.env.TELEGRAM_MT_PROTO_SESSION = prevSession;
+    if (prevApiId !== undefined) process.env.TELEGRAM_API_ID = prevApiId; else delete process.env.TELEGRAM_API_ID;
+    if (prevApiHash !== undefined) process.env.TELEGRAM_API_HASH = prevApiHash; else delete process.env.TELEGRAM_API_HASH;
+    if (prevBotToken !== undefined) process.env.TELEGRAM_BOT_TOKEN = prevBotToken; else delete process.env.TELEGRAM_BOT_TOKEN;
+    if (prevSession !== undefined) process.env.TELEGRAM_MT_PROTO_SESSION = prevSession; else delete process.env.TELEGRAM_MT_PROTO_SESSION;
   }
 
   // Test 29: Entity resolution for Bot API chat ID -1004494262619 resolves to InputChannel and NOT PeerUser
@@ -595,17 +597,641 @@ async function runTests() {
   };
 
   const serviceInstance = new MtprotoParticipantService();
-  serviceInstance.isConfigured = () => true;
+  serviceInstance.getAuthMode = () => 'USER';
   (serviceInstance as any).client = mockSearchClient;
   (serviceInstance as any).isConnected = true;
+  (serviceInstance as any).currentMode = 'USER';
 
   const mockFetchRes = await serviceInstance.fetchGroupParticipants(-1004494262619, 99999);
   assert(mockFetchRes.status === 'FULL_FETCH', 'Test 41: Search fetch returns status FULL_FETCH');
+  assert(mockFetchRes.authMode === 'USER', 'Test 41: Search fetch includes authMode: USER');
   assert(mockFetchRes.eligibleCount === 23, 'Test 41: Search fetch enumerates all 23 members (20 ordinary + 3 admins)');
   assert(
     mockFetchRes.members.some(m => m.userId === 5000) && mockFetchRes.members.some(m => m.userId === 6001),
     'Test 41: Both ordinary members (id: 5000) and admins (id: 6001) are included in fetch result'
   );
+
+  // Test 42: Dual-Auth mode resolution (USER session priority over Bot Token)
+  const dualAuthService = new MtprotoParticipantService();
+  const origEnv = { ...process.env };
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'user_session_str';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:bot_token';
+
+    assert(dualAuthService.getAuthMode() === 'USER', 'Test 42: When both MT_PROTO_SESSION and BOT_TOKEN are set, getAuthMode() prioritizes USER');
+
+    delete process.env.TELEGRAM_MT_PROTO_SESSION;
+    assert(dualAuthService.getAuthMode() === 'BOT', 'Test 42: When only BOT_TOKEN is set, getAuthMode() returns BOT');
+
+    process.env.TELEGRAM_STRING_SESSION = 'alt_string_session';
+    assert(dualAuthService.getAuthMode() === 'USER', 'Test 42: TELEGRAM_STRING_SESSION also resolves to USER mode');
+
+    delete process.env.TELEGRAM_STRING_SESSION;
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    assert(dualAuthService.getAuthMode() === 'NONE', 'Test 42: When neither session nor token is set, getAuthMode() returns NONE');
+  } finally {
+    process.env = origEnv;
+  }
+
+  // Test 43: Strict bot filtering with u.bot === true (tolerating username with 'bot')
+  const mockMixedBotClient: any = {
+    _entityCache: {
+      get: () => new Api.InputPeerChannel({
+        channelId: bigInt('4494262619') as any,
+        accessHash: bigInt('987654321012345678') as any
+      })
+    },
+    invoke: async (req: any) => {
+      if (req instanceof Api.channels.GetParticipants) {
+        const users = [
+          new Api.User({ id: bigInt(7001) as any, firstName: 'RealHuman', username: 'human_robot_enthusiast', bot: false }),
+          new Api.User({ id: bigInt(7002) as any, firstName: 'Abbot', username: 'abbot', bot: false }),
+          new Api.User({ id: bigInt(7003) as any, firstName: 'TelegramBot', username: 'some_bot', bot: true }),
+          new Api.User({ id: bigInt(7004) as any, firstName: 'Deleted Account', username: 'del', deleted: true })
+        ];
+        return new Api.channels.ChannelParticipants({
+          count: 4,
+          participants: users.map(u => new Api.ChannelParticipant({ userId: u.id, date: Math.floor(Date.now() / 1000) })),
+          chats: [],
+          users
+        });
+      }
+      throw new Error('Unknown request');
+    }
+  };
+
+  const strictFilterService = new MtprotoParticipantService();
+  strictFilterService.getAuthMode = () => 'USER';
+  (strictFilterService as any).client = mockMixedBotClient;
+  (strictFilterService as any).isConnected = true;
+  (strictFilterService as any).currentMode = 'USER';
+
+  const strictRes = await strictFilterService.fetchGroupParticipants(-1004494262619, 99999);
+  assert(strictRes.eligibleCount === 2, 'Test 43: Strict filtering keeps RealHuman and Abbot (2 eligible members)');
+  assert(strictRes.excludedCount === 2, 'Test 43: Exactly 2 members excluded (1 bot with bot: true and 1 deleted)');
+  assert(strictRes.members.some(m => m.userId === 7001), 'Test 43: human_robot_enthusiast is NOT excluded');
+  assert(strictRes.members.some(m => m.userId === 7002), 'Test 43: abbot is NOT excluded');
+  assert(!strictRes.members.some(m => m.userId === 7003), 'Test 43: TelegramBot with bot: true is excluded');
+  assert(!strictRes.members.some(m => m.userId === 7004), 'Test 43: Deleted account is excluded');
+
+  // Test 44: BOT mode partial fetch diagnostic recommendation
+  const mockBotPartialClient: any = {
+    _entityCache: {
+      get: () => new Api.InputPeerChannel({
+        channelId: bigInt('4494262619') as any,
+        accessHash: bigInt('987654321012345678') as any
+      })
+    },
+    invoke: async (req: any) => {
+      if (req instanceof Api.channels.GetParticipants) {
+        // Return only 6 admins for a 500-member supergroup
+        const users = Array.from({ length: 6 }, (_, i) => new Api.User({
+          id: bigInt(8000 + i) as any,
+          firstName: `Admin${i}`,
+          username: `admin_${i}`,
+          bot: false
+        }));
+        return new Api.channels.ChannelParticipants({
+          count: 500, // Group has 500 members
+          participants: users.map(u => new Api.ChannelParticipant({ userId: u.id, date: Math.floor(Date.now() / 1000) })),
+          chats: [],
+          users
+        });
+      }
+      throw new Error('Unknown request');
+    }
+  };
+
+  const botModeService = new MtprotoParticipantService();
+  botModeService.getAuthMode = () => 'BOT';
+  (botModeService as any).client = mockBotPartialClient;
+  (botModeService as any).isConnected = true;
+  (botModeService as any).currentMode = 'BOT';
+
+  const botPartialRes = await botModeService.fetchGroupParticipants(-1004494262619, 99999);
+  assert(botPartialRes.status === 'PARTIAL_FETCH', 'Test 44: BOT mode with 6/500 members returns PARTIAL_FETCH');
+  assert(botPartialRes.authMode === 'BOT', 'Test 44: authMode is BOT');
+  assert(
+    botPartialRes.diagnosticMessage?.includes('Configure TELEGRAM_MT_PROTO_SESSION') === true,
+    'Test 44: BOT mode diagnostic explicitly guides setting TELEGRAM_MT_PROTO_SESSION'
+  );
+
+  // Test 45: USER mode partial fetch returns Telegram visibility diagnostic (not bot limitation)
+  const mockUserPartialClient: any = {
+    _entityCache: {
+      get: () => new Api.InputPeerChannel({
+        channelId: bigInt('4494262619') as any,
+        accessHash: bigInt('987654321012345678') as any
+      })
+    },
+    invoke: async (req: any) => {
+      if (req instanceof Api.channels.GetParticipants) {
+        const users = Array.from({ length: 15 }, (_, i) => new Api.User({
+          id: bigInt(8100 + i) as any,
+          firstName: `Member${i}`,
+          username: `member_${i}`,
+          bot: false
+        }));
+        return new Api.channels.ChannelParticipants({
+          count: 200,
+          participants: users.map(u => new Api.ChannelParticipant({ userId: u.id, date: Math.floor(Date.now() / 1000) })),
+          chats: [],
+          users
+        });
+      }
+      throw new Error('Unknown request');
+    }
+  };
+
+  const userModePartialService = new MtprotoParticipantService();
+  userModePartialService.getAuthMode = () => 'USER';
+  (userModePartialService as any).client = mockUserPartialClient;
+  (userModePartialService as any).isConnected = true;
+  (userModePartialService as any).currentMode = 'USER';
+
+  const userPartialRes = await userModePartialService.fetchGroupParticipants(-1004494262619, 99999);
+  assert(userPartialRes.status === 'PARTIAL_FETCH', 'Test 45: USER mode with 15/200 returns PARTIAL_FETCH');
+  assert(userPartialRes.authMode === 'USER', 'Test 45: authMode is USER');
+  assert(
+    userPartialRes.diagnosticMessage?.includes('Telegram participant visibility or chat restrictions') === true,
+    'Test 45: USER mode diagnostic accurately attributes limitation to Telegram visibility/chat permissions'
+  );
+
+  // Test 46: getConfigurationStatus reporting across auth configurations
+  const configService = new MtprotoParticipantService();
+  const envSnapshot = { ...process.env };
+  try {
+    // 1. Fully configured in USER mode
+    process.env.TELEGRAM_API_ID = '98765';
+    process.env.TELEGRAM_API_HASH = 'mock_api_hash_val';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'user_session_abc';
+    process.env.TELEGRAM_BOT_TOKEN = '98765:bot_token_abc';
+
+    const userStatus = configService.getConfigurationStatus();
+    assert(userStatus.isConfigured === true, 'Test 46: USER mode configuration status isConfigured=true');
+    assert(userStatus.mode === 'USER', 'Test 46: USER mode configuration status mode=USER');
+    assert(userStatus.hasUserSession === true, 'Test 46: hasUserSession is true');
+    assert(userStatus.hasBotToken === true, 'Test 46: hasBotToken is true');
+
+    // 2. Configured in BOT mode
+    delete process.env.TELEGRAM_MT_PROTO_SESSION;
+    delete process.env.TELEGRAM_STRING_SESSION;
+    const botStatus = configService.getConfigurationStatus();
+    assert(botStatus.isConfigured === true, 'Test 46: BOT mode configuration status isConfigured=true');
+    assert(botStatus.mode === 'BOT', 'Test 46: BOT mode configuration status mode=BOT');
+    assert(botStatus.hasUserSession === false, 'Test 46: hasUserSession is false in BOT mode');
+    assert(botStatus.hasBotToken === true, 'Test 46: hasBotToken is true in BOT mode');
+
+    // 3. Unconfigured
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    const noneStatus = configService.getConfigurationStatus();
+    assert(noneStatus.isConfigured === false, 'Test 46: Unconfigured status isConfigured=false');
+    assert(noneStatus.mode === 'NONE', 'Test 46: Unconfigured status mode=NONE');
+  } finally {
+    process.env = envSnapshot;
+  }
+
+  // Test 47: 55 members split into exactly 6 batches (10, 10, 10, 10, 10, 5)
+  const usersBatch55: CachedMember[] = Array.from({ length: 55 }, (_, i) =>
+    createMember(9000 + i, `Member${i}`)
+  );
+  const batches55 = MtprotoParticipantService.buildEmojiMentionBatches(usersBatch55, 'Hello', 10);
+  assert(batches55.mentions.length === 55, 'Test 47: 55 members produce 55 mentions');
+  assert(batches55.chunks.length === 6, 'Test 47: 55 members produce exactly 6 chunks');
+  assert(batches55.chunks.every(c => c.startsWith('Hello\n\n')), 'Test 47: All 6 chunks include custom prefix "Hello\\n\\n"');
+
+  // Test 48: User MTProto auth failure throwing without silent fallback to BOT token
+  const authFailEnv = { ...process.env };
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'invalid_session_string';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:fallback_bot_token';
+
+    const failService = new MtprotoParticipantService();
+    assert(failService.getAuthMode() === 'USER', 'Test 48: Auth mode resolves to USER');
+  } finally {
+    process.env = authFailEnv;
+  }
+
+  // Test 49: USER mode entity resolution warms dialogs cache when missing from _entityCache
+  const warmupEnv = { ...process.env };
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'valid_mock_session_string';
+    delete process.env.TELEGRAM_BOT_TOKEN;
+
+    const warmupService = new MtprotoParticipantService();
+    warmupService.setAuthenticatedUserForTesting({
+      id: '12345678',
+      username: 'test_user',
+      isBot: false
+    });
+
+    const cacheMap = new Map<string, any>();
+    const trace = { dialogsInvoked: false };
+    const mockWarmupClient: any = {
+      _entityCache: {
+        get: (k: string) => cacheMap.get(String(k)),
+        add: (entitiesObj: any) => {
+          if (entitiesObj?.chats) {
+            for (const chat of entitiesObj.chats) {
+              const pid = `-100${chat.id.toString()}`;
+              cacheMap.set(pid, new Api.InputPeerChannel({
+                channelId: chat.id,
+                accessHash: chat.accessHash
+              }));
+            }
+          }
+        }
+      },
+      getInputEntity: async (key: any) => {
+        throw new Error(`Could not find the input entity for ${key}`);
+      },
+      invoke: async (request: any) => {
+        if (request instanceof Api.messages.GetDialogs) {
+          trace.dialogsInvoked = true;
+          return new Api.messages.Dialogs({
+            dialogs: [],
+            messages: [],
+            chats: [
+              new Api.Channel({
+                id: bigInt('4494262619') as any,
+                accessHash: bigInt('987654321012345678') as any,
+                title: 'Dialog Supergroup',
+                photo: new Api.ChatPhotoEmpty(),
+                date: 0
+              })
+            ],
+            users: []
+          });
+        }
+        throw new Error('Unexpected invoke');
+      }
+    };
+
+    const warmedChannel = await warmupService.resolvePeerEntity(mockWarmupClient, -1004494262619);
+    assert(trace.dialogsInvoked === true, 'Test 49: Dialog warmup request was invoked when entity was missing');
+    assert(
+      warmedChannel instanceof Api.InputChannel &&
+      warmedChannel.channelId.toString() === '4494262619' &&
+      warmedChannel.accessHash.toString() === '987654321012345678',
+      'Test 49: Supergroup resolved successfully via dialog cache warmup'
+    );
+  } finally {
+    process.env = warmupEnv;
+  }
+
+  // Test 50: Supergroup with public username resolves via Bot API chat username fallback
+  const usernameEnv = { ...process.env };
+  const origGetChat = telegramApi.getChat.bind(telegramApi);
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:mock_bot_token';
+    delete process.env.TELEGRAM_MT_PROTO_SESSION;
+
+    const usernameService = new MtprotoParticipantService();
+    (telegramApi as any).getChat = async (cId: any) => {
+      if (String(cId) === '-1004494262619') {
+        return { ok: true, result: { id: -1004494262619, username: 'public_roxie_group' } };
+      }
+      return { ok: false, error_code: 400, description: 'Chat not found' };
+    };
+
+    const userTrace = { resolvedViaUsername: false };
+    const mockUsernameClient: any = {
+      _entityCache: {
+        get: () => { throw new Error('Cache miss'); }
+      },
+      getInputEntity: async (key: any) => {
+        if (key === '@public_roxie_group') {
+          userTrace.resolvedViaUsername = true;
+          return new Api.InputPeerChannel({
+            channelId: bigInt('4494262619') as any,
+            accessHash: bigInt('112233445566') as any
+          });
+        }
+        throw new Error(`Could not find the input entity for ${key}`);
+      }
+    };
+
+    const usernameResolvedChannel = await usernameService.resolvePeerEntity(mockUsernameClient, -1004494262619);
+    assert(userTrace.resolvedViaUsername === true, 'Test 50: Resolved via public username @public_roxie_group');
+    assert(
+      usernameResolvedChannel instanceof Api.InputChannel &&
+      usernameResolvedChannel.channelId.toString() === '4494262619',
+      'Test 50: Public supergroup resolved to InputChannel'
+    );
+  } finally {
+    (telegramApi as any).getChat = origGetChat;
+    process.env = usernameEnv;
+  }
+
+  // Test 51: Multi-identity diagnostic detects when @MissRoxie_Bot is admin, but MTProto session user is not a member
+  const multiIdEnv = { ...process.env };
+  const origGetMe = telegramApi.getMe.bind(telegramApi);
+  const origGetChatMember = telegramApi.getChatMember.bind(telegramApi);
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'valid_session';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:mock_bot_token';
+
+    const diagService = new MtprotoParticipantService();
+    diagService.setAuthenticatedUserForTesting({
+      id: '99887766',
+      username: 'operator_personal_account',
+      isBot: false
+    });
+
+    (telegramApi as any).getMe = async () => ({
+      ok: true,
+      result: { id: 10001, username: 'MissRoxie_Bot', is_bot: true, first_name: 'Miss Roxie' }
+    });
+
+    (telegramApi as any).getChatMember = async (cId: any, uId: number) => {
+      if (uId === 10001) {
+        // Roxie bot is an administrator in the supergroup
+        return {
+          ok: true,
+          result: {
+            user: { id: 10001, is_bot: true, first_name: 'Miss Roxie' },
+            status: 'administrator',
+            can_manage_chat: true
+          }
+        };
+      }
+      if (uId === 99887766) {
+        // MTProto session user account is NOT a member
+        return {
+          ok: false,
+          error_code: 400,
+          description: 'Bad Request: USER_NOT_PARTICIPANT'
+        };
+      }
+      return { ok: false, error_code: 400, description: 'Not found' };
+    };
+
+    const mockFailingClient: any = {
+      _entityCache: { get: () => { throw new Error('Cache miss'); } },
+      getInputEntity: async () => { throw new Error('Could not find the input entity'); }
+    };
+
+    let resolutionError: any = null;
+    try {
+      await diagService.resolvePeerEntity(mockFailingClient, -1004494262619, 10001);
+    } catch (err: any) {
+      resolutionError = err;
+    }
+
+    assert(resolutionError instanceof MTProtoGroupResolutionError, 'Test 51: Throws MTProtoGroupResolutionError');
+    const msg = resolutionError.message;
+    assert(
+      msg.includes('@operator_personal_account') && msg.includes('NOT a member of this supergroup'),
+      'Test 51: Diagnostic identifies MTProto session user account (@operator_personal_account) is not a member'
+    );
+    assert(
+      msg.includes('@MissRoxie_Bot is an administrator'),
+      'Test 51: Diagnostic accurately reports @MissRoxie_Bot IS an administrator'
+    );
+    assert(
+      msg.includes('Please add @operator_personal_account to this supergroup'),
+      'Test 51: Actionable guidance instructs operator to add the user account to the supergroup'
+    );
+    assert(
+      !msg.includes('valid_session') && !msg.includes('mock_hash') && !msg.includes('mock_bot_token'),
+      'Test 51: Credentials (session, hash, token) are NEVER leaked in diagnostic message'
+    );
+  } finally {
+    (telegramApi as any).getMe = origGetMe;
+    (telegramApi as any).getChatMember = origGetChatMember;
+    process.env = multiIdEnv;
+  }
+
+  // Test 52: Multi-identity diagnostic detects when @MissRoxie_Bot is NOT an administrator
+  const botNotAdminEnv = { ...process.env };
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'valid_session';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:mock_bot_token';
+
+    const diagService = new MtprotoParticipantService();
+    diagService.setAuthenticatedUserForTesting({
+      id: '99887766',
+      username: 'operator_account',
+      isBot: false
+    });
+
+    (telegramApi as any).getMe = async () => ({
+      ok: true,
+      result: { id: 10001, username: 'MissRoxie_Bot', is_bot: true }
+    });
+
+    (telegramApi as any).getChatMember = async (cId: any, uId: number) => {
+      if (uId === 10001) {
+        // Bot is a member, but not an admin
+        return {
+          ok: true,
+          result: { user: { id: 10001, is_bot: true }, status: 'member' }
+        };
+      }
+      if (uId === 99887766) {
+        return {
+          ok: true,
+          result: { user: { id: 99887766, is_bot: false }, status: 'member' }
+        };
+      }
+      return { ok: false, error_code: 400, description: 'Not found' };
+    };
+
+    const mockFailingClient: any = {
+      _entityCache: { get: () => { throw new Error('Cache miss'); } },
+      getInputEntity: async () => { throw new Error('Could not find the input entity'); }
+    };
+
+    let resolutionError: any = null;
+    try {
+      await diagService.resolvePeerEntity(mockFailingClient, -1004494262619, 10001);
+    } catch (err: any) {
+      resolutionError = err;
+    }
+
+    assert(resolutionError instanceof MTProtoGroupResolutionError, 'Test 52: Throws MTProtoGroupResolutionError');
+    assert(
+      resolutionError.message.includes('@MissRoxie_Bot is a member but not an administrator'),
+      'Test 52: Diagnostic detects bot is in group but lacks administrator privileges'
+    );
+  } finally {
+    (telegramApi as any).getMe = origGetMe;
+    (telegramApi as any).getChatMember = origGetChatMember;
+    process.env = botNotAdminEnv;
+  }
+
+  // Test 53: Multi-identity diagnostic in BOT mode guides operator regarding private supergroup MTProto limitation
+  const botModeDiagEnv = { ...process.env };
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:mock_bot_token';
+    delete process.env.TELEGRAM_MT_PROTO_SESSION;
+
+    const botModeService = new MtprotoParticipantService();
+    (telegramApi as any).getMe = async () => ({
+      ok: true,
+      result: { id: 10001, username: 'MissRoxie_Bot', is_bot: true }
+    });
+    (telegramApi as any).getChatMember = async () => ({
+      ok: true,
+      result: { user: { id: 10001, is_bot: true }, status: 'administrator' }
+    });
+
+    const mockFailingClient: any = {
+      _entityCache: { get: () => { throw new Error('Cache miss'); } },
+      getInputEntity: async () => { throw new Error('Could not find the input entity'); }
+    };
+
+    let botModeError: any = null;
+    try {
+      await botModeService.resolvePeerEntity(mockFailingClient, -1004494262619, 10001);
+    } catch (err: any) {
+      botModeError = err;
+    }
+
+    assert(botModeError instanceof MTProtoGroupResolutionError, 'Test 53: Throws MTProtoGroupResolutionError');
+    assert(
+      botModeError.message.includes('TELEGRAM_MT_PROTO_SESSION'),
+      'Test 53: BOT mode error instructs operator to configure TELEGRAM_MT_PROTO_SESSION for private groups'
+    );
+  } finally {
+    (telegramApi as any).getMe = origGetMe;
+    (telegramApi as any).getChatMember = origGetChatMember;
+    process.env = botModeDiagEnv;
+  }
+
+  // Test 54: When USER mode cannot resolve group peer, fetchGroupParticipants falls back to BOT mode seamlessly
+  const fallbackEnv = { ...process.env };
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'valid_user_session';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:mock_bot_token';
+
+    const fallbackService = new MtprotoParticipantService();
+    fallbackService.setAuthenticatedUserForTesting({
+      id: '99887766',
+      username: 'operator_not_in_group',
+      isBot: false
+    });
+
+    const mockUserFailingClient: any = {
+      _entityCache: { get: () => { throw new Error('Cache miss'); } },
+      getInputEntity: async () => { throw new Error('CHANNEL_INVALID'); },
+      invoke: async () => { throw new Error('Should not be invoked on failing client'); }
+    };
+
+    const botMockChannel = new Api.Channel({
+      id: bigInt('4494262619') as any,
+      title: 'Horney Log Supergroup',
+      photo: new Api.ChatPhotoEmpty(),
+      date: 0,
+      accessHash: bigInt('123456789012345678') as any
+    });
+
+    const mockBotSuccessClient: any = {
+      _entityCache: {
+        get: (key: any) => {
+          if (String(key) === '-1004494262619' || key === -1004494262619) {
+            return new Api.InputPeerChannel({
+              channelId: bigInt('4494262619') as any,
+              accessHash: bigInt('123456789012345678') as any
+            });
+          }
+          throw new Error('Cache miss');
+        }
+      },
+      getInputEntity: async (key: any) => {
+        return new Api.InputPeerChannel({
+          channelId: bigInt('4494262619') as any,
+          accessHash: bigInt('123456789012345678') as any
+        });
+      },
+      invoke: async (request: any) => {
+        if (request instanceof Api.channels.GetParticipants) {
+          return new Api.channels.ChannelParticipants({
+            count: 3,
+            participants: [
+              new Api.ChannelParticipant({ userId: bigInt(1001) as any, date: 0 } as any),
+              new Api.ChannelParticipant({ userId: bigInt(1002) as any, date: 0 } as any),
+              new Api.ChannelParticipant({ userId: bigInt(1003) as any, date: 0 } as any)
+            ] as any,
+            users: [
+              new Api.User({ id: bigInt(1001) as any, firstName: 'Alice', username: 'alice_1' } as any),
+              new Api.User({ id: bigInt(1002) as any, firstName: 'Bob', username: 'bob_2' } as any),
+              new Api.User({ id: bigInt(1003) as any, firstName: 'Charlie', username: 'charlie_3' } as any)
+            ] as any,
+            chats: []
+          });
+        }
+        throw new Error('Unexpected invocation');
+      }
+    };
+
+    // Override getClient on fallbackService to return mockUserFailingClient for USER and mockBotSuccessClient for BOT
+    (fallbackService as any).getClient = async (forceMode?: string) => {
+      if (forceMode === 'BOT') {
+        return mockBotSuccessClient;
+      }
+      return mockUserFailingClient;
+    };
+
+    const fallbackResult = await fallbackService.fetchGroupParticipants(-1004494262619, 10001);
+    assert(fallbackResult.status === 'FULL_FETCH', 'Test 54: Fallback result status is FULL_FETCH');
+    assert(fallbackResult.authMode === 'BOT', 'Test 54: Fallback result authMode is BOT');
+    assert(fallbackResult.members.length === 3, 'Test 54: Retrieved 3 members via bot mode fallback');
+    assert(fallbackResult.members[0].username === 'alice_1', 'Test 54: Member Alice retrieved correctly');
+    assert(fallbackResult.members[1].username === 'bob_2', 'Test 54: Member Bob retrieved correctly');
+    assert(fallbackResult.members[2].username === 'charlie_3', 'Test 54: Member Charlie retrieved correctly');
+  } finally {
+    process.env = fallbackEnv;
+  }
+
+  // Test 55: When both USER and BOT resolution fail, fetchGroupParticipants returns accurate failure
+  const bothFailEnv = { ...process.env };
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'valid_user_session';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:mock_bot_token';
+
+    const failService = new MtprotoParticipantService();
+    const mockFailingUserClient: any = {
+      _entityCache: { get: () => { throw new Error('Cache miss'); } },
+      getInputEntity: async () => { throw new Error('CHANNEL_INVALID'); }
+    };
+    const mockFailingBotClient: any = {
+      _entityCache: { get: () => { throw new Error('Cache miss'); } },
+      getInputEntity: async () => { throw new Error('CHANNEL_PRIVATE'); }
+    };
+
+    (failService as any).getClient = async (forceMode?: string) => {
+      if (forceMode === 'BOT') {
+        return mockFailingBotClient;
+      }
+      return mockFailingUserClient;
+    };
+
+    const failResult = await failService.fetchGroupParticipants(-1004494262619, 10001);
+    assert(failResult.status === 'FETCH_FAILED', 'Test 55: Both modes failing results in FETCH_FAILED');
+    assert(failResult.errorCode === 'GROUP_RESOLUTION_FAILED', 'Test 55: Error code is GROUP_RESOLUTION_FAILED');
+    assert(failResult.members.length === 0, 'Test 55: No members returned');
+  } finally {
+    process.env = bothFailEnv;
+  }
 
   console.log(`\n====================================================`);
   console.log(`🎉 MTProto Service Tests Completed: ${passed} Passed, ${failed} Failed`);
