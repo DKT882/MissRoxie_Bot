@@ -189,6 +189,8 @@ export interface MtprotoHealthState {
     firstName?: string;
     isBot: boolean;
   };
+  userSessionWarning?: string;
+  userSessionStatus?: string;
 }
 
 interface OperationStatus {
@@ -412,7 +414,9 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
   const hasText = announcementText.trim().length > 0;
   const isTextValid = !currentConfig.requiresText || hasText;
   const isOperationActive = Boolean(opStatus?.active);
-  const isMtprotoRevoked = opStatus?.mtprotoHealth?.status === 'AUTH_KEY_UNREGISTERED' || opStatus?.mtprotoHealth?.status === 'AUTH_REVOKED';
+  const isMtprotoRevoked =
+    !opStatus?.mtprotoHealth?.canOperate &&
+    (opStatus?.mtprotoHealth?.status === 'AUTH_KEY_UNREGISTERED' || opStatus?.mtprotoHealth?.status === 'AUTH_REVOKED');
 
   const canStart =
     isTargetGroupValid &&
@@ -588,6 +592,19 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
             <div>2. Authenticate with your Telegram account and copy the newly generated session string.</div>
             <div>3. Update <code className="text-pink-300 bg-black/40 px-1 py-0.5 rounded">TELEGRAM_MT_PROTO_SESSION</code> in your hosting/Render environment variables.</div>
           </div>
+        </div>
+      )}
+
+      {/* Informational notice when operating via BOT mode fallback */}
+      {!isMtprotoRevoked && opStatus?.mtprotoHealth?.userSessionWarning && (
+        <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 space-y-1 text-xs">
+          <div className="flex items-center gap-2 font-semibold text-amber-200">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Active MTProto Mode: Native Bot Authorization</span>
+          </div>
+          <p className="leading-relaxed text-stone-300">
+            {opStatus.mtprotoHealth.userSessionWarning}
+          </p>
         </div>
       )}
 

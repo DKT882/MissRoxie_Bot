@@ -6474,18 +6474,22 @@ export default function App() {
                   {
                     name: 'MTProto Member Service',
                     status: healthData?.components?.mtproto?.status === 'HEALTHY' ? '🟢 Connected' :
+                            healthData?.components?.mtproto?.canOperate && healthData?.components?.mtproto?.userSessionWarning ? '🟢 Bot Mode Active' :
                             healthData?.components?.mtproto?.status === 'AUTH_KEY_UNREGISTERED' ? '🔴 Key Revoked (401)' :
                             healthData?.components?.mtproto?.status === 'AUTH_REVOKED' ? '🔴 Session Revoked' :
                             healthData?.components?.mtproto?.status === 'NOT_CONFIGURED' ? '⚪ Not Configured' :
-                            healthData?.components?.mtproto?.isConnected ? '🟢 Connected' : '🟡 Standby / Ready',
-                    ok: healthData?.components?.mtproto?.status !== 'AUTH_KEY_UNREGISTERED' &&
-                        healthData?.components?.mtproto?.status !== 'AUTH_REVOKED' &&
-                        healthData?.components?.mtproto?.status !== 'AUTH_FAILED',
+                            healthData?.components?.mtproto?.isConnected ? '🟢 Connected' :
+                            healthData?.components?.mtproto?.canOperate ? '🟢 Ready (Bot Auth)' : '🟡 Standby / Ready',
+                    ok: Boolean(healthData?.components?.mtproto?.canOperate || healthData?.components?.mtproto?.isConnected),
                     extra: (
                       <div className={`text-[11px] ${themeMutedText} space-y-0.5 pt-1.5 border-t border-white/5`}>
                         <div><span className="font-semibold">Mode:</span> {healthData?.components?.mtproto?.mode || 'NONE'}</div>
                         <div><span className="font-semibold">Can Operate:</span> {healthData?.components?.mtproto?.canOperate ? 'Yes' : 'No'}</div>
-                        {healthData?.components?.mtproto?.errorCode && (
+                        {healthData?.components?.mtproto?.userSessionWarning ? (
+                          <div className="text-amber-400 font-sans text-[10px] line-clamp-2" title={healthData?.components?.mtproto?.userSessionWarning}>
+                            User session revoked; running in Bot Mode
+                          </div>
+                        ) : healthData?.components?.mtproto?.errorCode && (
                           <div className="text-rose-400 font-mono text-[10px] truncate" title={healthData?.components?.mtproto?.actionRequired || healthData?.components?.mtproto?.errorCode}>
                             {healthData?.components?.mtproto?.errorCode}
                           </div>

@@ -1233,6 +1233,128 @@ async function runTests() {
     process.env = bothFailEnv;
   }
 
+  // Test 56: Revoked USER session (AUTH_KEY_UNREGISTERED) automatically falls back to BOT client in getClient()
+  const fallbackClientEnv = { ...process.env };
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'revoked_user_session';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:mock_bot_token';
+
+    const fallbackClientService = new MtprotoParticipantService();
+    const mockBotClientInstance: any = {
+      isBot: true,
+      getMe: async () => ({ id: 10001, username: 'MissRoxie_Bot', is_bot: true }),
+      disconnect: async () => {}
+    };
+
+    (fallbackClientService as any).connectUserClient = async () => {
+      const err = new MTProtoAuthError(
+        'MTProto user session invalid or revoked: 401: AUTH_KEY_UNREGISTERED',
+        'AUTH_KEY_UNREGISTERED',
+        'Generate a fresh session string'
+      );
+      (fallbackClientService as any).lastFatalUserAuthError = {
+        fingerprint: (fallbackClientService as any).getSessionFingerprint('USER'),
+        code: 'AUTH_KEY_UNREGISTERED',
+        message: err.message,
+        actionRequired: err.actionRequired!,
+        timestamp: Date.now()
+      };
+      (fallbackClientService as any).lastFatalAuthError = (fallbackClientService as any).lastFatalUserAuthError;
+      throw err;
+    };
+
+    (fallbackClientService as any).connectBotClient = async () => {
+      (fallbackClientService as any).client = mockBotClientInstance;
+      (fallbackClientService as any).isConnected = true;
+      (fallbackClientService as any).currentMode = 'BOT';
+      (fallbackClientService as any).authenticatedUser = {
+        id: '10001',
+        username: 'MissRoxie_Bot',
+        firstName: 'Bot',
+        isBot: true
+      };
+      return mockBotClientInstance;
+    };
+
+    const connectedClient = await fallbackClientService.getClient();
+    assert(connectedClient === mockBotClientInstance, 'Test 56: getClient() returned BOT client when USER session revoked');
+    assert((fallbackClientService as any).currentMode === 'BOT', 'Test 56: Current mode transitioned to BOT');
+    assert(fallbackClientService.isUserSessionFatallyRevoked() === true, 'Test 56: USER session marked as fatally revoked');
+
+    // Calling getClient() again should reuse BOT client directly
+    const cachedClient = await fallbackClientService.getClient();
+    assert(cachedClient === mockBotClientInstance, 'Test 56: getClient() reuses BOT client on subsequent calls');
+  } finally {
+    process.env = fallbackClientEnv;
+  }
+
+  // Test 57: Revoked USER session reports canOperate=true, mode='BOT', and includes userSessionWarning in health report
+  const healthRevokedEnv = { ...process.env };
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'revoked_session';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:mock_bot_token';
+
+    const healthRevokedService = new MtprotoParticipantService();
+    (healthRevokedService as any).lastFatalUserAuthError = {
+      fingerprint: (healthRevokedService as any).getSessionFingerprint('USER'),
+      code: 'AUTH_KEY_UNREGISTERED',
+      message: '401: AUTH_KEY_UNREGISTERED',
+      actionRequired: 'Generate a fresh session string',
+      timestamp: Date.now()
+    };
+    (healthRevokedService as any).isConnected = true;
+    (healthRevokedService as any).client = { disconnect: async () => {} };
+    (healthRevokedService as any).currentMode = 'BOT';
+
+    const report = healthRevokedService.getHealthReport();
+    assert(report.canOperate === true, 'Test 57: canOperate is true despite revoked user session');
+    assert(report.mode === 'BOT', 'Test 57: Effective mode is BOT');
+    assert(report.status === 'HEALTHY', 'Test 57: Status is HEALTHY when connected via BOT mode');
+    assert(
+      report.userSessionWarning?.includes('AUTH_KEY_UNREGISTERED') === true,
+      'Test 57: userSessionWarning contains informative notice'
+    );
+    assert(report.userSessionStatus === 'AUTH_KEY_UNREGISTERED', 'Test 57: userSessionStatus captures revoked status');
+  } finally {
+    process.env = healthRevokedEnv;
+  }
+
+  // Test 58: When both USER session and BOT token fatally fail, canOperate is false
+  const bothFatalEnv = { ...process.env };
+  try {
+    process.env.TELEGRAM_API_ID = '12345';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_MT_PROTO_SESSION = 'revoked_session';
+    process.env.TELEGRAM_BOT_TOKEN = '12345:invalid_bot_token';
+
+    const doubleFatalService = new MtprotoParticipantService();
+    (doubleFatalService as any).lastFatalUserAuthError = {
+      fingerprint: (doubleFatalService as any).getSessionFingerprint('USER'),
+      code: 'AUTH_KEY_UNREGISTERED',
+      message: '401: AUTH_KEY_UNREGISTERED',
+      actionRequired: 'Generate a fresh session',
+      timestamp: Date.now()
+    };
+    (doubleFatalService as any).lastFatalBotAuthError = {
+      fingerprint: (doubleFatalService as any).getSessionFingerprint('BOT'),
+      code: 'BOT_TOKEN_INVALID',
+      message: '401: BOT_TOKEN_INVALID',
+      actionRequired: 'Verify TELEGRAM_BOT_TOKEN',
+      timestamp: Date.now()
+    };
+
+    const fatalReport = doubleFatalService.getHealthReport();
+    assert(fatalReport.canOperate === false, 'Test 58: canOperate is false when both modes fail');
+    assert(fatalReport.status === 'AUTH_FAILED', 'Test 58: status is AUTH_FAILED');
+    assert(fatalReport.errorCode === 'BOT_TOKEN_INVALID', 'Test 58: errorCode reflects bot failure');
+  } finally {
+    process.env = bothFatalEnv;
+  }
+
   console.log(`\n====================================================`);
   console.log(`🎉 MTProto Service Tests Completed: ${passed} Passed, ${failed} Failed`);
   console.log(`====================================================`);

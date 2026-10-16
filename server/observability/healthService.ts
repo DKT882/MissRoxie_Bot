@@ -46,7 +46,7 @@ export class HealthDiagnosticsService {
     const storageConnected = Boolean(db);
 
     const mtprotoHealth = mtprotoParticipantService.getHealthReport();
-    const isMtprotoAuthRevoked = mtprotoHealth.isConfigured && (
+    const isMtprotoAuthRevoked = mtprotoHealth.isConfigured && !mtprotoHealth.canOperate && (
       mtprotoHealth.status === 'AUTH_KEY_UNREGISTERED' ||
       mtprotoHealth.status === 'AUTH_REVOKED' ||
       mtprotoHealth.status === 'AUTH_FAILED'
@@ -98,6 +98,8 @@ export class HealthDiagnosticsService {
           errorCode: mtprotoHealth.errorCode,
           actionRequired: mtprotoHealth.actionRequired,
           authenticatedUser: mtprotoHealth.authenticatedUser,
+          userSessionWarning: mtprotoHealth.userSessionWarning,
+          userSessionStatus: mtprotoHealth.userSessionStatus,
           lastCheckedAt: mtprotoHealth.lastCheckedAt
         },
         telegramPolling: {
