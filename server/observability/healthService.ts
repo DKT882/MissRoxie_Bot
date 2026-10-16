@@ -3,6 +3,7 @@ import { messageScheduler } from '../telegram/scheduler.js';
 import { metricsTracker } from './metricsService.js';
 import { errorTracker } from './errorService.js';
 import { db } from '../db/storage.js';
+import { mtprotoParticipantService } from '../telegram/mtprotoParticipantService.js';
 
 export class HealthDiagnosticsService {
   public static getSystemHealth() {
@@ -44,10 +45,17 @@ export class HealthDiagnosticsService {
 
     const storageConnected = Boolean(db);
 
+    const mtprotoHealth = mtprotoParticipantService.getHealthReport();
+    const isMtprotoAuthRevoked = mtprotoHealth.isConfigured && (
+      mtprotoHealth.status === 'AUTH_KEY_UNREGISTERED' ||
+      mtprotoHealth.status === 'AUTH_REVOKED' ||
+      mtprotoHealth.status === 'AUTH_FAILED'
+    );
+
     let overallStatus: 'HEALTHY' | 'DEGRADED' | 'ERROR' = 'HEALTHY';
     if (pollingError || schedulerFailures >= 5 || aiFailures > 20) {
       overallStatus = 'ERROR';
-    } else if (!botPolling || schedulerFailures > 0 || aiTimeouts > 0 || aiFailures > 0) {
+    } else if (!botPolling || schedulerFailures > 0 || aiTimeouts > 0 || aiFailures > 0 || isMtprotoAuthRevoked) {
       overallStatus = 'DEGRADED';
     }
 
@@ -71,13 +79,26 @@ export class HealthDiagnosticsService {
         lastTelegramResponse: tgTimestamps.lastResponseTimestamp,
         storage: (db as any).lastSaveSuccessful !== false ? 'HEALTHY' : 'ERROR',
         dashboardApi: 'HEALTHY',
-        ai: aiStatus === 'ERROR' ? 'ERROR' : 'HEALTHY'
+        ai: aiStatus === 'ERROR' ? 'ERROR' : 'HEALTHY',
+        mtproto: mtprotoHealth.canOperate ? 'HEALTHY' : (mtprotoHealth.status === 'NOT_CONFIGURED' ? 'UNCONFIGURED' : 'ERROR')
       },
       components: {
         bot: {
           configured: botConfigured,
           polling: botPolling,
           error: pollingError
+        },
+        mtproto: {
+          isConfigured: mtprotoHealth.isConfigured,
+          mode: mtprotoHealth.mode,
+          status: mtprotoHealth.status,
+          isConnected: mtprotoHealth.isConnected,
+          canOperate: mtprotoHealth.canOperate,
+          error: mtprotoHealth.error,
+          errorCode: mtprotoHealth.errorCode,
+          actionRequired: mtprotoHealth.actionRequired,
+          authenticatedUser: mtprotoHealth.authenticatedUser,
+          lastCheckedAt: mtprotoHealth.lastCheckedAt
         },
         telegramPolling: {
           status: telegramPollingStatus,

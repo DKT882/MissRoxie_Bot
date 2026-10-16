@@ -5,6 +5,32 @@ import { logDebug } from '../observability/logger.js';
 
 export type ParticipantFetchStatus = 'FULL_FETCH' | 'PARTIAL_FETCH' | 'FETCH_FAILED';
 export type MtprotoAuthMode = 'USER' | 'BOT' | 'NONE';
+export type MtprotoSessionStatus =
+  | 'HEALTHY'
+  | 'AUTH_KEY_UNREGISTERED'
+  | 'AUTH_REVOKED'
+  | 'AUTH_FAILED'
+  | 'NOT_CONFIGURED'
+  | 'CONNECTING'
+  | 'DISCONNECTED';
+
+export interface MtprotoHealthReport {
+  isConfigured: boolean;
+  mode: MtprotoAuthMode;
+  status: MtprotoSessionStatus;
+  isConnected: boolean;
+  canOperate: boolean;
+  error?: string;
+  errorCode?: string;
+  actionRequired?: string;
+  authenticatedUser?: {
+    id: string;
+    username?: string;
+    firstName?: string;
+    isBot: boolean;
+  };
+  lastCheckedAt: number;
+}
 
 export interface ParticipantFetchResult {
   status: ParticipantFetchStatus;
@@ -30,10 +56,18 @@ export class MTProtoNotConfiguredError extends Error {
 }
 
 export class MTProtoAuthError extends Error {
-  public readonly code = 'AUTH_FAILED';
-  constructor(message: string = 'MTProto authentication failed.') {
+  public readonly code: string;
+  public readonly actionRequired?: string;
+
+  constructor(
+    message: string = 'MTProto authentication failed.',
+    code: string = 'AUTH_FAILED',
+    actionRequired?: string
+  ) {
     super(message);
     this.name = 'MTProtoAuthError';
+    this.code = code;
+    this.actionRequired = actionRequired;
   }
 }
 
@@ -90,6 +124,20 @@ export class MtprotoParticipantService {
   private isConnected: boolean = false;
   private currentMode: MtprotoAuthMode = 'NONE';
   private connectPromise: Promise<TelegramClient> | null = null;
+  private lastCheckedAt: number = 0;
+  private authenticatedUser: {
+    id: string;
+    username?: string;
+    firstName?: string;
+    isBot: boolean;
+  } | null = null;
+  private lastFatalAuthError: {
+    fingerprint: string;
+    code: string;
+    message: string;
+    actionRequired: string;
+    timestamp: number;
+  } | null = null;
 
   // Active chat fetch locks to prevent concurrent /all operations for the same group
   private static activeChatLocks: Set<number> = new Set();
@@ -99,6 +147,19 @@ export class MtprotoParticipantService {
       MtprotoParticipantService.instance = new MtprotoParticipantService();
     }
     return MtprotoParticipantService.instance;
+  }
+
+  /**
+   * Generates a non-sensitive fingerprint of the active credentials without exposing or logging secrets.
+   */
+  private getSessionFingerprint(): string {
+    const sessionStr = (process.env.TELEGRAM_MT_PROTO_SESSION || process.env.TELEGRAM_STRING_SESSION || process.env.TELEGRAM_BOT_TOKEN || '').trim();
+    if (!sessionStr) return 'none';
+    let hash = 0;
+    for (let i = 0; i < sessionStr.length; i++) {
+      hash = ((hash << 5) - hash + sessionStr.charCodeAt(i)) | 0;
+    }
+    return `len_${sessionStr.length}_h_${Math.abs(hash)}`;
   }
 
   public getAuthMode(): MtprotoAuthMode {
@@ -125,6 +186,69 @@ export class MtprotoParticipantService {
     return this.getAuthMode() !== 'NONE';
   }
 
+  public getHealthReport(): MtprotoHealthReport {
+    const mode = this.getAuthMode();
+    const isConfigured = mode !== 'NONE';
+    const currentFingerprint = this.getSessionFingerprint();
+
+    if (!isConfigured) {
+      return {
+        isConfigured: false,
+        mode: 'NONE',
+        status: 'NOT_CONFIGURED',
+        isConnected: false,
+        canOperate: false,
+        error: 'MTProto credentials are not configured.',
+        errorCode: 'NOT_CONFIGURED',
+        actionRequired: 'Set TELEGRAM_API_ID, TELEGRAM_API_HASH, and either TELEGRAM_MT_PROTO_SESSION or TELEGRAM_BOT_TOKEN.',
+        lastCheckedAt: this.lastCheckedAt || Date.now()
+      };
+    }
+
+    if (this.lastFatalAuthError && this.lastFatalAuthError.fingerprint === currentFingerprint) {
+      const code = this.lastFatalAuthError.code;
+      const status: MtprotoSessionStatus =
+        code === 'AUTH_KEY_UNREGISTERED'
+          ? 'AUTH_KEY_UNREGISTERED'
+          : code === 'AUTH_REVOKED'
+          ? 'AUTH_REVOKED'
+          : 'AUTH_FAILED';
+
+      return {
+        isConfigured: true,
+        mode,
+        status,
+        isConnected: false,
+        canOperate: false,
+        error: this.lastFatalAuthError.message,
+        errorCode: this.lastFatalAuthError.code,
+        actionRequired: this.lastFatalAuthError.actionRequired,
+        lastCheckedAt: this.lastCheckedAt || this.lastFatalAuthError.timestamp
+      };
+    }
+
+    if (this.isConnected && this.client) {
+      return {
+        isConfigured: true,
+        mode,
+        status: 'HEALTHY',
+        isConnected: true,
+        canOperate: true,
+        authenticatedUser: this.authenticatedUser || undefined,
+        lastCheckedAt: this.lastCheckedAt || Date.now()
+      };
+    }
+
+    return {
+      isConfigured: true,
+      mode,
+      status: this.isConnecting ? 'CONNECTING' : 'DISCONNECTED',
+      isConnected: false,
+      canOperate: false,
+      lastCheckedAt: this.lastCheckedAt || Date.now()
+    };
+  }
+
   public getConfigurationStatus(): {
     isConfigured: boolean;
     mode: MtprotoAuthMode;
@@ -133,12 +257,16 @@ export class MtprotoParticipantService {
     hasUserSession: boolean;
     hasBotToken: boolean;
     isConnected: boolean;
+    status: MtprotoSessionStatus;
+    canOperate: boolean;
+    errorCode?: string;
   } {
     const apiId = process.env.TELEGRAM_API_ID?.trim();
     const apiHash = process.env.TELEGRAM_API_HASH?.trim();
     const userSession = (process.env.TELEGRAM_MT_PROTO_SESSION || process.env.TELEGRAM_STRING_SESSION)?.trim();
     const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
     const mode = this.getAuthMode();
+    const health = this.getHealthReport();
 
     return {
       isConfigured: mode !== 'NONE',
@@ -147,8 +275,17 @@ export class MtprotoParticipantService {
       hasApiHash: Boolean(apiHash && apiHash.length > 0),
       hasUserSession: Boolean(userSession && userSession.length > 0),
       hasBotToken: Boolean(botToken && botToken.length > 0),
-      isConnected: this.isConnected
+      isConnected: this.isConnected,
+      status: health.status,
+      canOperate: health.canOperate,
+      errorCode: health.errorCode
     };
+  }
+
+  public resetSessionState(): void {
+    this.lastFatalAuthError = null;
+    this.authenticatedUser = null;
+    this.disconnect().catch(() => {});
   }
 
   public acquireChatLock(chatId: number): boolean {
@@ -179,10 +316,21 @@ export class MtprotoParticipantService {
       return this.client;
     }
 
+    // Fast-fail non-retryable fatal authentication errors for the same credentials
+    const currentFingerprint = this.getSessionFingerprint();
+    if (this.lastFatalAuthError && this.lastFatalAuthError.fingerprint === currentFingerprint) {
+      throw new MTProtoAuthError(
+        this.lastFatalAuthError.message,
+        this.lastFatalAuthError.code,
+        this.lastFatalAuthError.actionRequired
+      );
+    }
+
     if (this.connectPromise) {
       return this.connectPromise;
     }
 
+    this.isConnecting = true;
     this.connectPromise = (async () => {
       const apiId = parseInt(process.env.TELEGRAM_API_ID!.trim(), 10);
       const apiHash = process.env.TELEGRAM_API_HASH!.trim();
@@ -191,10 +339,10 @@ export class MtprotoParticipantService {
         const sessionString = (process.env.TELEGRAM_MT_PROTO_SESSION || process.env.TELEGRAM_STRING_SESSION)!.trim();
         const stringSession = new StringSession(sessionString);
         const client = new TelegramClient(stringSession, apiId, apiHash, {
-          connectionRetries: 3,
-          autoReconnect: true,
+          connectionRetries: 1,
+          autoReconnect: false,
           useWSS: false,
-          timeout: 25000
+          timeout: 15000
         });
 
         console.log('[MTProto] Connecting client with USER session...');
@@ -202,23 +350,87 @@ export class MtprotoParticipantService {
           await client.connect();
           const me = await client.getMe();
           if (!me) {
-            throw new MTProtoAuthError('Telegram client connected but could not retrieve authenticated user account.');
+            throw new MTProtoAuthError('Telegram client connected but could not retrieve authenticated user account.', 'AUTH_FAILED');
           }
           this.client = client;
           this.isConnected = true;
           this.currentMode = 'USER';
+          this.lastFatalAuthError = null;
+          this.lastCheckedAt = Date.now();
           const userId = (me as any).id?.toString() || 'unknown';
-          console.log(`[MTProto] Authenticated in USER mode (userId=${userId}, isBot=${Boolean((me as any).bot)})`);
+          const username = (me as any).username ? `@${(me as any).username}` : undefined;
+          this.authenticatedUser = {
+            id: userId,
+            username: (me as any).username || undefined,
+            firstName: (me as any).firstName || undefined,
+            isBot: Boolean((me as any).bot)
+          };
+          console.log(`[MTProto] Authenticated in USER mode (userId=${userId}, username=${username || 'none'}, isBot=${this.authenticatedUser.isBot})`);
           return client;
         } catch (err: any) {
           this.isConnected = false;
+          try {
+            await client.disconnect();
+          } catch {}
           this.client = null;
           this.currentMode = 'NONE';
-          if (err.message && (err.message.includes('AUTH_KEY') || err.message.includes('SESSION_REVOKED') || err.message.includes('401') || err.message.includes('SESSION_PASSWORD_NEEDED'))) {
-            throw new MTProtoAuthError(`MTProto user session invalid or revoked: ${err.message}`);
+          this.lastCheckedAt = Date.now();
+          const errMsg = err?.message || String(err);
+
+          if (errMsg.includes('AUTH_KEY_UNREGISTERED')) {
+            const authErr = new MTProtoAuthError(
+              `MTProto user session invalid or revoked: 401: AUTH_KEY_UNREGISTERED (caused by users.GetUsers)`,
+              'AUTH_KEY_UNREGISTERED',
+              'Generate a fresh session string by running "npx tsx scripts/generateMtprotoSession.ts" and update TELEGRAM_MT_PROTO_SESSION in your hosting environment variables.'
+            );
+            this.lastFatalAuthError = {
+              fingerprint: currentFingerprint,
+              code: authErr.code,
+              message: authErr.message,
+              actionRequired: authErr.actionRequired!,
+              timestamp: Date.now()
+            };
+            console.error(`[MTProto] Fatal authentication failure: ${authErr.message}`);
+            throw authErr;
           }
+
+          if (errMsg.includes('SESSION_REVOKED') || errMsg.includes('AUTH_KEY_DUPLICATED')) {
+            const authErr = new MTProtoAuthError(
+              `MTProto user session revoked or superseded: ${errMsg}`,
+              'AUTH_REVOKED',
+              'Generate a fresh session string by running "npx tsx scripts/generateMtprotoSession.ts" and update TELEGRAM_MT_PROTO_SESSION in your hosting environment variables.'
+            );
+            this.lastFatalAuthError = {
+              fingerprint: currentFingerprint,
+              code: authErr.code,
+              message: authErr.message,
+              actionRequired: authErr.actionRequired!,
+              timestamp: Date.now()
+            };
+            console.error(`[MTProto] Fatal authentication failure: ${authErr.message}`);
+            throw authErr;
+          }
+
+          if (errMsg.includes('401') || errMsg.includes('SESSION_PASSWORD_NEEDED')) {
+            const authErr = new MTProtoAuthError(
+              `MTProto user session authentication rejected: ${errMsg}`,
+              'AUTH_FAILED',
+              'Check Telegram account credentials and 2FA status, then regenerate session using scripts/generateMtprotoSession.ts.'
+            );
+            this.lastFatalAuthError = {
+              fingerprint: currentFingerprint,
+              code: authErr.code,
+              message: authErr.message,
+              actionRequired: authErr.actionRequired!,
+              timestamp: Date.now()
+            };
+            console.error(`[MTProto] Fatal authentication failure: ${authErr.message}`);
+            throw authErr;
+          }
+
           throw err;
         } finally {
+          this.isConnecting = false;
           this.connectPromise = null;
         }
       } else {
@@ -226,10 +438,10 @@ export class MtprotoParticipantService {
         const botToken = process.env.TELEGRAM_BOT_TOKEN!.trim();
         const stringSession = new StringSession('');
         const client = new TelegramClient(stringSession, apiId, apiHash, {
-          connectionRetries: 3,
-          autoReconnect: true,
+          connectionRetries: 1,
+          autoReconnect: false,
           useWSS: false,
-          timeout: 25000
+          timeout: 15000
         });
 
         console.log('[MTProto] Connecting client with BOT token authorization...');
@@ -239,23 +451,52 @@ export class MtprotoParticipantService {
           });
           const me = await client.getMe();
           if (!me) {
-            throw new MTProtoAuthError('Telegram client connected but could not retrieve authenticated bot account.');
+            throw new MTProtoAuthError('Telegram client connected but could not retrieve authenticated bot account.', 'BOT_NOT_FOUND');
           }
           this.client = client;
           this.isConnected = true;
           this.currentMode = 'BOT';
+          this.lastFatalAuthError = null;
+          this.lastCheckedAt = Date.now();
           const botUsername = (me as any).username || 'MissRoxie_Bot';
+          this.authenticatedUser = {
+            id: (me as any).id?.toString() || 'unknown',
+            username: botUsername,
+            firstName: (me as any).firstName || 'Bot',
+            isBot: true
+          };
           console.log(`[MTProto] Authenticated in BOT mode (username=${botUsername}, isBot=true)`);
           return client;
         } catch (err: any) {
           this.isConnected = false;
+          try {
+            await client.disconnect();
+          } catch {}
           this.client = null;
           this.currentMode = 'NONE';
-          if (err.message && (err.message.includes('AUTH_KEY') || err.message.includes('SESSION_REVOKED') || err.message.includes('401') || err.message.includes('BOT_TOKEN_INVALID'))) {
-            throw new MTProtoAuthError(`MTProto bot authentication failed or token invalid: ${err.message}`);
+          this.lastCheckedAt = Date.now();
+          const errMsg = err?.message || String(err);
+
+          if (errMsg.includes('BOT_TOKEN_INVALID') || errMsg.includes('401') || errMsg.includes('AUTH_KEY')) {
+            const authErr = new MTProtoAuthError(
+              `MTProto bot authentication failed or token invalid: ${errMsg}`,
+              'BOT_TOKEN_INVALID',
+              'Verify that TELEGRAM_BOT_TOKEN is correct and matches your bot credentials from @BotFather.'
+            );
+            this.lastFatalAuthError = {
+              fingerprint: currentFingerprint,
+              code: authErr.code,
+              message: authErr.message,
+              actionRequired: authErr.actionRequired!,
+              timestamp: Date.now()
+            };
+            console.error(`[MTProto] Fatal bot authentication failure: ${authErr.message}`);
+            throw authErr;
           }
+
           throw err;
         } finally {
+          this.isConnecting = false;
           this.connectPromise = null;
         }
       }
@@ -451,6 +692,10 @@ export class MtprotoParticipantService {
     try {
       client = await this.getClient();
     } catch (err: any) {
+      const isAuthKeyUnregistered = err.code === 'AUTH_KEY_UNREGISTERED' || (err.message && err.message.includes('AUTH_KEY_UNREGISTERED'));
+      const errorCode = isAuthKeyUnregistered ? 'AUTH_KEY_UNREGISTERED' : (err.code || 'AUTH_FAILED');
+      const actionNotice = err.actionRequired ? ` Action: ${err.actionRequired}` : '';
+
       return {
         status: 'FETCH_FAILED',
         authMode: mode,
@@ -460,10 +705,12 @@ export class MtprotoParticipantService {
         excludedCount: 0,
         eligibleCount: 0,
         members: [],
-        errorCode: err.code || 'AUTH_FAILED',
+        errorCode,
         error: err.message || 'Failed to authenticate MTProto client.',
         isComplete: false,
-        diagnosticMessage: `MTProto authentication failure: ${err.message}`
+        diagnosticMessage: isAuthKeyUnregistered
+          ? `MTProto session revoked (AUTH_KEY_UNREGISTERED): The Telegram session was terminated or expired.${actionNotice}`
+          : `MTProto authentication failure: ${err.message}${actionNotice}`
       };
     }
 

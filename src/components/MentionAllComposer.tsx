@@ -71,10 +71,10 @@ export const FORMAT_CONFIGS: Record<MentionContentFormat, FormatConfig> = {
     categoryLabel: 'Text Only',
     baseType: 'text',
     requiresMedia: false,
-    requiresText: true,
+    requiresText: false,
     maxTextLen: 3500,
     icon: FileText,
-    description: 'Standard text announcement'
+    description: 'Standard text announcement or mention-only broadcast'
   },
   photo: {
     id: 'photo',
@@ -131,10 +131,10 @@ export const FORMAT_CONFIGS: Record<MentionContentFormat, FormatConfig> = {
     categoryLabel: 'Combined',
     baseType: 'photo',
     requiresMedia: true,
-    requiresText: true,
+    requiresText: false,
     maxTextLen: 700,
     icon: Image,
-    description: 'Text announcement with attached photo'
+    description: 'Photo broadcast with optional announcement text'
   },
   text_video: {
     id: 'text_video',
@@ -143,10 +143,10 @@ export const FORMAT_CONFIGS: Record<MentionContentFormat, FormatConfig> = {
     categoryLabel: 'Combined',
     baseType: 'video',
     requiresMedia: true,
-    requiresText: true,
+    requiresText: false,
     maxTextLen: 700,
     icon: Video,
-    description: 'Text announcement with attached video'
+    description: 'Video broadcast with optional announcement text'
   },
   text_animation: {
     id: 'text_animation',
@@ -155,10 +155,10 @@ export const FORMAT_CONFIGS: Record<MentionContentFormat, FormatConfig> = {
     categoryLabel: 'Combined',
     baseType: 'animation',
     requiresMedia: true,
-    requiresText: true,
+    requiresText: false,
     maxTextLen: 700,
     icon: Film,
-    description: 'Text announcement with attached GIF'
+    description: 'GIF broadcast with optional announcement text'
   },
   text_document: {
     id: 'text_document',
@@ -167,15 +167,33 @@ export const FORMAT_CONFIGS: Record<MentionContentFormat, FormatConfig> = {
     categoryLabel: 'Combined',
     baseType: 'document',
     requiresMedia: true,
-    requiresText: true,
+    requiresText: false,
     maxTextLen: 700,
     icon: Sparkles,
-    description: 'Text announcement with attached document'
+    description: 'Document broadcast with optional announcement text'
   }
 };
 
+export interface MtprotoHealthState {
+  isConfigured: boolean;
+  mode: string;
+  status: string;
+  isConnected: boolean;
+  canOperate: boolean;
+  error?: string;
+  errorCode?: string;
+  actionRequired?: string;
+  authenticatedUser?: {
+    id: string;
+    username?: string;
+    firstName?: string;
+    isBot: boolean;
+  };
+}
+
 interface OperationStatus {
   active: boolean;
+  mtprotoHealth?: MtprotoHealthState;
   operation?: {
     operationId: string;
     chatId: number;
@@ -394,6 +412,7 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
   const hasText = announcementText.trim().length > 0;
   const isTextValid = !currentConfig.requiresText || hasText;
   const isOperationActive = Boolean(opStatus?.active);
+  const isMtprotoRevoked = opStatus?.mtprotoHealth?.status === 'AUTH_KEY_UNREGISTERED' || opStatus?.mtprotoHealth?.status === 'AUTH_REVOKED';
 
   const canStart =
     isTargetGroupValid &&
@@ -401,6 +420,7 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
     !isOverLimit &&
     isMediaValid &&
     isTextValid &&
+    !isMtprotoRevoked &&
     !isSubmitting;
 
   // Start Mention All
@@ -533,7 +553,11 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
               className="flex-1 sm:flex-initial px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm min-h-[40px]"
             >
               <Send className="w-4 h-4" />
-              {isSubmitting ? 'Starting...' : 'Start Mention All'}
+              {isSubmitting
+                ? 'Starting...'
+                : isMtprotoRevoked
+                ? 'MTProto Session Revoked'
+                : 'Start Mention All'}
             </button>
           )}
 
@@ -547,6 +571,25 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* MTProto Session Revocation Alert */}
+      {isMtprotoRevoked && (
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 space-y-2">
+          <div className="flex items-center gap-2 font-bold text-rose-200">
+            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+            <span>Telegram MTProto Session Invalid or Revoked (401: AUTH_KEY_UNREGISTERED)</span>
+          </div>
+          <p className="text-xs leading-relaxed text-stone-300">
+            The configured MTProto session was invalidated or terminated by Telegram. Mention All cannot enumerate group members until a fresh session string is configured.
+          </p>
+          <div className="bg-black/40 p-3 rounded-lg text-xs font-mono text-stone-200 space-y-1 border border-rose-500/20">
+            <div className="text-rose-400 font-semibold font-sans">Action Required to Restore Service:</div>
+            <div>1. In terminal, run: <code className="text-pink-300 bg-black/40 px-1 py-0.5 rounded">npx tsx scripts/generateMtprotoSession.ts</code></div>
+            <div>2. Authenticate with your Telegram account and copy the newly generated session string.</div>
+            <div>3. Update <code className="text-pink-300 bg-black/40 px-1 py-0.5 rounded">TELEGRAM_MT_PROTO_SESSION</code> in your hosting/Render environment variables.</div>
+          </div>
+        </div>
+      )}
 
       {/* Notification Banner */}
       {feedback && (
@@ -911,10 +954,10 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
           onChange={(e) => setAnnouncementText(e.target.value)}
           placeholder={
             currentConfig.category === 'text'
-              ? 'Enter your announcement text here. 10 member mentions will be appended as interactive emojis to each message batch...'
+              ? 'Enter optional announcement text, or leave blank to mention all members directly with clickable emojis in 10-user batches...'
               : currentConfig.category === 'combo'
-              ? 'Enter your announcement text. Both text and media will be delivered together with 10 member mentions...'
-              : 'Enter an optional announcement caption. 10 member mentions will be appended to each media batch...'
+              ? 'Enter optional announcement text, or leave blank to deliver media with clickable member mentions directly...'
+              : 'Enter an optional announcement caption, or leave blank to deliver media with clickable member mentions directly...'
           }
           className={`w-full ${themeInnerCardBg} border ${
             isOverLimit ? 'border-rose-500' : themeBorder
@@ -923,11 +966,6 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
         {isOverLimit && (
           <p className="text-[11px] text-rose-400 flex items-center gap-1">
             <AlertCircle className="w-3.5 h-3.5" /> Character limit exceeded. Shorten text to leave room for Telegram member mention hyperlinks.
-          </p>
-        )}
-        {currentConfig.requiresText && announcementText.trim().length === 0 && (
-          <p className="text-[11px] text-amber-400 flex items-center gap-1">
-            <AlertCircle className="w-3.5 h-3.5" /> Announcement text is required for this format.
           </p>
         )}
       </div>

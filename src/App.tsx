@@ -6441,10 +6441,32 @@ export default function App() {
               </div>
 
               {/* Component Status Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                 {[
                   { name: 'Bot Core', status: healthData?.components?.bot?.configured ? 'Configured' : 'Missing Token', ok: healthData?.components?.bot?.configured },
                   { name: 'Telegram Polling', status: healthData?.components?.telegramPolling?.status || 'HEALTHY', ok: healthData?.components?.telegramPolling?.status !== 'DEGRADED' },
+                  {
+                    name: 'MTProto Member Service',
+                    status: healthData?.components?.mtproto?.status === 'HEALTHY' ? '🟢 Connected' :
+                            healthData?.components?.mtproto?.status === 'AUTH_KEY_UNREGISTERED' ? '🔴 Key Revoked (401)' :
+                            healthData?.components?.mtproto?.status === 'AUTH_REVOKED' ? '🔴 Session Revoked' :
+                            healthData?.components?.mtproto?.status === 'NOT_CONFIGURED' ? '⚪ Not Configured' :
+                            healthData?.components?.mtproto?.isConnected ? '🟢 Connected' : '🟡 Standby / Ready',
+                    ok: healthData?.components?.mtproto?.status !== 'AUTH_KEY_UNREGISTERED' &&
+                        healthData?.components?.mtproto?.status !== 'AUTH_REVOKED' &&
+                        healthData?.components?.mtproto?.status !== 'AUTH_FAILED',
+                    extra: (
+                      <div className={`text-[11px] ${themeMutedText} space-y-0.5 pt-1.5 border-t border-white/5`}>
+                        <div><span className="font-semibold">Mode:</span> {healthData?.components?.mtproto?.mode || 'NONE'}</div>
+                        <div><span className="font-semibold">Can Operate:</span> {healthData?.components?.mtproto?.canOperate ? 'Yes' : 'No'}</div>
+                        {healthData?.components?.mtproto?.errorCode && (
+                          <div className="text-rose-400 font-mono text-[10px] truncate" title={healthData?.components?.mtproto?.actionRequired || healthData?.components?.mtproto?.errorCode}>
+                            {healthData?.components?.mtproto?.errorCode}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  },
                   { name: 'Scheduler', status: healthData?.components?.scheduler?.status || 'HEALTHY', ok: true },
                   { name: 'AI Chatbot', status: healthData?.components?.ai?.status || 'HEALTHY', ok: true },
                   {

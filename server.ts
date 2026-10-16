@@ -21,6 +21,7 @@ import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
 import { ModerationService } from './server/telegram/moderation.js';
 import { messageScheduler, normalizeTriggerKeyword } from './server/telegram/scheduler.js';
 import { mentionAllService } from './server/telegram/mentionAllService.js';
+import { mtprotoParticipantService } from './server/telegram/mtprotoParticipantService.js';
 
 dotenv.config();
 
@@ -2708,7 +2709,22 @@ export async function startServer() {
       }
 
       const status = mentionAllService.getOperationStatus(numChatId);
-      return res.json(status);
+      const mtprotoHealth = mtprotoParticipantService.getHealthReport();
+      return res.json({ ...status, mtprotoHealth });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  });
+
+  app.get('/api/dashboard/mtproto/status', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error, code: 'UNAUTHORIZED' });
+      }
+
+      const health = mtprotoParticipantService.getHealthReport();
+      return res.json({ ok: true, health });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Internal server error' });
     }
