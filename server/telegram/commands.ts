@@ -27,6 +27,15 @@ import {
   CommandCategory
 } from './commandCatalog.js';
 import { ChatbotService, ROXIE_SUPPORTED_MOODS } from './chatbot.js';
+import { resolveGroupRole } from '../tma/tmaAuth.js';
+
+export function getPublicMiniAppUrl(): string | null {
+  const raw = process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL;
+  if (!raw || typeof raw !== 'string') return null;
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  if (!trimmed || trimmed.includes('example.com')) return null;
+  return trimmed;
+}
 
 export const TELEGRAM_SUGGESTED_COMMANDS: readonly BotCommand[] = Object.freeze([
   { command: "help", description: "Command help guide" },
@@ -321,8 +330,11 @@ export class CommandHandler {
     '/help', '/start', '/ping', '/live', '/report', '/getnote', '/notes', '/rules', '/mymemory', '/forgetme', '/settings'
   ]);
 
+  public static readonly DASHBOARD_COMMANDS = new Set<string>([
+    '/dashboard', '/miniapp'
+  ]);
+
   public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
-    '/dashboard', '/miniapp',
     '/clear', '/del', '/delete', '/purge',
     '/kick', '/ban', '/unban', '/mute', '/unmute',
     '/tmute', '/tban', '/dban', '/dmute', '/dkick', '/sban', '/smute', '/skick',
@@ -396,7 +408,8 @@ export class CommandHandler {
     const isPublic = CommandHandler.PUBLIC_GROUP_COMMANDS.has(cmd) || (catalogItem?.permission === 'Everyone');
     const isAdminOnly = CommandHandler.ADMIN_ONLY_COMMANDS.has(cmd) || (catalogItem && catalogItem.permission !== 'Everyone');
     const isSensitive = CommandHandler.SENSITIVE_COMMANDS.has(cmd) || (catalogItem?.modifiesState === true);
-    const isRegistered = isPublic || isAdminOnly || isSensitive || Boolean(catalogItem);
+    const isDashboard = CommandHandler.DASHBOARD_COMMANDS.has(cmd);
+    const isRegistered = isPublic || isAdminOnly || isSensitive || isDashboard || Boolean(catalogItem);
 
     if (!isRegistered) {
       console.log(`[COMMAND] registry lookup command=${cmd.replace(/^\//, '')} result=NOT_FOUND`);
@@ -404,7 +417,10 @@ export class CommandHandler {
     }
     console.log(`[COMMAND] registry lookup command=${cmd.replace(/^\//, '')} result=FOUND`);
 
-    if (isAdminOnly) {
+    if (isDashboard) {
+      // TMA dashboard command performs its own dual-context authorization (group vs private chat)
+      console.log(`[COMMAND] authorization command=${cmd.replace(/^\//, '')} result=DEFERRED_TO_HANDLER`);
+    } else if (isAdminOnly) {
       // Centrally enforce admin-only requirement on ALL Roxie admin and moderation commands
       const auth = await TelegramMiddleware.requireAdmin(ctx);
       if (!auth.allowed) {
@@ -439,38 +455,7 @@ export class CommandHandler {
     switch (cmd) {
       case '/dashboard':
       case '/miniapp': {
-        const domain = process.env.PUBLIC_APP_URL || process.env.BASE_URL || 'https://roxiebot.example.com';
-        const webAppUrl = `${domain}/miniapp?chat_id=${ctx.chatId}`;
-        const meRes = await telegramApi.getMe();
-        const botUsername = meRes.ok && meRes.result?.username ? meRes.result.username : 'MissRoxie_Bot';
-        const directTmaUrl = `https://t.me/${botUsername}/dashboard?startapp=${encodeURIComponent(String(ctx.chatId))}`;
-
-        await telegramApi.sendMessage(
-          ctx.chatId,
-          `⚙️ <b>Roxie Admin Dashboard (Mini App)</b>\n\n` +
-          `Manage moderation, content protection, members, and group configuration in Telegram:\n\n` +
-          `• <b>Target Group:</b> ${ctx.chatTitle} (<code>${ctx.chatId}</code>)\n` +
-          `• <b>Authorized For:</b> Administrators & Group Owner\n\n` +
-          `Tap the button below to launch the dashboard inside Telegram.`,
-          {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: '🚀 Open Group Dashboard',
-                    web_app: { url: webAppUrl }
-                  }
-                ],
-                [
-                  {
-                    text: '🔗 Direct Link',
-                    url: directTmaUrl
-                  }
-                ]
-              ]
-            }
-          }
-        );
+        await this.handleDashboardCommand(ctx);
         return true;
       }
       case '/del':
@@ -850,6 +835,249 @@ export class CommandHandler {
       default:
         return false;
     }
+  }
+
+  /**
+   * Telegram Mini App Admin Dashboard Launcher (/dashboard, /miniapp)
+   * Dispatches the OPEN DASHBOARD inline button for authorized group owners, admins, and exception admins.
+   * Performs dual-context authorization (group chat and private chat).
+   */
+  private static async handleDashboardCommand(ctx: CommandContext): Promise<void> {
+    const senderId = ctx.sender?.id || ctx.message?.from?.id || 0;
+    const isGroup = TelegramMiddleware.isGroup(ctx.message) || ctx.chatId < 0;
+
+    // ----------------------------------------------------
+    // CONTEXT 1: Invocation inside a Telegram Group / Supergroup
+    // ----------------------------------------------------
+    if (isGroup) {
+      let isAuthorized = false;
+      let resolvedRole = 'UNAUTHORIZED';
+
+      if (ctx.isAnonymousAdmin) {
+        isAuthorized = true;
+        resolvedRole = 'GROUP_ADMIN';
+      } else if (senderId > 0) {
+        const roleInfo = await resolveGroupRole(ctx.chatId, senderId);
+        if (roleInfo.role !== 'UNAUTHORIZED') {
+          isAuthorized = true;
+          resolvedRole = roleInfo.role;
+        }
+      }
+
+      if (!isAuthorized) {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          '❌ <b>Access Denied</b>\n\nThe Roxie Admin Dashboard is only available to group administrators and the group owner.',
+          { reply_to_message_id: ctx.message?.message_id }
+        );
+        return;
+      }
+
+      const publicUrl = getPublicMiniAppUrl();
+      if (!publicUrl) {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          '⚠️ <b>Mini App Unavailable</b>\n\nPublic application URL is not configured. Please configure <code>PUBLIC_APP_URL</code> or <code>RENDER_EXTERNAL_URL</code> in environment variables.',
+          { reply_to_message_id: ctx.message?.message_id }
+        );
+        return;
+      }
+
+      const webAppUrl = `${publicUrl}/miniapp?chat_id=${ctx.chatId}`;
+      const displayRole = resolvedRole.replace('_', ' ');
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚙️ <b>Roxie Admin Dashboard</b>\n\n` +
+        `Manage moderation, content protection, members, and group configuration in Telegram:\n\n` +
+        `• <b>Target Group:</b> ${ctx.chatTitle} (<code>${ctx.chatId}</code>)\n` +
+        `• <b>Your Role:</b> ${displayRole}\n\n` +
+        `Tap <b>OPEN DASHBOARD</b> below to open the dashboard.`,
+        {
+          reply_to_message_id: ctx.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: 'OPEN DASHBOARD',
+                  web_app: { url: webAppUrl }
+                }
+              ]
+            ]
+          }
+        }
+      );
+      return;
+    }
+
+    // ----------------------------------------------------
+    // CONTEXT 2: Invocation inside a Private Chat
+    // ----------------------------------------------------
+    if (!senderId || senderId === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '❌ <b>Access Denied</b>\n\nUnable to verify your Telegram identity.',
+        { reply_to_message_id: ctx.message?.message_id }
+      );
+      return;
+    }
+
+    const targetArg = ctx.args && ctx.args.length > 0 ? ctx.args[0].trim() : '';
+
+    if (targetArg) {
+      const targetChatId = Number(targetArg);
+      if (isNaN(targetChatId) || targetChatId >= 0) {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          '⚠️ <b>Invalid Group ID</b>\n\nPlease provide a valid Telegram group ID (e.g. <code>/dashboard -100123456789</code>) or run <code>/dashboard</code> without arguments to select from your managed groups.',
+          { reply_to_message_id: ctx.message?.message_id }
+        );
+        return;
+      }
+
+      const roleInfo = await resolveGroupRole(targetChatId, senderId);
+      if (roleInfo.role === 'UNAUTHORIZED') {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `❌ <b>Access Denied</b>\n\nYou are not an authorized administrator or owner of group <code>${targetChatId}</code>.`,
+          { reply_to_message_id: ctx.message?.message_id }
+        );
+        return;
+      }
+
+      const publicUrl = getPublicMiniAppUrl();
+      if (!publicUrl) {
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          '⚠️ <b>Mini App Unavailable</b>\n\nPublic application URL is not configured. Please configure <code>PUBLIC_APP_URL</code> or <code>RENDER_EXTERNAL_URL</code> in environment variables.',
+          { reply_to_message_id: ctx.message?.message_id }
+        );
+        return;
+      }
+
+      const groupSettings = db.getGroupSettingsIfExists(targetChatId);
+      const targetTitle = groupSettings?.chatTitle || `Group ${targetChatId}`;
+      const displayRole = roleInfo.role.replace('_', ' ');
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚙️ <b>Roxie Admin Dashboard</b>\n\n` +
+        `• <b>Target Group:</b> ${targetTitle} (<code>${targetChatId}</code>)\n` +
+        `• <b>Your Role:</b> ${displayRole}\n\n` +
+        `Tap <b>OPEN DASHBOARD</b> below to open the dashboard.`,
+        {
+          reply_to_message_id: ctx.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: 'OPEN DASHBOARD',
+                  web_app: { url: `${publicUrl}/miniapp?chat_id=${targetChatId}` }
+                }
+              ]
+            ]
+          }
+        }
+      );
+      return;
+    }
+
+    // No argument in private chat: find all groups where caller is authorized
+    const allSettings = db.getAllGroupSettings();
+    const candidateGroupIds = Object.keys(allSettings)
+      .map(Number)
+      .filter(id => !isNaN(id) && id < 0);
+
+    const checkResults = await Promise.all(
+      candidateGroupIds.map(async (gId) => {
+        try {
+          const roleInfo = await resolveGroupRole(gId, senderId);
+          if (roleInfo.role !== 'UNAUTHORIZED') {
+            const s = allSettings[gId];
+            return {
+              chatId: gId,
+              chatTitle: s?.chatTitle || `Group ${gId}`,
+              role: roleInfo.role
+            };
+          }
+        } catch {
+          // Fail closed
+        }
+        return null;
+      })
+    );
+
+    const authorizedGroups = checkResults.filter((g): g is NonNullable<typeof g> => g !== null);
+
+    if (authorizedGroups.length === 0) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '❌ <b>No Managed Groups Found</b>\n\nYou do not have administrator or owner access to any connected groups managed by Roxie.\n\nTo manage a group, ensure Roxie is added to the group and you have administrative privileges.',
+        { reply_to_message_id: ctx.message?.message_id }
+      );
+      return;
+    }
+
+    const publicUrl = getPublicMiniAppUrl();
+    if (!publicUrl) {
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        '⚠️ <b>Mini App Unavailable</b>\n\nPublic application URL is not configured. Please configure <code>PUBLIC_APP_URL</code> or <code>RENDER_EXTERNAL_URL</code> in environment variables.',
+        { reply_to_message_id: ctx.message?.message_id }
+      );
+      return;
+    }
+
+    if (authorizedGroups.length === 1) {
+      const single = authorizedGroups[0];
+      const displayRole = single.role.replace('_', ' ');
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `⚙️ <b>Roxie Admin Dashboard</b>\n\n` +
+        `• <b>Target Group:</b> ${single.chatTitle} (<code>${single.chatId}</code>)\n` +
+        `• <b>Your Role:</b> ${displayRole}\n\n` +
+        `Tap <b>OPEN DASHBOARD</b> below to open the dashboard.`,
+        {
+          reply_to_message_id: ctx.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: 'OPEN DASHBOARD',
+                  web_app: { url: `${publicUrl}/miniapp?chat_id=${single.chatId}` }
+                }
+              ]
+            ]
+          }
+        }
+      );
+      return;
+    }
+
+    const groupListText = authorizedGroups
+      .map(g => `• <b>${g.chatTitle}</b> (<code>${g.chatId}</code>) — <i>${g.role.replace('_', ' ')}</i>`)
+      .join('\n');
+
+    const inlineKeyboard = authorizedGroups.map(g => [
+      {
+        text: `OPEN DASHBOARD: ${g.chatTitle}`,
+        web_app: { url: `${publicUrl}/miniapp?chat_id=${g.chatId}` }
+      }
+    ]);
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `⚙️ <b>Roxie Admin Dashboard</b>\n\n` +
+      `Select a managed group below to open its dashboard:\n\n` +
+      `${groupListText}\n\n` +
+      `You can also open a specific group directly using <code>/dashboard &lt;groupId&gt;</code>.`,
+      {
+        reply_to_message_id: ctx.message?.message_id,
+        reply_markup: {
+          inline_keyboard: inlineKeyboard
+        }
+      }
+    );
   }
 
   /**

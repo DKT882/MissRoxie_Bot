@@ -17,6 +17,8 @@ import { db } from '../server/db/storage.js';
 import { telegramApi } from '../server/telegram/api.js';
 import { authManager } from '../server/auth/authManager.js';
 import { verifyOperatorAuth } from '../server.js';
+import { CommandHandler } from '../server/telegram/commands.js';
+import { CommandContext } from '../server/telegram/middleware.js';
 
 let passed = 0;
 let failed = 0;
@@ -216,8 +218,12 @@ async function runTmaTestSuite() {
   const groupBCD = -100444555666; // User is NOT admin here (normal member)
   const testUserId = 7771234;
 
-  // Mock Telegram API for group administrators
+  // Mock Telegram API for group administrators and chat members
   const origGetChatAdministrators = telegramApi.getChatAdministrators;
+  const origGetChatMember = telegramApi.getChatMember;
+  telegramApi.getChatMember = async (_cId: number, _uId: number) => {
+    return { ok: false, error_code: 400, description: 'Chat member not found in test mock' };
+  };
   telegramApi.getChatAdministrators = async (cId: number) => {
     if (cId === groupABC) {
       return {
@@ -414,10 +420,214 @@ async function runTmaTestSuite() {
   const adminFakeVerify = verifyOperatorAuth({
     headers: { 'x-session-id': adminToken }
   }, 'SUPER_ADMIN');
-  assert(!adminFakeVerify.authorized, 'TMA-43: Group Admin TMA token CANNOT be used to authenticate as superadmin operator');
+  // ----------------------------------------------------
+  // SECTION 7: /dashboard & /miniapp Launch Button & Flow Verification
+  // ----------------------------------------------------
+  console.log('\n--- SECTION 7: /dashboard & /miniapp Launch Button & Flow Verification ---');
 
-  // Restore original telegramApi method
+  const origSendMessage = telegramApi.sendMessage.bind(telegramApi);
+  let sentMessages: Array<{ chatId: any; text: string; options: any }> = [];
+  telegramApi.sendMessage = async (cId: any, text: string, options?: any) => {
+    sentMessages.push({ chatId: cId, text, options });
+    return { ok: true, result: { message_id: 12345 } };
+  };
+
+  process.env.PUBLIC_APP_URL = 'https://missroxie-bot.onrender.com';
+  db.updateGroupSettings(groupABC, { chatTitle: 'Group ABC' });
+  db.updateGroupSettings(groupBCD, { chatTitle: 'Group BCD' });
+
+  // 1. Group Owner sends /dashboard in groupABC
+  sentMessages = [];
+  const ownerCtx: CommandContext = {
+    message: {
+      message_id: 101,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: groupABC, type: 'supergroup', title: 'Group ABC' },
+      from: { id: 9990001, is_bot: false, first_name: 'OwnerGuy' }
+    },
+    chatId: groupABC,
+    chatTitle: 'Group ABC',
+    sender: { id: 9990001, is_bot: false, first_name: 'OwnerGuy' },
+    isAnonymousAdmin: false,
+    adminDisplayName: 'OwnerGuy',
+    args: [],
+    command: '/dashboard'
+  };
+
+  const ownerHandled = await CommandHandler.handleCommand(ownerCtx);
+  assert(ownerHandled === true, 'TMA-44: /dashboard handled for Group Owner');
+  assert(sentMessages.length === 1, 'TMA-45: Exactly one message sent to Group Owner');
+  const ownerBtn = sentMessages[0]?.options?.reply_markup?.inline_keyboard?.[0]?.[0];
+  assert(ownerBtn?.text === 'OPEN DASHBOARD', 'TMA-46: Launch button has exact label "OPEN DASHBOARD"');
+  assert(ownerBtn?.web_app?.url === `https://missroxie-bot.onrender.com/miniapp?chat_id=${groupABC}`, 'TMA-47: Launch button uses web_app format with live public URL and chat_id');
+  assert(!ownerBtn?.web_app?.url.includes('example.com'), 'TMA-48: Launch button does not use placeholder example.com domain');
+
+  // 2. Regular Admin sends /dashboard in groupABC
+  sentMessages = [];
+  const adminCtx: CommandContext = {
+    message: {
+      message_id: 102,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: groupABC, type: 'supergroup', title: 'Group ABC' },
+      from: { id: testUserId, is_bot: false, first_name: 'AdminUser' }
+    },
+    chatId: groupABC,
+    chatTitle: 'Group ABC',
+    sender: { id: testUserId, is_bot: false, first_name: 'AdminUser' },
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminUser',
+    args: [],
+    command: '/dashboard'
+  };
+
+  const adminHandled = await CommandHandler.handleCommand(adminCtx);
+  assert(adminHandled === true, 'TMA-49: /dashboard handled for Regular Admin');
+  const adminBtn = sentMessages[0]?.options?.reply_markup?.inline_keyboard?.[0]?.[0];
+  assert(adminBtn?.text === 'OPEN DASHBOARD' && adminBtn?.web_app?.url?.includes(String(groupABC)), 'TMA-50: Regular Admin receives OPEN DASHBOARD web_app button');
+
+  // 3. Exception Admin sends /dashboard in groupABC
+  sentMessages = [];
+  const excCtx: CommandContext = {
+    message: {
+      message_id: 103,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: groupABC, type: 'supergroup', title: 'Group ABC' },
+      from: { id: 3330001, is_bot: false, first_name: 'ExceptionAdmin' }
+    },
+    chatId: groupABC,
+    chatTitle: 'Group ABC',
+    sender: { id: 3330001, is_bot: false, first_name: 'ExceptionAdmin' },
+    isAnonymousAdmin: false,
+    adminDisplayName: 'ExceptionAdmin',
+    args: [],
+    command: '/dashboard'
+  };
+
+  const excHandled = await CommandHandler.handleCommand(excCtx);
+  assert(excHandled === true, 'TMA-51: /dashboard handled for Exception Admin');
+  const excBtn = sentMessages[0]?.options?.reply_markup?.inline_keyboard?.[0]?.[0];
+  assert(excBtn?.text === 'OPEN DASHBOARD' && excBtn?.web_app?.url?.includes(String(groupABC)), 'TMA-52: Exception Admin receives OPEN DASHBOARD web_app button');
+
+  // 4. Unauthorized Regular Member sends /dashboard in groupABC (DENIED - NO BUTTON)
+  sentMessages = [];
+  const memberCtx: CommandContext = {
+    message: {
+      message_id: 104,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: groupABC, type: 'supergroup', title: 'Group ABC' },
+      from: { id: 7770001, is_bot: false, first_name: 'NormalMember' }
+    },
+    chatId: groupABC,
+    chatTitle: 'Group ABC',
+    sender: { id: 7770001, is_bot: false, first_name: 'NormalMember' },
+    isAnonymousAdmin: false,
+    adminDisplayName: 'NormalMember',
+    args: [],
+    command: '/dashboard'
+  };
+
+  const memberHandled = await CommandHandler.handleCommand(memberCtx);
+  assert(memberHandled === true, 'TMA-53: /dashboard handled for normal member (denial dispatched)');
+  assert(sentMessages[0]?.text?.includes('Access Denied'), 'TMA-54: Normal member receives explicit Access Denied notice');
+  assert(!sentMessages[0]?.options?.reply_markup?.inline_keyboard, 'TMA-55: Normal member receives NO launch button');
+
+  // 5. /miniapp alias in group works identically
+  sentMessages = [];
+  const aliasCtx: CommandContext = { ...adminCtx, command: '/miniapp' };
+  const aliasHandled = await CommandHandler.handleCommand(aliasCtx);
+  assert(aliasHandled === true, 'TMA-56: /miniapp alias handled identically');
+  const aliasBtn = sentMessages[0]?.options?.reply_markup?.inline_keyboard?.[0]?.[0];
+  assert(aliasBtn?.text === 'OPEN DASHBOARD' && aliasBtn?.web_app?.url?.includes(String(groupABC)), 'TMA-57: /miniapp produces identical OPEN DASHBOARD web_app button');
+
+  // 6. Private chat with authorized group argument
+  sentMessages = [];
+  const privateAuthCtx: CommandContext = {
+    message: {
+      message_id: 201,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 8881001, type: 'private', first_name: 'AdminUser' },
+      from: { id: testUserId, is_bot: false, first_name: 'AdminUser' }
+    },
+    chatId: 8881001,
+    chatTitle: 'AdminUser',
+    sender: { id: testUserId, is_bot: false, first_name: 'AdminUser' },
+    isAnonymousAdmin: false,
+    adminDisplayName: 'AdminUser',
+    args: [String(groupABC)],
+    command: '/dashboard'
+  };
+
+  const privateAuthHandled = await CommandHandler.handleCommand(privateAuthCtx);
+  assert(privateAuthHandled === true, 'TMA-58: /dashboard <authorizedGroupId> in private chat succeeds');
+  const privBtn = sentMessages[0]?.options?.reply_markup?.inline_keyboard?.[0]?.[0];
+  assert(privBtn?.text === 'OPEN DASHBOARD' && privBtn?.web_app?.url?.includes(String(groupABC)), 'TMA-59: Private chat with authorized group ID yields OPEN DASHBOARD button');
+
+  // 7. Private chat with UNAUTHORIZED group argument (NEVER grant access solely because user knows a group ID)
+  sentMessages = [];
+  const privateUnauthCtx: CommandContext = {
+    ...privateAuthCtx,
+    args: [String(groupBCD)] // testUserId is NOT an admin in groupBCD
+  };
+
+  const privateUnauthHandled = await CommandHandler.handleCommand(privateUnauthCtx);
+  assert(privateUnauthHandled === true, 'TMA-60: /dashboard <unauthorizedGroupId> handled in private chat');
+  assert(sentMessages[0]?.text?.includes('Access Denied'), 'TMA-61: Private chat rejected with Access Denied for unauthorized group ID');
+  assert(!sentMessages[0]?.options?.reply_markup?.inline_keyboard, 'TMA-62: No launch button sent for unauthorized group ID in private chat');
+
+  // 8. Private chat without arguments for user managing groups
+  sentMessages = [];
+  const privateNoArgCtx: CommandContext = {
+    ...privateAuthCtx,
+    args: []
+  };
+
+  const privateNoArgHandled = await CommandHandler.handleCommand(privateNoArgCtx);
+  assert(privateNoArgHandled === true, 'TMA-63: /dashboard with no arguments in private chat handled');
+  const privNoArgBtn = sentMessages[0]?.options?.reply_markup?.inline_keyboard?.[0]?.[0];
+  assert(privNoArgBtn?.text === 'OPEN DASHBOARD' && privNoArgBtn?.web_app?.url?.includes(String(groupABC)), 'TMA-64: Private chat without args resolves authorized group and provides OPEN DASHBOARD button');
+
+  // 9. Private chat without arguments for user managing NO groups
+  sentMessages = [];
+  const privateNoGroupsCtx: CommandContext = {
+    message: {
+      message_id: 202,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 7770001, type: 'private', first_name: 'NoGroupsUser' },
+      from: { id: 7770001, is_bot: false, first_name: 'NoGroupsUser' }
+    },
+    chatId: 7770001,
+    chatTitle: 'NoGroupsUser',
+    sender: { id: 7770001, is_bot: false, first_name: 'NoGroupsUser' },
+    isAnonymousAdmin: false,
+    adminDisplayName: 'NoGroupsUser',
+    args: [],
+    command: '/dashboard'
+  };
+
+  const privateNoGroupsHandled = await CommandHandler.handleCommand(privateNoGroupsCtx);
+  assert(privateNoGroupsHandled === true, 'TMA-65: /dashboard with no groups handled');
+  assert(sentMessages[0]?.text?.includes('No Managed Groups Found'), 'TMA-66: Private chat replies No Managed Groups Found when user has no groups');
+  assert(!sentMessages[0]?.options?.reply_markup?.inline_keyboard, 'TMA-67: No button sent when user has no managed groups');
+
+  // 10. Missing public app URL returns safe configuration notice instead of broken button
+  sentMessages = [];
+  const savedPublicUrl = process.env.PUBLIC_APP_URL;
+  delete process.env.PUBLIC_APP_URL;
+  delete process.env.RENDER_EXTERNAL_URL;
+  delete process.env.BASE_URL;
+
+  const noUrlHandled = await CommandHandler.handleCommand(ownerCtx);
+  assert(noUrlHandled === true, 'TMA-68: /dashboard handled when public URL is not configured');
+  assert(sentMessages[0]?.text?.includes('Mini App Unavailable') && sentMessages[0]?.text?.includes('PUBLIC_APP_URL'), 'TMA-69: Safe configuration notice returned when public URL is missing');
+  assert(!sentMessages[0]?.options?.reply_markup?.inline_keyboard, 'TMA-70: No broken launch button sent when public URL is missing');
+
+  // Restore environment & mock
+  process.env.PUBLIC_APP_URL = savedPublicUrl;
+  telegramApi.sendMessage = origSendMessage;
+
+  // Restore original telegramApi methods
   telegramApi.getChatAdministrators = origGetChatAdministrators;
+  telegramApi.getChatMember = origGetChatMember;
 
   console.log('\n====================================================');
   console.log(`🎉 ALL ${passed} TELEGRAM MINI APP TESTS PASSED! (0 FAILED)`);
