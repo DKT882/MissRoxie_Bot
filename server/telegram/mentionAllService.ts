@@ -438,6 +438,8 @@ export class MentionAllService {
         let batchAttempts = 0;
         const maxBatchAttempts = 3;
 
+        let currentReplyId = (i === 0 && targetReplyId) ? targetReplyId : undefined;
+
         while (!sendSuccess && batchAttempts <= maxBatchAttempts) {
           if (operation.abortController.signal.aborted || operation.isCancelled) {
             break;
@@ -452,7 +454,8 @@ export class MentionAllService {
               sendRes = await telegramApi.sendPhoto(chatId, currentMedia, {
                 caption: chunkText,
                 parse_mode: 'HTML',
-                reply_to_message_id: i === 0 ? targetReplyId : undefined
+                reply_to_message_id: currentReplyId,
+                allow_sending_without_reply: true
               });
               if (sendRes?.ok && sendRes.result?.photo?.length) {
                 cachedTelegramFileId = sendRes.result.photo[sendRes.result.photo.length - 1].file_id;
@@ -461,7 +464,8 @@ export class MentionAllService {
               sendRes = await telegramApi.sendVideo(chatId, currentMedia, {
                 caption: chunkText,
                 parse_mode: 'HTML',
-                reply_to_message_id: i === 0 ? targetReplyId : undefined
+                reply_to_message_id: currentReplyId,
+                allow_sending_without_reply: true
               });
               if (sendRes?.ok && sendRes.result?.video?.file_id) {
                 cachedTelegramFileId = sendRes.result.video.file_id;
@@ -470,7 +474,8 @@ export class MentionAllService {
               sendRes = await telegramApi.sendAnimation(chatId, currentMedia, {
                 caption: chunkText,
                 parse_mode: 'HTML',
-                reply_to_message_id: i === 0 ? targetReplyId : undefined
+                reply_to_message_id: currentReplyId,
+                allow_sending_without_reply: true
               });
               if (sendRes?.ok && (sendRes.result?.animation?.file_id || sendRes.result?.document?.file_id)) {
                 cachedTelegramFileId = sendRes.result.animation?.file_id || sendRes.result.document?.file_id;
@@ -479,14 +484,16 @@ export class MentionAllService {
               sendRes = await telegramApi.sendDocument(chatId, currentMedia, {
                 caption: chunkText,
                 parse_mode: 'HTML',
-                reply_to_message_id: i === 0 ? targetReplyId : undefined
+                reply_to_message_id: currentReplyId,
+                allow_sending_without_reply: true
               });
               if (sendRes?.ok && sendRes.result?.document?.file_id) {
                 cachedTelegramFileId = sendRes.result.document.file_id;
               }
             } else {
               sendRes = await telegramApi.sendMessage(chatId, chunkText, {
-                reply_to_message_id: i === 0 ? targetReplyId : undefined,
+                reply_to_message_id: currentReplyId,
+                allow_sending_without_reply: true,
                 parse_mode: 'HTML'
               });
             }
@@ -496,6 +503,15 @@ export class MentionAllService {
 
           if (sendRes && sendRes.ok) {
             sendSuccess = true;
+          } else if (currentReplyId && (
+            sendRes?.description?.toLowerCase().includes('message to be replied not found') ||
+            sendRes?.description?.toLowerCase().includes('reply message not found') ||
+            sendRes?.description?.toLowerCase().includes('message to reply not found') ||
+            sendRes?.error_code === 400
+          )) {
+            console.warn(`[ALL] Batch ${i + 1} rejected with reply_to_message_id=${currentReplyId} (${sendRes?.description}). Retrying immediately without reply...`);
+            currentReplyId = undefined;
+            continue;
           } else if (sendRes && sendRes.error_code === 429) {
             const retryAfterSec = sendRes.parameters?.retry_after || 2;
             console.warn(`[ALL] 429 flood wait on batch ${i + 1}. Retrying in ${retryAfterSec}s...`);
@@ -506,10 +522,20 @@ export class MentionAllService {
                 break;
               }
             } else {
-              sendSuccess = true;
+              sendSuccess = false;
+              break;
             }
           } else {
-            sendSuccess = true;
+            console.warn(`[ALL] Batch ${i + 1} sending error: ${sendRes?.description || 'Unknown error'}`);
+            if (batchAttempts <= maxBatchAttempts) {
+              const completed = await MentionAllService.abortableSleep(1000, operation.abortController.signal);
+              if (!completed || operation.isCancelled) {
+                break;
+              }
+            } else {
+              sendSuccess = false;
+              break;
+            }
           }
         }
 

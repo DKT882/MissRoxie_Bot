@@ -4342,7 +4342,7 @@ export class CommandHandler {
       await telegramApi.sendMessage(
         ctx.chatId,
         '⏳ An /all broadcast is already in progress for this group. Please wait for it to complete.',
-        { reply_to_message_id: ctx.message.message_id }
+        { reply_to_message_id: ctx.message.message_id, allow_sending_without_reply: true }
       );
       return;
     }
@@ -4379,7 +4379,7 @@ export class CommandHandler {
         `<b>Batch Size:</b> 10 members / message\n` +
         `<b>Usage:</b> <code>/all [custom message text]</code>\n\n` +
         `<i>Note: Mentions all eligible members directly through Telegram member enumeration in 10-member emoji batches.</i>`,
-        { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML' }
+        { reply_to_message_id: ctx.message.message_id, parse_mode: 'HTML', allow_sending_without_reply: true }
       );
       return;
     }
@@ -4404,7 +4404,7 @@ export class CommandHandler {
       }
     }
 
-    const targetReplyId = reply?.message_id || ctx.message.message_id;
+    const targetReplyId = reply?.message_id;
 
     const startRes = await mentionAllService.startOperation({
       chatId: ctx.chatId,
@@ -4433,14 +4433,14 @@ export class CommandHandler {
         await telegramApi.sendMessage(
           ctx.chatId,
           '⏳ An /all broadcast is already in progress for this group. Please wait for it to complete.',
-          { reply_to_message_id: ctx.message.message_id }
+          { reply_to_message_id: ctx.message.message_id, allow_sending_without_reply: true }
         );
       } else if (startRes.status === 'mtproto_error') {
         const errorMsg = startRes.error || 'Failed to retrieve group participants via MTProto.';
         await telegramApi.sendMessage(
           ctx.chatId,
           `❌ ${errorMsg}`,
-          { reply_to_message_id: ctx.message.message_id }
+          { reply_to_message_id: ctx.message.message_id, allow_sending_without_reply: true }
         );
 
         TelegramMiddleware.logAudit({
@@ -4456,7 +4456,7 @@ export class CommandHandler {
         await telegramApi.sendMessage(
           ctx.chatId,
           `⚠️ ${startRes.error}`,
-          { reply_to_message_id: ctx.message.message_id }
+          { reply_to_message_id: ctx.message.message_id, allow_sending_without_reply: true }
         );
 
         TelegramMiddleware.logAudit({
@@ -4472,7 +4472,7 @@ export class CommandHandler {
         await telegramApi.sendMessage(
           ctx.chatId,
           '⚠️ No eligible group members found to mention.',
-          { reply_to_message_id: ctx.message.message_id }
+          { reply_to_message_id: ctx.message.message_id, allow_sending_without_reply: true }
         );
 
         TelegramMiddleware.logAudit({
@@ -4488,7 +4488,7 @@ export class CommandHandler {
         await telegramApi.sendMessage(
           ctx.chatId,
           `⚠️ ${startRes.error}`,
-          { reply_to_message_id: ctx.message.message_id }
+          { reply_to_message_id: ctx.message.message_id, allow_sending_without_reply: true }
         );
       }
     }
@@ -4502,7 +4502,7 @@ export class CommandHandler {
       await telegramApi.sendMessage(
         ctx.chatId,
         '❌ You don\'t have permission to use /stopall.',
-        { reply_to_message_id: ctx.message.message_id }
+        { reply_to_message_id: ctx.message.message_id, allow_sending_without_reply: true }
       );
       return;
     }
@@ -4512,7 +4512,7 @@ export class CommandHandler {
       await telegramApi.sendMessage(
         ctx.chatId,
         'ℹ️ There is no active /all broadcast running in this group.',
-        { reply_to_message_id: ctx.message.message_id }
+        { reply_to_message_id: ctx.message.message_id, allow_sending_without_reply: true }
       );
       return;
     }
@@ -4521,7 +4521,7 @@ export class CommandHandler {
       await telegramApi.sendMessage(
         ctx.chatId,
         '⏳ The active /all broadcast is already stopping. Please wait.',
-        { reply_to_message_id: ctx.message.message_id }
+        { reply_to_message_id: ctx.message.message_id, allow_sending_without_reply: true }
       );
       return;
     }
@@ -4535,6 +4535,7 @@ export class CommandHandler {
     if (stopRes.ok) {
       await telegramApi.sendMessage(ctx.chatId, stopRes.message, {
         reply_to_message_id: ctx.message.message_id,
+        allow_sending_without_reply: true,
         parse_mode: 'HTML'
       });
 

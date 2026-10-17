@@ -230,6 +230,10 @@ export class MtprotoParticipantService {
     return this.getAuthMode() !== 'NONE';
   }
 
+  public canOperate(): boolean {
+    return this.getHealthReport().canOperate;
+  }
+
   public getHealthReport(): MtprotoHealthReport {
     const mode = this.getAuthMode();
     const isConfigured = mode !== 'NONE';

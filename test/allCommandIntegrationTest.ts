@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test';
 import { CommandHandler } from '../server/telegram/commands.js';
 import { db } from '../server/db/storage.js';
 import { telegramApi } from '../server/telegram/api.js';
+import { mtprotoParticipantService } from '../server/telegram/mtprotoParticipantService.js';
 
 let passed = 0;
 let failed = 0;
@@ -21,12 +22,12 @@ async function runTests() {
   console.log('STARTING /ALL COMMAND INTEGRATION TEST SUITE');
   console.log('====================================================');
 
-  const chatId = -100999888778;
+  const chatId = -10099988877899;
 
   // Cache test members
-  db.cacheUser({ id: 111, first_name: 'Alice', username: 'alice' }, chatId);
-  db.cacheUser({ id: 222, first_name: 'Bob', username: 'bob' }, chatId);
-  db.cacheUser({ id: 333, first_name: 'Bot', username: 'testbot' }, chatId); // Bot should be excluded by username filter
+  db.cacheUser({ id: 111, first_name: 'Alice', username: 'alice', is_bot: false }, chatId);
+  db.cacheUser({ id: 222, first_name: 'Bob', username: 'bob', is_bot: false }, chatId);
+  db.cacheUser({ id: 333, first_name: 'Bot', username: 'testbot', is_bot: true }, chatId); // Bot should be excluded by is_bot flag
 
   let sentMessages: { text: string; options: any }[] = [];
   const originalSendMessage = telegramApi.sendMessage;
@@ -36,7 +37,7 @@ async function runTests() {
 
   (telegramApi as any).sendMessage = async (id: number, text: string, options?: any) => {
     sentMessages.push({ text, options });
-    return { message_id: 100, chat: { id, type: 'supergroup' }, date: Date.now() };
+    return { ok: true, result: { message_id: 100, chat: { id, type: 'supergroup' }, date: Date.now() } };
   };
 
   (telegramApi as any).getMe = async () => {
@@ -117,6 +118,7 @@ async function runTests() {
     assert(combinedText.includes('tg://user?id=111'), 'ALL-03: Includes clickable emoji tg://user mention for Alice (id: 111)');
     assert(combinedText.includes('tg://user?id=222'), 'ALL-03: Includes clickable emoji tg://user mention for Bob (id: 222)');
     assert(!combinedText.includes('tg://user?id=333'), 'ALL-06: Excludes bot user (id: 333) from mentions');
+    assert(sentMessages[0].options?.reply_to_message_id === undefined, 'ALL-13: Standalone /all does not bind to command message ID (targetReplyId is undefined)');
 
     // Test 3: ALL-02: Custom message support (/all hello everyone)
     sentMessages = [];
@@ -150,9 +152,9 @@ async function runTests() {
     assert(sentMessages.some(m => m.text.includes('No eligible group members') || m.text.includes('cached group members')), 'ALL-05: Empty member handling returns informative warning');
 
     // Seed 25 members for multi-batch testing (25 members -> 3 batches of 10, 10, 5)
-    const multiBatchChatId = -1004494262619;
+    const multiBatchChatId = -10099988877888;
     for (let i = 1; i <= 25; i++) {
-      db.cacheUser({ id: 5000 + i, first_name: `Member${i}`, username: `member_${i}` }, multiBatchChatId);
+      db.cacheUser({ id: 5000 + i, first_name: `Member${i}`, username: `member_${i}`, is_bot: false }, multiBatchChatId);
     }
 
     // Test 5: ALL-08: Replied photo with 25 members sends 3 sendPhoto messages, all with photo file_id & custom caption
@@ -185,6 +187,7 @@ async function runTests() {
     assert(sentPhotos.every(p => p.photo === 'best_photo_id_999'), 'ALL-08: All 3 batches reuse original photo file_id');
     assert(sentPhotos.every(p => p.options.caption.startsWith('ajao sab\n\n')), 'ALL-08: All 3 batches contain custom text "ajao sab"');
     assert(sentPhotos[0].options.reply_to_message_id === 40, 'ALL-08: Batch 1 links reply to original message');
+    assert(sentPhotos[0].options.allow_sending_without_reply === true, 'ALL-14: Batch 1 sends allow_sending_without_reply: true');
     assert(sentPhotos[1].options.reply_to_message_id === undefined, 'ALL-08: Batch 2 does not repeat reply header');
     assert(sentPhotos[2].options.reply_to_message_id === undefined, 'ALL-08: Batch 3 does not repeat reply header');
     assert(sentPhotos.every(p => p.options.parse_mode === 'HTML'), 'ALL-08: All 3 batches use HTML parse_mode');
@@ -289,6 +292,67 @@ async function runTests() {
 
     assert(sentMessages.length === 3, `ALL-12: 25 members produced exactly 3 sendMessage calls (got ${sentMessages.length})`);
     assert(sentMessages.every(m => m.text.startsWith('announcement everyone\n\n')), 'ALL-12: All 3 plain text messages contain custom text prefix');
+
+    // Test 10: ALL-15: Immediate fallback retry without reply when Telegram returns 400 reply-not-found
+    let callCount = 0;
+    const recordedOptions: any[] = [];
+    (telegramApi as any).sendMessage = async (id: number, text: string, options?: any) => {
+      callCount++;
+      recordedOptions.push(options);
+      if (options?.reply_to_message_id) {
+        return { ok: false, error_code: 400, description: 'Bad Request: message to be replied not found' };
+      }
+      return { ok: true, result: { message_id: 999, chat: { id, type: 'supergroup' }, date: Date.now() } };
+    };
+
+    sentMessages = [];
+    await CommandHandler.handleCommand({
+      command: '/all',
+      args: ['urgent', 'meeting'],
+      chatId,
+      chatTitle: 'Test Group',
+      isAnonymousAdmin: false,
+      adminDisplayName: 'Admin',
+      sender: { id: 12345, first_name: 'Admin', is_bot: false },
+      message: {
+        message_id: 99,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: chatId, type: 'supergroup' },
+        reply_to_message: {
+          message_id: 88,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: chatId, type: 'supergroup' },
+          text: 'Original message'
+        }
+      }
+    });
+
+    assert(callCount === 2, `ALL-15: Broadcast retried immediately without reply upon 400 error (attempts: ${callCount})`);
+    assert(recordedOptions[0]?.reply_to_message_id === 88, 'ALL-15: First attempt included reply_to_message_id 88');
+    assert(recordedOptions[1]?.reply_to_message_id === undefined, 'ALL-15: Fallback attempt dropped reply_to_message_id');
+
+    // Test 11: ALL-16: BOT-mode MTProto operational check
+    const originalApiId = process.env.TELEGRAM_API_ID;
+    const originalApiHash = process.env.TELEGRAM_API_HASH;
+    const originalBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    const originalUserSession = process.env.TELEGRAM_MT_PROTO_SESSION;
+
+    process.env.TELEGRAM_API_ID = '123456';
+    process.env.TELEGRAM_API_HASH = 'mock_hash';
+    process.env.TELEGRAM_BOT_TOKEN = '123456789:ABCDefGhIjKlMnOpQrStUvWxYz';
+    delete process.env.TELEGRAM_MT_PROTO_SESSION;
+    delete process.env.TELEGRAM_STRING_SESSION;
+
+    const report = mtprotoParticipantService.getHealthReport();
+    assert(report.canOperate === true, 'ALL-16: canOperate is true with only TELEGRAM_BOT_TOKEN and no user session');
+    assert(mtprotoParticipantService.canOperate() === true, 'ALL-16: mtprotoParticipantService.canOperate() helper returns true');
+    assert(report.mode === 'BOT', 'ALL-16: Effective mode is BOT');
+
+    // Restore env
+    if (originalApiId) process.env.TELEGRAM_API_ID = originalApiId; else delete process.env.TELEGRAM_API_ID;
+    if (originalApiHash) process.env.TELEGRAM_API_HASH = originalApiHash; else delete process.env.TELEGRAM_API_HASH;
+    if (originalBotToken) process.env.TELEGRAM_BOT_TOKEN = originalBotToken; else delete process.env.TELEGRAM_BOT_TOKEN;
+    if (originalUserSession) process.env.TELEGRAM_MT_PROTO_SESSION = originalUserSession;
 
     console.log(`\n🎉 /all Integration Tests Completed: ${passed} Passed, ${failed} Failed`);
     if (failed > 0) {

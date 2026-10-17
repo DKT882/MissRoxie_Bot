@@ -373,13 +373,15 @@ export class TelegramApi {
     text: string,
     options?: {
       reply_to_message_id?: number;
-      reply_parameters?: { message_id: number; chat_id?: number | string };
+      reply_parameters?: { message_id: number; chat_id?: number | string; allow_sending_without_reply?: boolean };
       parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
       disable_web_page_preview?: boolean;
       reply_markup?: any;
+      allow_sending_without_reply?: boolean;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     const replyId = options?.reply_parameters?.message_id || options?.reply_to_message_id;
+    const allowWithoutReply = options?.allow_sending_without_reply ?? options?.reply_parameters?.allow_sending_without_reply ?? true;
     const stackTrace = new Error().stack?.split('\n').slice(2, 6).map(s => s.trim()) || [];
     logDebug({
       event: 'TELEGRAM_SEND_CALLSITE',
@@ -401,7 +403,8 @@ export class TelegramApi {
       text,
       parse_mode: options?.parse_mode || 'HTML',
       reply_to_message_id: replyId,
-      reply_parameters: replyId ? { message_id: replyId } : undefined,
+      allow_sending_without_reply: replyId ? allowWithoutReply : undefined,
+      reply_parameters: replyId ? { message_id: replyId, allow_sending_without_reply: allowWithoutReply } : undefined,
       disable_web_page_preview: options?.disable_web_page_preview ?? true,
       reply_markup: options?.reply_markup
     }, { timeoutMs: 12000, maxRetries: 2 });
@@ -846,9 +849,11 @@ export class TelegramApi {
       reply_to_message_id?: number;
       reply_markup?: any;
       protect_content?: boolean;
+      allow_sending_without_reply?: boolean;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     let bodyPayload: any;
+    const allowWithoutReply = options?.allow_sending_without_reply ?? true;
     if (typeof photo === 'object' && photo && 'buffer' in photo) {
       const formData = new FormData();
       formData.append('chat_id', String(chatId));
@@ -856,7 +861,10 @@ export class TelegramApi {
       formData.append('photo', blob, photo.filename || 'photo.jpg');
       if (options?.caption) formData.append('caption', options.caption);
       if (options?.parse_mode) formData.append('parse_mode', options.parse_mode);
-      if (options?.reply_to_message_id) formData.append('reply_to_message_id', String(options.reply_to_message_id));
+      if (options?.reply_to_message_id) {
+        formData.append('reply_to_message_id', String(options.reply_to_message_id));
+        formData.append('allow_sending_without_reply', String(allowWithoutReply));
+      }
       if (options?.protect_content) formData.append('protect_content', 'true');
       if (options?.reply_markup) {
         formData.append('reply_markup', typeof options.reply_markup === 'string' ? options.reply_markup : JSON.stringify(options.reply_markup));
@@ -869,12 +877,30 @@ export class TelegramApi {
         caption: options?.caption,
         parse_mode: options?.parse_mode || 'HTML',
         reply_to_message_id: options?.reply_to_message_id,
+        allow_sending_without_reply: options?.reply_to_message_id ? allowWithoutReply : undefined,
         reply_markup: options?.reply_markup,
         protect_content: options?.protect_content
       };
     }
 
-    const res = await this.call('sendPhoto', bodyPayload);
+    let res = await this.call('sendPhoto', bodyPayload);
+
+    // Fallback: If Telegram rejected due to deleted/missing replied message, retry without reply parameters
+    if (!res.ok && options?.reply_to_message_id && (
+      res.description?.toLowerCase().includes('message to be replied not found') ||
+      res.description?.toLowerCase().includes('reply message not found') ||
+      res.description?.toLowerCase().includes('message to reply not found') ||
+      res.error_code === 400
+    )) {
+      const retryWithoutReply = await this.sendPhoto(chatId, photo, {
+        ...options,
+        reply_to_message_id: undefined
+      });
+      if (retryWithoutReply.ok) {
+        return retryWithoutReply;
+      }
+    }
+
     if (res.ok) {
       logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendPhoto' });
     } else {
@@ -892,9 +918,11 @@ export class TelegramApi {
       reply_to_message_id?: number;
       reply_markup?: any;
       protect_content?: boolean;
+      allow_sending_without_reply?: boolean;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     let bodyPayload: any;
+    const allowWithoutReply = options?.allow_sending_without_reply ?? true;
     if (typeof video === 'object' && video && 'buffer' in video) {
       const formData = new FormData();
       formData.append('chat_id', String(chatId));
@@ -902,7 +930,10 @@ export class TelegramApi {
       formData.append('video', blob, video.filename || 'video.mp4');
       if (options?.caption) formData.append('caption', options.caption);
       if (options?.parse_mode) formData.append('parse_mode', options.parse_mode);
-      if (options?.reply_to_message_id) formData.append('reply_to_message_id', String(options.reply_to_message_id));
+      if (options?.reply_to_message_id) {
+        formData.append('reply_to_message_id', String(options.reply_to_message_id));
+        formData.append('allow_sending_without_reply', String(allowWithoutReply));
+      }
       if (options?.protect_content) formData.append('protect_content', 'true');
       if (options?.reply_markup) {
         formData.append('reply_markup', typeof options.reply_markup === 'string' ? options.reply_markup : JSON.stringify(options.reply_markup));
@@ -915,12 +946,30 @@ export class TelegramApi {
         caption: options?.caption,
         parse_mode: options?.parse_mode || 'HTML',
         reply_to_message_id: options?.reply_to_message_id,
+        allow_sending_without_reply: options?.reply_to_message_id ? allowWithoutReply : undefined,
         reply_markup: options?.reply_markup,
         protect_content: options?.protect_content
       };
     }
 
-    const res = await this.call('sendVideo', bodyPayload);
+    let res = await this.call('sendVideo', bodyPayload);
+
+    // Fallback: If Telegram rejected due to deleted/missing replied message, retry without reply parameters
+    if (!res.ok && options?.reply_to_message_id && (
+      res.description?.toLowerCase().includes('message to be replied not found') ||
+      res.description?.toLowerCase().includes('reply message not found') ||
+      res.description?.toLowerCase().includes('message to reply not found') ||
+      res.error_code === 400
+    )) {
+      const retryWithoutReply = await this.sendVideo(chatId, video, {
+        ...options,
+        reply_to_message_id: undefined
+      });
+      if (retryWithoutReply.ok) {
+        return retryWithoutReply;
+      }
+    }
+
     if (res.ok) {
       logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendVideo' });
     } else {
@@ -938,9 +987,11 @@ export class TelegramApi {
       reply_to_message_id?: number;
       reply_markup?: any;
       protect_content?: boolean;
+      allow_sending_without_reply?: boolean;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     let bodyPayload: any;
+    const allowWithoutReply = options?.allow_sending_without_reply ?? true;
     if (typeof document === 'object' && document && 'buffer' in document) {
       const formData = new FormData();
       formData.append('chat_id', String(chatId));
@@ -948,7 +999,10 @@ export class TelegramApi {
       formData.append('document', blob, document.filename || 'document.pdf');
       if (options?.caption) formData.append('caption', options.caption);
       if (options?.parse_mode) formData.append('parse_mode', options.parse_mode);
-      if (options?.reply_to_message_id) formData.append('reply_to_message_id', String(options.reply_to_message_id));
+      if (options?.reply_to_message_id) {
+        formData.append('reply_to_message_id', String(options.reply_to_message_id));
+        formData.append('allow_sending_without_reply', String(allowWithoutReply));
+      }
       if (options?.protect_content) formData.append('protect_content', 'true');
       if (options?.reply_markup) {
         formData.append('reply_markup', typeof options.reply_markup === 'string' ? options.reply_markup : JSON.stringify(options.reply_markup));
@@ -961,12 +1015,30 @@ export class TelegramApi {
         caption: options?.caption,
         parse_mode: options?.parse_mode || 'HTML',
         reply_to_message_id: options?.reply_to_message_id,
+        allow_sending_without_reply: options?.reply_to_message_id ? allowWithoutReply : undefined,
         reply_markup: options?.reply_markup,
         protect_content: options?.protect_content
       };
     }
 
-    const res = await this.call('sendDocument', bodyPayload);
+    let res = await this.call('sendDocument', bodyPayload);
+
+    // Fallback: If Telegram rejected due to deleted/missing replied message, retry without reply parameters
+    if (!res.ok && options?.reply_to_message_id && (
+      res.description?.toLowerCase().includes('message to be replied not found') ||
+      res.description?.toLowerCase().includes('reply message not found') ||
+      res.description?.toLowerCase().includes('message to reply not found') ||
+      res.error_code === 400
+    )) {
+      const retryWithoutReply = await this.sendDocument(chatId, document, {
+        ...options,
+        reply_to_message_id: undefined
+      });
+      if (retryWithoutReply.ok) {
+        return retryWithoutReply;
+      }
+    }
+
     if (res.ok) {
       logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendDocument' });
     } else {
@@ -984,9 +1056,11 @@ export class TelegramApi {
       reply_to_message_id?: number;
       reply_markup?: any;
       protect_content?: boolean;
+      allow_sending_without_reply?: boolean;
     }
   ): Promise<{ ok: boolean; result?: any; description?: string; error_code?: number }> {
     let bodyPayload: any;
+    const allowWithoutReply = options?.allow_sending_without_reply ?? true;
     if (typeof animation === 'object' && animation && 'buffer' in animation) {
       const formData = new FormData();
       formData.append('chat_id', String(chatId));
@@ -994,7 +1068,10 @@ export class TelegramApi {
       formData.append('animation', blob, animation.filename || 'animation.gif');
       if (options?.caption) formData.append('caption', options.caption);
       if (options?.parse_mode) formData.append('parse_mode', options.parse_mode);
-      if (options?.reply_to_message_id) formData.append('reply_to_message_id', String(options.reply_to_message_id));
+      if (options?.reply_to_message_id) {
+        formData.append('reply_to_message_id', String(options.reply_to_message_id));
+        formData.append('allow_sending_without_reply', String(allowWithoutReply));
+      }
       if (options?.protect_content) formData.append('protect_content', 'true');
       if (options?.reply_markup) {
         formData.append('reply_markup', typeof options.reply_markup === 'string' ? options.reply_markup : JSON.stringify(options.reply_markup));
@@ -1007,12 +1084,30 @@ export class TelegramApi {
         caption: options?.caption,
         parse_mode: options?.parse_mode || 'HTML',
         reply_to_message_id: options?.reply_to_message_id,
+        allow_sending_without_reply: options?.reply_to_message_id ? allowWithoutReply : undefined,
         reply_markup: options?.reply_markup,
         protect_content: options?.protect_content
       };
     }
 
-    const res = await this.call('sendAnimation', bodyPayload);
+    let res = await this.call('sendAnimation', bodyPayload);
+
+    // Fallback: If Telegram rejected due to deleted/missing replied message, retry without reply parameters
+    if (!res.ok && options?.reply_to_message_id && (
+      res.description?.toLowerCase().includes('message to be replied not found') ||
+      res.description?.toLowerCase().includes('reply message not found') ||
+      res.description?.toLowerCase().includes('message to reply not found') ||
+      res.error_code === 400
+    )) {
+      const retryWithoutReply = await this.sendAnimation(chatId, animation, {
+        ...options,
+        reply_to_message_id: undefined
+      });
+      if (retryWithoutReply.ok) {
+        return retryWithoutReply;
+      }
+    }
+
     if (res.ok) {
       logDebug({ event: 'TELEGRAM_SEND_SUCCESS', chat_id: chatId, message_id: res.result?.message_id, method: 'sendAnimation' });
     } else {

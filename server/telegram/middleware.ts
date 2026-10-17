@@ -274,8 +274,8 @@ export class TelegramMiddleware {
       }
     }
 
-    // 3. Fallback / Detailed Member Lookup ONLY if getChatAdministrators failed / was not available
-    if (!member && !fetchedAdmins) {
+    // 3. Fallback / Detailed Member Lookup if not found in cached admin list
+    if (!member) {
       member = await this.getTargetMember(ctx.chatId, actorUserId);
     }
 
