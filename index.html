@@ -9,10 +9,45 @@
     <meta property="og:description" content="An application built with Google AI Studio." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #020617;
+        color: #f8fafc;
+      }
+    </style>
+    <script defer src="https://telegram.org/js/telegram-web-app.js" onload="try{if(window.Telegram&&window.Telegram.WebApp){window.Telegram.WebApp.ready();window.Telegram.WebApp.expand();}}catch(e){}"></script>
+    <script>
+      // Early signal to Telegram WebApp client to reveal webview immediately
+      try {
+        if (window.Telegram && window.Telegram.WebApp) {
+          window.Telegram.WebApp.ready();
+          window.Telegram.WebApp.expand();
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="min-height: 100vh; background-color: #020617; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f8fafc; padding: 24px; text-align: center; box-sizing: border-box;">
+        <div style="width: 56px; height: 56px; border-radius: 16px; background: rgba(6, 182, 212, 0.12); border: 1px solid rgba(6, 182, 212, 0.3); display: flex; align-items: center; justify-content: center; margin-bottom: 20px; box-shadow: 0 0 24px rgba(6, 182, 212, 0.2);">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </div>
+        <div style="width: 32px; height: 32px; border: 3px solid rgba(6, 182, 212, 0.2); border-top-color: #06b6d4; border-radius: 50%; animation: roxie-spin 0.8s linear infinite; margin-bottom: 16px;"></div>
+        <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 700; color: #ffffff; letter-spacing: -0.01em;">Roxie Admin Dashboard</h3>
+        <p style="margin: 0; font-size: 12px; color: #94a3b8; max-width: 260px; line-height: 1.5;">Starting Telegram Mini App...</p>
+        <style>
+          @keyframes roxie-spin {
+            to { transform: rotate(360deg); }
+          }
+        </style>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

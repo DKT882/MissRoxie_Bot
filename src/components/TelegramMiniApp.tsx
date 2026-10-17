@@ -72,6 +72,17 @@ export const TelegramMiniApp: React.FC = () => {
   // Loading & Notice State
   const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [loadingSlow, setLoadingSlow] = useState<boolean>(false);
+  const [initAttempts, setInitAttempts] = useState<number>(0);
+  const [debugInfo, setDebugInfo] = useState<{
+    tgAvailable: boolean;
+    initDataPresent: boolean;
+    resolvedChatId: number | null;
+  }>({
+    tgAvailable: false,
+    initDataPresent: false,
+    resolvedChatId: null
+  });
   const [tabLoading, setTabLoading] = useState<boolean>(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
@@ -143,21 +154,31 @@ export const TelegramMiniApp: React.FC = () => {
 
   // 1. Initial Authentication & Group Identification
   useEffect(() => {
+    let isCancelled = false;
+    const controller = new AbortController();
+    const slowTimer = setTimeout(() => {
+      if (!isCancelled) setLoadingSlow(true);
+    }, 6000);
+    const timeoutTimer = setTimeout(() => {
+      controller.abort();
+    }, 15000);
+
     const initApp = async () => {
       setAuthLoading(true);
       setAuthError(null);
+      setLoadingSlow(false);
 
       try {
         const tg = (window as any).Telegram?.WebApp;
         if (tg) {
-          tg.ready();
-          tg.expand();
+          tg.ready?.();
+          tg.expand?.();
         }
 
         // Extract launch data
         let rawInitData = tg?.initData || '';
-        const urlParams = new URLSearchParams(window.location.search);
-        const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+        const urlParams = new URLSearchParams(window.location.search || '');
+        const hashParams = new URLSearchParams((window.location.hash || '').replace('#', ''));
 
         if (!rawInitData) {
           rawInitData = hashParams.get('tgWebAppData') || urlParams.get('tgWebAppData') || '';
@@ -165,7 +186,16 @@ export const TelegramMiniApp: React.FC = () => {
 
         // Determine target Group ID
         let targetChatId: number | null = null;
-        const paramChatId = urlParams.get('chat_id') || urlParams.get('chatId') || urlParams.get('startapp') || tg?.initDataUnsafe?.start_param;
+        const paramChatId =
+          urlParams.get('chat_id') ||
+          urlParams.get('chatId') ||
+          urlParams.get('startapp') ||
+          hashParams.get('chat_id') ||
+          hashParams.get('chatId') ||
+          hashParams.get('startapp') ||
+          hashParams.get('tgWebAppStartParam') ||
+          tg?.initDataUnsafe?.start_param;
+
         if (paramChatId) {
           const parsed = Number(paramChatId);
           if (!isNaN(parsed) && parsed < 0) {
@@ -174,12 +204,19 @@ export const TelegramMiniApp: React.FC = () => {
         }
 
         // Fallback in test/development mode if no chatId provided in query
-        if (!targetChatId && (process.env.NODE_ENV === 'test' || urlParams.get('demo') === 'true')) {
+        const isTestEnv = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') || (import.meta as any).env?.MODE === 'test';
+        if (!targetChatId && (isTestEnv || urlParams.get('demo') === 'true')) {
           targetChatId = -1001234567890;
         }
 
+        setDebugInfo({
+          tgAvailable: Boolean(tg || (window as any).TelegramWebviewProxy),
+          initDataPresent: Boolean(rawInitData),
+          resolvedChatId: targetChatId
+        });
+
         if (!targetChatId) {
-          setAuthError('No group context specified. Please launch Roxie Mini App directly from your Telegram group via the /dashboard command or group menu button.');
+          setAuthError('No group context specified. Please launch Roxie Mini App directly from your Telegram group via the /dashboard command.');
           setAuthLoading(false);
           return;
         }
@@ -189,7 +226,7 @@ export const TelegramMiniApp: React.FC = () => {
 
         // In test mode or when testing without Telegram client, generate test token
         let launchInitData = rawInitData;
-        if (!launchInitData && (urlParams.get('test_user') || process.env.NODE_ENV === 'test')) {
+        if (!launchInitData && (urlParams.get('test_user') || isTestEnv)) {
           const testUid = urlParams.get('test_user') || '1001';
           launchInitData = `test_tma_token:${testUid}:AdminUser`;
         }
@@ -200,19 +237,31 @@ export const TelegramMiniApp: React.FC = () => {
           return;
         }
 
-        // Call backend validation endpoint
+        // Call backend validation endpoint with timeout
         const res = await fetch('/api/tma/auth/validate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             initData: launchInitData,
             chatId: targetChatId
-          })
+          }),
+          signal: controller.signal
         });
 
-        const data = await res.json();
-        if (!res.ok || !data.ok) {
-          setAuthError(data.error || 'You do not have administrative access to manage this group.');
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+
+        if (isCancelled) return;
+
+        if (!res.ok || !data?.ok) {
+          const defaultMsg = res.status >= 500
+            ? `Server error (${res.status}). The service may be waking up from sleep. Please tap Retry Connection.`
+            : 'You do not have administrative access to manage this group.';
+          setAuthError(data?.error || defaultMsg);
           setAuthLoading(false);
           return;
         }
@@ -230,14 +279,32 @@ export const TelegramMiniApp: React.FC = () => {
           setActiveTab(data.allowedFeatures[0]);
         }
       } catch (err: any) {
-        setAuthError(`Initialization error: ${err?.message || err}`);
+        if (isCancelled) return;
+        if (err?.name === 'AbortError') {
+          setAuthError('Connection timed out. The backend server may be waking up from sleep. Please tap Retry Connection.');
+        } else if (err?.message?.includes('Failed to fetch') || err?.message?.includes('NetworkError')) {
+          setAuthError('Network error connecting to Roxie backend server. Please verify your connection and tap Retry.');
+        } else {
+          setAuthError(`Initialization error: ${err?.message || err}`);
+        }
       } finally {
-        setAuthLoading(false);
+        clearTimeout(slowTimer);
+        clearTimeout(timeoutTimer);
+        if (!isCancelled) {
+          setAuthLoading(false);
+        }
       }
     };
 
     initApp();
-  }, []);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(slowTimer);
+      clearTimeout(timeoutTimer);
+      controller.abort();
+    };
+  }, [initAttempts]);
 
   // 2. Tab Data Loader
   const loadTabData = useCallback(async (tab: MiniAppFeature) => {
@@ -522,12 +589,30 @@ export const TelegramMiniApp: React.FC = () => {
   // Screen: Loading
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 space-y-4">
-        <div className="w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-        <h2 className="text-lg font-bold text-cyan-400">Authenticating with Telegram...</h2>
-        <p className="text-xs text-slate-400 text-center max-w-xs">
-          Verifying cryptographic launch credentials and authoritative group permissions.
-        </p>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 space-y-4 font-sans">
+        <div className="relative">
+          <div className="w-14 h-14 border-4 border-cyan-500/20 border-t-cyan-400 rounded-full animate-spin" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Shield className="w-5 h-5 text-cyan-400" />
+          </div>
+        </div>
+        <div className="text-center space-y-1">
+          <h2 className="text-base font-bold text-white">Authenticating with Telegram...</h2>
+          <p className="text-xs text-slate-400 max-w-xs leading-relaxed">
+            Verifying cryptographic launch credentials and authoritative group permissions.
+          </p>
+        </div>
+        {loadingSlow && (
+          <div className="mt-3 p-3 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 max-w-xs text-center space-y-2">
+            <p className="text-slate-400">Connecting is taking longer than usual. The server may be waking up from sleep.</p>
+            <button
+              onClick={() => setInitAttempts(c => c + 1)}
+              className="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 mx-auto transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Retry Connection
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -535,17 +620,37 @@ export const TelegramMiniApp: React.FC = () => {
   // Screen: Error / Unauthorized
   if (authError || role === 'UNAUTHORIZED') {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center space-y-4">
-        <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center space-y-4 font-sans">
+        <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
           <XCircle className="w-8 h-8" />
         </div>
-        <h2 className="text-xl font-bold text-red-400">Access Denied</h2>
-        <p className="text-sm text-slate-300 max-w-sm">
-          {authError || 'You do not have administrative privileges in this group.'}
-        </p>
-        <div className="text-xs text-slate-500 bg-slate-900 border border-slate-800 rounded-lg p-3 max-w-xs text-left">
-          <strong>Troubleshooting:</strong>
-          <ul className="list-disc pl-4 mt-1 space-y-1">
+        <div className="space-y-1">
+          <h2 className="text-lg font-bold text-white">Access Not Granted</h2>
+          <p className="text-xs text-slate-300 max-w-sm leading-relaxed">
+            {authError || 'You do not have administrative privileges in this group.'}
+          </p>
+        </div>
+
+        <button
+          onClick={() => {
+            setAuthError(null);
+            setAuthLoading(true);
+            setInitAttempts(c => c + 1);
+          }}
+          className="w-full max-w-xs py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-lg shadow-cyan-600/20 cursor-pointer"
+        >
+          <RefreshCw className="w-4 h-4" /> Retry Connection
+        </button>
+
+        <div className="text-[11px] font-mono text-slate-500 bg-slate-900/60 border border-slate-800 rounded-xl p-3 max-w-xs text-left w-full space-y-1">
+          <div>Target Chat: <span className="text-slate-300">{debugInfo.resolvedChatId || 'Not found'}</span></div>
+          <div>Telegram SDK: <span className="text-slate-300">{debugInfo.tgAvailable ? 'Detected' : 'Not detected'}</span></div>
+          <div>InitData: <span className="text-slate-300">{debugInfo.initDataPresent ? 'Present' : 'Missing'}</span></div>
+        </div>
+
+        <div className="text-xs text-slate-500 bg-slate-900/40 border border-slate-800 rounded-xl p-3 max-w-xs text-left w-full">
+          <strong className="text-slate-400">Troubleshooting:</strong>
+          <ul className="list-disc pl-4 mt-1 space-y-1 text-slate-500 text-[11px]">
             <li>Ensure you are an active Administrator or Owner in this group.</li>
             <li>Launch the app using the <code>/dashboard</code> command inside the group.</li>
             <li>Telegram authentication expires after 24 hours. Reopen from Telegram.</li>
