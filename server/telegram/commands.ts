@@ -844,7 +844,7 @@ export class CommandHandler {
    */
   private static async handleDashboardCommand(ctx: CommandContext): Promise<void> {
     const senderId = ctx.sender?.id || ctx.message?.from?.id || 0;
-    const isGroup = TelegramMiddleware.isGroup(ctx.message) || ctx.chatId < 0;
+    const isGroup = TelegramMiddleware.isGroup(ctx.message);
 
     // ----------------------------------------------------
     // CONTEXT 1: Invocation inside a Telegram Group / Supergroup
@@ -3103,7 +3103,7 @@ export class CommandHandler {
 
     const meRes = await telegramApi.getMe();
     const botId = meRes.result?.id || 0;
-    const botMember = await TelegramMiddleware.getTargetMember(ctx.chatId, botId);
+    const botMember = await TelegramMiddleware.getTargetMember(ctx.chatId, botId, true);
 
     // Safe debug logging for [Promote]
     console.log('[Promote]', {

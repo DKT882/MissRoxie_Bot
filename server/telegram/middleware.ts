@@ -2,6 +2,7 @@ import { telegramApi } from './api.js';
 import { TelegramMessage, TelegramChatMember, TelegramUser, RoleLevel, ModerationLog } from './types.js';
 import { db } from '../db/storage.js';
 import { mapTelegramError } from './errorMapper.js';
+import { mtprotoParticipantService } from './mtprotoParticipantService.js';
 
 export enum RoleRank {
   OWNER = 100,
@@ -139,8 +140,9 @@ export class TelegramMiddleware {
         const adminMap = new Map<number, TelegramChatMember>();
         for (const admin of res.result) {
           if (admin.user?.id) {
-            adminMap.set(admin.user.id, admin);
-            this.memberCache.set(`${chatId}_${admin.user.id}`, { member: admin, timestamp: Date.now() });
+            const adminId = Number(admin.user.id);
+            adminMap.set(adminId, admin);
+            this.memberCache.set(`${chatId}_${adminId}`, { member: admin, timestamp: Date.now() });
           }
         }
         this.adminListCache.set(chatId, {
@@ -169,7 +171,8 @@ export class TelegramMiddleware {
     if (!targetUserId || targetUserId === 0 || targetUserId === 1087968824) {
       return null;
     }
-    const cacheKey = `${chatId}_${targetUserId}`;
+    const numericUserId = Number(targetUserId);
+    const cacheKey = `${chatId}_${numericUserId}`;
     if (!forceFresh) {
       const cached = this.memberCache.get(cacheKey);
       if (cached && (Date.now() - cached.timestamp < 5 * 60 * 1000)) {
@@ -178,7 +181,7 @@ export class TelegramMiddleware {
     }
 
     try {
-      const res = await telegramApi.getChatMember(chatId, targetUserId, forceFresh);
+      const res = await telegramApi.getChatMember(chatId, numericUserId, forceFresh);
       if (res.ok && res.result) {
         this.memberCache.set(cacheKey, { member: res.result, timestamp: Date.now() });
         return res.result;
@@ -200,7 +203,7 @@ export class TelegramMiddleware {
     if (message.sender_chat && message.sender_chat.id === chatId) {
       return true;
     }
-    if (message.from?.id === 1087968824 && message.sender_chat && message.sender_chat.id === chatId) {
+    if (message.from?.id === 1087968824 && (!message.sender_chat || message.sender_chat.id === chatId)) {
       return true;
     }
     return false;
@@ -240,7 +243,8 @@ export class TelegramMiddleware {
       return resolved;
     }
 
-    const actorUserId = ctx.sender?.id || ctx.message.from?.id || 0;
+    const rawActorUserId = ctx.sender?.id || ctx.message.from?.id || 0;
+    const actorUserId = Number(rawActorUserId);
     const actorUsername = ctx.sender?.username || ctx.message.from?.username;
     const actorDisplayName = ctx.adminDisplayName || (actorUsername ? `@${actorUsername}` : (ctx.sender?.first_name || `User ${actorUserId}`));
 
@@ -265,18 +269,29 @@ export class TelegramMiddleware {
     // 2. Primary Admin Check: getChatAdministrators()
     let member: TelegramChatMember | null | undefined = null;
     let fetchedAdmins = false;
-    if (this.isGroup(ctx.message)) {
+    const isChatGroup = this.isGroup(ctx.message);
+    if (isChatGroup) {
       await this.getChatAdministrators(ctx.chatId);
       const cachedAdmins = this.adminListCache.get(ctx.chatId);
       if (cachedAdmins) {
         fetchedAdmins = true;
-        member = cachedAdmins.map.get(actorUserId);
+        member = cachedAdmins.map.get(actorUserId) || cachedAdmins.map.get(Number(rawActorUserId));
       }
     }
 
     // 3. Fallback / Detailed Member Lookup if not found in cached admin list
     if (!member) {
       member = await this.getTargetMember(ctx.chatId, actorUserId);
+    }
+
+    // 3b. Stale Cache Protection: If member is still missing or not administrator/creator,
+    // query Telegram API with forceFresh = true to eliminate stale non-admin cache false negatives
+    if (isChatGroup && (!member || (member.status !== 'administrator' && member.status !== 'creator'))) {
+      const freshMember = await this.getTargetMember(ctx.chatId, actorUserId, true);
+      if (freshMember && (freshMember.status === 'administrator' || freshMember.status === 'creator')) {
+        member = freshMember;
+        this.adminListCache.delete(ctx.chatId);
+      }
     }
 
     const customRole = db.getCustomRole(ctx.chatId, actorUserId);
@@ -621,8 +636,49 @@ export class TelegramMiddleware {
 
       // Explicit @username
       if (firstArg.startsWith('@')) {
-        const username = firstArg.replace(/^@/, '');
-        const known = db.findUserByUsername(username, ctx.chatId);
+        const username = firstArg.replace(/^@+/, '').trim();
+        const isValidSyntax = /^[a-zA-Z0-9_]{3,32}$/.test(username);
+
+        if (!isValidSyntax) {
+          return {
+            type: 'none',
+            source: 'none',
+            error: `❌ "@${username}" is not a valid Telegram username format. Telegram usernames must be 3–32 characters and contain only letters, numbers, and underscores.`
+          };
+        }
+
+        let known = db.findUserByUsername(username, ctx.chatId);
+        if (!known) {
+          known = db.findUserByUsername(username);
+        }
+
+        if (!known && mtprotoParticipantService.isConfigured()) {
+          try {
+            const client = await mtprotoParticipantService.getClient();
+            const entity: any = await client.getEntity(username);
+            if (entity && entity.id) {
+              const uid = Number(entity.id);
+              const user: TelegramUser = {
+                id: uid,
+                is_bot: Boolean(entity.bot),
+                first_name: entity.firstName || entity.title || `User ${uid}`,
+                last_name: entity.lastName || undefined,
+                username: entity.username || username
+              };
+              db.cacheUser(user, ctx.chatId);
+              known = {
+                userId: uid,
+                firstName: user.first_name,
+                lastName: user.last_name,
+                username: user.username,
+                lastSeen: new Date().toISOString()
+              };
+            }
+          } catch {
+            // MTProto entity resolution fallback
+          }
+        }
+
         if (known) {
           return {
             type: 'user',
@@ -641,7 +697,7 @@ export class TelegramMiddleware {
         return {
           type: 'none',
           source: 'none',
-          error: `⚠️ Could not find a member with username @${username} in local group memory.\nPlease reply to their message and use ${cleanCmd}`
+          error: `⚠️ Could not find a member with username @${username} in local group memory.\nTelegram does not allow bots to resolve usernames without prior group interaction. Please reply directly to their message with ${cleanCmd} or provide their numeric Telegram user ID.`
         };
       }
     }
@@ -678,11 +734,42 @@ export class TelegramMiddleware {
       }
     }
 
-    // 3. Arguments without @ prefix (bare username matching cache)
+    // 3. Arguments without @ prefix (bare username matching cache or 3-32 char username)
     if (effectiveArgs && effectiveArgs.length > 0) {
       const firstArg = effectiveArgs[0].trim();
-      if (/^[a-zA-Z0-9_]{4,32}$/.test(firstArg)) {
-        const known = db.findUserByUsername(firstArg, ctx.chatId);
+      if (/^[a-zA-Z0-9_]{3,32}$/.test(firstArg)) {
+        let known = db.findUserByUsername(firstArg, ctx.chatId);
+        if (!known) {
+          known = db.findUserByUsername(firstArg);
+        }
+
+        if (!known && mtprotoParticipantService.isConfigured()) {
+          try {
+            const client = await mtprotoParticipantService.getClient();
+            const entity: any = await client.getEntity(firstArg);
+            if (entity && entity.id) {
+              const uid = Number(entity.id);
+              const user: TelegramUser = {
+                id: uid,
+                is_bot: Boolean(entity.bot),
+                first_name: entity.firstName || entity.title || `User ${uid}`,
+                last_name: entity.lastName || undefined,
+                username: entity.username || firstArg
+              };
+              db.cacheUser(user, ctx.chatId);
+              known = {
+                userId: uid,
+                firstName: user.first_name,
+                lastName: user.last_name,
+                username: user.username,
+                lastSeen: new Date().toISOString()
+              };
+            }
+          } catch {
+            // MTProto entity resolution fallback
+          }
+        }
+
         if (known) {
           return {
             type: 'user',
@@ -697,6 +784,12 @@ export class TelegramMiddleware {
             source: 'username'
           };
         }
+
+        return {
+          type: 'none',
+          source: 'none',
+          error: `⚠️ Could not find a member with username @${firstArg} in local group memory.\nTelegram does not allow bots to resolve usernames without prior group interaction. Please reply directly to their message with ${cleanCmd} or provide their numeric Telegram user ID.`
+        };
       }
     }
 
@@ -947,11 +1040,12 @@ export class TelegramMiddleware {
     }
 
     if (resolvedTarget.type !== 'user') {
+      const isMissingTarget = (!ctx.args || ctx.args.length === 0) && !ctx.message?.reply_to_message;
       return {
         allowed: false,
-        reason: (action === 'promote' || action === 'permissions') && (!resolvedTarget.error || resolvedTarget.error.includes('reply'))
+        reason: (action === 'promote' || action === 'permissions') && isMissingTarget
           ? '❌ I couldn\'t identify that user. Reply to their message or provide a valid Telegram ID.'
-          : resolvedTarget.error,
+          : (resolvedTarget.error || '❌ I couldn\'t identify that user. Reply to their message or provide a valid Telegram ID.'),
         actor
       };
     }
@@ -1002,7 +1096,7 @@ export class TelegramMiddleware {
     }
 
     // 6. Resolve Target Telegram Status & Custom Role
-    const targetMember = await this.getTargetMember(ctx.chatId, targetUserId);
+    const targetMember = await this.getTargetMember(ctx.chatId, targetUserId, true);
     const targetCustomRole = db.getCustomRole(ctx.chatId, targetUserId);
 
     let targetRole: RoleLevel = 'MEMBER';
