@@ -8,6 +8,7 @@ import { db } from './server/db/storage.js';
 import { COMMAND_CATALOG } from './server/telegram/commandCatalog.js';
 import { enterpriseRouter } from './server/api/enterpriseRouter.js';
 import { phase8Router } from './server/api/phase8Router.js';
+import { tmaRouter } from './server/tma/tmaRouter.js';
 import { DisasterRecoveryService } from './server/system/disasterRecovery.js';
 import { HealthDiagnosticsService } from './server/observability/healthService.js';
 import { telegramApi } from './server/telegram/api.js';
@@ -627,6 +628,7 @@ export async function startServer() {
   });
   app.use(enterpriseRouter);
   app.use(phase8Router);
+  app.use('/api/tma', tmaRouter);
 
   // Health check route as requested
   app.get('/health', (req, res) => {
@@ -653,7 +655,8 @@ export async function startServer() {
       '/auth/logout',
       '/health',
       '/commands',
-      '/telegram/status'
+      '/telegram/status',
+      '/tma'
     ];
 
     if (publicPrefixes.some(p => req.path === p || req.path.startsWith(p + '/'))) {

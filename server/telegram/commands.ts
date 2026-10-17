@@ -322,6 +322,7 @@ export class CommandHandler {
   ]);
 
   public static readonly ADMIN_ONLY_COMMANDS = new Set<string>([
+    '/dashboard', '/miniapp',
     '/clear', '/del', '/delete', '/purge',
     '/kick', '/ban', '/unban', '/mute', '/unmute',
     '/tmute', '/tban', '/dban', '/dmute', '/dkick', '/sban', '/smute', '/skick',
@@ -436,6 +437,42 @@ export class CommandHandler {
     }
 
     switch (cmd) {
+      case '/dashboard':
+      case '/miniapp': {
+        const domain = process.env.PUBLIC_APP_URL || process.env.BASE_URL || 'https://roxiebot.example.com';
+        const webAppUrl = `${domain}/miniapp?chat_id=${ctx.chatId}`;
+        const meRes = await telegramApi.getMe();
+        const botUsername = meRes.ok && meRes.result?.username ? meRes.result.username : 'MissRoxie_Bot';
+        const directTmaUrl = `https://t.me/${botUsername}/dashboard?startapp=${encodeURIComponent(String(ctx.chatId))}`;
+
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `⚙️ <b>Roxie Admin Dashboard (Mini App)</b>\n\n` +
+          `Manage moderation, content protection, members, and group configuration in Telegram:\n\n` +
+          `• <b>Target Group:</b> ${ctx.chatTitle} (<code>${ctx.chatId}</code>)\n` +
+          `• <b>Authorized For:</b> Administrators & Group Owner\n\n` +
+          `Tap the button below to launch the dashboard inside Telegram.`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '🚀 Open Group Dashboard',
+                    web_app: { url: webAppUrl }
+                  }
+                ],
+                [
+                  {
+                    text: '🔗 Direct Link',
+                    url: directTmaUrl
+                  }
+                ]
+              ]
+            }
+          }
+        );
+        return true;
+      }
       case '/del':
       case '/delete':
         await this.handleDel(ctx);

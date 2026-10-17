@@ -688,7 +688,7 @@ export interface CachedMember {
   lastName?: string;
   groupId?: number;
   lastSeen: string;
-  customRole?: 'MODERATOR' | 'NONE';
+  customRole?: 'MODERATOR' | 'EXCEPTION_ADMIN' | 'NONE';
 }
 
 export interface TrackedChatMessage {

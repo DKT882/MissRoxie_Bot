@@ -202,7 +202,7 @@ interface DatabaseSchema {
   knownUsers: Record<string, CachedMember>; // username (lowercase) -> CachedMember
   knownUsersById: Record<number, CachedMember>; // userId -> CachedMember
   groupMembers: Record<string, CachedMember>; // `${chatId}_${userId}` -> CachedMember
-  customRoles: Record<string, 'MODERATOR' | 'NONE'>; // `${chatId}_${userId}` -> Custom bot role
+  customRoles: Record<string, 'MODERATOR' | 'EXCEPTION_ADMIN' | 'NONE'>; // `${chatId}_${userId}` -> Custom bot role
   mediaLibrary?: MediaLibraryRecord;
   groupMediaLibraries?: Record<string, MediaLibraryRecord>; // `${chatId}` -> MediaLibraryRecord
   userMemories?: Record<string, UserMemoryRecord>; // `${chatId}_${userId}` -> UserMemoryRecord (personal facts only)
@@ -2218,7 +2218,7 @@ export class StorageManager {
   }
 
   // --- Custom Roles & Tags (Mod-1, etc.) ---
-  public setCustomRole(chatId: number, userId: number, role: 'MODERATOR' | 'NONE') {
+  public setCustomRole(chatId: number, userId: number, role: 'MODERATOR' | 'EXCEPTION_ADMIN' | 'NONE') {
     if (!this.data.customRoles) {
       this.data.customRoles = {};
     }
@@ -2231,7 +2231,7 @@ export class StorageManager {
     this.scheduleSave(chatId);
   }
 
-  public getCustomRole(chatId: number, userId: number): 'MODERATOR' | 'NONE' {
+  public getCustomRole(chatId: number, userId: number): 'MODERATOR' | 'EXCEPTION_ADMIN' | 'NONE' {
     if (!this.data.customRoles) return 'NONE';
     return this.data.customRoles[`${chatId}_${userId}`] || 'NONE';
   }
