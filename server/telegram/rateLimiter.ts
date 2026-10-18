@@ -1,6 +1,7 @@
 import { TelegramMessage } from './types.js';
 import { TelegramMiddleware, RoleRank } from './middleware.js';
 import { telegramApi } from './api.js';
+import { db } from '../db/storage.js';
 
 export interface RateLimitConfig {
   windowMs: number;
@@ -36,25 +37,22 @@ export class RateLimiterService {
       return { allowed: true };
     }
 
-    // 1. Check admin / owner / anonymous admin exemption using existing middleware actor resolution
-    const ctx = {
-      message,
-      chatId,
-      chatTitle: message.chat?.title || 'Chat',
-      sender: message.from || { id: userId, is_bot: false, first_name: 'User' },
-      isAnonymousAdmin: Boolean(message.sender_chat && message.sender_chat.id === chatId),
-      adminDisplayName: message.from?.first_name || 'User',
-      args: [],
-      command: ''
-    };
+    // 1. Fast in-memory admin / owner / anonymous admin exemption check (zero network calls)
+    if (message.sender_chat && message.sender_chat.id === chatId) {
+      return { allowed: true };
+    }
+    if (userId === 1087968824) {
+      return { allowed: true };
+    }
 
-    try {
-      const actor = await TelegramMiddleware.resolveActor(ctx);
-      if (actor.actorRank >= RoleRank.MODERATOR) {
-        return { allowed: true }; // Admins and owners are exempt from rate limiting
+    if (chatId < 0) {
+      const customRole = db.getCustomRole(chatId, userId);
+      if (customRole === 'MODERATOR') {
+        return { allowed: true };
       }
-    } catch {
-      // If actor resolution fails transiently, default to allowing or fallback safely
+      if (TelegramMiddleware.isAdminCached(chatId, userId)) {
+        return { allowed: true };
+      }
     }
 
     const key = `${chatId}_${userId}`;

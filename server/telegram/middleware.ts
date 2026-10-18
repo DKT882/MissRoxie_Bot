@@ -279,19 +279,17 @@ export class TelegramMiddleware {
       }
     }
 
-    // 3. Fallback / Detailed Member Lookup if not found in cached admin list
+    // 3. Fallback / Detailed Member Lookup from in-memory cache if not found in admin list
     if (!member) {
-      member = await this.getTargetMember(ctx.chatId, actorUserId);
+      const cached = this.memberCache.get(`${ctx.chatId}_${actorUserId}`);
+      if (cached && (Date.now() - cached.timestamp < 5 * 60 * 1000)) {
+        member = cached.member;
+      }
     }
 
-    // 3b. Stale Cache Protection: If member is still missing or not administrator/creator,
-    // query Telegram API with forceFresh = true to eliminate stale non-admin cache false negatives
-    if (isChatGroup && (!member || (member.status !== 'administrator' && member.status !== 'creator'))) {
-      const freshMember = await this.getTargetMember(ctx.chatId, actorUserId, true);
-      if (freshMember && (freshMember.status === 'administrator' || freshMember.status === 'creator')) {
-        member = freshMember;
-        this.adminListCache.delete(ctx.chatId);
-      }
+    // 3b. Only if getChatAdministrators failed to retrieve any admins, query getTargetMember as fallback
+    if (!member && !fetchedAdmins) {
+      member = await this.getTargetMember(ctx.chatId, actorUserId, false);
     }
 
     const customRole = db.getCustomRole(ctx.chatId, actorUserId);
@@ -409,15 +407,28 @@ export class TelegramMiddleware {
     }
 
     // 2. Resolve Actor
-    const actor = await this.resolveActor(ctx);
+    let actor = await this.resolveActor(ctx);
 
     // 3. Evaluate Authorization
-    const isAuthorized =
+    let isAuthorized =
       actor.isAnonymousAdmin ||
       actor.actorRole === 'OWNER' ||
       actor.actorStatus === 'creator' ||
       actor.actorRole === 'ADMIN' ||
       actor.actorStatus === 'administrator';
+
+    // 3b. Stale Cache Protection for Admin Commands: If not authorized in a group, verify fresh from Telegram API
+    // (guarantees newly promoted administrators are recognized even if local member cache is stale)
+    if (!isAuthorized && this.isGroup(ctx.message) && actor.actorUserId > 0 && actor.actorUserId !== 1087968824) {
+      const freshMember = await this.getTargetMember(ctx.chatId, actor.actorUserId, true);
+      if (freshMember && (freshMember.status === 'administrator' || freshMember.status === 'creator')) {
+        this.adminListCache.delete(ctx.chatId);
+        this.memberCache.set(`${ctx.chatId}_${actor.actorUserId}`, { member: freshMember, timestamp: Date.now() });
+        ctx.actor = undefined;
+        actor = await this.resolveActor(ctx);
+        isAuthorized = true;
+      }
+    }
 
     console.log(`[AUTH] chatId=${ctx.chatId} userId=${actor.actorUserId} role=${actor.actorRole} status=${actor.actorStatus} result=${isAuthorized ? 'AUTHORIZED' : 'DENIED'}`);
 
@@ -574,14 +585,35 @@ export class TelegramMiddleware {
       if (adminMember) {
         return adminMember.status === 'creator' || adminMember.status === 'administrator';
       }
+      // If getChatAdministrators succeeded and returned admins, and user is not in the list,
+      // they are definitely not an admin. Do not perform redundant getTargetMember calls.
+      return false;
     }
 
-    // 4. Secondary Source / Fallback: getTargetMember
+    // 4. Secondary Source / Fallback: getTargetMember (only if getChatAdministrators failed)
     const member = await this.getTargetMember(chatId, userId, forceFresh);
     if (member) {
       return member.status === 'creator' || member.status === 'administrator';
     }
 
+    return false;
+  }
+
+  public static isAdminCached(chatId: number, userId: number): boolean {
+    if (typeof chatId !== 'number' || isNaN(chatId) || chatId >= 0) return false;
+    if (typeof userId !== 'number' || isNaN(userId) || userId <= 0 || userId === 1087968824) return false;
+    const now = Date.now();
+    const cachedEntry = this.adminListCache.get(chatId);
+    if (cachedEntry && now - cachedEntry.timestamp < 30_000) {
+      const adminMember = cachedEntry.map.get(userId);
+      if (adminMember?.status === 'creator' || adminMember?.status === 'administrator') return true;
+    }
+    const cachedMember = this.memberCache.get(`${chatId}_${userId}`);
+    if (cachedMember && now - cachedMember.timestamp < 30_000) {
+      if (cachedMember.member.status === 'creator' || cachedMember.member.status === 'administrator') {
+        return true;
+      }
+    }
     return false;
   }
 
@@ -961,7 +993,26 @@ export class TelegramMiddleware {
     }
 
     // 2. Resolve Actor
-    const actor = await this.resolveActor(ctx);
+    let actor = await this.resolveActor(ctx);
+
+    // 2b. Stale Cache Resilience for Moderation Actions: If actor is not recognized as admin, verify fresh
+    if (
+      (action === 'demote' || action === 'promote' || action === 'permissions' || action === 'warn') &&
+      actor.actorRole !== 'OWNER' &&
+      !actor.isAnonymousAdmin &&
+      actor.actorRole !== 'ADMIN' &&
+      this.isGroup(ctx.message) &&
+      actor.actorUserId > 0 &&
+      actor.actorUserId !== 1087968824
+    ) {
+      const freshMember = await this.getTargetMember(ctx.chatId, actor.actorUserId, true);
+      if (freshMember && (freshMember.status === 'administrator' || freshMember.status === 'creator')) {
+        this.adminListCache.delete(ctx.chatId);
+        this.memberCache.set(`${ctx.chatId}_${actor.actorUserId}`, { member: freshMember, timestamp: Date.now() });
+        ctx.actor = undefined;
+        actor = await this.resolveActor(ctx);
+      }
+    }
 
     // 3. Validate Actor's Telegram Permissions
     if (action === 'demote' || action === 'promote' || action === 'permissions') {

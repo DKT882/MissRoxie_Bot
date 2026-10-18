@@ -53,3 +53,57 @@ export function initProductionLogging(forceLevel?: LogLevel): void {
 
 // Auto-initialize production logging when module is loaded
 initProductionLogging();
+
+export interface PerformanceTraceLog {
+  event: 'PERFORMANCE_STAGE_DURATION';
+  path: 'update_command' | 'private_autoreply' | 'group_message' | 'dashboard_api' | 'mention_all';
+  stage: string;
+  durationMs: number;
+  operationId?: string | number;
+  chatId?: number;
+  handlerName?: string;
+  outcome: 'success' | 'failure' | 'skipped' | 'in_progress' | 'error' | string;
+  details?: Record<string, any>;
+  timestamp?: string;
+}
+
+function sanitizeLogDetails(obj: any): any {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(sanitizeLogDetails);
+  const clean: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const lowerKey = k.toLowerCase();
+    if (
+      lowerKey.includes('token') ||
+      lowerKey.includes('session') ||
+      lowerKey.includes('secret') ||
+      lowerKey.includes('password') ||
+      lowerKey.includes('authorization') ||
+      lowerKey.includes('cookie') ||
+      lowerKey.includes('message') ||
+      lowerKey.includes('text') ||
+      lowerKey.includes('content')
+    ) {
+      continue; // omit sensitive fields
+    }
+    if (typeof v === 'string') {
+      if (/^\d{8,11}:[a-zA-Z0-9_-]{35}/.test(v) || /^1[a-zA-Z0-9+/=]{40,}/.test(v)) {
+        continue;
+      }
+    }
+    clean[k] = typeof v === 'object' && v !== null ? sanitizeLogDetails(v) : v;
+  }
+  return clean;
+}
+
+export function logPerformance(data: Omit<PerformanceTraceLog, 'event'>): void {
+  const sanitizedDetails = data.details ? sanitizeLogDetails(data.details) : undefined;
+  const payload: PerformanceTraceLog = {
+    event: 'PERFORMANCE_STAGE_DURATION',
+    timestamp: new Date().toISOString(),
+    ...data,
+    details: sanitizedDetails
+  };
+  console.log(JSON.stringify(payload));
+}
+

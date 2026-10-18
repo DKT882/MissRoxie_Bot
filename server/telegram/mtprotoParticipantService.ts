@@ -156,8 +156,9 @@ export class MtprotoParticipantService {
     timestamp: number;
   } | null = null;
 
-  // Active chat fetch locks to prevent concurrent /all operations for the same group
-  private static activeChatLocks: Set<number> = new Set();
+  // Active chat fetch locks to prevent concurrent /all operations for the same group (with TTL eviction and active check)
+  private static activeChatLocks: Map<number, { timestamp: number; isActive?: () => boolean }> = new Map();
+  public static readonly CHAT_LOCK_TTL_MS = 120_000; // 2 minutes auto-eviction for crashed/stale operations
 
   public static getInstance(): MtprotoParticipantService {
     if (!MtprotoParticipantService.instance) {
@@ -390,11 +391,22 @@ export class MtprotoParticipantService {
     this.authenticatedUser = user;
   }
 
-  public acquireChatLock(chatId: number): boolean {
-    if (MtprotoParticipantService.activeChatLocks.has(chatId)) {
-      return false;
+  public acquireChatLock(chatId: number, isActive?: () => boolean): boolean {
+    const now = Date.now();
+    const existing = MtprotoParticipantService.activeChatLocks.get(chatId);
+    if (existing) {
+      const isStillActive = existing.isActive ? existing.isActive() : false;
+      // If original operation is still active, reject second operation even after 120s
+      if (isStillActive) {
+        existing.timestamp = now;
+        return false;
+      }
+      // Stale crashed operation check: only allow reacquisition if TTL has expired
+      if (now - existing.timestamp < MtprotoParticipantService.CHAT_LOCK_TTL_MS) {
+        return false;
+      }
     }
-    MtprotoParticipantService.activeChatLocks.add(chatId);
+    MtprotoParticipantService.activeChatLocks.set(chatId, { timestamp: now, isActive });
     return true;
   }
 
@@ -403,7 +415,19 @@ export class MtprotoParticipantService {
   }
 
   public isChatLocked(chatId: number): boolean {
-    return MtprotoParticipantService.activeChatLocks.has(chatId);
+    const now = Date.now();
+    const existing = MtprotoParticipantService.activeChatLocks.get(chatId);
+    if (!existing) return false;
+    const isStillActive = existing.isActive ? existing.isActive() : false;
+    if (isStillActive) {
+      existing.timestamp = now;
+      return true;
+    }
+    if (now - existing.timestamp >= MtprotoParticipantService.CHAT_LOCK_TTL_MS) {
+      MtprotoParticipantService.activeChatLocks.delete(chatId);
+      return false;
+    }
+    return true;
   }
 
   public async getClient(forceMode?: MtprotoAuthMode): Promise<TelegramClient> {
@@ -789,20 +813,7 @@ export class MtprotoParticipantService {
             '❌ Roxie needs administrator access in this supergroup to enumerate its members.'
           );
         }
-        if (
-          errMsg.includes('CHANNEL_INVALID') ||
-          errMsg.includes('CHANNEL_PRIVATE') ||
-          errMsg.includes('USER_NOT_PARTICIPANT')
-        ) {
-          throw new MTProtoGroupResolutionError(
-            `Failed to resolve Telegram chat ${rawIdStr} on MTProto: Roxie bot is not a member or administrator of this supergroup.`
-          );
-        }
-        if (errMsg.includes('BOT_METHOD_INVALID')) {
-          throw new MTProtoGroupResolutionError(
-            `MTProto bot method invalid for chat ${rawIdStr}: ${errMsg}`
-          );
-        }
+        // Non-fatal for direct resolution: log and proceed to username and dialog warmup fallbacks
       }
     }
 
@@ -1222,12 +1233,13 @@ export class MtprotoParticipantService {
       // 3. Query Administrators
       await fetchWithFilter(new Api.ChannelParticipantsAdmins(), 10);
 
-      // 4. If supergroup reports more members than empty search returned, perform prefix sweep
+      // 4. If supergroup reports more members than empty search returned, perform bounded prefix sweep
       if (totalReported > userMap.size && totalReported > 20) {
+        const sweepDeadline = Date.now() + 15_000; // max 15 seconds dedicated to prefix sweep
         const prefixes = 'abcdefghijklmnopqrstuvwxyz0123456789_'.split('');
         for (const char of prefixes) {
-          if (userMap.size >= totalReported) break;
-          await fetchWithFilter(new Api.ChannelParticipantsSearch({ q: char }), 5);
+          if (userMap.size >= totalReported || Date.now() > sweepDeadline) break;
+          await fetchWithFilter(new Api.ChannelParticipantsSearch({ q: char }), 3);
         }
       }
     } catch (fetchErr: any) {

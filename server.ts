@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
-import './server/observability/logger.js';
+import { logPerformance } from './server/observability/logger.js';
 import { telegramBot } from './server/telegram.js';
 import { db } from './server/db/storage.js';
 import { COMMAND_CATALOG } from './server/telegram/commandCatalog.js';
@@ -644,6 +644,25 @@ export async function startServer() {
     } catch (err: any) {
       res.status(500).json({ status: 'ERROR', error: err.message });
     }
+  });
+
+  // Dashboard API Performance Tracing Middleware
+  app.use('/api', (req, res, next) => {
+    const start = Date.now();
+    const reqPath = req.path;
+    const method = req.method;
+    res.on('finish', () => {
+      const durationMs = Date.now() - start;
+      logPerformance({
+        path: 'dashboard_api',
+        stage: 'request_completed',
+        durationMs,
+        handlerName: `${method} /api${reqPath}`,
+        outcome: res.statusCode < 400 ? 'success' : 'error',
+        details: { statusCode: res.statusCode }
+      });
+    });
+    next();
   });
 
   // Global Dashboard API Route Protection Middleware

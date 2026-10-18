@@ -4,6 +4,7 @@ import { mtprotoParticipantService } from './mtprotoParticipantService.js';
 import { mediaUploadStore } from './mediaUploadStore.js';
 import { TelegramMiddleware, RoleRank, ActorResolution } from './middleware.js';
 import { CachedMember, TelegramMessage } from './types.js';
+import { logPerformance } from '../observability/logger.js';
 
 export const ALL_MENTION_EMOJIS = [
   '✨', '🌟', '💫', '⚡', '🔥', '🌸', '💖', '👑', '💎', '🎉',
@@ -228,7 +229,23 @@ export class MentionAllService {
   }
 
   public hasActiveOperation(chatId: number): boolean {
-    return this.activeOperations.has(chatId) || mtprotoParticipantService.isChatLocked(chatId);
+    const existing = this.activeOperations.get(chatId);
+    if (existing) {
+      const now = Date.now();
+      // Auto-evict stale operations: starting for >120s or running for >30m
+      if (
+        (existing.status === 'starting' && now - existing.startedAt > 120_000) ||
+        (now - existing.startedAt > 30 * 60_000)
+      ) {
+        this.activeOperations.delete(chatId);
+        mtprotoParticipantService.releaseChatLock(chatId);
+        try { existing.abortController.abort(); } catch {}
+        try { existing.completionResolve(); } catch {}
+        return false;
+      }
+      return true;
+    }
+    return mtprotoParticipantService.isChatLocked(chatId);
   }
 
   public getActiveOperation(chatId: number): ActiveAllOperation | undefined {
@@ -281,7 +298,12 @@ export class MentionAllService {
 
     // Atomically register before any async operations
     this.activeOperations.set(chatId, operation);
-    mtprotoParticipantService.acquireChatLock(chatId);
+    mtprotoParticipantService.acquireChatLock(chatId, () => {
+      const op = this.activeOperations.get(chatId);
+      if (!op || op.isCancelled) return false;
+      if (op.status === 'starting' && Date.now() - op.startedAt > 120_000) return false;
+      return op.status === 'starting' || op.status === 'running';
+    });
 
     let workerDispatched = false;
     try {
@@ -296,17 +318,38 @@ export class MentionAllService {
       const isMtprotoConfigured = mtprotoParticipantService.isConfigured();
 
       if (isMtprotoConfigured) {
+        const fetchStart = Date.now();
         const fetchRes = await mtprotoParticipantService.fetchGroupParticipants(chatId, botId);
+        logPerformance({
+          path: 'mention_all',
+          stage: 'participant_discovery',
+          durationMs: Date.now() - fetchStart,
+          operationId: operation.operationId,
+          chatId,
+          handlerName: 'startOperation',
+          outcome: fetchRes.status
+        });
+
         if (fetchRes.status === 'FETCH_FAILED') {
-          const errorMsg = fetchRes.error || 'Failed to retrieve group participants via MTProto.';
-          return { ok: false, status: 'mtproto_error', error: errorMsg };
+          members = await this.getEligibleGroupMembers(chatId, botId);
+          if (members.length === 0) {
+            const errorMsg = fetchRes.error || 'Failed to retrieve group participants via MTProto.';
+            return { ok: false, status: 'mtproto_error', error: errorMsg };
+          }
+        } else if (fetchRes.status === 'PARTIAL_FETCH') {
+          if (fetchRes.members && fetchRes.members.length > 0) {
+            members = fetchRes.members;
+          } else {
+            members = await this.getEligibleGroupMembers(chatId, botId);
+            if (members.length === 0) {
+              const restrictionMsg = fetchRes.diagnosticMessage ||
+                `Telegram did not allow Roxie to retrieve the complete member list for this group (${fetchRes.uniqueCount}/${fetchRes.telegramTotal} available).`;
+              return { ok: false, status: 'mtproto_partial', error: restrictionMsg };
+            }
+          }
+        } else {
+          members = fetchRes.members;
         }
-        if (fetchRes.status === 'PARTIAL_FETCH') {
-          const restrictionMsg = fetchRes.diagnosticMessage ||
-            `Telegram did not allow Roxie to retrieve the complete member list for this group (${fetchRes.uniqueCount}/${fetchRes.telegramTotal} available).`;
-          return { ok: false, status: 'mtproto_partial', error: restrictionMsg };
-        }
-        members = fetchRes.members;
       } else {
         if (process.env.NODE_ENV === 'test') {
           members = await this.getEligibleGroupMembers(chatId, botId);
@@ -548,6 +591,17 @@ export class MentionAllService {
 
         if (sendSuccess) {
           operation.sentBatches = i + 1;
+          if (i === 0) {
+            logPerformance({
+              path: 'mention_all',
+              stage: 'first_message_sent',
+              durationMs: Date.now() - operation.startedAt,
+              operationId: operation.operationId,
+              chatId,
+              handlerName: 'executeWorker',
+              outcome: 'success'
+            });
+          }
         }
 
         // Pacing delay between batches
@@ -621,6 +675,16 @@ export class MentionAllService {
       operation.status = 'failed';
       operation.error = workerErr.message;
     } finally {
+      logPerformance({
+        path: 'mention_all',
+        stage: 'operation_completed',
+        durationMs: Date.now() - operation.startedAt,
+        operationId: operation.operationId,
+        chatId,
+        handlerName: 'executeWorker',
+        outcome: operation.status,
+        details: { sentBatches: operation.sentBatches, totalBatches: chunks.length }
+      });
       try {
         this.activeOperations.delete(chatId);
         mtprotoParticipantService.releaseChatLock(chatId);

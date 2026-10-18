@@ -13,7 +13,7 @@ import { SmartProtectionService } from './smartProtection.js';
 import { ReactionService } from './reactionService.js';
 import { metricsTracker } from '../observability/metricsService.js';
 import { errorTracker } from '../observability/errorService.js';
-import { logDebug } from '../observability/logger.js';
+import { logDebug, logPerformance } from '../observability/logger.js';
 import { mtprotoParticipantService } from './mtprotoParticipantService.js';
 import { mongoManager } from '../db/mongodb.js';
 
@@ -45,9 +45,9 @@ export class TelegramBotManager {
 
   // Per-chat sequential serialization queue
   private static chatQueues: Map<number, Promise<void>> = new Map();
-  // Global concurrency semaphore for active expensive message processing
+  // Global concurrency semaphore for active message processing
   private static activeProcessingCount: number = 0;
-  public static readonly MAX_CONCURRENT_GLOBAL_PROCESSING = 4;
+  public static readonly MAX_CONCURRENT_GLOBAL_PROCESSING = 16;
   private static globalSlotWaiters: Array<() => void> = [];
 
   public static async acquireGlobalSlot(): Promise<void> {
@@ -639,6 +639,22 @@ export class TelegramBotManager {
           pipeline_ms: totalPipelineMs,
           total_ms: Date.now() - receivedAt
         });
+
+        const pathType = reqCtx.isCommand
+          ? 'update_command'
+          : reqCtx.chatId > 0
+          ? 'private_autoreply'
+          : 'group_message';
+        logPerformance({
+          path: pathType,
+          stage: 'pipeline_complete',
+          durationMs: totalPipelineMs,
+          operationId: reqCtx.traceId,
+          chatId: reqCtx.chatId,
+          handlerName: reqCtx.isCommand ? 'CommandHandler' : (reqCtx.chatId > 0 ? 'PrivateMessageHandler' : 'GroupMessageHandler'),
+          outcome: 'success',
+          details: { queueWaitMs, totalMs: Date.now() - receivedAt }
+        });
       } catch (updateErr: any) {
         metricsTracker.increment('telegram_updates_failed');
         errorTracker.recordError({
@@ -874,12 +890,14 @@ export class TelegramBotManager {
     const isRoxieSelf = ChatbotService.isRoxieSelfMessage(message, this.botUser);
     console.log(`[TRIGGER_TRACE] genuine_human=${isHuman} isRoxieSelf=${isRoxieSelf} (chatId=${chatId} messageId=${message.message_id})`);
 
-    // 3. Check Smart User Protection & Moderation (for human users)
-    if (isHuman) {
-      // 3a. Check Targeted Promotional Spam Protection (forwarded promo, tables, buttons, CTAs, adult ads)
+    // 3. Targeted Promotional Spam Protection (intercepts spam from users, userbots, spam bots, and channels)
+    if (!isRoxieSelf && !ChatbotService.isTelegramServiceMessage(message)) {
       const promoSpamIntercepted = await ModerationService.handlePromotionalSpam(message);
       if (promoSpamIntercepted) return { handled: true, shouldTriggerAi: false };
+    }
 
+    // 4. Check Smart User Protection & Moderation (for human users)
+    if (isHuman) {
       const smartProtected = await SmartProtectionService.handleMessage(message);
       if (smartProtected) return { handled: true, shouldTriggerAi: false };
 
