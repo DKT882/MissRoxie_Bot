@@ -28,6 +28,8 @@ import {
 } from './commandCatalog.js';
 import { ChatbotService, ROXIE_SUPPORTED_MOODS } from './chatbot.js';
 import { resolveGroupRole } from '../tma/tmaAuth.js';
+import { logDebug } from '../observability/logger.js';
+
 
 export function getPublicMiniAppUrl(): string | null {
   const raw = process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL;
@@ -309,6 +311,113 @@ export class CommandHandler {
   }
   private static sayCooldowns: Map<number, number> = new Map();
   public static permissionSessions: Map<string, PermissionEditorSession> = new Map();
+  private static deletedCommandMessages: Map<string, number> = new Map();
+
+  /**
+   * Safely deletes a command message as early as possible without blocking command handlers.
+   * Ensures deduplication, group-chat validation, and graceful handling of Telegram API errors
+   * (e.g. message already deleted, message too old, or missing bot delete permissions).
+   */
+  public static async deleteCommandMessage(ctx: CommandContext, commandName?: string): Promise<boolean>;
+  public static async deleteCommandMessage(chatId: number, messageId: number, commandName?: string): Promise<boolean>;
+  public static async deleteCommandMessage(
+    targetOrChatId: CommandContext | number,
+    msgIdOrCmd?: number | string,
+    cmdName?: string
+  ): Promise<boolean> {
+    let chatId: number;
+    let messageId: number;
+    let command: string | undefined;
+
+    if (typeof targetOrChatId === 'number') {
+      chatId = targetOrChatId;
+      messageId = typeof msgIdOrCmd === 'number' ? msgIdOrCmd : 0;
+      command = cmdName;
+    } else if (targetOrChatId && typeof targetOrChatId === 'object') {
+      const ctx = targetOrChatId as CommandContext;
+      if (!TelegramMiddleware.isGroup(ctx.message)) return false;
+      chatId = ctx.chatId;
+      messageId = ctx.message?.message_id;
+      command = typeof msgIdOrCmd === 'string' ? msgIdOrCmd : ctx.command;
+    } else {
+      return false;
+    }
+
+    if (!chatId || chatId >= 0 || !messageId || messageId <= 0) {
+      return false;
+    }
+
+    const dedupKey = `${chatId}_${messageId}`;
+    const now = Date.now();
+    const existing = CommandHandler.deletedCommandMessages.get(dedupKey);
+    if (existing && now - existing < 600000) {
+      return true; // Already processed / in-flight
+    }
+    CommandHandler.deletedCommandMessages.set(dedupKey, now);
+
+    // Bounded cleanup to prevent memory leaks:
+    // Evict expired entries (>10m); if still above threshold, perform FIFO eviction down to 4000.
+    if (CommandHandler.deletedCommandMessages.size > 5000) {
+      for (const [key, ts] of CommandHandler.deletedCommandMessages.entries()) {
+        if (now - ts > 600000) {
+          CommandHandler.deletedCommandMessages.delete(key);
+        }
+      }
+      if (CommandHandler.deletedCommandMessages.size > 5000) {
+        for (const [key] of CommandHandler.deletedCommandMessages.entries()) {
+          CommandHandler.deletedCommandMessages.delete(key);
+          if (CommandHandler.deletedCommandMessages.size <= 4000) break;
+        }
+      }
+    }
+
+    try {
+      const res = await telegramApi.deleteMessage(chatId, messageId);
+      if (res && res.ok) {
+        db.untrackMessages(chatId, [messageId]);
+        logDebug({
+          event: 'COMMAND_MESSAGE_DELETED',
+          chatId,
+          messageId,
+          command,
+          success: true
+        });
+        return true;
+      } else {
+        const desc = res?.description || '';
+        // If error is transient (e.g. 429 flood wait / server error), evict from dedup cache to allow retry
+        const isTransient = desc.toLowerCase().includes('too many requests') ||
+                            desc.toLowerCase().includes('flood') ||
+                            desc.toLowerCase().includes('internal') ||
+                            desc.toLowerCase().includes('timeout');
+        if (isTransient) {
+          CommandHandler.deletedCommandMessages.delete(dedupKey);
+        }
+        logDebug({
+          event: 'COMMAND_MESSAGE_DELETE_SKIPPED',
+          chatId,
+          messageId,
+          command,
+          reason: desc || 'Telegram deletion returned false',
+          transient: isTransient
+        });
+        return false;
+      }
+    } catch (err: any) {
+      // Network drops, timeouts, connection resets are transient: evict so retry is permitted
+      CommandHandler.deletedCommandMessages.delete(dedupKey);
+      logDebug({
+        event: 'COMMAND_MESSAGE_DELETE_ERROR',
+        chatId,
+        messageId,
+        command,
+        error: err?.message || 'Error deleting command message',
+        transient: true
+      });
+      return false;
+    }
+  }
+
 
   public static abortableSleep(ms: number, signal?: AbortSignal): Promise<boolean> {
     return MentionAllService.abortableSleep(ms, signal);
@@ -445,12 +554,14 @@ export class CommandHandler {
 
     console.log(`[COMMAND] handler command=${cmd.replace(/^\//, '')} invoked`);
 
-    if (TelegramMiddleware.isGroup(ctx.message) && CommandHandler.SENSITIVE_COMMANDS.has(cmd)) {
-      const delay = cmd === '/say' ? 1000 : 4500;
-      setTimeout(() => {
-        telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id).catch(() => {});
-      }, delay);
+    // Immediate non-blocking command message deletion for authorized group commands
+    const isGroup = TelegramMiddleware.isGroup(ctx.message);
+    const isDeleteEligible = isGroup;
+
+    if (isDeleteEligible) {
+      CommandHandler.deleteCommandMessage(ctx, cmd).catch(() => {});
     }
+
 
     switch (cmd) {
       case '/dashboard':
@@ -2475,12 +2586,24 @@ export class CommandHandler {
 
     // Delete replied message and command message if possible
     const replyMsgId = ctx.message.reply_to_message?.message_id;
+    let deletedTargetMessage = false;
     if (replyMsgId) {
       await Promise.allSettled([
         telegramApi.deleteMessage(ctx.chatId, replyMsgId),
-        telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id)
+        CommandHandler.deleteCommandMessage(ctx, 'dban')
       ]);
       db.untrackMessages(ctx.chatId, [replyMsgId, ctx.message.message_id]);
+      deletedTargetMessage = true;
+    } else {
+      const recentMsgs = db.getMessagesByUser(ctx.chatId, target.targetUserId, undefined, 1);
+      if (recentMsgs.length > 0) {
+        await Promise.allSettled([
+          telegramApi.deleteMessage(ctx.chatId, recentMsgs[0]),
+          CommandHandler.deleteCommandMessage(ctx, 'dban')
+        ]);
+        db.untrackMessages(ctx.chatId, [recentMsgs[0], ctx.message.message_id]);
+        deletedTargetMessage = true;
+      }
     }
 
     const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
@@ -2519,9 +2642,10 @@ export class CommandHandler {
         reason
       });
 
+      const deleteText = deletedTargetMessage ? ' and their message was deleted.' : '.';
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🔨 <b>${targetTag} has been banned${duration ? ` for ${duration.formatted}` : ''} and their message was deleted.</b>${parsedReason ? `\nReason: <i>${escapeHtml(parsedReason)}</i>` : ''}`
+        `🔨 <b>${targetTag} has been banned${duration ? ` for ${duration.formatted}` : ''}${deleteText}</b>${parsedReason ? `\nReason: <i>${escapeHtml(parsedReason)}</i>` : ''}`
       );
     } else {
       const friendlyError = mapTelegramError('dban', res.description, res.error_code);
@@ -2569,12 +2693,24 @@ export class CommandHandler {
     if (!actor || !target) return;
 
     const replyMsgId = ctx.message.reply_to_message?.message_id;
+    let deletedTargetMessage = false;
     if (replyMsgId) {
       await Promise.allSettled([
         telegramApi.deleteMessage(ctx.chatId, replyMsgId),
-        telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id)
+        CommandHandler.deleteCommandMessage(ctx, 'dmute')
       ]);
       db.untrackMessages(ctx.chatId, [replyMsgId, ctx.message.message_id]);
+      deletedTargetMessage = true;
+    } else {
+      const recentMsgs = db.getMessagesByUser(ctx.chatId, target.targetUserId, undefined, 1);
+      if (recentMsgs.length > 0) {
+        await Promise.allSettled([
+          telegramApi.deleteMessage(ctx.chatId, recentMsgs[0]),
+          CommandHandler.deleteCommandMessage(ctx, 'dmute')
+        ]);
+        db.untrackMessages(ctx.chatId, [recentMsgs[0], ctx.message.message_id]);
+        deletedTargetMessage = true;
+      }
     }
 
     const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
@@ -2613,9 +2749,10 @@ export class CommandHandler {
         reason
       });
 
+      const deleteText = deletedTargetMessage ? ' and their message was deleted.' : '.';
       await telegramApi.sendMessage(
         ctx.chatId,
-        `🔇 <b>${targetTag} has been muted${duration ? ` for ${duration.formatted}` : ''} and their message was deleted.</b>${parsedReason ? `\nReason: <i>${escapeHtml(parsedReason)}</i>` : ''}`
+        `🔇 <b>${targetTag} has been muted${duration ? ` for ${duration.formatted}` : ''}${deleteText}</b>${parsedReason ? `\nReason: <i>${escapeHtml(parsedReason)}</i>` : ''}`
       );
     } else {
       const friendlyError = mapTelegramError('dmute', res.description, res.error_code);
@@ -2663,12 +2800,24 @@ export class CommandHandler {
     if (!actor || !target) return;
 
     const replyMsgId = ctx.message.reply_to_message?.message_id;
+    let deletedTargetMessage = false;
     if (replyMsgId) {
       await Promise.allSettled([
         telegramApi.deleteMessage(ctx.chatId, replyMsgId),
-        telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id)
+        CommandHandler.deleteCommandMessage(ctx, 'dkick')
       ]);
       db.untrackMessages(ctx.chatId, [replyMsgId, ctx.message.message_id]);
+      deletedTargetMessage = true;
+    } else {
+      const recentMsgs = db.getMessagesByUser(ctx.chatId, target.targetUserId, undefined, 1);
+      if (recentMsgs.length > 0) {
+        await Promise.allSettled([
+          telegramApi.deleteMessage(ctx.chatId, recentMsgs[0]),
+          CommandHandler.deleteCommandMessage(ctx, 'dkick')
+        ]);
+        db.untrackMessages(ctx.chatId, [recentMsgs[0], ctx.message.message_id]);
+        deletedTargetMessage = true;
+      }
     }
 
     const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Admin dkick';
@@ -2688,9 +2837,10 @@ export class CommandHandler {
         reason
       });
 
+      const deleteText = deletedTargetMessage ? ' and their message was deleted.' : '.';
       await telegramApi.sendMessage(
         ctx.chatId,
-        `👢 <b>${targetTag} was removed from the group and their message was deleted.</b>`
+        `👢 <b>${targetTag} was removed from the group${deleteText}</b>`
       );
     } else {
       const friendlyError = mapTelegramError('dkick', res.description, res.error_code);
@@ -2739,11 +2889,12 @@ export class CommandHandler {
 
     // Delete command message and replied message (silent)
     const replyMsgId = ctx.message.reply_to_message?.message_id;
-    const toDelete = [ctx.message.message_id];
-    if (replyMsgId) toDelete.push(replyMsgId);
-
-    await Promise.allSettled(toDelete.map((id) => telegramApi.deleteMessage(ctx.chatId, id)));
-    db.untrackMessages(ctx.chatId, toDelete);
+    const promises: Promise<any>[] = [CommandHandler.deleteCommandMessage(ctx, 'sban')];
+    if (replyMsgId) promises.push(telegramApi.deleteMessage(ctx.chatId, replyMsgId));
+    await Promise.allSettled(promises);
+    const toUntrack = [ctx.message.message_id];
+    if (replyMsgId) toUntrack.push(replyMsgId);
+    db.untrackMessages(ctx.chatId, toUntrack);
 
     const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
     const { duration, untilDateSec, reason: parsedReason } = parseModerationArgs(ctx.args, isTargetInArgs);
@@ -2823,11 +2974,12 @@ export class CommandHandler {
 
     // Delete command message and replied message (silent)
     const replyMsgId = ctx.message.reply_to_message?.message_id;
-    const toDelete = [ctx.message.message_id];
-    if (replyMsgId) toDelete.push(replyMsgId);
-
-    await Promise.allSettled(toDelete.map((id) => telegramApi.deleteMessage(ctx.chatId, id)));
-    db.untrackMessages(ctx.chatId, toDelete);
+    const promises: Promise<any>[] = [CommandHandler.deleteCommandMessage(ctx, 'smute')];
+    if (replyMsgId) promises.push(telegramApi.deleteMessage(ctx.chatId, replyMsgId));
+    await Promise.allSettled(promises);
+    const toUntrack = [ctx.message.message_id];
+    if (replyMsgId) toUntrack.push(replyMsgId);
+    db.untrackMessages(ctx.chatId, toUntrack);
 
     const isTargetInArgs = target.source === 'numeric_id' || target.source === 'username';
     const { duration, untilDateSec, reason: parsedReason } = parseModerationArgs(ctx.args, isTargetInArgs);
@@ -2907,11 +3059,12 @@ export class CommandHandler {
 
     // Delete command message and replied message (silent)
     const replyMsgId = ctx.message.reply_to_message?.message_id;
-    const toDelete = [ctx.message.message_id];
-    if (replyMsgId) toDelete.push(replyMsgId);
-
-    await Promise.allSettled(toDelete.map((id) => telegramApi.deleteMessage(ctx.chatId, id)));
-    db.untrackMessages(ctx.chatId, toDelete);
+    const promises: Promise<any>[] = [CommandHandler.deleteCommandMessage(ctx, 'skick')];
+    if (replyMsgId) promises.push(telegramApi.deleteMessage(ctx.chatId, replyMsgId));
+    await Promise.allSettled(promises);
+    const toUntrack = [ctx.message.message_id];
+    if (replyMsgId) toUntrack.push(replyMsgId);
+    db.untrackMessages(ctx.chatId, toUntrack);
 
     const reason = ctx.args.slice(target.source === 'numeric_id' || target.source === 'username' ? 1 : 0).join(' ') || 'Silent kick';
     const res = await ModerationService.executeKick(ctx.chatId, target.targetUserId);
@@ -5001,10 +5154,10 @@ export class CommandHandler {
     const settings = db.getGroupSettings(ctx.chatId, ctx.chatTitle);
 
     if (arg === 'on') {
-      db.updateGroupSettings(ctx.chatId, { gifProtection: true });
+      db.updateGroupSettings(ctx.chatId, { gifProtection: true, gifsProtection: true });
       await telegramApi.sendMessage(ctx.chatId, '🛡️ <b>GIF Protection is now ON.</b>', { reply_to_message_id: ctx.message.message_id });
     } else if (arg === 'off') {
-      db.updateGroupSettings(ctx.chatId, { gifProtection: false });
+      db.updateGroupSettings(ctx.chatId, { gifProtection: false, gifsProtection: false });
       await telegramApi.sendMessage(ctx.chatId, '🔓 <b>GIF Protection is now OFF.</b>', { reply_to_message_id: ctx.message.message_id });
     } else {
       await telegramApi.sendMessage(ctx.chatId, `ℹ️ <b>GIF Protection:</b> ${settings.gifProtection ? '🟢 ON' : '🔴 OFF'}\nUsage: <code>/gif on</code> or <code>/gif off</code>`, { reply_to_message_id: ctx.message.message_id });
@@ -5135,7 +5288,7 @@ export class CommandHandler {
     // Delete target replied message and command message simultaneously
     await Promise.allSettled([
       telegramApi.deleteMessage(ctx.chatId, targetMsgId),
-      telegramApi.deleteMessage(ctx.chatId, cmdMsgId)
+      CommandHandler.deleteCommandMessage(ctx, 'del')
     ]);
 
     db.untrackMessages(ctx.chatId, [targetMsgId, cmdMsgId]);
@@ -7530,7 +7683,7 @@ export class CommandHandler {
 
       // 10. Delete moderator's command message when possible so the group remains clean
       try {
-        await telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id);
+        await CommandHandler.deleteCommandMessage(ctx, 'stickerpackremove');
       } catch {}
 
       await telegramApi.sendMessage(ctx.chatId, `🗑️ Sticker pack <b>${escapeHtml(packTitle)}</b> (<code>${escapeHtml(setName)}</code>) owned by Roxie has been permanently deleted from Telegram.`, {
@@ -7569,7 +7722,7 @@ export class CommandHandler {
 
     // 10. Delete moderator's command message when possible so the group remains clean
     try {
-      await telegramApi.deleteMessage(ctx.chatId, ctx.message.message_id);
+      await CommandHandler.deleteCommandMessage(ctx, 'stickerpackremove');
     } catch {}
 
     const ownerMsg =

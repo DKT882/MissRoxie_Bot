@@ -417,9 +417,11 @@ export class TelegramMiddleware {
       actor.actorRole === 'ADMIN' ||
       actor.actorStatus === 'administrator';
 
-    // 3b. Stale Cache Protection for Admin Commands: If not authorized in a group, verify fresh from Telegram API
-    // (guarantees newly promoted administrators are recognized even if local member cache is stale)
-    if (!isAuthorized && this.isGroup(ctx.message) && actor.actorUserId > 0 && actor.actorUserId !== 1087968824) {
+    // 3b. Fallback Member Verification: If not authorized and admin list was not definitive (e.g. getChatAdministrators failed) or for privileged promotion commands
+    const cleanCmd = ctx.command ? ctx.command.toLowerCase().split('@')[0] : '';
+    const isPrivilegedAction = cleanCmd === '/promote' || cleanCmd === '/demote' || cleanCmd === '/permissions';
+    const cachedAdmins = this.adminListCache.get(ctx.chatId);
+    if (!isAuthorized && this.isGroup(ctx.message) && actor.actorUserId > 0 && actor.actorUserId !== 1087968824 && (!cachedAdmins || isPrivilegedAction)) {
       const freshMember = await this.getTargetMember(ctx.chatId, actor.actorUserId, true);
       if (freshMember && (freshMember.status === 'administrator' || freshMember.status === 'creator')) {
         this.adminListCache.delete(ctx.chatId);
@@ -640,31 +642,59 @@ export class TelegramMiddleware {
     const effectiveArgs = args || ctx.args;
     const cleanCmd = ctx.command.toLowerCase().split('@')[0];
 
-    // 1. Check if first argument is an EXPLICIT target (@username or numeric user ID)
-    if (effectiveArgs && effectiveArgs.length > 0) {
-      const firstArg = effectiveArgs[0].trim();
+    // 1. PRIMARY TARGET RESOLUTION: Replied Message
+    // When a message is replied to, the replied message sender is the primary target unless
+    // the command is NOT a delete-moderation action and the admin explicitly provided an @username argument.
+    const isDeleteModerationCmd = cleanCmd === '/dmute' || cleanCmd === '/dban' || cleanCmd === '/dkick' || cleanCmd === '/del' || cleanCmd === '/smute' || cleanCmd === '/sban' || cleanCmd === '/skick';
+    const hasExplicitMention = effectiveArgs && effectiveArgs.length > 0 && effectiveArgs[0].trim().startsWith('@');
 
-      // Explicit numeric user ID
-      if (/^\d{3,16}$/.test(firstArg)) {
-        const userId = parseInt(firstArg, 10);
-        const cached = db.findUserById(userId, ctx.chatId);
+    if (ctx.message.reply_to_message && (isDeleteModerationCmd || !hasExplicitMention)) {
+      const repliedMessage = ctx.message.reply_to_message;
+
+      // Check if replied to anonymous admin or channel sender
+      if (!repliedMessage.from && repliedMessage.sender_chat) {
         return {
-          type: 'user',
-          userId,
-          user: cached ? {
-            id: cached.userId,
-            is_bot: false,
-            first_name: cached.firstName,
-            last_name: cached.lastName,
-            username: cached.username
-          } : {
-            id: userId,
-            is_bot: false,
-            first_name: `User ${userId}`
-          },
-          source: 'numeric_id'
+          type: 'sender_chat',
+          id: repliedMessage.sender_chat.id,
+          source: 'reply'
         };
       }
+
+      if (repliedMessage.from?.id === 1087968824 || (repliedMessage.sender_chat && repliedMessage.sender_chat.id === ctx.chatId)) {
+        return {
+          type: 'sender_chat',
+          id: repliedMessage.sender_chat?.id || 1087968824,
+          source: 'reply'
+        };
+      }
+
+      if (repliedMessage.from) {
+        db.cacheUser(repliedMessage.from, ctx.chatId);
+        return {
+          type: 'user',
+          userId: repliedMessage.from.id,
+          user: repliedMessage.from,
+          source: 'reply'
+        };
+      }
+
+      // Replied to a service message (e.g. pinned message, user joined/left, title changed) without a sender
+      let actionName = cleanCmd.replace(/^\//, '');
+      if (actionName.startsWith('d') && actionName !== 'demote') {
+        actionName = actionName.substring(1);
+      } else if (actionName.startsWith('s') && ['smute', 'sban', 'skick'].includes(cleanCmd)) {
+        actionName = actionName.substring(1);
+      }
+      return {
+        type: 'none',
+        source: 'none',
+        error: `⚠️ Cannot moderate a service message. Please reply directly to a message sent by the user you want to ${actionName}.`
+      };
+    }
+
+    // 2. EXPLICIT ARGUMENT RESOLUTION (When no reply or explicit @mention overriding non-delete command)
+    if (effectiveArgs && effectiveArgs.length > 0) {
+      const firstArg = effectiveArgs[0].trim();
 
       // Explicit @username
       if (firstArg.startsWith('@')) {
@@ -732,44 +762,38 @@ export class TelegramMiddleware {
           error: `⚠️ Could not find a member with username @${username} in local group memory.\nTelegram does not allow bots to resolve usernames without prior group interaction. Please reply directly to their message with ${cleanCmd} or provide their numeric Telegram user ID.`
         };
       }
-    }
 
-    // 2. PRIMARY (When no explicit @user/ID argument): Reply to a message
-    if (ctx.message.reply_to_message) {
-      const repliedMessage = ctx.message.reply_to_message;
-
-      // Check if replied to anonymous admin or channel sender
-      if (!repliedMessage.from && repliedMessage.sender_chat) {
-        return {
-          type: 'sender_chat',
-          id: repliedMessage.sender_chat.id,
-          source: 'reply'
-        };
-      }
-
-      if (repliedMessage.from?.id === 1087968824 || (repliedMessage.sender_chat && repliedMessage.sender_chat.id === ctx.chatId)) {
-        return {
-          type: 'sender_chat',
-          id: repliedMessage.sender_chat?.id || 1087968824,
-          source: 'reply'
-        };
-      }
-
-      if (repliedMessage.from) {
-        db.cacheUser(repliedMessage.from, ctx.chatId);
+      // Explicit numeric Telegram User ID (4 to 16 digits, valid Telegram user ID range)
+      // Note: Values < 4 digits (e.g. 300, 60) are not valid Telegram user IDs and represent durations or numbers.
+      if (/^\d{4,16}$/.test(firstArg)) {
+        const userId = parseInt(firstArg, 10);
+        const cached = db.findUserById(userId, ctx.chatId);
         return {
           type: 'user',
-          userId: repliedMessage.from.id,
-          user: repliedMessage.from,
-          source: 'reply'
+          userId,
+          user: cached ? {
+            id: cached.userId,
+            is_bot: false,
+            first_name: cached.firstName,
+            last_name: cached.lastName,
+            username: cached.username
+          } : {
+            id: userId,
+            is_bot: false,
+            first_name: `User ${userId}`
+          },
+          source: 'numeric_id'
         };
       }
     }
 
-    // 3. Arguments without @ prefix (bare username matching cache or 3-32 char username)
+    // 3. Arguments without @ prefix (bare username matching cache)
+    // Only resolve as username if it is actually found in group cache or MTProto.
+    // If not found, do NOT guess or return "@word not found", so durations (10m) or reason words (spam) fall through.
     if (effectiveArgs && effectiveArgs.length > 0) {
       const firstArg = effectiveArgs[0].trim();
-      if (/^[a-zA-Z0-9_]{3,32}$/.test(firstArg)) {
+      const isDuration = /^\d+\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks|mo|month|months|y|yr|yrs|year|years)$/i.test(firstArg);
+      if (!isDuration && /^[a-zA-Z][a-zA-Z0-9_]{2,31}$/.test(firstArg)) {
         let known = db.findUserByUsername(firstArg, ctx.chatId);
         if (!known) {
           known = db.findUserByUsername(firstArg);
@@ -816,21 +840,29 @@ export class TelegramMiddleware {
             source: 'username'
           };
         }
-
-        return {
-          type: 'none',
-          source: 'none',
-          error: `⚠️ Could not find a member with username @${firstArg} in local group memory.\nTelegram does not allow bots to resolve usernames without prior group interaction. Please reply directly to their message with ${cleanCmd} or provide their numeric Telegram user ID.`
-        };
       }
     }
 
-    // No target provided
+    // 4. No target provided / unresolved
     if (cleanCmd === '/demote' || cleanCmd.includes('demote')) {
       return {
         type: 'none',
         source: 'none',
         error: '⚠️ Reply to an administrator\'s message or provide their user ID/username.'
+      };
+    }
+
+    if (isDeleteModerationCmd) {
+      let actionName = cleanCmd.replace(/^\//, '');
+      if (actionName.startsWith('d') && actionName !== 'demote') {
+        actionName = actionName.substring(1);
+      } else if (actionName.startsWith('s') && ['smute', 'sban', 'skick'].includes(cleanCmd)) {
+        actionName = actionName.substring(1);
+      }
+      return {
+        type: 'none',
+        source: 'none',
+        error: `⚠️ Please reply to the message you want to delete and ${actionName} with ${cleanCmd}`
       };
     }
 

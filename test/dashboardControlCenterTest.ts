@@ -114,6 +114,7 @@ async function runDashboardControlCenterTests() {
   pass('Test 6: Stored messages in shared group memory');
 
   // 7. Private chats list
+  db.deletePrivateChatData(testUser1);
   db.addPrivateMessage(testUser1, testUser1, {
     role: 'user',
     content: 'Hi Roxie, secret DM!',
@@ -349,6 +350,7 @@ async function runDashboardControlCenterTests() {
   console.log('\n====================================================');
   console.log(`🎉 ALL 22 TESTS PASSED! (${passed}/22)`);
   console.log('====================================================\n');
+  process.exit(0);
 }
 
 runDashboardControlCenterTests().catch((err) => {

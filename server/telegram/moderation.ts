@@ -47,6 +47,18 @@ export function parseDuration(input: string): { seconds: number; formatted: stri
   const trimmed = input.trim();
   if (!trimmed) return null;
 
+  // Support bare integer seconds (e.g. "300" for 300 seconds)
+  if (/^\d+$/.test(trimmed)) {
+    const value = parseInt(trimmed, 10);
+    if (!isNaN(value) && value > 0 && value <= 100 * 365 * 86400) {
+      return {
+        seconds: value,
+        formatted: formatDuration(value)
+      };
+    }
+    return null;
+  }
+
   const compoundRegex = /(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks|mo|month|months|y|yr|yrs|year|years)/gi;
 
   let totalSeconds = 0;
