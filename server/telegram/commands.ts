@@ -436,7 +436,7 @@ export class CommandHandler {
   );
 
   public static readonly PUBLIC_GROUP_COMMANDS = new Set<string>([
-    '/help', '/start', '/ping', '/live', '/report', '/getnote', '/notes', '/rules', '/mymemory', '/forgetme', '/settings'
+    '/help', '/start', '/ping', '/live', '/report', '/admin', '/getnote', '/notes', '/rules', '/mymemory', '/forgetme', '/settings'
   ]);
 
   public static readonly DASHBOARD_COMMANDS = new Set<string>([
@@ -840,6 +840,9 @@ export class CommandHandler {
         return true;
       case '/report':
         await this.handleReport(ctx);
+        return true;
+      case '/admin':
+        await this.handleAdmin(ctx);
         return true;
       case '/note':
         await this.handleNote(ctx);
@@ -4494,6 +4497,75 @@ export class CommandHandler {
         reply_to_message_id: ctx.message.message_id
       });
     }
+  }
+
+  private static async handleAdmin(ctx: CommandContext): Promise<void> {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+
+    let admins: TelegramChatMember[] = [];
+    try {
+      const res = await telegramApi.getChatAdministrators(ctx.chatId);
+      if (res && res.ok && Array.isArray(res.result)) {
+        admins = res.result;
+      }
+    } catch {
+      // Safe fallback
+    }
+
+    if (!admins || admins.length === 0) {
+      try {
+        admins = await TelegramMiddleware.getChatAdministrators(ctx.chatId);
+      } catch {
+        // Safe fallback
+      }
+    }
+
+    if (!admins || admins.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, '❌ Failed to retrieve group administrators. Please try again later.');
+      return;
+    }
+
+    let botId: number | undefined;
+    try {
+      const meRes = await telegramApi.getMe();
+      if (meRes && meRes.ok && meRes.result) {
+        botId = meRes.result.id;
+      }
+    } catch {
+      // Safe fallback
+    }
+
+    const mentionableAdmins = admins.filter(admin => {
+      if (!admin.user || !admin.user.id) return false;
+      if (botId && admin.user.id === botId) return false;
+      if (admin.user.is_bot) return false;
+      return true;
+    });
+
+    if (mentionableAdmins.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, '⚠️ No mentionable group administrators found.');
+      return;
+    }
+
+    const mentions = mentionableAdmins.map(admin => {
+      const name = [admin.user.first_name, admin.user.last_name].filter(Boolean).join(' ').trim()
+        || admin.user.username
+        || `Admin ${admin.user.id}`;
+      const badge = admin.status === 'creator' ? '👑' : '🛡️';
+      return `${badge} <a href="tg://user?id=${admin.user.id}">${escapeHtml(name)}</a>`;
+    });
+
+    const reason = ctx.args && ctx.args.length > 0 ? ctx.args.join(' ').trim() : '';
+    let messageText = `🚨 <b>Group Administrators Summoned</b>\n\n${mentions.join('\n')}`;
+    if (reason) {
+      messageText += `\n\n<b>Reason:</b> <i>${escapeHtml(reason)}</i>`;
+    }
+
+    const replyId = ctx.message.reply_to_message?.message_id;
+    await telegramApi.sendMessage(ctx.chatId, messageText, {
+      parse_mode: 'HTML',
+      reply_to_message_id: replyId
+    });
   }
 
   // ==========================================

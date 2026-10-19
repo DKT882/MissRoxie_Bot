@@ -1024,6 +1024,19 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     auditLogged: true,
     scopes: ['group']
   },
+  {
+    command: '/admin',
+    category: 'Reports',
+    description: 'Mention all group administrators and the group owner in one message.',
+    syntax: '/admin [reason]',
+    example: '/admin Need help with a spammer',
+    permission: 'Everyone',
+    targetType: 'None',
+    isPublic: true,
+    modifiesState: false,
+    auditLogged: false,
+    scopes: ['group']
+  },
 
   // ==================== WELCOME & RULES ====================
   {
