@@ -186,7 +186,15 @@ tmaRouter.get('/groups/:chatId/settings', requireTmaAuth('general'), (req: Authe
   try {
     const chatId = req.tmaChatId!;
     const settings = db.getGroupSettings(chatId);
-    res.json(settings);
+    const autoRespElig = db.checkAutoResponseEligibility(chatId);
+    const autoStkElig = db.checkAutoStickerEligibility(chatId);
+    res.json({
+      ...settings,
+      autoEngineMessageNextSeconds: autoRespElig.remainingSeconds || 0,
+      autoEngineStickerNextSeconds: autoStkElig.remainingSeconds || 0,
+      autoResponseNextAvailableSeconds: autoRespElig.remainingSeconds || 0,
+      autoStickerNextAvailableSeconds: autoStkElig.remainingSeconds || 0
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -209,10 +217,11 @@ tmaRouter.put('/groups/:chatId/settings', requireTmaAuth('general'), (req: Authe
         'warnLimit', 'warnAction', 'warnExpireSeconds', 'floodEnabled', 'floodCount', 'floodWindow', 'floodAction',
         'raidEnabled', 'raidLimit', 'raidWindow', 'raidAction', 'raidDuration',
         'captchaEnabled', 'captchaMode', 'captchaTimeout', 'captchaAction',
-        'automodEnabled', 'securityEnabled',
+        'automodEnabled', 'securityEnabled', 'reportsEnabled', 'stopAbusiveEnabled',
         // content protection
         'linksProtection', 'linksWhitelist', 'mediaProtection', 'stickerProtection', 'gifsProtection',
         'videosProtection', 'photosProtection', 'voiceProtection', 'audioProtection', 'locks',
+        'fileProtection', 'imageProtection', 'gifProtection',
         'stopSpamEnabled', 'stopPromotionEnabled', 'promotionalSpamProtection',
         // lust mode
         'lustMode', 'lustLevel',
@@ -220,15 +229,43 @@ tmaRouter.put('/groups/:chatId/settings', requireTmaAuth('general'), (req: Authe
         'autoEngine', 'autoResponse', 'autoSticker', 'stickerPacks'
       ]);
 
-      for (const key of Object.keys(updates)) {
-        if (!allowedAdminKeys.has(key)) {
-          delete updates[key];
-        }
+      const unauthorizedKeys = Object.keys(updates).filter(k => !allowedAdminKeys.has(k));
+      if (unauthorizedKeys.length > 0) {
+        return res.status(403).json({
+          ok: false,
+          code: 'OWNER_ONLY_SETTING',
+          error: `Setting(s) [${unauthorizedKeys.join(', ')}] require Owner or Exception Admin privileges.`
+        });
       }
     }
 
     const updated = db.updateGroupSettings(chatId, updates);
     res.json({ ok: true, settings: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 4B. Moderation Warnings (Owner, Admin, Exception Admin)
+// ==========================================
+
+tmaRouter.get('/groups/:chatId/warnings', requireTmaAuth('moderation'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const warnings = (db as any).data?.warnings?.filter((w: any) => w.groupId === chatId || w.chatId === chatId) || [];
+    res.json({ ok: true, warnings });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.delete('/groups/:chatId/warnings/:userId', requireTmaAuth('moderation'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const targetUserId = Number(req.params.userId);
+    const removed = db.resetUserWarnings(chatId, targetUserId);
+    res.json({ ok: true, removed });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -242,9 +279,32 @@ tmaRouter.get('/groups/:chatId/welcome-goodbye', requireTmaAuth('welcome_goodbye
   try {
     const chatId = req.tmaChatId!;
     const settings = db.getGroupSettings(chatId);
+    const groupWelcome = settings.groupWelcome || {
+      enabled: Boolean(settings.welcomeEnabled),
+      mode: 'simple',
+      contentType: 'text',
+      text: settings.welcomeMessage || '👋 Welcome {user} to {groupname}!'
+    };
+    const groupGoodbye = settings.groupGoodbye || {
+      enabled: Boolean(settings.goodbyeEnabled),
+      mode: 'simple',
+      contentType: 'text',
+      text: settings.goodbyeMessage || '👋 Goodbye {user}!'
+    };
+    const welcomeDm = settings.welcomeDm || {
+      enabled: false,
+      mode: 'simple',
+      contentType: 'text',
+      text: 'You joined {groupname} 🎉'
+    };
+
     res.json({
-      groupWelcome: settings.groupWelcome || null,
-      groupGoodbye: settings.groupGoodbye || null,
+      ok: true,
+      chatId,
+      settings,
+      groupWelcome,
+      groupGoodbye,
+      welcomeDm,
       autoDeleteJoinLeave: settings.autoDeleteJoinLeave || false
     });
   } catch (err: any) {
@@ -255,16 +315,86 @@ tmaRouter.get('/groups/:chatId/welcome-goodbye', requireTmaAuth('welcome_goodbye
 tmaRouter.put('/groups/:chatId/welcome-goodbye', requireTmaAuth('welcome_goodbye'), (req: AuthenticatedTmaRequest, res) => {
   try {
     const chatId = req.tmaChatId!;
-    const { groupWelcome, groupGoodbye, autoDeleteJoinLeave } = req.body;
+    const { groupWelcome, groupGoodbye, welcomeDm, autoDeleteJoinLeave } = req.body;
     const updates: any = {};
-    if (groupWelcome !== undefined) updates.groupWelcome = groupWelcome;
-    if (groupGoodbye !== undefined) updates.groupGoodbye = groupGoodbye;
+    if (groupWelcome !== undefined) {
+      updates.groupWelcome = groupWelcome;
+      if (groupWelcome.enabled !== undefined) updates.welcomeEnabled = Boolean(groupWelcome.enabled);
+      if (groupWelcome.text !== undefined) updates.welcomeMessage = groupWelcome.text;
+    }
+    if (groupGoodbye !== undefined) {
+      updates.groupGoodbye = groupGoodbye;
+      if (groupGoodbye.enabled !== undefined) updates.goodbyeEnabled = Boolean(groupGoodbye.enabled);
+      if (groupGoodbye.text !== undefined) updates.goodbyeMessage = groupGoodbye.text;
+    }
+    if (welcomeDm !== undefined) updates.welcomeDm = welcomeDm;
     if (autoDeleteJoinLeave !== undefined) updates.autoDeleteJoinLeave = Boolean(autoDeleteJoinLeave);
 
     const updated = db.updateGroupSettings(chatId, updates);
-    res.json({ ok: true, settings: updated });
+    res.json({
+      ok: true,
+      settings: updated,
+      groupWelcome: updated.groupWelcome,
+      groupGoodbye: updated.groupGoodbye,
+      welcomeDm: updated.welcomeDm,
+      autoDeleteJoinLeave: updated.autoDeleteJoinLeave
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.post('/groups/:chatId/welcome-goodbye/test', requireTmaAuth('welcome_goodbye'), async (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const settings = db.getGroupSettings(chatId);
+    const chatTitle = settings.chatTitle || `Group ${chatId}`;
+    const target = (req.body?.target || 'welcomeDm') as 'groupWelcome' | 'groupGoodbye' | 'welcomeDm';
+    const targetUserId = req.body?.targetUserId ? Number(req.body.targetUserId) : undefined;
+
+    let configToTest: any;
+    if (target === 'groupWelcome') {
+      configToTest = req.body.config || settings.groupWelcome || {
+        enabled: true,
+        mode: 'simple',
+        contentType: 'text',
+        text: '👋 Welcome {user} to {groupname}!'
+      };
+    } else if (target === 'groupGoodbye') {
+      configToTest = req.body.config || settings.groupGoodbye || {
+        enabled: true,
+        mode: 'simple',
+        contentType: 'text',
+        text: '👋 Goodbye {user}!'
+      };
+    } else {
+      configToTest = req.body.config || settings.welcomeDm || {
+        enabled: true,
+        mode: 'simple',
+        contentType: 'text',
+        text: 'You joined {groupname} 🎉'
+      };
+    }
+
+    const testText = (configToTest.text || '')
+      .replace(/{user}/g, '@Tester')
+      .replace(/{groupname}/g, chatTitle)
+      .replace(/{chat}/g, chatTitle);
+
+    const destChatId = target === 'welcomeDm' ? (targetUserId || req.tmaUser!.id) : chatId;
+    const postPayload: PostPayload = {
+      contentType: configToTest.contentType || 'text',
+      text: testText || 'Test greeting',
+      mediaFileId: configToTest.mediaFileId,
+      buttons: sanitizeInlineButtons(configToTest.buttons),
+      pinAfterSend: false,
+      protectContent: false
+    };
+
+    const sendRes = await PostSender.send(destChatId, postPayload);
+    res.json({ ok: sendRes.ok, result: sendRes });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -418,11 +548,31 @@ tmaRouter.put('/groups/:chatId/lust/settings', requireTmaAuth('lust_mode'), (req
   }
 });
 
+tmaRouter.get('/groups/:chatId/lust/users', requireTmaAuth('lust_mode'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const users = db.getGroupUserLustLevels(chatId);
+    res.json({ ok: true, users: users || [] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 tmaRouter.post('/groups/:chatId/lust/reset-group', requireTmaAuth('lust_mode'), (req: AuthenticatedTmaRequest, res) => {
   try {
     const chatId = req.tmaChatId!;
     db.resetGroupLustState(chatId);
     res.json({ ok: true, message: 'Group lust memory reset successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.post('/groups/:chatId/lust/reset-users', requireTmaAuth('lust_mode'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    db.resetLustLevel(chatId);
+    res.json({ ok: true, message: 'All user lust levels reset in group' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -436,35 +586,109 @@ tmaRouter.get('/groups/:chatId/stickers', requireTmaAuth('stickers'), (req: Auth
   try {
     const chatId = req.tmaChatId!;
     const settings = db.getGroupSettings(chatId);
+    const summary = db.getGroupPacksSummary(chatId);
+    const lib = db.getMediaLibrary(chatId);
+    const packs = db.getGroupStickerPacks(chatId);
     res.json({
-      packs: settings.stickerPacks || {},
-      autoSticker: settings.autoSticker || {}
+      ok: true,
+      chatId,
+      summary,
+      packs: packs || [],
+      stickerPacks: settings.stickerPacks || {},
+      autoSticker: settings.autoSticker || {},
+      customStickers: lib.stickers || {},
+      lustStickers: lib.lustStickers || {}
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-tmaRouter.post('/groups/:chatId/stickers/packs', requireTmaAuth('stickers'), (req: AuthenticatedTmaRequest, res) => {
+tmaRouter.patch('/groups/:chatId/stickers/packs/:packName', requireTmaAuth('stickers'), (req: AuthenticatedTmaRequest, res) => {
   try {
     const chatId = req.tmaChatId!;
-    const { packName, config } = req.body;
+    const packName = req.params.packName.trim();
+    const enabled = req.body.enabled !== false;
+    const updated = db.updateGroupStickerPack(chatId, packName, { enabled });
+    if (!updated) {
+      return res.status(404).json({ error: `Sticker pack "${packName}" not found in group configuration` });
+    }
+    res.json({ ok: true, pack: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-    if (!packName || typeof packName !== 'string') {
-      return res.status(400).json({ error: 'packName is required' });
+tmaRouter.post('/groups/:chatId/stickers/packs', requireTmaAuth('stickers'), async (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const rawInput = (req.body.packNameOrUrl || req.body.packName || req.body.name || '').trim();
+    if (!rawInput) {
+      return res.status(400).json({ error: 'Sticker pack name or URL is required' });
+    }
+
+    const cleanPackName = rawInput
+      .replace(/^https?:\/\/t\.me\/addstickers\//i, '')
+      .replace(/^t\.me\/addstickers\//i, '')
+      .replace(/[<>]/g, '')
+      .trim();
+
+    if (!cleanPackName) {
+      return res.status(400).json({ error: 'Invalid sticker pack identifier' });
+    }
+
+    const existingPacks = db.getGroupStickerPacks(chatId);
+    const alreadyExisting = existingPacks.find(p => p.name.toLowerCase() === cleanPackName.toLowerCase());
+    if (alreadyExisting) {
+      return res.json({
+        ok: true,
+        pack: alreadyExisting,
+        alreadyExisted: true,
+        message: `Sticker pack "${cleanPackName}" is already registered in this group.`
+      });
+    }
+
+    let title = cleanPackName;
+    let stickers: any[] = [];
+
+    try {
+      const setRes = await telegramApi.getStickerSet(cleanPackName);
+      if (setRes && setRes.ok && setRes.result) {
+        const tgSet = setRes.result;
+        title = tgSet.title || tgSet.name || cleanPackName;
+        stickers = (tgSet.stickers || []).map((s: any) => ({
+          fileId: s.file_id,
+          emoji: s.emoji || '✨'
+        }));
+        const now = new Date().toISOString();
+        for (const s of (tgSet.stickers || [])) {
+          db.addStickerToLibrary('playful', s.file_id, {
+            chatId,
+            packName: cleanPackName,
+            packTitle: title,
+            fileId: s.file_id,
+            emoji: s.emoji || '✨',
+            mood: 'playful',
+            source: 'custom',
+            addedAt: now
+          }, chatId);
+        }
+      }
+    } catch {
+      // Safe fallback
     }
 
     const settings = db.getGroupSettings(chatId);
     const packs = { ...(settings.stickerPacks || {}) };
-    packs[packName] = {
-      name: packName,
-      title: config?.title || packName,
-      enabled: config?.enabled !== undefined ? Boolean(config.enabled) : true,
-      stickers: Array.isArray(config?.stickers) ? config.stickers : []
+    packs[cleanPackName] = {
+      name: cleanPackName,
+      title: req.body.config?.title || title,
+      enabled: req.body.config?.enabled !== undefined ? Boolean(req.body.config.enabled) : true,
+      stickers: req.body.config?.stickers || stickers
     };
 
     db.updateGroupSettings(chatId, { stickerPacks: packs });
-    res.json({ ok: true, pack: packs[packName] });
+    res.json({ ok: true, pack: packs[cleanPackName] });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -568,20 +792,31 @@ tmaRouter.delete('/groups/:chatId/abuse-words', requireTmaAuth('abuse_words'), (
 // 12. Members (Owner & Exception Admin)
 // ==========================================
 
-tmaRouter.get('/groups/:chatId/members', requireTmaAuth('members'), (req: AuthenticatedTmaRequest, res) => {
+tmaRouter.get('/groups/:chatId/members', requireTmaAuth('members'), async (req: AuthenticatedTmaRequest, res) => {
   try {
     const chatId = req.tmaChatId!;
-    const members = (db as any).data?.groupMembers || {};
-    const prefix = `${chatId}_`;
-    const list: any[] = [];
+    let list = db.getGroupMembers(chatId);
 
-    for (const [key, m] of Object.entries(members)) {
-      if (key.startsWith(prefix)) {
-        list.push(m);
+    // If local member list is empty, query Telegram chat administrators to populate list
+    if (!list || list.length === 0) {
+      try {
+        const admins = await TelegramMiddleware.getChatAdministrators(chatId);
+        if (admins && admins.length > 0) {
+          list = admins.map(adm => ({
+            userId: adm.user?.id || 0,
+            username: adm.user?.username,
+            firstName: adm.user?.first_name,
+            lastName: adm.user?.last_name,
+            role: adm.status === 'creator' ? 'creator' : 'administrator',
+            lastActive: new Date().toISOString()
+          }));
+        }
+      } catch {
+        // Fallback
       }
     }
 
-    res.json({ ok: true, members: list });
+    res.json({ ok: true, members: list || [] });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -938,6 +1173,61 @@ tmaRouter.put('/groups/:chatId/rules', requireTmaAuth('schedules'), (req: Authen
     const { rules } = req.body;
     const updated = db.updateGroupSettings(chatId, { rules: String(rules || '') });
     res.json({ ok: true, rules: updated.rules });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.get('/groups/:chatId/automations', requireTmaAuth('schedules'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const automations = db.getAutomations(chatId);
+    res.json({ ok: true, automations: automations || [] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.post('/groups/:chatId/automations', requireTmaAuth('schedules'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const { trigger, action, parameters, enabled } = req.body;
+    if (!trigger || !action) {
+      return res.status(400).json({ error: 'Trigger and action are required.' });
+    }
+    const newAuto = {
+      id: Math.random().toString(36).substring(2, 8).toUpperCase(),
+      trigger,
+      action,
+      parameters: parameters || '',
+      enabled: enabled !== false,
+      createdBy: req.tmaUser!.id,
+      createdAt: new Date().toISOString()
+    };
+    db.addAutomation(chatId, newAuto);
+    res.json({ ok: true, automation: newAuto });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.delete('/groups/:chatId/automations/:id', requireTmaAuth('schedules'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const autoId = req.params.id;
+    const deleted = db.deleteAutomation(chatId, autoId);
+    res.json({ ok: Boolean(deleted) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.post('/groups/:chatId/automations/:id/toggle', requireTmaAuth('schedules'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const autoId = req.params.id;
+    const toggled = db.toggleAutomation(chatId, autoId, req.body.enabled);
+    res.json({ ok: Boolean(toggled) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

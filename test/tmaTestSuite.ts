@@ -277,6 +277,20 @@ async function runTmaTestSuite() {
   // ----------------------------------------------------
   console.log('\n--- SECTION 5: TMA Endpoints & Express Routing Tests ---');
 
+  const origSendMessage = telegramApi.sendMessage.bind(telegramApi);
+  let sentMessages: Array<{ chatId: any; text: string; options: any }> = [];
+  telegramApi.sendMessage = async (cId: any, text: string, options?: any) => {
+    sentMessages.push({ chatId: cId, text, options });
+    return { ok: true, result: { message_id: 12345 } };
+  };
+
+  db.updateGroupSettings(groupABC, {
+    chatTitle: 'Group ABC',
+    stickerPacks: {
+      roxie_pack: { name: 'roxie_pack', title: 'Roxie Pack', enabled: true, stickers: [] }
+    }
+  });
+
   const app = express();
   app.use(express.json());
   app.use('/api/tma', tmaRouter);
@@ -401,6 +415,132 @@ async function runTmaTestSuite() {
   });
   assert(ownerResetReq.status === 403 && ownerResetReq.body?.code === 'FORBIDDEN_MINIAPP_ENDPOINT', 'TMA-40: /reset permanently denied to Group Owner in Mini App (403)');
 
+  // 11. Welcome & Goodbye Settings
+  const welcomeGetReq = await simulateRequest('GET', `/api/tma/groups/${groupABC}/welcome-goodbye`, {
+    'x-tma-session': ownerToken
+  });
+  assert(welcomeGetReq.status === 200 && welcomeGetReq.body?.groupWelcome !== undefined, 'TMA-40A: GET /welcome-goodbye returns greeting configs for Owner');
+
+  // 12. Welcome & Goodbye PUT
+  const welcomePutReq = await simulateRequest('PUT', `/api/tma/groups/${groupABC}/welcome-goodbye`, {
+    'x-tma-session': ownerToken
+  }, {
+    groupWelcome: { enabled: true, text: 'Hello {user}!' },
+    groupGoodbye: { enabled: true, text: 'Bye {user}!' },
+    welcomeDm: { enabled: true, text: 'Welcome DM {user}!' },
+    autoDeleteJoinLeave: true
+  });
+  assert(welcomePutReq.status === 200 && welcomePutReq.body?.ok, 'TMA-40B: PUT /welcome-goodbye successfully saves greeting configurations');
+
+  // 13. Welcome & Goodbye Test Message Dispatch
+  const welcomeTestReq = await simulateRequest('POST', `/api/tma/groups/${groupABC}/welcome-goodbye/test`, {
+    'x-tma-session': ownerToken
+  }, {
+    target: 'groupWelcome'
+  });
+  assert(welcomeTestReq.status === 200 && welcomeTestReq.body?.ok, 'TMA-40C: POST /welcome-goodbye/test successfully dispatches test greeting for Owner');
+
+  // 14. Welcome & Goodbye restricted from regular admin
+  const welcomeAdminDeny = await simulateRequest('GET', `/api/tma/groups/${groupABC}/welcome-goodbye`, {
+    'x-tma-session': adminToken
+  });
+  assert(welcomeAdminDeny.status === 403 && welcomeAdminDeny.body?.code === 'FORBIDDEN_FEATURE', 'TMA-40D: GET /welcome-goodbye restricted from GROUP_ADMIN with 403 FORBIDDEN_FEATURE');
+
+  // 15. Warnings list and reset
+  const warningsGetReq = await simulateRequest('GET', `/api/tma/groups/${groupABC}/warnings`, {
+    'x-tma-session': ownerToken
+  });
+  assert(warningsGetReq.status === 200 && Array.isArray(warningsGetReq.body?.warnings), 'TMA-40E: GET /warnings returns active warnings array for Owner');
+
+  const warningsAdminGet = await simulateRequest('GET', `/api/tma/groups/${groupABC}/warnings`, {
+    'x-tma-session': adminToken
+  });
+  assert(warningsAdminGet.status === 200 && Array.isArray(warningsAdminGet.body?.warnings), 'TMA-40F: GET /warnings accessible to GROUP_ADMIN with moderation permission');
+
+  // 16. User Lust Levels and Reset (lust_mode permitted for GROUP_ADMIN)
+  const lustUsersReq = await simulateRequest('GET', `/api/tma/groups/${groupABC}/lust/users`, {
+    'x-tma-session': adminToken
+  });
+  assert(lustUsersReq.status === 200 && Array.isArray(lustUsersReq.body?.users), 'TMA-40G: GET /lust/users accessible to GROUP_ADMIN');
+
+  const lustResetReq = await simulateRequest('POST', `/api/tma/groups/${groupABC}/lust/reset-users`, {
+    'x-tma-session': adminToken
+  });
+  assert(lustResetReq.status === 200 && lustResetReq.body?.ok, 'TMA-40H: POST /lust/reset-users accessible to GROUP_ADMIN');
+
+  // 17. Stickers packs list and toggle (stickers permitted for GROUP_ADMIN)
+  const stickersGetReq = await simulateRequest('GET', `/api/tma/groups/${groupABC}/stickers`, {
+    'x-tma-session': adminToken
+  });
+  assert(stickersGetReq.status === 200 && Array.isArray(stickersGetReq.body?.packs), 'TMA-40I: GET /stickers returns packs array to GROUP_ADMIN');
+
+  const stickerToggleReq = await simulateRequest('PATCH', `/api/tma/groups/${groupABC}/stickers/packs/roxie_pack`, {
+    'x-tma-session': adminToken
+  }, { enabled: false });
+  assert(stickerToggleReq.status === 200 && stickerToggleReq.body?.ok, 'TMA-40J: PATCH /stickers/packs/:packName toggles pack status');
+
+  // 18. Automations (schedules feature permitted for Owner, restricted for GROUP_ADMIN)
+  const automationsOwnerReq = await simulateRequest('GET', `/api/tma/groups/${groupABC}/automations`, {
+    'x-tma-session': ownerToken
+  });
+  assert(automationsOwnerReq.status === 200 && Array.isArray(automationsOwnerReq.body?.automations), 'TMA-40K: GET /automations returns automations array for Owner');
+
+  const automationsAdminDeny = await simulateRequest('GET', `/api/tma/groups/${groupABC}/automations`, {
+    'x-tma-session': adminToken
+  });
+  assert(automationsAdminDeny.status === 403 && automationsAdminDeny.body?.code === 'FORBIDDEN_FEATURE', 'TMA-40L: GET /automations restricted from GROUP_ADMIN');
+
+  // 19. Members (members feature permitted for Owner, restricted for GROUP_ADMIN)
+  const membersOwnerReq = await simulateRequest('GET', `/api/tma/groups/${groupABC}/members`, {
+    'x-tma-session': ownerToken
+  });
+  assert(membersOwnerReq.status === 200 && Array.isArray(membersOwnerReq.body?.members), 'TMA-40M: GET /members returns members list for Owner');
+
+  const membersAdminDeny = await simulateRequest('GET', `/api/tma/groups/${groupABC}/members`, {
+    'x-tma-session': adminToken
+  });
+  assert(membersAdminDeny.status === 403 && membersAdminDeny.body?.code === 'FORBIDDEN_FEATURE', 'TMA-40N: GET /members restricted from GROUP_ADMIN');
+
+  // 20. Permissions (permissions feature permitted for Owner, restricted for GROUP_ADMIN)
+  const permsOwnerReq = await simulateRequest('GET', `/api/tma/groups/${groupABC}/permissions`, {
+    'x-tma-session': ownerToken
+  });
+  assert(permsOwnerReq.status === 200 && permsOwnerReq.body?.defaultMemberPermissions !== undefined, 'TMA-40O: GET /permissions returns permission states for Owner');
+
+  const permsAdminDeny = await simulateRequest('GET', `/api/tma/groups/${groupABC}/permissions`, {
+    'x-tma-session': adminToken
+  });
+  assert(permsAdminDeny.status === 403 && permsAdminDeny.body?.code === 'FORBIDDEN_FEATURE', 'TMA-40P: GET /permissions restricted from GROUP_ADMIN');
+
+  // 21. Settings RBAC: Regular Admin can update moderation protection settings
+  const adminSettingsMod = await simulateRequest('PUT', `/api/tma/groups/${groupABC}/settings`, {
+    'x-tma-session': adminToken
+  }, {
+    fileProtection: true,
+    imageProtection: true,
+    reportsEnabled: true
+  });
+  assert(adminSettingsMod.status === 200 && adminSettingsMod.body?.ok, 'TMA-40Q: GROUP_ADMIN can update moderation protection toggles');
+
+  // 22. Settings RBAC: Regular Admin cannot update owner-only settings (e.g. exceptionAdmins)
+  const adminOwnerSettingsDeny = await simulateRequest('PUT', `/api/tma/groups/${groupABC}/settings`, {
+    'x-tma-session': adminToken
+  }, {
+    exceptionAdmins: [12345]
+  });
+  assert(adminOwnerSettingsDeny.status === 403 && adminOwnerSettingsDeny.body?.code === 'OWNER_ONLY_SETTING', 'TMA-40R: GROUP_ADMIN cannot update owner-only settings');
+
+  // 23. Settings Telemetry: cooldown and next-execution seconds returned
+  const settingsTelemetry = await simulateRequest('GET', `/api/tma/groups/${groupABC}/settings`, {
+    'x-tma-session': adminToken
+  });
+  assert(
+    settingsTelemetry.status === 200 &&
+    typeof settingsTelemetry.body?.autoEngineMessageNextSeconds === 'number' &&
+    typeof settingsTelemetry.body?.autoEngineStickerNextSeconds === 'number',
+    'TMA-40S: GET /settings returns autoEngineMessageNextSeconds and autoEngineStickerNextSeconds telemetry'
+  );
+
   // ----------------------------------------------------
   // SECTION 6: Superadmin Web Dashboard Independence
   // ----------------------------------------------------
@@ -420,17 +560,12 @@ async function runTmaTestSuite() {
   const adminFakeVerify = verifyOperatorAuth({
     headers: { 'x-session-id': adminToken }
   }, 'SUPER_ADMIN');
+  assert(!adminFakeVerify.authorized, 'TMA-42B: TMA session token cannot authenticate as SUPER_ADMIN operator');
+
   // ----------------------------------------------------
   // SECTION 7: /dashboard & /miniapp Launch Button & Flow Verification
   // ----------------------------------------------------
   console.log('\n--- SECTION 7: /dashboard & /miniapp Launch Button & Flow Verification ---');
-
-  const origSendMessage = telegramApi.sendMessage.bind(telegramApi);
-  let sentMessages: Array<{ chatId: any; text: string; options: any }> = [];
-  telegramApi.sendMessage = async (cId: any, text: string, options?: any) => {
-    sentMessages.push({ chatId: cId, text, options });
-    return { ok: true, result: { message_id: 12345 } };
-  };
 
   process.env.PUBLIC_APP_URL = 'https://missroxie-bot.onrender.com';
   db.updateGroupSettings(groupABC, { chatTitle: 'Group ABC' });
@@ -632,6 +767,7 @@ async function runTmaTestSuite() {
   console.log('\n====================================================');
   console.log(`🎉 ALL ${passed} TELEGRAM MINI APP TESTS PASSED! (0 FAILED)`);
   console.log('====================================================\n');
+  process.exit(0);
 }
 
 runTmaTestSuite().catch((err) => {
