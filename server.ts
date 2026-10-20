@@ -17,7 +17,9 @@ import { runDummyDataCleanup } from './server/operations/cleanupDummyData.js';
 import { mongoManager } from './server/db/mongodb.js';
 import { MongoStorageService } from './server/db/mongoStorage.js';
 import { PostSender, sanitizeInlineButtons, validateMediaReference } from './server/telegram/postSender.js';
-import { PostPayload, PostContentType, ScheduledPostButton, WelcomeDmConfig, TelegramUser, RichMessageConfig, MessageMode, GroupSettings, WelcomeDmTriggerMode } from './server/telegram/types.js';
+import { PostPayload, PostContentType, ScheduledPostButton, WelcomeDmConfig, TelegramUser, RichMessageConfig, MessageMode, GroupSettings, WelcomeDmTriggerMode, SavedPost, PrivateRecipientRecord } from './server/telegram/types.js';
+import { PostResolverService } from './server/telegram/postResolver.js';
+import { parseScheduleTime } from './server/telegram/postBuilder.js';
 import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
 import { ModerationService } from './server/telegram/moderation.js';
 import { messageScheduler, normalizeTriggerKeyword } from './server/telegram/scheduler.js';
@@ -804,7 +806,8 @@ export async function startServer() {
   // 3. Get all connected groups
   const handleGetGroups = (req: express.Request, res: express.Response) => {
     try {
-      const groups = db.getConnectedGroups(db.getCurrentBotId() ?? undefined);
+      const includeInactive = req.query.include_inactive === 'true' || req.query.all === 'true';
+      const groups = db.getConnectedGroups(db.getCurrentBotId() ?? undefined, includeInactive);
       res.json(groups);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1209,6 +1212,107 @@ export async function startServer() {
       });
 
       res.json({ success: true, removedCount });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 7f. Copy Sticker Packs Between Groups (Feature 3)
+  app.post('/api/dashboard/groups/:chatId/stickers/packs/copy', async (req, res) => {
+    try {
+      const destChatId = Number(req.params.chatId);
+      const { sourceChatId, packNames } = req.body;
+      if (!sourceChatId || !Array.isArray(packNames) || packNames.length === 0) {
+        return res.status(400).json({ error: 'sourceChatId and packNames array are required.' });
+      }
+
+      const destExistingPacks = db.getGroupStickerPacks(destChatId);
+      const destExistingNames = new Set(destExistingPacks.map(p => p.name.toLowerCase()));
+      const sourcePacks = db.getGroupStickerPacks(Number(sourceChatId));
+
+      const results: Array<{ packName: string; status: 'copied' | 'already_exists' | 'failed'; message?: string; stickerCount?: number }> = [];
+
+      for (const rawName of packNames) {
+        const cleanName = String(rawName).trim();
+        if (destExistingNames.has(cleanName.toLowerCase())) {
+          results.push({
+            packName: cleanName,
+            status: 'already_exists',
+            message: `Pack "${cleanName}" is already configured in destination group.`
+          });
+          continue;
+        }
+
+        const srcPack = sourcePacks.find(p => p.name.toLowerCase() === cleanName.toLowerCase());
+        let title = srcPack?.title || cleanName;
+        let stickers = srcPack?.stickers || [];
+
+        if (!srcPack || stickers.length === 0) {
+          const setRes = await telegramApi.getStickerSet(cleanName);
+          if (setRes.ok && setRes.result) {
+            title = setRes.result.title || title;
+            stickers = (setRes.result.stickers || []).map((s: any) => ({
+              fileId: s.file_id,
+              emoji: s.emoji || '✨'
+            }));
+          } else {
+            results.push({
+              packName: cleanName,
+              status: 'failed',
+              message: setRes.description || `Could not find sticker pack "${cleanName}" on Telegram.`
+            });
+            continue;
+          }
+        }
+
+        const now = new Date().toISOString();
+        for (const s of stickers) {
+          db.addStickerToLibrary('playful', s.fileId, {
+            chatId: destChatId,
+            packName: cleanName,
+            packTitle: title,
+            fileId: s.fileId,
+            emoji: s.emoji || '✨',
+            mood: 'playful',
+            source: 'custom',
+            addedAt: now
+          }, destChatId);
+        }
+
+        const packConfig = {
+          name: cleanName,
+          title,
+          enabled: true,
+          stickerCount: stickers.length,
+          stickers,
+          addedBy: 'dashboard_admin',
+          addedAt: now
+        };
+        db.addGroupStickerPack(destChatId, packConfig);
+        destExistingNames.add(cleanName.toLowerCase());
+
+        results.push({
+          packName: cleanName,
+          status: 'copied',
+          stickerCount: stickers.length,
+          message: `Successfully configured "${title}" (${stickers.length} stickers)`
+        });
+      }
+
+      db.logAction({
+        id: Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        chatId: destChatId,
+        groupId: destChatId,
+        actorRole: 'DASHBOARD_ADMIN',
+        adminUsername: 'dashboard_admin',
+        command: 'copy_sticker_packs',
+        action: 'setting_change',
+        result: results.some(r => r.status === 'copied') ? 'success' : 'error',
+        details: `Copied sticker packs from ${sourceChatId} to ${destChatId}: ${results.map(r => `${r.packName} (${r.status})`).join(', ')}`
+      });
+
+      res.json({ success: true, results });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2005,6 +2109,51 @@ export async function startServer() {
     }
   });
 
+  // 11b. Private Chat Recipient Registry APIs (Feature 5)
+  app.get('/api/dashboard/private-recipients', (req, res) => {
+    try {
+      const { status, search } = req.query;
+      const recipients = db.getPrivateRecipients({
+        status: status ? String(status) : undefined,
+        search: search ? String(search) : undefined
+      });
+      const stats = db.getPrivateRecipientStats();
+      res.json({ success: true, recipients, stats });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/dashboard/private-recipients/:chatId', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const ok = db.deletePrivateRecipient(chatId);
+      if (!ok) {
+        return res.status(404).json({ error: 'Recipient not found' });
+      }
+      res.json({ success: true, chatId });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch('/api/dashboard/private-recipients/:chatId/status', (req, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const { status, reason } = req.body;
+      if (!['active', 'blocked', 'opted_out', 'failed'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid status' });
+      }
+      const ok = db.updatePrivateRecipientStatus(chatId, status, reason);
+      if (!ok) {
+        return res.status(404).json({ error: 'Recipient not found' });
+      }
+      res.json({ success: true, chatId, status });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // 12. Send Message to Group or Private Chat (with Reply-to-User support)
   app.post('/api/dashboard/send', async (req, res) => {
     try {
@@ -2033,7 +2182,7 @@ export async function startServer() {
   const activeBroadcastLocks = new Set<string>();
   const recentBroadcastResults = new Map<string, any>();
 
-  // 13. Broadcast announcement to multiple groups
+  // 13. Broadcast announcement to multiple groups or private recipients (Feature 1, 4, 5)
   app.post('/api/dashboard/broadcast', async (req, res) => {
     const auth = verifyOperatorAuth(req, 'MODERATOR');
     if (!auth.authorized) {
@@ -2052,30 +2201,112 @@ export async function startServer() {
     }
 
     try {
-      const { groupIds, message } = req.body;
+      const { groupIds, recipientIds, target, targetType, message } = req.body;
+      if (!message || !message.trim()) {
+        return res.status(400).json({ error: 'Message content cannot be empty.' });
+      }
+
+      // Resolve post reference if present (Feature 1)
+      let resolvedPayload: PostPayload;
+      try {
+        resolvedPayload = await PostResolverService.resolveMessage(message.trim());
+      } catch (postErr: any) {
+        return res.status(400).json({ error: postErr.message });
+      }
+
+      const isPrivateBroadcast = target === 'private_recipients' || targetType === 'private_recipients' || (Array.isArray(recipientIds) && recipientIds.length > 0);
+
+      if (isPrivateBroadcast) {
+        const candidateIds = Array.isArray(recipientIds) && recipientIds.length > 0
+          ? recipientIds.map(Number)
+          : db.getPrivateRecipients({ status: 'active' }).map(r => r.chatId);
+
+        // Deduplicate target IDs (Feature 5)
+        const uniqueRecipients = Array.from(new Set(candidateIds)).filter(id => id > 0);
+
+        if (uniqueRecipients.length === 0) {
+          return res.status(400).json({ error: 'No eligible active private recipients found for broadcast.' });
+        }
+
+        const successful: number[] = [];
+        const failed: Array<{ recipientId: number; error: string }> = [];
+
+        for (const rId of uniqueRecipients) {
+          try {
+            const sendRes = await PostSender.send(rId, resolvedPayload);
+            if (sendRes.ok) {
+              successful.push(rId);
+              db.recordPrivateDeliveryResult(rId, true);
+            } else {
+              const errDesc = sendRes.error || 'Failed to deliver';
+              failed.push({ recipientId: rId, error: errDesc });
+              db.recordPrivateDeliveryResult(rId, false, errDesc);
+            }
+          } catch (rErr: any) {
+            failed.push({ recipientId: rId, error: rErr.message || 'Error' });
+            db.recordPrivateDeliveryResult(rId, false, rErr.message);
+          }
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        db.logAction({
+          id: Math.random().toString(36).slice(2, 9),
+          timestamp: new Date().toISOString(),
+          chatId: 0,
+          groupId: 0,
+          actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
+          adminUsername: auth.operatorUsername || 'dashboard_admin',
+          command: 'private_broadcast',
+          action: 'broadcast',
+          result: failed.length === 0 ? 'success' : 'denied',
+          details: `Private DM Broadcast: ${successful.length} sent, ${failed.length} failed`
+        });
+
+        const responsePayload = {
+          total: uniqueRecipients.length,
+          sent: successful.length,
+          failed: failed.length,
+          successful,
+          errors: failed
+        };
+
+        if (broadcastId) {
+          recentBroadcastResults.set(broadcastId, responsePayload);
+          setTimeout(() => recentBroadcastResults.delete(broadcastId), 30_000);
+        }
+
+        return res.json(responsePayload);
+      }
+
+      // GROUP BROADCAST
       if (!Array.isArray(groupIds) || groupIds.length === 0) {
         return res.status(400).json({ error: 'At least one group ID must be selected.' });
       }
-      if (!message || !message.trim()) {
-        return res.status(400).json({ error: 'Message content cannot be empty.' });
+
+      // Feature 4: Exclude groups where Roxie has left
+      const eligibleGroupIds = Array.from(new Set(groupIds.map(Number)))
+        .filter(gId => !db.getGroupSettings(gId).botLeft);
+
+      if (eligibleGroupIds.length === 0) {
+        return res.status(400).json({ error: 'None of the selected groups are active (Roxie is not present in them).' });
       }
 
       const successful: number[] = [];
       const failed: Array<{ groupId: number; error: string }> = [];
 
-      for (const gId of groupIds) {
+      for (const gId of eligibleGroupIds) {
         try {
-          const sendRes = await telegramApi.sendMessage(gId, message.trim(), { parse_mode: 'HTML' });
+          const sendRes = await PostSender.send(gId, resolvedPayload);
           if (sendRes.ok) {
             successful.push(gId);
             db.addGroupConversationEntry(gId, {
               role: 'assistant',
               name: 'Roxie',
-              content: message.trim(),
+              content: resolvedPayload.text || message.trim(),
               timestamp: Date.now()
             });
           } else {
-            failed.push({ groupId: gId, error: sendRes.description || 'Unknown Telegram error' });
+            failed.push({ groupId: gId, error: sendRes.error || 'Unknown Telegram error' });
           }
         } catch (itemErr: any) {
           failed.push({ groupId: gId, error: itemErr.message || 'Failed' });
@@ -2086,8 +2317,8 @@ export async function startServer() {
       db.logAction({
         id: Math.random().toString(36).slice(2, 9),
         timestamp: new Date().toISOString(),
-        chatId: groupIds[0] || 0,
-        groupId: groupIds[0] || 0,
+        chatId: eligibleGroupIds[0] || 0,
+        groupId: eligibleGroupIds[0] || 0,
         actorRole: auth.session?.role || 'DASHBOARD_ADMIN',
         adminUsername: auth.operatorUsername || 'dashboard_admin',
         command: 'broadcast',
@@ -2097,7 +2328,7 @@ export async function startServer() {
       });
 
       const responsePayload = {
-        total: groupIds.length,
+        total: eligibleGroupIds.length,
         sent: successful.length,
         failed: failed.length,
         successful,
@@ -2531,6 +2762,158 @@ export async function startServer() {
   app.post('/api/dashboard/posts/schedule', handleScheduleRichPost);
   app.post('/api/dashboard/groups/:chatId/rich-post/schedule', handleScheduleRichPost);
   app.post('/api/dashboard/private/:userId/rich-post/schedule', handleScheduleRichPost);
+
+  // ==========================================
+  // POST LIBRARY APIs (FEATURE 1)
+  // ==========================================
+  app.get('/api/dashboard/posts/library', (req, res) => {
+    try {
+      const { search, type, creatorId } = req.query;
+      const posts = db.getSavedPosts({
+        search: search ? String(search) : undefined,
+        type: type ? String(type) : undefined,
+        creatorId: creatorId ? Number(creatorId) : undefined
+      });
+      res.json({ success: true, posts });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/dashboard/posts/library/:id', (req, res) => {
+    try {
+      const post = db.getSavedPost(req.params.id);
+      if (!post) {
+        return res.status(404).json({ error: `Saved post "${req.params.id}" not found in library.` });
+      }
+      res.json({ success: true, post });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/posts/library', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const { title, contentType, text, mediaFileId, mediaUploadId, buttons, protectContent, pinAfterSend, replyToLatest, tags } = req.body;
+      if (!title || !title.trim()) {
+        return res.status(400).json({ error: 'Title is required for saved post' });
+      }
+
+      const post = db.saveSavedPost({
+        title: title.trim(),
+        contentType: contentType || 'text',
+        text,
+        mediaFileId,
+        mediaUploadId,
+        buttons,
+        protectContent: Boolean(protectContent),
+        pinAfterSend: Boolean(pinAfterSend),
+        replyToLatest: Boolean(replyToLatest),
+        createdBy: {
+          userId: 0,
+          username: auth.operatorUsername || 'dashboard_admin',
+          role: auth.session?.role || 'ADMIN'
+        },
+        tags
+      });
+
+      res.json({ success: true, post });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put('/api/dashboard/posts/library/:id', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const updated = db.updateSavedPost(req.params.id, req.body);
+      if (!updated) {
+        return res.status(404).json({ error: `Saved post "${req.params.id}" not found.` });
+      }
+      res.json({ success: true, post: updated });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/posts/library/:id/duplicate', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const duplicated = db.duplicateSavedPost(req.params.id, req.body?.title, {
+        userId: 0,
+        username: auth.operatorUsername || 'dashboard_admin',
+        role: auth.session?.role || 'ADMIN'
+      });
+      if (!duplicated) {
+        return res.status(404).json({ error: `Saved post "${req.params.id}" not found.` });
+      }
+      res.json({ success: true, post: duplicated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/dashboard/posts/library/:id', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const deleted = db.deleteSavedPost(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: `Saved post "${req.params.id}" not found.` });
+      }
+      res.json({ success: true, id: req.params.id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/posts/library/:id/preview', async (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const targetChatId = Number(req.body.targetChatId);
+      if (!targetChatId) {
+        return res.status(400).json({ error: 'targetChatId is required for preview delivery.' });
+      }
+
+      const post = db.getSavedPost(req.params.id);
+      if (!post) {
+        return res.status(404).json({ error: `Saved post "${req.params.id}" not found.` });
+      }
+
+      const sendRes = await PostSender.send(targetChatId, {
+        contentType: post.contentType,
+        text: post.text,
+        mediaFileId: post.mediaFileId,
+        mediaUploadId: post.mediaUploadId,
+        buttons: post.buttons,
+        protectContent: post.protectContent
+      });
+
+      res.json(sendRes);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // --- Admin-Only Mention All (@all) Dashboard APIs ---
   const handleMentionAllStart = async (req: express.Request, res: express.Response) => {

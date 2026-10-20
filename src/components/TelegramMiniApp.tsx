@@ -33,7 +33,10 @@ import {
   HelpCircle,
   X,
   Check,
-  Search
+  Search,
+  Bookmark,
+  Copy,
+  Edit2
 } from 'lucide-react';
 
 export type MiniAppFeature =
@@ -197,7 +200,28 @@ export const TelegramMiniApp: React.FC = () => {
 
   // Role Assignment Modal
   const [showRoleModal, setShowRoleModal] = useState<boolean>(false);
-  const [roleModalTarget, setRoleModalTarget] = useState<any | null>(null);
+  // Editing state for Schedule & Automation (Feature 2 Parity)
+    const [editingSchedule, setEditingSchedule] = useState<any | null>(null);
+    const [editingAutomation, setEditingAutomation] = useState<any | null>(null);
+
+    // Sticker Pack Copy state (Feature 3)
+    const [showCopyStickersModal, setShowCopyStickersModal] = useState<boolean>(false);
+    const [stickerSources, setStickerSources] = useState<any[]>([]);
+    const [selectedSourceGroupId, setSelectedSourceGroupId] = useState<string>('');
+    const [selectedPacksToCopy, setSelectedPacksToCopy] = useState<string[]>([]);
+    const [copyStickerResults, setCopyStickerResults] = useState<any[] | null>(null);
+    const [isCopyingStickers, setIsCopyingStickers] = useState<boolean>(false);
+
+    // Post Library state in TMA (Feature 1 & 2)
+    const [showPostLibraryModal, setShowPostLibraryModal] = useState<boolean>(false);
+    const [savedPostsData, setSavedPostsData] = useState<any[]>([]);
+    const [postLibrarySearch, setPostLibrarySearch] = useState<string>('');
+    const [postLibraryLoading, setPostLibraryLoading] = useState<boolean>(false);
+    const [showSavePostModal, setShowSavePostModal] = useState<boolean>(false);
+    const [newPostTitle, setNewPostTitle] = useState<string>('');
+    const [isSavingPostToLib, setIsSavingPostToLib] = useState<boolean>(false);
+
+    const [roleModalTarget, setRoleModalTarget] = useState<any | null>(null);
   const [selectedRoleToAssign, setSelectedRoleToAssign] = useState<string>('MODERATOR');
 
   // Confirmation Modal State
@@ -786,6 +810,176 @@ export const TelegramMiniApp: React.FC = () => {
   const handleRemovePostButton = (index: number) => {
     setPostButtons(postButtons.filter((_, i) => i !== index));
   };
+  // Schedule & Automation Edit Openers (Feature 2 Parity)
+  const handleOpenEditSchedule = (s: any) => {
+    setEditingSchedule(s);
+    setScheduleForm({
+      name: s.name || '',
+      message: s.message || s.messageText || '',
+      scheduleType: s.scheduleType || (s.cronExpression ? 'daily' : 'interval'),
+      intervalStr: s.intervalFormatted || s.intervalStr || '1h',
+      nextRunDate: s.nextRun ? s.nextRun.split('T')[0] : new Date().toISOString().split('T')[0],
+      nextRunTime: s.nextRun && s.nextRun.includes('T') ? s.nextRun.split('T')[1].slice(0, 5) : '12:00',
+      pinAfterSend: Boolean(s.pinAfterSend),
+      replyToLatest: Boolean(s.replyToLatest)
+    });
+    setShowScheduleModal(true);
+  };
+
+  const handleOpenEditAutomation = (a: any) => {
+    setEditingAutomation(a);
+    setAutoRuleForm({
+      trigger: a.trigger || 'spam_detected',
+      action: a.action || 'delete_message',
+      parameters: a.parameters || ''
+    });
+    setShowAutomationModal(true);
+  };
+
+  // Sticker Copy Handlers (Feature 3)
+  const handleOpenCopyStickers = async () => {
+    if (!chatId) return;
+    setCopyStickerResults(null);
+    setSelectedPacksToCopy([]);
+    try {
+      const res = await tmaFetch(`/api/tma/groups/${chatId}/stickers/sources`);
+      const data = await res.json();
+      if (res.ok && data.sources) {
+        setStickerSources(data.sources);
+        if (data.sources.length > 0) {
+          setSelectedSourceGroupId(String(data.sources[0].chatId));
+        }
+        setShowCopyStickersModal(true);
+      } else {
+        showNotification('No other groups with sticker packs found', 'info');
+      }
+    } catch (err: any) {
+      showNotification(err.message, 'error');
+    }
+  };
+
+  const handleExecuteCopyStickers = async () => {
+    if (!chatId || !selectedSourceGroupId || selectedPacksToCopy.length === 0) {
+      showNotification('Please select at least one pack to copy', 'error');
+      return;
+    }
+    setIsCopyingStickers(true);
+    try {
+      const res = await tmaFetch(`/api/tma/groups/${chatId}/stickers/packs/copy`, {
+        method: 'POST',
+        body: JSON.stringify({
+          sourceChatId: Number(selectedSourceGroupId),
+          packNames: selectedPacksToCopy
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.results) {
+        setCopyStickerResults(data.results);
+        loadTabData('stickers');
+        showNotification('Sticker pack copy operation completed', 'success');
+      } else {
+        showNotification(data.error || 'Failed to copy sticker packs', 'error');
+      }
+    } catch (err: any) {
+      showNotification(err.message, 'error');
+    } finally {
+      setIsCopyingStickers(false);
+    }
+  };
+
+  // Post Library Handlers in TMA (Feature 1 & 2)
+  const handleLoadSavedPosts = async (searchQuery?: string) => {
+    if (!chatId) return;
+    setPostLibraryLoading(true);
+    try {
+      const q = searchQuery !== undefined ? searchQuery : postLibrarySearch;
+      const res = await tmaFetch(`/api/tma/groups/${chatId}/posts/library${q ? `?search=${encodeURIComponent(q)}` : ''}`);
+      const data = await res.json();
+      if (res.ok && data.posts) {
+        setSavedPostsData(data.posts);
+      }
+    } catch (err: any) {
+      showNotification(err.message, 'error');
+    } finally {
+      setPostLibraryLoading(false);
+    }
+  };
+
+  const handleOpenPostLibrary = () => {
+    setShowPostLibraryModal(true);
+    handleLoadSavedPosts('');
+  };
+
+  const handleSavePostToLibrary = async () => {
+    if (!chatId || !newPostTitle.trim()) {
+      showNotification('Please provide a title for the saved post', 'error');
+      return;
+    }
+    setIsSavingPostToLib(true);
+    try {
+      const buttonRows = postButtons.length > 0 ? [postButtons] : [];
+      const res = await tmaFetch(`/api/tma/groups/${chatId}/posts/library`, {
+        method: 'POST',
+        body: JSON.stringify({
+          title: newPostTitle.trim(),
+          contentType: postContentType,
+          text: postContent,
+          mediaFileId: postMediaId.trim() || undefined,
+          buttons: buttonRows,
+          protectContent: postProtect,
+          pinAfterSend: postPin
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.post) {
+        showNotification(`Saved to library as ${data.post.id}`, 'success');
+        setShowSavePostModal(false);
+        setNewPostTitle('');
+      } else {
+        showNotification(data.error || 'Failed to save post', 'error');
+      }
+    } catch (err: any) {
+      showNotification(err.message, 'error');
+    } finally {
+      setIsSavingPostToLib(false);
+    }
+  };
+
+  const handleInsertPostReference = (postId: string) => {
+    setPostContent(prev => (prev ? `${prev} {{post:${postId}}}` : `{{post:${postId}}}`));
+    setShowPostLibraryModal(false);
+    showNotification(`Inserted {{post:${postId}}} into composer`, 'success');
+  };
+
+  const handleLoadPostIntoComposer = (p: any) => {
+    if (p.contentType) setPostContentType(p.contentType);
+    if (p.text) setPostContent(p.text);
+    if (p.mediaFileId) setPostMediaId(p.mediaFileId);
+    if (Array.isArray(p.buttons)) {
+      setPostButtons(p.buttons.flat());
+    }
+    setShowPostLibraryModal(false);
+    showNotification(`Loaded "${p.title}" into composer`, 'success');
+  };
+
+  const handleDeleteSavedPost = (postId: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: `Delete Saved Post ${postId}?`,
+      description: 'Are you sure you want to delete this reusable post from the library?',
+      action: async () => {
+        try {
+          const res = await tmaFetch(`/api/tma/groups/${chatId}/posts/library/${postId}`, { method: 'DELETE' });
+          if (res.ok) {
+            showNotification(`Post ${postId} deleted`, 'info');
+            handleLoadSavedPosts();
+          }
+        } catch (err: any) {
+          showNotification(err.message, 'error');
+        }
+      }
+    });
+  };
 
   const handleSendRichPost = async () => {
     if (!chatId || !postContent.trim()) {
@@ -891,14 +1085,21 @@ export const TelegramMiniApp: React.FC = () => {
       return;
     }
     try {
-      const res = await tmaFetch(`/api/tma/groups/${chatId}/schedules`, {
-        method: 'POST',
+      const isEdit = Boolean(editingSchedule && editingSchedule.id);
+      const url = isEdit
+        ? `/api/tma/groups/${chatId}/schedules/${editingSchedule.id}`
+        : `/api/tma/groups/${chatId}/schedules`;
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await tmaFetch(url, {
+        method,
         body: JSON.stringify(scheduleForm)
       });
       const data = await res.json();
       if (res.ok && data.ok) {
-        showNotification('Scheduled message created', 'success');
+        showNotification(isEdit ? 'Scheduled message updated' : 'Scheduled message created', 'success');
         setShowScheduleModal(false);
+        setEditingSchedule(null);
         setScheduleForm({
           name: '',
           message: '',
@@ -911,7 +1112,7 @@ export const TelegramMiniApp: React.FC = () => {
         });
         loadTabData('schedules');
       } else {
-        showNotification(data.error || 'Failed to create schedule', 'error');
+        showNotification(data.error || (isEdit ? 'Failed to update schedule' : 'Failed to create schedule'), 'error');
       }
     } catch (err: any) {
       showNotification(err.message, 'error');
@@ -972,16 +1173,25 @@ export const TelegramMiniApp: React.FC = () => {
   const handleCreateAutomation = async () => {
     if (!chatId) return;
     try {
-      const res = await tmaFetch(`/api/tma/groups/${chatId}/automations`, {
-        method: 'POST',
+      const isEdit = Boolean(editingAutomation && editingAutomation.id);
+      const url = isEdit
+        ? `/api/tma/groups/${chatId}/automations/${editingAutomation.id}`
+        : `/api/tma/groups/${chatId}/automations`;
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await tmaFetch(url, {
+        method,
         body: JSON.stringify(autoRuleForm)
       });
       const data = await res.json();
       if (res.ok && data.ok) {
-        showNotification('Automation rule added', 'success');
+        showNotification(isEdit ? 'Automation rule updated' : 'Automation rule added', 'success');
         setShowAutomationModal(false);
+        setEditingAutomation(null);
         setAutoRuleForm({ trigger: 'spam_detected', action: 'delete_message', parameters: '' });
         loadTabData('schedules');
+      } else {
+        showNotification(data.error || (isEdit ? 'Failed to update automation' : 'Failed to create automation'), 'error');
       }
     } catch (err: any) {
       showNotification(err.message, 'error');
@@ -2045,6 +2255,25 @@ export const TelegramMiniApp: React.FC = () => {
                       />
                       <span className="text-white text-xs">Protect Content</span>
                     </label>
+                  </div>
+
+                  {/* Post Library Integration (Feature 1 & 2) */}
+                  <div className="flex gap-2 pt-1 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={handleOpenPostLibrary}
+                      className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Bookmark className="w-3.5 h-3.5" /> Post Library
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowSavePostModal(true)}
+                      disabled={!postContent.trim()}
+                      className="flex-1 py-2 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-40"
+                    >
+                      <Copy className="w-3.5 h-3.5" /> Save to Library
+                    </button>
                   </div>
 
                   {/* Send Button */}
@@ -3158,8 +3387,8 @@ export const TelegramMiniApp: React.FC = () => {
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full space-y-3 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white">Create Scheduled Broadcast</h3>
-              <button onClick={() => setShowScheduleModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
+              <h3 className="text-sm font-bold text-white">{editingSchedule ? 'Edit Scheduled Broadcast' : 'Create Scheduled Broadcast'}</h3>
+              <button onClick={() => { setShowScheduleModal(false); setEditingSchedule(null); }} className="text-slate-400 hover:text-white cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -3248,7 +3477,7 @@ export const TelegramMiniApp: React.FC = () => {
 
             <div className="flex gap-2 justify-end pt-2">
               <button
-                onClick={() => setShowScheduleModal(false)}
+                onClick={() => { setShowScheduleModal(false); setEditingSchedule(null); }}
                 className="px-3.5 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
               >
                 Cancel
@@ -3257,7 +3486,7 @@ export const TelegramMiniApp: React.FC = () => {
                 onClick={handleCreateSchedule}
                 className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold cursor-pointer"
               >
-                Create Schedule
+                {editingSchedule ? 'Save Changes' : 'Create Schedule'}
               </button>
             </div>
           </div>
@@ -3269,8 +3498,8 @@ export const TelegramMiniApp: React.FC = () => {
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white">Add Reactive Rule</h3>
-              <button onClick={() => setShowAutomationModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
+              <h3 className="text-sm font-bold text-white">{editingAutomation ? 'Edit Reactive Rule' : 'Add Reactive Rule'}</h3>
+              <button onClick={() => { setShowAutomationModal(false); setEditingAutomation(null); }} className="text-slate-400 hover:text-white cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -3319,7 +3548,7 @@ export const TelegramMiniApp: React.FC = () => {
 
             <div className="flex gap-2 justify-end pt-2">
               <button
-                onClick={() => setShowAutomationModal(false)}
+                onClick={() => { setShowAutomationModal(false); setEditingAutomation(null); }}
                 className="px-3.5 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
               >
                 Cancel
@@ -3328,7 +3557,284 @@ export const TelegramMiniApp: React.FC = () => {
                 onClick={handleCreateAutomation}
                 className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold cursor-pointer"
               >
-                Add Rule
+                {editingAutomation ? 'Save Changes' : 'Add Rule'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Copy Sticker Packs Modal (Feature 3) */}
+      {showCopyStickersModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Copy className="w-4 h-4 text-cyan-400" /> Copy Sticker Packs Between Groups
+              </h3>
+              <button onClick={() => setShowCopyStickersModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              Select a source group and the sticker packs you want to copy into this group.
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-slate-400 block mb-1 font-semibold">Source Group</label>
+                <select
+                  value={selectedSourceGroupId}
+                  onChange={e => {
+                    setSelectedSourceGroupId(e.target.value);
+                    setSelectedPacksToCopy([]);
+                    setCopyStickerResults(null);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
+                >
+                  {stickerSources.map(s => (
+                    <option key={s.chatId} value={s.chatId}>
+                      {s.chatTitle} ({s.packs.length} packs)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Pack list */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-slate-400 font-semibold">Configured Packs</label>
+                  {(() => {
+                    const src = stickerSources.find(s => String(s.chatId) === String(selectedSourceGroupId));
+                    if (!src || src.packs.length === 0) return null;
+                    const allSelected = selectedPacksToCopy.length === src.packs.length;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (allSelected) {
+                            setSelectedPacksToCopy([]);
+                          } else {
+                            setSelectedPacksToCopy(src.packs.map((p: any) => p.name));
+                          }
+                        }}
+                        className="text-[11px] text-cyan-400 hover:underline cursor-pointer"
+                      >
+                        {allSelected ? 'Deselect All' : 'Select All'}
+                      </button>
+                    );
+                  })()}
+                </div>
+
+                <div className="space-y-1.5 max-h-48 overflow-y-auto p-1">
+                  {(() => {
+                    const src = stickerSources.find(s => String(s.chatId) === String(selectedSourceGroupId));
+                    if (!src || src.packs.length === 0) {
+                      return <p className="text-slate-500 py-3 text-center">No packs configured in selected group.</p>;
+                    }
+                    return src.packs.map((p: any) => {
+                      const isChecked = selectedPacksToCopy.includes(p.name);
+                      return (
+                        <label
+                          key={p.name}
+                          className="flex items-center justify-between p-2 rounded-xl bg-slate-950/70 border border-slate-800 cursor-pointer hover:border-slate-700"
+                        >
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                if (isChecked) {
+                                  setSelectedPacksToCopy(selectedPacksToCopy.filter(n => n !== p.name));
+                                } else {
+                                  setSelectedPacksToCopy([...selectedPacksToCopy, p.name]);
+                                }
+                              }}
+                              className="w-4 h-4 accent-cyan-500 rounded"
+                            />
+                            <div>
+                              <div className="font-semibold text-white truncate max-w-[170px]">{p.title || p.name}</div>
+                              <div className="text-[10px] text-slate-500 font-mono">{p.name}</div>
+                            </div>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono">{p.count} stickers</span>
+                        </label>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+
+              {/* Progress and Results */}
+              {copyStickerResults && (
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <div className="font-bold text-white text-[11px]">Copy Results:</div>
+                  <div className="space-y-1">
+                    {copyStickerResults.map((r, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-[11px]">
+                        <span className="font-mono text-slate-300 truncate max-w-[160px]">{r.packName}</span>
+                        <span className={`px-1.5 py-0.2 rounded font-bold uppercase text-[9px] ${
+                          r.status === 'copied' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                          r.status === 'already_exists' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                          'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                        }`}>
+                          {r.status === 'copied' ? 'Copied' : r.status === 'already_exists' ? 'Exists' : 'Failed'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                onClick={() => setShowCopyStickersModal(false)}
+                className="px-3.5 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                onClick={handleExecuteCopyStickers}
+                disabled={isCopyingStickers || selectedPacksToCopy.length === 0}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5"
+              >
+                {isCopyingStickers ? 'Copying...' : `Copy (${selectedPacksToCopy.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Post Library Modal (Feature 1 & 2) */}
+      {showPostLibraryModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full space-y-3.5 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Bookmark className="w-4 h-4 text-cyan-400" /> Saved Posts Library
+              </h3>
+              <button onClick={() => setShowPostLibraryModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="relative">
+              <input
+                type="text"
+                value={postLibrarySearch}
+                onChange={e => {
+                  setPostLibrarySearch(e.target.value);
+                  handleLoadSavedPosts(e.target.value);
+                }}
+                placeholder="Search saved posts by ID, title, text..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white pl-8"
+              />
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-3" />
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2 text-xs pr-1">
+              {postLibraryLoading ? (
+                <div className="text-center py-6 text-slate-500">Loading saved posts...</div>
+              ) : savedPostsData.length === 0 ? (
+                <div className="text-center py-6 text-slate-500">No saved posts found.</div>
+              ) : (
+                savedPostsData.map(p => (
+                  <div key={p.id} className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="font-bold text-white truncate max-w-[180px]">{p.title}</div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="font-mono text-cyan-400 font-bold text-[10px]">{p.id}</span>
+                          <span className="px-1.5 py-0.2 rounded bg-slate-800 text-[9px] text-slate-300 font-semibold uppercase">{p.contentType}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteSavedPost(p.id)}
+                        className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
+                        title="Delete post"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {p.text && (
+                      <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed bg-slate-900/50 p-1.5 rounded-lg border border-slate-800/60 font-sans">
+                        {p.text}
+                      </p>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-1 border-t border-slate-800/80">
+                      <button
+                        onClick={() => handleInsertPostReference(p.id)}
+                        className="flex-1 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 rounded-lg text-[10px] font-semibold cursor-pointer"
+                      >
+                        Insert ID
+                      </button>
+                      <button
+                        onClick={() => handleLoadPostIntoComposer(p)}
+                        className="flex-1 py-1 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg text-[10px] font-semibold cursor-pointer"
+                      >
+                        Load Post
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowPostLibraryModal(false)}
+              className="w-full py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Save Post to Library Modal */}
+      {showSavePostModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full space-y-3.5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Bookmark className="w-4 h-4 text-indigo-400" /> Save Post to Library
+              </h3>
+              <button onClick={() => setShowSavePostModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              Save your current rich post into the persistent Post Library so it can be reused in broadcasts, schedules, and welcome messages.
+            </p>
+
+            <div className="space-y-2 text-xs">
+              <label className="text-slate-400 block font-semibold">Post Title / Name</label>
+              <input
+                type="text"
+                placeholder="e.g. Official Community Rules Broadcast"
+                value={newPostTitle}
+                onChange={e => setNewPostTitle(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
+              />
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                onClick={() => setShowSavePostModal(false)}
+                className="px-3.5 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSavePostToLibrary}
+                disabled={isSavingPostToLib || !newPostTitle.trim()}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold cursor-pointer"
+              >
+                {isSavingPostToLib ? 'Saving...' : 'Save Post'}
               </button>
             </div>
           </div>

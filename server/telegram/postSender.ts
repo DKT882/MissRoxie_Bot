@@ -4,6 +4,7 @@ import { TelegramMiddleware } from './middleware.js';
 import { PostPayload, SendPostResult, ScheduledMessage, ScheduledPostButton } from './types.js';
 import { errorTracker } from '../observability/errorService.js';
 import { mediaUploadStore } from './mediaUploadStore.js';
+import { PostResolverService } from './postResolver.js';
 
 export function isValidHttpUrl(stringUrl?: string): boolean {
   if (!stringUrl || typeof stringUrl !== 'string') return false;
@@ -121,8 +122,9 @@ export class PostSender {
   /**
    * Centralized sending engine for rich Telegram posts (text, photos, videos, GIFs, docs, stickers, buttons, pinning).
    */
-  public static async send(chatId: number, payload: PostPayload): Promise<SendPostResult> {
+  public static async send(chatId: number, rawPayload: PostPayload): Promise<SendPostResult> {
     try {
+      const payload = await PostResolverService.resolvePayload(rawPayload);
       // 1. Resolve Reply Target (replyToLatest takes precedence over static replyToMessageId)
       let replyToMessageId: number | undefined = undefined;
       if (payload.replyToLatest) {

@@ -637,6 +637,43 @@ export interface RichMessageConfig {
 
 export type WelcomeDmConfig = RichMessageConfig;
 
+export interface SavedPost {
+  id: string; // e.g. "POST-7K2P9"
+  title: string;
+  contentType: PostContentType;
+  text?: string;
+  mediaFileId?: string;
+  mediaUploadId?: string;
+  buttons?: ScheduledPostButton[][];
+  protectContent?: boolean;
+  pinAfterSend?: boolean;
+  replyToLatest?: boolean;
+  autoDeletePrevious?: boolean;
+  createdBy: {
+    userId: number;
+    username?: string;
+    role?: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+  tags?: string[];
+  metadata?: Record<string, any>;
+}
+
+export interface PrivateRecipientRecord {
+  chatId: number;
+  username?: string;
+  firstName?: string;
+  source: 'welcome_dm' | 'private_interaction' | 'deep_link';
+  sourceGroupId?: number;
+  status: 'active' | 'blocked' | 'opted_out' | 'failed';
+  firstSeenAt: string;
+  lastSeenAt: string;
+  lastDeliveredAt?: string;
+  failureReason?: string;
+  deliveryCount: number;
+}
+
 export interface SendPostResult {
   ok: boolean;
   messageId?: number;
@@ -751,7 +788,7 @@ export interface ModerationLog {
   adminUserId?: number;
   adminUsername?: string;
   command?: string;
-  action: 'kick' | 'ban' | 'unban' | 'mute' | 'unmute' | 'tmute' | 'tban' | 'dban' | 'dmute' | 'dkick' | 'sban' | 'smute' | 'skick' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'delete_sticker_pack' | 'delete_image' | 'delete_media' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'clear' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change' | 'lock' | 'unlock' | 'flood_action' | 'filter_match' | 'set_slowmode' | 'pin' | 'unpin' | 'auto_accept' | 'automod_toggle' | 'security_toggle' | 'captcha_toggle' | 'antiraid_toggle' | 'joinmode_change' | 'automation_add' | 'automation_remove' | 'automation_toggle' | 'rules_update' | 'all_broadcast' | 'leave_group' | 'send_message' | 'broadcast';
+  action: 'kick' | 'ban' | 'unban' | 'mute' | 'unmute' | 'tmute' | 'tban' | 'dban' | 'dmute' | 'dkick' | 'sban' | 'smute' | 'skick' | 'demote' | 'promote' | 'permissions' | 'warn' | 'resetwarns' | 'auto_ban' | 'delete_link' | 'delete_sticker' | 'delete_sticker_pack' | 'delete_image' | 'delete_media' | 'free_sticker' | 'unfree_sticker' | 'report' | 'say' | 'clear' | 'schedule_created' | 'schedule_deleted' | 'schedule_sent' | 'setting_change' | 'lock' | 'unlock' | 'flood_action' | 'filter_match' | 'set_slowmode' | 'pin' | 'unpin' | 'auto_accept' | 'automod_toggle' | 'security_toggle' | 'captcha_toggle' | 'antiraid_toggle' | 'joinmode_change' | 'automation_add' | 'automation_remove' | 'automation_toggle' | 'rules_update' | 'all_broadcast' | 'leave_group' | 'send_message' | 'broadcast' | 'bot_left' | 'bot_rejoined';
   result?: 'success' | 'denied' | 'error';
   telegramError?: string;
   reason?: string;

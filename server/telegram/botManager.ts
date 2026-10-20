@@ -769,6 +769,11 @@ export class TelegramBotManager {
     }
     if (message.left_chat_member) {
       db.cacheUser(message.left_chat_member, chatId);
+      const me = await telegramApi.getMe().catch(() => null);
+      const botId = me?.result?.id || db.getCurrentBotId();
+      if (botId && message.left_chat_member.id === botId) {
+        db.markBotLeftGroup(chatId);
+      }
     }
     if (message.entities) {
       for (const entity of message.entities) {
@@ -1280,6 +1285,37 @@ export class TelegramBotManager {
     const oldStatus = chatMemberUpdate.old_chat_member?.status;
     const newStatus = chatMemberUpdate.new_chat_member?.status;
     const user = chatMemberUpdate.new_chat_member?.user || chatMemberUpdate.from;
+
+    const me = await telegramApi.getMe().catch(() => null);
+    const botId = me?.result?.id || db.getCurrentBotId();
+
+    // Check if the affected member is the bot itself (Feature 4: Group Removal/Re-addition)
+    if (botId && user && user.id === botId) {
+      if (newStatus === 'left' || newStatus === 'kicked') {
+        db.markBotLeftGroup(chatId);
+        db.addLog({
+          chatId,
+          chatTitle: chatMemberUpdate.chat.title || `Group ${chatId}`,
+          targetUserId: botId,
+          targetUsername: user.username,
+          action: 'bot_left',
+          details: `Roxie was removed from or left group ${chatMemberUpdate.chat.title || chatId} (status: ${newStatus})`
+        });
+        return;
+      }
+      if (newStatus === 'member' || newStatus === 'administrator') {
+        db.markBotRejoinedGroup(chatId, chatMemberUpdate.chat.title);
+        db.addLog({
+          chatId,
+          chatTitle: chatMemberUpdate.chat.title || `Group ${chatId}`,
+          targetUserId: botId,
+          targetUsername: user.username,
+          action: 'bot_rejoined',
+          details: `Roxie was added back to group ${chatMemberUpdate.chat.title || chatId} (status: ${newStatus})`
+        });
+        return;
+      }
+    }
 
     if (user) {
       db.cacheUser(user, chatId);

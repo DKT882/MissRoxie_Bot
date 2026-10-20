@@ -56,7 +56,8 @@ import {
   Copy,
   FileCode,
   Pin,
-  Link2
+  Link2,
+  Bookmark
 } from 'lucide-react';
 import { RichPostComposer, ComposerContentType, ComposerButton, PostButtonStyle } from './components/RichPostComposer';
 import { RichMessageEditor, RichMessageConfigData } from './components/RichMessageEditor';
@@ -248,7 +249,305 @@ export default function App() {
   const isDark = theme === 'dark';
 
   // Navigation (Default to Groups)
+  // Feature 1: Post Library State
+  const [savedPostsList, setSavedPostsList] = useState<any[]>([]);
+  const [savedPostsLoading, setSavedPostsLoading] = useState<boolean>(false);
+  const [postSearch, setPostSearch] = useState<string>('');
+  const [postTypeFilter, setPostTypeFilter] = useState<string>('all');
+  const [showCreatePostModal, setShowCreatePostModal] = useState<boolean>(false);
+  const [showEditPostModal, setShowEditPostModal] = useState<boolean>(false);
+  const [editingSavedPost, setEditingSavedPost] = useState<any | null>(null);
+  const [previewingSavedPost, setPreviewingSavedPost] = useState<any | null>(null);
+  const [copiedPostId, setCopiedPostId] = useState<string | null>(null);
+  const [postForm, setPostForm] = useState<{
+    title: string;
+    contentType: string;
+    text: string;
+    mediaFileId: string;
+    buttonsJson: string;
+    pinAfterSend: boolean;
+    protectContent: boolean;
+  }>({
+    title: '',
+    contentType: 'text',
+    text: '',
+    mediaFileId: '',
+    buttonsJson: '',
+    pinAfterSend: false,
+    protectContent: false
+  });
+
+  // Feature 5: Private Chat Recipient Registry State
+  const [privateRecipientsList, setPrivateRecipientsList] = useState<any[]>([]);
+  const [privateRecipientsStats, setPrivateRecipientsStats] = useState<any | null>(null);
+  const [privateRecipientsLoading, setPrivateRecipientsLoading] = useState<boolean>(false);
+  const [recipientFilterStatus, setRecipientFilterStatus] = useState<string>('all');
+  const [recipientSearch, setRecipientSearch] = useState<string>('');
+
+  // Feature 3: Desktop Sticker Copy Modal State
+  const [showDesktopStickerCopyModal, setShowDesktopStickerCopyModal] = useState<boolean>(false);
+  const [desktopCopySourceGroupId, setDesktopCopySourceGroupId] = useState<string>('');
+  const [desktopCopyDestGroupId, setDesktopCopyDestGroupId] = useState<string>('');
+  const [desktopCopySelectedPacks, setDesktopCopySelectedPacks] = useState<string[]>([]);
+  const [desktopCopyResults, setDesktopCopyResults] = useState<any[] | null>(null);
+  const [desktopCopying, setDesktopCopying] = useState<boolean>(false);
+
+  // Auto-fetch for Post Library and Private Recipients on tab switch
+  const fetchSavedPosts = useCallback(async (q = postSearch, type = postTypeFilter) => {
+    setSavedPostsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set('search', q);
+      if (type && type !== 'all') params.set('type', type);
+      const res = await deduplicatedFetch(`/api/dashboard/posts/library?${params.toString()}`);
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data && data.posts) {
+          setSavedPostsList(data.posts);
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch saved posts', err);
+    } finally {
+      setSavedPostsLoading(false);
+    }
+  }, [postSearch, postTypeFilter]);
+
+  const fetchPrivateRecipients = useCallback(async (status = recipientFilterStatus, q = recipientSearch) => {
+    setPrivateRecipientsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (status && status !== 'all') params.set('status', status);
+      if (q) params.set('search', q);
+      const res = await deduplicatedFetch(`/api/dashboard/private-recipients?${params.toString()}`);
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data) {
+          if (Array.isArray(data.recipients)) setPrivateRecipientsList(data.recipients);
+          if (data.stats) setPrivateRecipientsStats(data.stats);
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch private recipients', err);
+    } finally {
+      setPrivateRecipientsLoading(false);
+    }
+  }, [recipientFilterStatus, recipientSearch]);
+
+
+
+  const handleCopyPostId = (id: string) => {
+    navigator.clipboard?.writeText(id);
+    setCopiedPostId(id);
+    setTimeout(() => setCopiedPostId(null), 2500);
+  };
+
+  const handleCreateSavedPostSubmit = async () => {
+    if (!postForm.title.trim()) return;
+    try {
+      let parsedButtons: any = undefined;
+      if (postForm.buttonsJson.trim()) {
+        try {
+          parsedButtons = JSON.parse(postForm.buttonsJson);
+        } catch {
+          alert('Invalid JSON for inline buttons');
+          return;
+        }
+      }
+      const res = await fetch('/api/dashboard/posts/library', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: postForm.title.trim(),
+          contentType: postForm.contentType,
+          content: postForm.text,
+          mediaFileId: postForm.mediaFileId.trim() || undefined,
+          buttons: parsedButtons,
+          pinAfterSend: postForm.pinAfterSend,
+          protectContent: postForm.protectContent
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.post) {
+        setShowCreatePostModal(false);
+        setPostForm({ title: '', contentType: 'text', text: '', mediaFileId: '', buttonsJson: '', pinAfterSend: false, protectContent: false });
+        fetchSavedPosts();
+      } else {
+        alert(data.error || 'Failed to create post');
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleOpenEditSavedPost = (p: any) => {
+    setEditingSavedPost(p);
+    setPostForm({
+      title: p.title || '',
+      contentType: p.contentType || 'text',
+      text: p.text || p.content || '',
+      mediaFileId: p.mediaFileId || '',
+      buttonsJson: p.buttons ? JSON.stringify(p.buttons, null, 2) : '',
+      pinAfterSend: Boolean(p.pinAfterSend),
+      protectContent: Boolean(p.protectContent)
+    });
+    setShowEditPostModal(true);
+  };
+
+  const handleUpdateSavedPostSubmit = async () => {
+    if (!editingSavedPost || !postForm.title.trim()) return;
+    try {
+      let parsedButtons: any = undefined;
+      if (postForm.buttonsJson.trim()) {
+        try {
+          parsedButtons = JSON.parse(postForm.buttonsJson);
+        } catch {
+          alert('Invalid JSON for inline buttons');
+          return;
+        }
+      }
+      const res = await fetch(`/api/dashboard/posts/library/${editingSavedPost.id}`, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: postForm.title.trim(),
+          contentType: postForm.contentType,
+          content: postForm.text,
+          mediaFileId: postForm.mediaFileId.trim() || undefined,
+          buttons: parsedButtons,
+          pinAfterSend: postForm.pinAfterSend,
+          protectContent: postForm.protectContent
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.post) {
+        setShowEditPostModal(false);
+        setEditingSavedPost(null);
+        fetchSavedPosts();
+      } else {
+        alert(data.error || 'Failed to update post');
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleDuplicateSavedPost = async (id: string) => {
+    try {
+      const res = await fetch(`/api/dashboard/posts/library/${id}/duplicate`, {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
+      if (res.ok) {
+        fetchSavedPosts();
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleDeleteSavedPost = async (id: string, title: string) => {
+    if (!confirm(`Are you sure you want to delete saved post "${title}" (${id})?`)) return;
+    try {
+      const res = await fetch(`/api/dashboard/posts/library/${id}`, {
+        method: 'DELETE',
+        credentials: 'same-origin'
+      });
+      if (res.ok) {
+        fetchSavedPosts();
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleToggleRecipientOptOut = async (chatId: number, currentStatus: string) => {
+    const nextStatus = currentStatus === 'opted_out' ? 'active' : 'opted_out';
+    try {
+      const res = await fetch(`/api/dashboard/private-recipients/${chatId}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus })
+      });
+      if (res.ok) {
+        fetchPrivateRecipients();
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleDeleteRecipient = async (chatId: number) => {
+    if (!confirm(`Remove recipient ${chatId} from registry?`)) return;
+    try {
+      const res = await fetch(`/api/dashboard/private-recipients/${chatId}`, {
+        method: 'DELETE',
+        credentials: 'same-origin'
+      });
+      if (res.ok) {
+        fetchPrivateRecipients();
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleOpenDesktopStickerCopy = (sourceChatId?: number) => {
+    const active = groups.filter(g => !g.botLeft);
+    if (active.length < 2) {
+      alert('You need at least 2 active connected groups to copy sticker packs between them.');
+      return;
+    }
+    const src = sourceChatId ? String(sourceChatId) : String(active[0].chatId);
+    const dst = active.find(g => String(g.chatId) !== src) ? String(active.find(g => String(g.chatId) !== src)!.chatId) : String(active[1].chatId);
+    setDesktopCopySourceGroupId(src);
+    setDesktopCopyDestGroupId(dst);
+    setDesktopCopySelectedPacks([]);
+    setDesktopCopyResults(null);
+    setShowDesktopStickerCopyModal(true);
+  };
+
+  const handleExecuteDesktopStickerCopy = async () => {
+    if (!desktopCopySourceGroupId || !desktopCopyDestGroupId || desktopCopySelectedPacks.length === 0) {
+      alert('Please select source group, destination group, and at least one pack to copy.');
+      return;
+    }
+    setDesktopCopying(true);
+    try {
+      const res = await fetch(`/api/dashboard/groups/${desktopCopyDestGroupId}/stickers/packs/copy`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceChatId: Number(desktopCopySourceGroupId),
+          packNames: desktopCopySelectedPacks
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.results) {
+        setDesktopCopyResults(data.results);
+      } else {
+        alert(data.error || 'Failed to copy sticker packs');
+      }
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setDesktopCopying(false);
+    }
+  };
+
   const [activeNav, setActiveNav] = useState<string>('groups');
+
+  useEffect(() => {
+    if (activeNav === 'post-library') {
+      fetchSavedPosts();
+    } else if (activeNav === 'private-recipients') {
+      fetchPrivateRecipients();
+    }
+  }, [activeNav, fetchSavedPosts, fetchPrivateRecipients]);
   const [broadcastSubTab, setBroadcastSubTab] = useState<'standard' | 'mention-all'>('standard');
   const [selectedChatId, setSelectedChatId] = useState<number | 'all'>('all');
   const [activeGroupDetailId, setActiveGroupDetailId] = useState<number | null>(null);
@@ -2562,7 +2861,9 @@ export default function App() {
                 {[
                   { id: 'groups', label: '👥 Groups', icon: Users, badge: groups.length },
                   { id: 'private-chats', label: '💬 Private Chats', icon: MessageSquare, badge: privateChats.length },
-                  { id: 'broadcast', label: '📣 Broadcast', icon: Radio }
+                  { id: 'broadcast', label: '📣 Broadcast', icon: Radio },
+                  { id: 'post-library', label: '🔖 Post Library', icon: Bookmark },
+                  { id: 'private-recipients', label: '👤 DM Recipients', icon: UserCheck }
                 ].map((item) => {
                   const Icon = item.icon;
                   const isActive = activeNav === item.id;
@@ -2654,7 +2955,9 @@ export default function App() {
               {[
                 { id: 'groups', label: '👥 Groups', icon: Users, badge: groups.length },
                 { id: 'private-chats', label: '💬 Private Chats', icon: MessageSquare, badge: privateChats.length },
-                { id: 'broadcast', label: '📣 Broadcast', icon: Radio }
+                { id: 'broadcast', label: '📣 Broadcast', icon: Radio },
+                { id: 'post-library', label: '🔖 Post Library', icon: Bookmark },
+                { id: 'private-recipients', label: '👤 DM Recipients', icon: UserCheck }
               ].map((item) => {
                 const Icon = item.icon;
                 const isActive = activeNav === item.id;
@@ -6767,6 +7070,292 @@ export default function App() {
             </div>
           )}
 
+        {/* Create / Edit Saved Post Modal (Feature 1) */}
+        {(showCreatePostModal || showEditPostModal) && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className={`${themeCardBg} border rounded-2xl p-6 max-w-lg w-full space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl`}>
+              <div className="flex items-center justify-between border-b border-stone-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Bookmark className="w-5 h-5 text-blue-500" />
+                  <h3 className="text-base font-bold text-white">
+                    {showEditPostModal ? 'Edit Saved Post' : 'Create Saved Post'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setShowCreatePostModal(false); setShowEditPostModal(false); }}
+                  className="text-stone-400 hover:text-white p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-3.5 text-xs">
+                <div>
+                  <label className="text-stone-300 font-semibold block mb-1">Post Title / Name (Required)</label>
+                  <input
+                    type="text"
+                    value={postForm.title}
+                    onChange={e => setPostForm({ ...postForm, title: e.target.value })}
+                    placeholder="e.g. VIP Member Guidelines"
+                    className={`w-full p-2.5 rounded-xl text-xs ${themeInnerCardBg} border ${themeBorder} outline-none`}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-stone-300 font-semibold block mb-1">Content Type</label>
+                    <select
+                      value={postForm.contentType}
+                      onChange={e => setPostForm({ ...postForm, contentType: e.target.value })}
+                      className={`w-full p-2.5 rounded-xl text-xs ${themeInnerCardBg} border ${themeBorder} outline-none`}
+                    >
+                      <option value="text">Text Only</option>
+                      <option value="photo">Photo + Caption</option>
+                      <option value="video">Video + Caption</option>
+                      <option value="animation">GIF + Caption</option>
+                      <option value="document">Document + Caption</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-stone-300 font-semibold block mb-1">Media File ID / URL (Optional)</label>
+                    <input
+                      type="text"
+                      value={postForm.mediaFileId}
+                      onChange={e => setPostForm({ ...postForm, mediaFileId: e.target.value })}
+                      placeholder="Telegram File ID or HTTPS URL"
+                      className={`w-full p-2.5 rounded-xl text-xs ${themeInnerCardBg} border ${themeBorder} outline-none font-mono`}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-stone-300 font-semibold block mb-1">Message Text / Caption (Mandatory)</label>
+                  <textarea
+                    rows={4}
+                    value={postForm.text}
+                    onChange={e => setPostForm({ ...postForm, text: e.target.value })}
+                    placeholder="Enter post text with HTML formatting..."
+                    className={`w-full p-2.5 rounded-xl text-xs ${themeInnerCardBg} border ${themeBorder} outline-none resize-y`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-stone-300 font-semibold block mb-1">Inline Buttons JSON (Optional)</label>
+                  <textarea
+                    rows={2}
+                    value={postForm.buttonsJson}
+                    onChange={e => setPostForm({ ...postForm, buttonsJson: e.target.value })}
+                    placeholder='[[{"text": "Visit Website", "url": "https://example.com"}]]'
+                    className={`w-full p-2 rounded-xl text-[11px] font-mono ${themeInnerCardBg} border ${themeBorder} outline-none resize-y`}
+                  />
+                </div>
+
+                <div className="flex items-center gap-4 pt-1">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={postForm.pinAfterSend}
+                      onChange={e => setPostForm({ ...postForm, pinAfterSend: e.target.checked })}
+                      className="w-4 h-4 accent-blue-500 rounded"
+                    />
+                    <span className="text-stone-300">Pin after sending</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={postForm.protectContent}
+                      onChange={e => setPostForm({ ...postForm, protectContent: e.target.checked })}
+                      className="w-4 h-4 accent-blue-500 rounded"
+                    />
+                    <span className="text-stone-300">Protect content (anti-forward)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end pt-3 border-t border-stone-800">
+                <button
+                  type="button"
+                  onClick={() => { setShowCreatePostModal(false); setShowEditPostModal(false); }}
+                  className="px-4 py-2 bg-stone-800 text-stone-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={showEditPostModal ? handleUpdateSavedPostSubmit : handleCreateSavedPostSubmit}
+                  disabled={!postForm.title.trim()}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  {showEditPostModal ? 'Save Changes' : 'Create Saved Post'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Desktop Sticker Copy Modal (Feature 3) */}
+        {showDesktopStickerCopyModal && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className={`${themeCardBg} border rounded-2xl p-6 max-w-lg w-full space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl`}>
+              <div className="flex items-center justify-between border-b border-stone-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Copy className="w-5 h-5 text-blue-500" />
+                  <h3 className="text-base font-bold text-white">Copy Sticker Packs Between Groups</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDesktopStickerCopyModal(false)}
+                  className="text-stone-400 hover:text-white p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-3.5 text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-stone-300 font-semibold block mb-1">Source Group</label>
+                    <select
+                      value={desktopCopySourceGroupId}
+                      onChange={e => {
+                        setDesktopCopySourceGroupId(e.target.value);
+                        setDesktopCopySelectedPacks([]);
+                        setDesktopCopyResults(null);
+                      }}
+                      className={`w-full p-2.5 rounded-xl text-xs ${themeInnerCardBg} border ${themeBorder} outline-none`}
+                    >
+                      {groups.filter(g => !g.botLeft).map(g => (
+                        <option key={g.chatId} value={g.chatId}>{g.chatTitle} ({g.chatId})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-stone-300 font-semibold block mb-1">Destination Group</label>
+                    <select
+                      value={desktopCopyDestGroupId}
+                      onChange={e => {
+                        setDesktopCopyDestGroupId(e.target.value);
+                        setDesktopCopyResults(null);
+                      }}
+                      className={`w-full p-2.5 rounded-xl text-xs ${themeInnerCardBg} border ${themeBorder} outline-none`}
+                    >
+                      {groups.filter(g => !g.botLeft && String(g.chatId) !== desktopCopySourceGroupId).map(g => (
+                        <option key={g.chatId} value={g.chatId}>{g.chatTitle} ({g.chatId})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Pack list */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-stone-300 font-semibold">Configured Sticker Packs in Source</label>
+                    {(() => {
+                      const srcGroup = groups.find(g => String(g.chatId) === desktopCopySourceGroupId);
+                      const packs = srcGroup?.settings?.stickerPacks ? Object.values(srcGroup.settings.stickerPacks) : [];
+                      if (packs.length === 0) return null;
+                      const allSelected = desktopCopySelectedPacks.length === packs.length;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (allSelected) {
+                              setDesktopCopySelectedPacks([]);
+                            } else {
+                              setDesktopCopySelectedPacks(packs.map((p: any) => p.name));
+                            }
+                          }}
+                          className="text-[11px] text-blue-400 hover:underline cursor-pointer"
+                        >
+                          {allSelected ? 'Deselect All' : 'Select All'}
+                        </button>
+                      );
+                    })()}
+                  </div>
+
+                  <div className={`space-y-1.5 max-h-48 overflow-y-auto p-1 rounded-xl ${themeInnerCardBg} border ${themeBorder}`}>
+                    {(() => {
+                      const srcGroup = groups.find(g => String(g.chatId) === desktopCopySourceGroupId);
+                      const packs = srcGroup?.settings?.stickerPacks ? Object.values(srcGroup.settings.stickerPacks) : [];
+                      if (packs.length === 0) {
+                        return <p className="text-stone-500 py-3 text-center">No packs configured in source group.</p>;
+                      }
+                      return packs.map((p: any) => {
+                        const isChecked = desktopCopySelectedPacks.includes(p.name);
+                        return (
+                          <label
+                            key={p.name}
+                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer hover:bg-stone-800/30 transition-colors`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  if (isChecked) {
+                                    setDesktopCopySelectedPacks(desktopCopySelectedPacks.filter(n => n !== p.name));
+                                  } else {
+                                    setDesktopCopySelectedPacks([...desktopCopySelectedPacks, p.name]);
+                                  }
+                                }}
+                                className="w-4 h-4 accent-blue-500 rounded"
+                              />
+                              <div>
+                                <div className="font-semibold text-white">{p.title || p.name}</div>
+                                <div className="text-[10px] text-stone-500 font-mono">{p.name}</div>
+                              </div>
+                            </div>
+                            <span className="text-[10px] text-stone-400 font-mono">{p.stickers?.length || 0} stickers</span>
+                          </label>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+
+                {/* Results display */}
+                {desktopCopyResults && (
+                  <div className={`p-3 rounded-xl ${themeInnerCardBg} border ${themeBorder} space-y-2`}>
+                    <div className="font-bold text-white text-xs">Copy Results:</div>
+                    <div className="space-y-1">
+                      {desktopCopyResults.map((r, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-xs">
+                          <span className="font-mono text-stone-300">{r.packName}</span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            r.status === 'copied' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                            r.status === 'already_exists' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                            'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                          }`}>
+                            {r.status === 'copied' ? 'Copied' : r.status === 'already_exists' ? 'Already Configured' : 'Failed'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2 justify-end pt-3 border-t border-stone-800">
+                <button
+                  type="button"
+                  onClick={() => setShowDesktopStickerCopyModal(false)}
+                  className="px-4 py-2 bg-stone-800 text-stone-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteDesktopStickerCopy}
+                  disabled={desktopCopying || desktopCopySelectedPacks.length === 0}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5"
+                >
+                  {desktopCopying ? 'Copying...' : `Copy Selected (${desktopCopySelectedPacks.length})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         </main>
 
         {/* Mobile Bottom Navigation Bar (1-Tap Tab Switching) */}
@@ -6775,6 +7364,8 @@ export default function App() {
             { id: 'groups', label: 'Groups', icon: Users, badge: groups.length },
             { id: 'private-chats', label: 'Private Chats', icon: MessageSquare, badge: privateChats.length },
             { id: 'broadcast', label: 'Broadcast', icon: Radio },
+            { id: 'post-library', label: 'Posts', icon: Bookmark },
+            { id: 'private-recipients', label: 'DMs', icon: UserCheck },
           ].map((item) => {
             const Icon = item.icon;
             const isActive = activeNav === item.id;

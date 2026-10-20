@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoEngineConfig, AutoEngineMode, AutoEnginePreset, AutoEngineChannelConfig, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig, AUTO_ENGINE_PRESETS, WelcomeDmConfig } from '../telegram/types.js';
+import { SavedPost, PrivateRecipientRecord, PostContentType, ScheduledPostButton, GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoEngineConfig, AutoEngineMode, AutoEnginePreset, AutoEngineChannelConfig, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig, AUTO_ENGINE_PRESETS, WelcomeDmConfig } from '../telegram/types.js';
 import { getDefaultStickersStats } from '../telegram/defaultStickers.js';
 import { logDebug } from '../observability/logger.js';
 import { mongoManager } from './mongodb.js';
@@ -203,6 +203,8 @@ interface DatabaseSchema {
   knownUsersById: Record<number, CachedMember>; // userId -> CachedMember
   groupMembers: Record<string, CachedMember>; // `${chatId}_${userId}` -> CachedMember
   customRoles: Record<string, 'MODERATOR' | 'EXCEPTION_ADMIN' | 'NONE'>; // `${chatId}_${userId}` -> Custom bot role
+  savedPosts?: Record<string, SavedPost>;
+  privateRecipients?: Record<string, PrivateRecipientRecord>;
   mediaLibrary?: MediaLibraryRecord;
   groupMediaLibraries?: Record<string, MediaLibraryRecord>; // `${chatId}` -> MediaLibraryRecord
   userMemories?: Record<string, UserMemoryRecord>; // `${chatId}_${userId}` -> UserMemoryRecord (personal facts only)
@@ -1730,6 +1732,8 @@ export class StorageManager {
         logs: (this.data.logs || []).slice(-200),
         knownUsers: this.data.knownUsers || {},
         knownUsersById: this.data.knownUsersById || {},
+        savedPosts: this.data.savedPosts || {},
+        privateRecipients: this.data.privateRecipients || {},
         updatedAt: new Date().toISOString()
       };
       const safeData = this.sanitizeGroupData(globalData);
@@ -1763,6 +1767,8 @@ export class StorageManager {
         }
         if (parsed.knownUsers) this.data.knownUsers = { ...this.data.knownUsers, ...parsed.knownUsers };
         if (parsed.knownUsersById) this.data.knownUsersById = { ...this.data.knownUsersById, ...parsed.knownUsersById };
+        if (parsed.savedPosts) this.data.savedPosts = { ...(this.data.savedPosts || {}), ...parsed.savedPosts };
+        if (parsed.privateRecipients) this.data.privateRecipients = { ...(this.data.privateRecipients || {}), ...parsed.privateRecipients };
       }
     } catch (err: any) {
       console.error('[Storage] Error loading global.json:', err.message);
@@ -2569,7 +2575,7 @@ export class StorageManager {
     return result;
   }
 
-  public getConnectedGroups(botId?: number): Array<any> {
+  public getConnectedGroups(botId?: number, includeInactive = false): Array<any> {
     const scopedSettings = this.getAllGroupSettings(botId);
     return Object.entries(scopedSettings)
       .filter(([chatIdStr]) => Number(chatIdStr) < 0)
@@ -2619,7 +2625,14 @@ export class StorageManager {
           },
           settings: s
         };
-      });
+      })
+      .filter((g: any) => {
+        if (!g) return false;
+        if (!includeInactive && (g.botLeft || g.unavailable)) {
+          return false;
+        }
+        return true;
+      }) as any[];
   }
 
   public getConnectedGroupCount(botId?: number): number {
@@ -5987,6 +6000,39 @@ export class StorageManager {
     settings.botLeft = true;
     settings.leftAt = new Date().toISOString();
     settings.unavailable = false;
+
+    if (Array.isArray(this.data.schedules)) {
+      for (const s of this.data.schedules) {
+        if (Number(s.chatId) === numId && s.enabled) {
+          s.enabled = false;
+          (s as any).pausedDueToBotLeft = true;
+        }
+      }
+    }
+
+    this.saveGroupJsonSync(numId);
+    this.scheduleSave(numId);
+  }
+
+  public markBotRejoinedGroup(chatId: number | string, chatTitle?: string): void {
+    const numId = Number(chatId);
+    const settings = this.getGroupSettings(numId);
+    settings.botLeft = false;
+    settings.leftAt = undefined;
+    settings.unavailable = false;
+    settings.unavailableAt = undefined;
+    settings.unavailableReason = undefined;
+    if (chatTitle) settings.chatTitle = chatTitle;
+
+    if (Array.isArray(this.data.schedules)) {
+      for (const s of this.data.schedules) {
+        if (Number(s.chatId) === numId && (s as any).pausedDueToBotLeft) {
+          s.enabled = true;
+          delete (s as any).pausedDueToBotLeft;
+        }
+      }
+    }
+
     this.saveGroupJsonSync(numId);
     this.scheduleSave(numId);
   }
@@ -6755,6 +6801,318 @@ export class StorageManager {
       removedChatIds
     };
   }
+  // ==========================================
+  // AUTOMATION UPDATE (FEATURE 2 PARITY)
+  // ==========================================
+  public updateAutomation(chatId: number, id: string, updates: Partial<{ trigger: string; action: string; parameters: string; enabled: boolean }>): any | null {
+    const s = this.getGroupSettings(chatId);
+    if (!Array.isArray(s.automations)) return null;
+    const auto = s.automations.find((a) => a.id === id);
+    if (!auto) return null;
+    if (updates.trigger !== undefined) auto.trigger = updates.trigger;
+    if (updates.action !== undefined) auto.action = updates.action;
+    if (updates.parameters !== undefined) auto.parameters = updates.parameters;
+    if (updates.enabled !== undefined) auto.enabled = updates.enabled;
+    s.updatedAt = new Date().toISOString();
+    this.scheduleSave(chatId);
+    return auto;
+  }
+
+  // ==========================================
+  // SAVED POST LIBRARY (FEATURE 1)
+  // ==========================================
+  public generatePostId(): string {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    if (!this.data.savedPosts) this.data.savedPosts = {};
+    for (let attempts = 0; attempts < 1000; attempts++) {
+      let code = '';
+      for (let i = 0; i < 5; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const candidate = `POST-${code}`;
+      if (!this.data.savedPosts[candidate]) {
+        return candidate;
+      }
+    }
+    return `POST-${Date.now().toString(36).toUpperCase()}`;
+  }
+
+  public getSavedPosts(filter?: { search?: string; type?: string; creatorId?: number }): SavedPost[] {
+    if (!this.data.savedPosts) this.data.savedPosts = {};
+    let posts = Object.values(this.data.savedPosts);
+    if (filter) {
+      if (filter.type && filter.type !== 'all') {
+        posts = posts.filter(p => p.contentType === filter.type);
+      }
+      if (filter.creatorId) {
+        posts = posts.filter(p => p.createdBy?.userId === filter.creatorId);
+      }
+      if (filter.search && filter.search.trim()) {
+        const q = filter.search.toLowerCase().trim();
+        posts = posts.filter(p =>
+          p.id.toLowerCase().includes(q) ||
+          p.title.toLowerCase().includes(q) ||
+          (p.text && p.text.toLowerCase().includes(q)) ||
+          (p.createdBy?.username && p.createdBy.username.toLowerCase().includes(q))
+        );
+      }
+    }
+    return posts.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+  }
+
+  public getSavedPost(id: string): SavedPost | undefined {
+    if (!id) return undefined;
+    if (!this.data.savedPosts) this.data.savedPosts = {};
+    const cleanId = id.trim().toUpperCase();
+    return this.data.savedPosts[cleanId] || this.data.savedPosts[id.trim()];
+  }
+
+  public saveSavedPost(postInput: {
+    id?: string;
+    title: string;
+    contentType: PostContentType;
+    text?: string;
+    mediaFileId?: string;
+    mediaUploadId?: string;
+    buttons?: ScheduledPostButton[][];
+    protectContent?: boolean;
+    pinAfterSend?: boolean;
+    replyToLatest?: boolean;
+    autoDeletePrevious?: boolean;
+    createdBy: {
+      userId: number;
+      username?: string;
+      role?: string;
+    };
+    tags?: string[];
+    metadata?: Record<string, any>;
+  }): SavedPost {
+    if (!this.data.savedPosts) this.data.savedPosts = {};
+    const now = new Date().toISOString();
+    let id = postInput.id?.trim().toUpperCase();
+    if (!id) {
+      id = this.generatePostId();
+    } else {
+      if (!/^POST-[A-Z0-9_-]{3,20}$/i.test(id)) {
+        throw new Error('Invalid post ID format. Must match POST-XXXXX');
+      }
+      if (this.data.savedPosts[id]) {
+        throw new Error(`A saved post with ID "${id}" already exists. Do not overwrite existing posts.`);
+      }
+    }
+
+    const newPost: SavedPost = {
+      id,
+      title: postInput.title?.trim() || `Saved Post ${id}`,
+      contentType: postInput.contentType || 'text',
+      text: postInput.text,
+      mediaFileId: postInput.mediaFileId,
+      mediaUploadId: postInput.mediaUploadId,
+      buttons: postInput.buttons,
+      protectContent: Boolean(postInput.protectContent),
+      pinAfterSend: Boolean(postInput.pinAfterSend),
+      replyToLatest: Boolean(postInput.replyToLatest),
+      autoDeletePrevious: Boolean(postInput.autoDeletePrevious),
+      createdBy: postInput.createdBy,
+      createdAt: now,
+      updatedAt: now,
+      tags: postInput.tags || [],
+      metadata: postInput.metadata || {}
+    };
+
+    this.data.savedPosts[id] = newPost;
+    this.saveGlobalJsonSync();
+    this.persist();
+    return newPost;
+  }
+
+  public updateSavedPost(id: string, updates: Partial<SavedPost>): SavedPost | null {
+    if (!id) return null;
+    const existing = this.getSavedPost(id);
+    if (!existing) return null;
+
+    const updated: SavedPost = {
+      ...existing,
+      ...updates,
+      id: existing.id,
+      createdAt: existing.createdAt,
+      createdBy: existing.createdBy,
+      updatedAt: new Date().toISOString()
+    };
+
+    this.data.savedPosts[existing.id] = updated;
+    this.saveGlobalJsonSync();
+    this.persist();
+    return updated;
+  }
+
+  public duplicateSavedPost(id: string, newTitle?: string, creator?: { userId: number; username?: string; role?: string }): SavedPost | null {
+    const existing = this.getSavedPost(id);
+    if (!existing) return null;
+
+    const newId = this.generatePostId();
+    const now = new Date().toISOString();
+    const duplicated: SavedPost = {
+      ...existing,
+      id: newId,
+      title: newTitle || `${existing.title} (Copy)`,
+      createdBy: creator || existing.createdBy,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.data.savedPosts[newId] = duplicated;
+    this.saveGlobalJsonSync();
+    this.persist();
+    return duplicated;
+  }
+
+  public deleteSavedPost(id: string): boolean {
+    if (!id) return false;
+    const cleanId = id.trim().toUpperCase();
+    if (this.data.savedPosts && (this.data.savedPosts[cleanId] || this.data.savedPosts[id])) {
+      delete this.data.savedPosts[cleanId];
+      delete this.data.savedPosts[id];
+      this.saveGlobalJsonSync();
+      this.persist();
+      return true;
+    }
+    return false;
+  }
+
+  // ==========================================
+  // PRIVATE CHAT RECIPIENT REGISTRY (FEATURE 5)
+  // ==========================================
+  public savePrivateRecipient(data: {
+    chatId: number;
+    username?: string;
+    firstName?: string;
+    source?: 'welcome_dm' | 'private_interaction' | 'deep_link';
+    sourceGroupId?: number;
+    status?: 'active' | 'blocked' | 'opted_out' | 'failed';
+  }): PrivateRecipientRecord {
+    if (!this.data.privateRecipients) this.data.privateRecipients = {};
+    const key = String(data.chatId);
+    const now = new Date().toISOString();
+    const existing = this.data.privateRecipients[key];
+
+    if (existing) {
+      existing.lastSeenAt = now;
+      if (data.username !== undefined) existing.username = data.username;
+      if (data.firstName !== undefined) existing.firstName = data.firstName;
+      if (data.status && existing.status !== 'blocked') {
+        existing.status = data.status;
+      }
+      this.saveGlobalJsonSync();
+      this.persist();
+      return existing;
+    }
+
+    const record: PrivateRecipientRecord = {
+      chatId: data.chatId,
+      username: data.username,
+      firstName: data.firstName,
+      source: data.source || 'welcome_dm',
+      sourceGroupId: data.sourceGroupId,
+      status: data.status || 'active',
+      firstSeenAt: now,
+      lastSeenAt: now,
+      deliveryCount: 0
+    };
+
+    this.data.privateRecipients[key] = record;
+    this.saveGlobalJsonSync();
+    this.persist();
+    return record;
+  }
+
+  public getPrivateRecipients(filter?: { status?: string; search?: string }): PrivateRecipientRecord[] {
+    if (!this.data.privateRecipients) this.data.privateRecipients = {};
+    let recipients = Object.values(this.data.privateRecipients);
+    if (filter) {
+      if (filter.status && filter.status !== 'all') {
+        recipients = recipients.filter(r => r.status === filter.status);
+      }
+      if (filter.search && filter.search.trim()) {
+        const q = filter.search.toLowerCase().trim();
+        recipients = recipients.filter(r =>
+          String(r.chatId).includes(q) ||
+          (r.username && r.username.toLowerCase().includes(q)) ||
+          (r.firstName && r.firstName.toLowerCase().includes(q))
+        );
+      }
+    }
+    return recipients.sort((a, b) => new Date(b.lastSeenAt || b.firstSeenAt).getTime() - new Date(a.lastSeenAt || a.firstSeenAt).getTime());
+  }
+
+  public getPrivateRecipient(chatId: number): PrivateRecipientRecord | undefined {
+    if (!this.data.privateRecipients) this.data.privateRecipients = {};
+    return this.data.privateRecipients[String(chatId)];
+  }
+
+  public updatePrivateRecipientStatus(chatId: number, status: 'active' | 'blocked' | 'opted_out' | 'failed', failureReason?: string): boolean {
+    if (!this.data.privateRecipients) this.data.privateRecipients = {};
+    const recipient = this.data.privateRecipients[String(chatId)];
+    if (!recipient) return false;
+
+    recipient.status = status;
+    recipient.lastSeenAt = new Date().toISOString();
+    if (failureReason) recipient.failureReason = failureReason;
+    if (status === 'active') recipient.failureReason = undefined;
+
+    this.saveGlobalJsonSync();
+    this.persist();
+    return true;
+  }
+
+  public recordPrivateDeliveryResult(chatId: number, success: boolean, failureReason?: string): void {
+    if (!this.data.privateRecipients) this.data.privateRecipients = {};
+    const recipient = this.data.privateRecipients[String(chatId)];
+    if (!recipient) return;
+
+    const now = new Date().toISOString();
+    recipient.lastSeenAt = now;
+    if (success) {
+      recipient.lastDeliveredAt = now;
+      recipient.deliveryCount = (recipient.deliveryCount || 0) + 1;
+      recipient.failureReason = undefined;
+      if (recipient.status === 'failed') recipient.status = 'active';
+    } else {
+      recipient.failureReason = failureReason;
+      if (failureReason && (/blocked/i.test(failureReason) || /deactivated/i.test(failureReason))) {
+        recipient.status = 'blocked';
+      } else {
+        recipient.status = 'failed';
+      }
+    }
+    this.saveGlobalJsonSync();
+    this.persist();
+  }
+
+  public deletePrivateRecipient(chatId: number): boolean {
+    if (!this.data.privateRecipients) return false;
+    const key = String(chatId);
+    if (this.data.privateRecipients[key]) {
+      delete this.data.privateRecipients[key];
+      this.saveGlobalJsonSync();
+      this.persist();
+      return true;
+    }
+    return false;
+  }
+
+  public getPrivateRecipientStats(): { total: number; active: number; blocked: number; optedOut: number; failed: number } {
+    if (!this.data.privateRecipients) this.data.privateRecipients = {};
+    const all = Object.values(this.data.privateRecipients);
+    return {
+      total: all.length,
+      active: all.filter(r => r.status === 'active').length,
+      blocked: all.filter(r => r.status === 'blocked').length,
+      optedOut: all.filter(r => r.status === 'opted_out').length,
+      failed: all.filter(r => r.status === 'failed').length
+    };
+  }
+
 }
 
 export const db = new StorageManager();

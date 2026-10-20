@@ -123,6 +123,32 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     suggestInTelegramMenu: false
   },
   {
+    command: '/stop',
+    category: 'General',
+    description: 'Opt out of private broadcasts and direct message notifications from Roxie.',
+    syntax: '/stop',
+    example: '/stop',
+    permission: 'Everyone',
+    targetType: 'None',
+    isPublic: true,
+    modifiesState: true,
+    auditLogged: false,
+    scopes: ['private']
+  },
+  {
+    command: '/optout',
+    category: 'General',
+    description: 'Alias for /stop. Opt out of direct message broadcasts.',
+    syntax: '/optout',
+    example: '/optout',
+    permission: 'Everyone',
+    targetType: 'None',
+    isPublic: true,
+    modifiesState: true,
+    auditLogged: false,
+    scopes: ['private']
+  },
+  {
     command: '/roxie',
     category: 'General',
     description: 'Manage Roxie AI chatbot status (on/off/status).',
@@ -1332,6 +1358,46 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     modifiesState: true,
     auditLogged: true,
     scopes: ['group', 'admin']
+  },
+
+  {
+    command: '/post',
+    category: 'Announcements',
+    description: 'Save replied-to message or arguments as a reusable post, or retrieve/preview a saved post.',
+    syntax: '/post save [title] | /post <POST-ID>',
+    example: '/post save Welcome Banner',
+    permission: 'Admin',
+    targetType: 'None',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    scopes: ['group', 'private', 'admin']
+  },
+  {
+    command: '/postedit',
+    category: 'Announcements',
+    description: 'Edit the content, title, or buttons of an existing saved post.',
+    syntax: '/postedit <POST-ID> [new content]',
+    example: '/postedit POST-7K2P9 Updated announcement text',
+    permission: 'Admin',
+    targetType: 'None',
+    isPublic: false,
+    modifiesState: true,
+    auditLogged: true,
+    scopes: ['group', 'private', 'admin']
+  },
+  {
+    command: '/postlist',
+    category: 'Announcements',
+    description: 'List and search accessible saved posts in the post library.',
+    syntax: '/postlist [query]',
+    example: '/postlist banner',
+    permission: 'Admin',
+    targetType: 'None',
+    isPublic: false,
+    modifiesState: false,
+    auditLogged: false,
+    scopes: ['group', 'private', 'admin']
   },
 
   // ==================== SCHEDULER ====================

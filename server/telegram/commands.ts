@@ -7,7 +7,7 @@ import { PostBuilderManager } from './postBuilder.js';
 import { PostSender } from './postSender.js';
 import { WelcomeDmFallbackService } from './welcomeDmFallback.js';
 import { mapTelegramError } from './errorMapper.js';
-import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand, CachedMember, ScheduledPostButton, PostPayload } from './types.js';
+import { TelegramCallbackQuery, InlineKeyboardMarkup, AdminPermissions, TelegramChatMember, BotCommand, CachedMember, ScheduledPostButton, PostPayload, SavedPost, PostContentType } from './types.js';
 import { mtprotoParticipantService, MtprotoParticipantService } from './mtprotoParticipantService.js';
 import {
   mentionAllService,
@@ -762,7 +762,6 @@ export class CommandHandler {
         await this.handleFilterCommand(ctx);
         return true;
       case '/unfilter':
-      case '/stop':
         await this.handleUnfilterCommand(ctx);
         return true;
       case '/filters':
@@ -831,7 +830,6 @@ export class CommandHandler {
       case '/deleteschedule':
         await this.handleDeleteSchedule(ctx);
         return true;
-      case '/post':
       case '/buildpost':
         await PostBuilderManager.handlePostCommand(ctx);
         return true;
@@ -854,6 +852,22 @@ export class CommandHandler {
         await this.handleNotesList(ctx);
         return true;
       case '/delnote':
+        await this.handleDelNote(ctx);
+        return true;
+      case '/post':
+        await this.handlePost(ctx);
+        return true;
+      case '/postedit':
+        await this.handlePostEdit(ctx);
+        return true;
+      case '/postlist':
+      case '/posts':
+        await this.handlePostList(ctx);
+        return true;
+      case '/stop':
+      case '/optout':
+        await this.handleOptOut(ctx);
+        return true;
         await this.handleDelNote(ctx);
         return true;
       case '/exportconfig':
@@ -5606,6 +5620,15 @@ export class CommandHandler {
         if (sendRes.ok) {
           // Successful delivery: permanently consume the token
           WelcomeDmFallbackService.completeClaim(token);
+          db.savePrivateRecipient({
+            chatId: ctx.sender.id,
+            username: ctx.sender.username,
+            firstName: ctx.sender.first_name,
+            source: 'deep_link',
+            sourceGroupId: pending.chatId,
+            status: 'active'
+          });
+          db.recordPrivateDeliveryResult(ctx.sender.id, true);
 
           TelegramMiddleware.logAudit({
             chatId: pending.chatId,
@@ -6942,6 +6965,336 @@ export class CommandHandler {
       reply_to_message_id: ctx.message.message_id
     });
     console.log(`[COMMAND] reply result=success`);
+  }
+
+  // ==========================================
+  // SAVED POST LIBRARY (FEATURE 1)
+  // ==========================================
+  private static async handlePost(ctx: CommandContext) {
+    const isGroup = TelegramMiddleware.isGroup(ctx.message);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    if (isGroup && actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, "❌ You don't have permission to manage saved posts in this group.", {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const subCommand = (ctx.args[0] || '').toLowerCase().trim();
+
+    // 1. SAVE: /post save [title]
+    if (subCommand === 'save') {
+      const replied = ctx.message.reply_to_message;
+      let title = ctx.args.slice(1).join(' ').trim();
+      let contentType: PostContentType = 'text';
+      let textContent: string | undefined = undefined;
+      let mediaFileId: string | undefined = undefined;
+      let buttons: ScheduledPostButton[][] | undefined = undefined;
+
+      if (replied) {
+        if (replied.photo && Array.isArray(replied.photo) && replied.photo.length > 0) {
+          contentType = 'photo';
+          mediaFileId = replied.photo[replied.photo.length - 1].file_id;
+          textContent = replied.caption;
+        } else if (replied.video) {
+          contentType = 'video';
+          mediaFileId = replied.video.file_id;
+          textContent = replied.caption;
+        } else if (replied.animation) {
+          contentType = 'animation';
+          mediaFileId = replied.animation.file_id;
+          textContent = replied.caption;
+        } else if (replied.document) {
+          contentType = 'document';
+          mediaFileId = replied.document.file_id;
+          textContent = replied.caption;
+        } else if (replied.sticker) {
+          contentType = 'sticker';
+          mediaFileId = replied.sticker.file_id;
+        } else if (replied.text) {
+          contentType = 'text';
+          textContent = replied.text;
+        }
+
+        if (replied.reply_markup?.inline_keyboard && Array.isArray(replied.reply_markup.inline_keyboard)) {
+          buttons = replied.reply_markup.inline_keyboard.map((row: any[]) =>
+            row.filter((b: any) => b && b.text && b.url).map((b: any) => ({
+              text: b.text,
+              url: b.url
+            }))
+          ).filter((row: any[]) => row.length > 0);
+          if (buttons.length === 0) buttons = undefined;
+        }
+      } else {
+        const directText = ctx.args.slice(1).join(' ').trim();
+        if (!directText) {
+          await telegramApi.sendMessage(ctx.chatId, 'Usage:\n• Reply to a message with <code>/post save [title]</code>\n• Or use <code>/post save [title] - [text]</code>', {
+            reply_to_message_id: ctx.message.message_id,
+            parse_mode: 'HTML'
+          });
+          return;
+        }
+        if (directText.includes(' - ')) {
+          const parts = directText.split(' - ');
+          title = parts[0].trim();
+          textContent = parts.slice(1).join(' - ').trim();
+        } else {
+          textContent = directText;
+        }
+      }
+
+      if (!title) {
+        title = textContent ? (textContent.slice(0, 30) + (textContent.length > 30 ? '...' : '')) : 'Saved Post';
+      }
+
+      try {
+        const saved = db.saveSavedPost({
+          title,
+          contentType,
+          text: textContent,
+          mediaFileId,
+          buttons,
+          createdBy: {
+            userId: ctx.sender.id,
+            username: ctx.sender.username,
+            role: actor.actorRole
+          }
+        });
+
+        db.addLog({
+          chatId: ctx.chatId,
+          chatTitle: ctx.chatTitle,
+          targetUserId: ctx.sender.id,
+          targetUsername: ctx.sender.username,
+          action: 'send_message',
+          details: `Created saved post ${saved.id}: "${saved.title}"`
+        });
+
+        await telegramApi.sendMessage(
+          ctx.chatId,
+          `✅ <b>Post saved successfully!</b>\n\n` +
+          `<b>ID:</b> <code>${saved.id}</code>\n` +
+          `<b>Title:</b> ${escapeHtml(saved.title)}\n` +
+          `<b>Type:</b> <code>${saved.contentType}</code>\n\n` +
+          `Use <code>/post ${saved.id}</code> to preview, or reference it with <code>{{post:${saved.id}}}</code> in broadcasts, schedules, and welcomes.`,
+          {
+            reply_to_message_id: ctx.message.message_id,
+            parse_mode: 'HTML'
+          }
+        );
+      } catch (err: any) {
+        await telegramApi.sendMessage(ctx.chatId, `❌ Failed to save post: ${err.message}`, {
+          reply_to_message_id: ctx.message.message_id
+        });
+      }
+      return;
+    }
+
+    // 2. RETRIEVE / PREVIEW: /post POST-XXXXX
+    const postIdCandidate = ctx.args[0]?.trim()?.toUpperCase();
+    if (postIdCandidate && (postIdCandidate.startsWith('POST-') || /^POST-[A-Z0-9_-]+$/i.test(postIdCandidate))) {
+      const post = db.getSavedPost(postIdCandidate);
+      if (!post) {
+        await telegramApi.sendMessage(ctx.chatId, `❌ Saved post "<code>${escapeHtml(postIdCandidate)}</code>" not found in library.`, {
+          reply_to_message_id: ctx.message.message_id,
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `📌 <b>[Post Preview] ${escapeHtml(post.title)}</b> (<code>${post.id}</code>)\n` +
+        `<i>Type: ${post.contentType} | Created by: @${post.createdBy?.username || post.createdBy?.userId || 'unknown'}</i>`,
+        {
+          reply_to_message_id: ctx.message.message_id,
+          parse_mode: 'HTML'
+        }
+      );
+
+      const payload: PostPayload = {
+        contentType: post.contentType,
+        text: post.text,
+        mediaFileId: post.mediaFileId,
+        mediaUploadId: post.mediaUploadId,
+        buttons: post.buttons,
+        protectContent: post.protectContent
+      };
+
+      await PostSender.send(ctx.chatId, payload);
+      return;
+    }
+
+    // 3. USAGE / HELP
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `📖 <b>Saved Post Library:</b>\n\n` +
+      `• <code>/post save [title]</code> — Save replied message as a reusable post\n` +
+      `• <code>/post POST-XXXXX</code> — Preview a saved post\n` +
+      `• <code>/postedit POST-XXXXX [content]</code> — Edit an existing post\n` +
+      `• <code>/postlist [query]</code> — Search & list saved posts\n\n` +
+      `<i>Embed any post anywhere using <code>{{post:POST-XXXXX}}</code> syntax.</i>`,
+      {
+        reply_to_message_id: ctx.message.message_id,
+        parse_mode: 'HTML'
+      }
+    );
+  }
+
+  private static async handlePostEdit(ctx: CommandContext) {
+    const isGroup = TelegramMiddleware.isGroup(ctx.message);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    if (isGroup && actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, "❌ You don't have permission to edit saved posts.", {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const postId = ctx.args[0]?.trim()?.toUpperCase();
+    if (!postId || !postId.startsWith('POST-')) {
+      await telegramApi.sendMessage(ctx.chatId, 'Usage:\n<code>/postedit POST-XXXXX [new text or reply to new message]</code>', {
+        reply_to_message_id: ctx.message.message_id,
+        parse_mode: 'HTML'
+      });
+      return;
+    }
+
+    const existing = db.getSavedPost(postId);
+    if (!existing) {
+      await telegramApi.sendMessage(ctx.chatId, `❌ Saved post "<code>${escapeHtml(postId)}</code>" not found.`, {
+        reply_to_message_id: ctx.message.message_id,
+        parse_mode: 'HTML'
+      });
+      return;
+    }
+
+    if (existing.createdBy?.userId && existing.createdBy.userId !== ctx.sender.id && actor.actorRank < RoleRank.ADMIN) {
+      await telegramApi.sendMessage(ctx.chatId, '❌ You cannot edit a post created by another administrator without full Admin rights.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const replied = ctx.message.reply_to_message;
+    const updates: Partial<SavedPost> = {};
+
+    if (replied) {
+      if (replied.photo && Array.isArray(replied.photo) && replied.photo.length > 0) {
+        updates.contentType = 'photo';
+        updates.mediaFileId = replied.photo[replied.photo.length - 1].file_id;
+        updates.text = replied.caption;
+      } else if (replied.video) {
+        updates.contentType = 'video';
+        updates.mediaFileId = replied.video.file_id;
+        updates.text = replied.caption;
+      } else if (replied.animation) {
+        updates.contentType = 'animation';
+        updates.mediaFileId = replied.animation.file_id;
+        updates.text = replied.caption;
+      } else if (replied.document) {
+        updates.contentType = 'document';
+        updates.mediaFileId = replied.document.file_id;
+        updates.text = replied.caption;
+      } else if (replied.sticker) {
+        updates.contentType = 'sticker';
+        updates.mediaFileId = replied.sticker.file_id;
+      } else if (replied.text) {
+        updates.contentType = 'text';
+        updates.text = replied.text;
+      }
+
+      if (replied.reply_markup?.inline_keyboard) {
+        updates.buttons = replied.reply_markup.inline_keyboard.map((row: any[]) =>
+          row.filter((b: any) => b && b.text && b.url).map((b: any) => ({
+            text: b.text,
+            url: b.url
+          }))
+        ).filter((row: any[]) => row.length > 0);
+      }
+    } else {
+      const newText = ctx.args.slice(1).join(' ').trim();
+      if (!newText) {
+        await telegramApi.sendMessage(ctx.chatId, 'Please supply updated content or reply to a message with <code>/postedit ' + postId + '</code>.', {
+          reply_to_message_id: ctx.message.message_id,
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+      updates.text = newText;
+    }
+
+    const updated = db.updateSavedPost(postId, updates);
+    if (!updated) {
+      await telegramApi.sendMessage(ctx.chatId, `❌ Failed to update post ${postId}.`, {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    await telegramApi.sendMessage(
+      ctx.chatId,
+      `✅ <b>Post updated:</b> <code>${postId}</code>\n` +
+      `<b>Title:</b> ${escapeHtml(updated.title)}\n` +
+      `<b>Type:</b> <code>${updated.contentType}</code>\n` +
+      `Updated at: ${new Date(updated.updatedAt).toLocaleString()}`,
+      {
+        reply_to_message_id: ctx.message.message_id,
+        parse_mode: 'HTML'
+      }
+    );
+  }
+
+  private static async handlePostList(ctx: CommandContext) {
+    const isGroup = TelegramMiddleware.isGroup(ctx.message);
+    const actor = await TelegramMiddleware.resolveActor(ctx);
+
+    if (isGroup && actor.actorRank < RoleRank.MODERATOR) {
+      await telegramApi.sendMessage(ctx.chatId, "❌ You don't have permission to list saved posts.", {
+        reply_to_message_id: ctx.message.message_id
+      });
+      return;
+    }
+
+    const query = ctx.args.join(' ').trim();
+    const posts = db.getSavedPosts({ search: query });
+
+    if (posts.length === 0) {
+      await telegramApi.sendMessage(ctx.chatId, query ? `📂 No saved posts matched query "${escapeHtml(query)}".` : '📂 Post Library is currently empty.', {
+        reply_to_message_id: ctx.message.message_id,
+        parse_mode: 'HTML'
+      });
+      return;
+    }
+
+    let text = `📚 <b>Saved Posts Library</b> (${posts.length} total):\n\n`;
+    for (const p of posts.slice(0, 15)) {
+      text += `• <code>${p.id}</code> — <b>${escapeHtml(p.title)}</b> [${p.contentType}]\n`;
+    }
+    if (posts.length > 15) {
+      text += `\n<i>...and ${posts.length - 15} more in dashboard.</i>\n`;
+    }
+    text += `\nUse <code>/post <ID></code> to preview or <code>{{post:<ID>}}</code> to use.`;
+
+    await telegramApi.sendMessage(ctx.chatId, text, {
+      reply_to_message_id: ctx.message.message_id,
+      parse_mode: 'HTML'
+    });
+  }
+
+  private static async handleOptOut(ctx: CommandContext) {
+    const isGroup = TelegramMiddleware.isGroup(ctx.message);
+    if (isGroup) {
+      await telegramApi.sendMessage(ctx.chatId, 'This command can only be used in a private conversation with Roxie.');
+      return;
+    }
+
+    db.updatePrivateRecipientStatus(ctx.sender.id, 'opted_out');
+    await telegramApi.sendMessage(ctx.chatId, '✅ <b>You have opted out of direct broadcast messages from Miss Roxie.</b>\n\nYou will no longer receive mass announcements in private chat.', {
+      parse_mode: 'HTML'
+    });
   }
 
   private static async handleExportConfig(ctx: CommandContext) {

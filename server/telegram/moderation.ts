@@ -590,13 +590,17 @@ export class ModerationService {
    */
   public static async handlePromotionalSpam(message: TelegramMessage): Promise<boolean> {
     if (!TelegramMiddleware.isGroup(message)) return false;
-    if (!message.from) return false;
+
+    const chatId = message.chat.id;
+    const isSenderChat = Boolean(!message.from && message.sender_chat);
+    const userId = message.from?.id || message.sender_chat?.id;
+    if (!userId) return false;
 
     // 1. Bot & Roxie Self Safeguards
-    if (message.from.is_bot) return false;
     const meRes = await telegramApi.getMe().catch(() => null);
     const botId = meRes?.result?.id || db.getCurrentBotId() || 0;
-    if (botId && message.from.id === botId) return false;
+    if (botId && userId === botId) return false;
+    if (meRes?.result?.username && message.from?.username && message.from.username.toLowerCase() === meRes.result.username.toLowerCase()) return false;
 
     const textOrCaption = message.text || message.caption || '';
     const trimmed = textOrCaption.trim();
@@ -605,23 +609,40 @@ export class ModerationService {
     // Check if scheduled message or internal bot reply
     if ((message as any).isScheduled || (message as any).isBotReply) return false;
 
-    const chatId = message.chat.id;
-    const userId = message.from.id;
     const settings = db.getGroupSettings(chatId, message.chat.title);
+    const isProtectionEnabled = settings.promotionalSpamProtection !== false;
+    const threshold = settings.promotionalSpamThreshold ?? 6.0;
+
+    console.log(
+      `[PROMO_SPAM] Evaluating message chatId=${chatId} msgId=${message.message_id} senderId=${userId} isChannel=${isSenderChat} ` +
+      `isBot=${Boolean(message.from?.is_bot)} isForwarded=${Boolean(message.forward_origin || message.forward_from || message.forward_from_chat)} ` +
+      `textLen=${textOrCaption.length} protectionEnabled=${isProtectionEnabled} threshold=${threshold}`
+    );
 
     // Group-level disable toggle
-    if (settings.promotionalSpamProtection === false) return false;
+    if (!isProtectionEnabled) {
+      console.log(`[PROMO_SPAM] Protection disabled for group ${chatId}. Passing.`);
+      return false;
+    }
 
     // 2. Administrator & Authorized User Protections
     // (Forwarded message metadata does not bypass sender authorization)
     const isAdmin = await TelegramMiddleware.isAdmin(chatId, userId, message);
-    if (isAdmin) return false;
+    if (isAdmin) {
+      console.log(`[PROMO_SPAM] Sender ${userId} is admin in chat ${chatId}. Exempt from moderation.`);
+      return false;
+    }
 
-    if (db.isUserApproved(chatId, userId)) return false;
+    const isApproved = db.isUserApproved(chatId, userId);
+    if (isApproved) {
+      console.log(`[PROMO_SPAM] Sender ${userId} is approved in chat ${chatId}. Exempt from moderation.`);
+      return false;
+    }
 
     // 3. Deduplication & Idempotency Guards
     const msgKey = `${chatId}:${message.message_id}`;
     if (this.processedPromoSpamMessageIds.has(msgKey)) {
+      console.log(`[PROMO_SPAM] Message ${msgKey} already processed. Skipping duplicate evaluation.`);
       return true;
     }
 
@@ -630,8 +651,12 @@ export class ModerationService {
 
     // In-flight burst protection: if first offense for this user is in flight, delete concurrent message silently
     if (this.inFlightPromoSpamUsers.has(userLockKey)) {
+      console.log(`[PROMO_SPAM] In-flight burst detected for user ${userLockKey}. Deleting message ${message.message_id} silently.`);
       this.processedPromoSpamMessageIds.add(msgKey);
-      await telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
+      const burstDelRes = await telegramApi.deleteMessage(chatId, message.message_id).catch(() => null);
+      if (!burstDelRes?.ok && burstDelRes !== true) {
+        console.warn(`[PROMO_SPAM] Failed to delete in-flight burst message ${message.message_id}: ${burstDelRes?.description || 'Unknown error'}`);
+      }
       db.untrackMessages(chatId, [message.message_id]);
       return true;
     }
@@ -639,14 +664,24 @@ export class ModerationService {
     // Debounce window: if warning was issued in the last 4 seconds for this user in this group, delete message without duplicate warning
     const lastWarnTime = this.recentSpamWarnings.get(userLockKey) || 0;
     if (now - lastWarnTime < 4000) {
+      console.log(`[PROMO_SPAM] Recent warning issued within debounce window for user ${userLockKey}. Deleting message ${message.message_id} silently.`);
       this.processedPromoSpamMessageIds.add(msgKey);
-      await telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
+      const debouncedDelRes = await telegramApi.deleteMessage(chatId, message.message_id).catch(() => null);
+      if (!debouncedDelRes?.ok && debouncedDelRes !== true) {
+        console.warn(`[PROMO_SPAM] Failed to delete debounced message ${message.message_id}: ${debouncedDelRes?.description || 'Unknown error'}`);
+      }
       db.untrackMessages(chatId, [message.message_id]);
       return true;
     }
 
     // 4. Multi-Signal Detection Analysis
     const analysis = ContentProtectionService.analyzePromotionalSpam(message, chatId, settings);
+    console.log(
+      `[PROMO_SPAM] Analysis result chatId=${chatId} msgId=${message.message_id} senderId=${userId}: ` +
+      `score=${analysis.score.toFixed(1)}/${analysis.threshold} isSpam=${analysis.isSpam} ` +
+      `signals=${JSON.stringify(analysis.signals)} reasons=[${analysis.reasons.join('; ')}]`
+    );
+
     if (!analysis.isSpam) {
       return false;
     }
@@ -661,15 +696,23 @@ export class ModerationService {
       }
     }
 
-    const username = message.from.username
-      ? `@${message.from.username}`
-      : [message.from.first_name, message.from.last_name].filter(Boolean).join(' ') || `User ${userId}`;
+    const username = message.from
+      ? (message.from.username
+        ? `@${message.from.username}`
+        : [message.from.first_name, message.from.last_name].filter(Boolean).join(' ') || `User ${userId}`)
+      : (message.sender_chat?.title ? `Channel "${message.sender_chat.title}"` : `Sender ${userId}`);
 
     // 5. Delete offending message immediately
     let deletedCount = 0;
-    const delMsgRes = await telegramApi.deleteMessage(chatId, message.message_id).catch(() => null);
-    if (delMsgRes && (delMsgRes.ok || delMsgRes === true)) {
+    const delMsgRes = await telegramApi.deleteMessage(chatId, message.message_id).catch((err: any) => ({ ok: false, description: err?.message }));
+    if (delMsgRes && delMsgRes.ok) {
       deletedCount++;
+      console.log(`[PROMO_SPAM] Offending message ${message.message_id} in chat ${chatId} successfully deleted.`);
+    } else {
+      console.error(
+        `[PROMO_SPAM] Telegram rejected deletion of offending message ${message.message_id} in chat ${chatId}: ` +
+        `${delMsgRes?.description || 'Unknown API failure (check bot can_delete_messages admin permission)'}`
+      );
     }
     db.untrackMessages(chatId, [message.message_id]);
 
@@ -677,6 +720,7 @@ export class ModerationService {
     const otherMsgIds = db.getMessagesByUser(chatId, userId, message.message_id, 100).filter((id) => id !== message.message_id);
     const otherDeleted = await this.safeDeleteUserMessages(chatId, otherMsgIds);
     deletedCount += otherDeleted;
+    console.log(`[PROMO_SPAM] Safe deleted ${otherDeleted} other removable messages for sender ${userId} in chat ${chatId}. Total removed: ${deletedCount}`);
 
     // 7. Check existing warning history in Roxie's authoritative storage for this group
     const userWarnings = db.getUserWarnings(chatId, userId);
@@ -686,6 +730,7 @@ export class ModerationService {
 
     if (!hasPriorWarning) {
       // --- FIRST CONFIRMED OFFENSE: ISSUE ONE WARNING ---
+      console.log(`[PROMO_SPAM] Action: FIRST OFFENSE. Issuing Warning 1/1 for sender ${userId} in chat ${chatId}.`);
       this.inFlightPromoSpamUsers.add(userLockKey);
       this.recentSpamWarnings.set(userLockKey, now);
 
@@ -694,8 +739,8 @@ export class ModerationService {
           chatId,
           groupId: chatId,
           userId,
-          userUsername: message.from.username,
-          userFirstName: message.from.first_name,
+          userUsername: message.from?.username || message.sender_chat?.username,
+          userFirstName: message.from?.first_name || message.sender_chat?.title,
           adminId: botId || 0,
           adminUsername: 'RoxieAutoMod',
           reason: 'Promotional link spam',
@@ -707,15 +752,19 @@ export class ModerationService {
           `👤 <b>${escapeHtml(username)}</b>, your message and other removable messages have been deleted (${deletedCount} total).\n` +
           `<b>Repeating this offense will result in a permanent ban.</b>`;
 
-        await telegramApi.sendMessage(chatId, warningNotice).catch((err) => {
-          console.warn(`[AutoMod] Failed to send promotional spam warning to chat ${chatId}:`, err);
+        const warnRes = await telegramApi.sendMessage(chatId, warningNotice).catch((err) => {
+          console.warn(`[PROMO_SPAM] Failed to send promotional spam warning to chat ${chatId}:`, err?.message || err);
+          return null;
         });
+        if (warnRes?.ok) {
+          console.log(`[PROMO_SPAM] Warning 1/1 notice delivered to chat ${chatId} (msg #${warnRes.result?.message_id}).`);
+        }
 
         db.addLog({
           chatId,
           chatTitle: message.chat.title,
           targetUserId: userId,
-          targetUsername: message.from.username,
+          targetUsername: message.from?.username || message.sender_chat?.username,
           adminUserId: botId || 0,
           adminUsername: 'RoxieAutoMod',
           action: 'warn',
@@ -731,26 +780,42 @@ export class ModerationService {
       return true;
     } else {
       // --- REPEAT OFFENSE: PERMANENT BAN ---
+      console.log(`[PROMO_SPAM] Action: REPEAT OFFENSE. Executing PERMANENT BAN for sender ${userId} in chat ${chatId}.`);
       let banSucceeded = false;
       let banErrorDesc = '';
 
       try {
-        const banRes = await telegramApi.banChatMember(chatId, userId);
-        if (banRes && banRes.ok) {
-          banSucceeded = true;
+        if (isSenderChat) {
+          // Ban channel from speaking in the chat
+          const banChatRes = await telegramApi.call('banChatSenderChat', {
+            chat_id: chatId,
+            sender_chat_id: userId
+          });
+          if (banChatRes && banChatRes.ok) {
+            banSucceeded = true;
+          } else {
+            banErrorDesc = banChatRes?.description || 'Failed to ban channel sender';
+          }
         } else {
-          banErrorDesc = banRes?.description || 'Permission issue or Telegram API rejection';
+          // Ban regular user/bot permanently (until_date: 0)
+          const banRes = await telegramApi.banChatMember(chatId, userId);
+          if (banRes && banRes.ok) {
+            banSucceeded = true;
+          } else {
+            banErrorDesc = banRes?.description || 'Permission issue or Telegram API rejection';
+          }
         }
       } catch (err: any) {
-        banErrorDesc = err?.message || 'Telegram ban member request failed';
+        banErrorDesc = err?.message || 'Telegram ban request failed';
       }
 
       if (banSucceeded) {
+        console.log(`[PROMO_SPAM] Permanent ban successful for sender ${userId} in chat ${chatId}.`);
         db.addLog({
           chatId,
           chatTitle: message.chat.title,
           targetUserId: userId,
-          targetUsername: message.from.username,
+          targetUsername: message.from?.username || message.sender_chat?.username,
           adminUserId: botId || 0,
           adminUsername: 'RoxieAutoMod',
           action: 'auto_ban',
@@ -765,12 +830,12 @@ export class ModerationService {
 
         await telegramApi.sendMessage(chatId, banNotice).catch(() => {});
       } else {
-        // Report failure accurately without claiming ban succeeded
+        console.error(`[PROMO_SPAM] Permanent ban FAILED for sender ${userId} in chat ${chatId}: ${banErrorDesc}`);
         db.addLog({
           chatId,
           chatTitle: message.chat.title,
           targetUserId: userId,
-          targetUsername: message.from.username,
+          targetUsername: message.from?.username || message.sender_chat?.username,
           adminUserId: botId || 0,
           adminUsername: 'RoxieAutoMod',
           action: 'auto_ban',
@@ -1864,6 +1929,17 @@ export class ModerationService {
           action: 'send_message',
           details: `Sent Welcome Private DM (${trigger}) to ${user.first_name || user.id} (@${user.username || 'unknown'}) for joining ${title} (Telegram msg #${sendRes.messageId || 'unknown'})`
         });
+        // Capture eligible private recipient into registry (Feature 5)
+        db.savePrivateRecipient({
+          chatId: user.id,
+          username: user.username,
+          firstName: user.first_name,
+          source: 'welcome_dm',
+          sourceGroupId: chatId,
+          status: 'active'
+        });
+        db.recordPrivateDeliveryResult(user.id, true);
+
         return { sent: true, messageId: sendRes.messageId };
       } else {
         const errorMsg = sendRes.error || 'Telegram send failed';
@@ -1886,6 +1962,7 @@ export class ModerationService {
         // to prevent repeated impossible delivery attempts on duplicate updates
         if (isBlocked) {
           this.welcomedDmUsersCache.set(`blocked:${chatId}:${user.id}`, Date.now());
+          db.updatePrivateRecipientStatus(user.id, 'blocked', errorMsg);
           this.welcomedDmUsersCache.set(`blocked:${user.id}`, Date.now());
           this.welcomedDmUsersCache.delete(dedupeKey);
           return { sent: false, fallbackSent: false, error: errorMsg };
@@ -2038,7 +2115,13 @@ export class ModerationService {
 
     // Member left
     if (message.left_chat_member) {
-      await this.sendGoodbye(chatId, message.left_chat_member, chatTitle);
+      const me = await telegramApi.getMe().catch(() => null);
+      const botId = me?.result?.id || db.getCurrentBotId();
+      if (botId && message.left_chat_member.id === botId) {
+        db.markBotLeftGroup(chatId);
+      } else {
+        await this.sendGoodbye(chatId, message.left_chat_member, chatTitle);
+      }
     }
   }
 

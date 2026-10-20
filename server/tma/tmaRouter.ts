@@ -6,7 +6,8 @@ import { mentionAllService } from '../telegram/mentionAllService.js';
 import { PostSender, sanitizeInlineButtons, validateMediaReference } from '../telegram/postSender.js';
 import { messageScheduler } from '../telegram/scheduler.js';
 import { COMMAND_CATALOG } from '../telegram/commandCatalog.js';
-import { PostPayload, PostContentType } from '../telegram/types.js';
+import { PostPayload, PostContentType, SavedPost } from '../telegram/types.js';
+import { parseScheduleTime } from '../telegram/postBuilder.js';
 import {
   requireTmaAuth,
   validateTelegramInitData,
@@ -1150,6 +1151,48 @@ tmaRouter.post('/groups/:chatId/schedules/:id/toggle', requireTmaAuth('schedules
   }
 });
 
+tmaRouter.put('/groups/:chatId/schedules/:id', requireTmaAuth('schedules'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const id = req.params.id;
+    const existing = db.getScheduleById(id);
+    if (!existing || Number(existing.chatId) !== Number(chatId)) {
+      return res.status(404).json({ error: 'Schedule not found for this group' });
+    }
+
+    const { name, message, scheduleType, intervalStr, nextRunDate, nextRunTime, timezone, contentType, mediaFileId, pinAfterSend, replyToLatest } = req.body;
+    let nextRun: string | undefined = undefined;
+    let intervalMs: number | undefined = undefined;
+
+    if (intervalStr && (scheduleType === 'interval' || !scheduleType)) {
+      const parsed = parseScheduleTime(intervalStr);
+      if ('error' in parsed) {
+        return res.status(400).json({ error: parsed.error });
+      }
+      nextRun = parsed.nextRunIso;
+      intervalMs = parsed.intervalMs;
+    } else if (nextRunDate && nextRunTime) {
+      nextRun = new Date(`${nextRunDate}T${nextRunTime}:00.000Z`).toISOString();
+    }
+
+    const updated = db.updateSchedule(id, {
+      name: name !== undefined ? name : existing.name,
+      message: message !== undefined ? message : existing.message,
+      scheduleType: scheduleType || existing.scheduleType,
+      ...(nextRun ? { nextRun } : {}),
+      ...(intervalMs ? { intervalMs } : {}),
+      ...(contentType ? { contentType } : {}),
+      ...(mediaFileId !== undefined ? { mediaFileId } : {}),
+      ...(pinAfterSend !== undefined ? { pinAfterSend: Boolean(pinAfterSend) } : {}),
+      ...(replyToLatest !== undefined ? { replyToLatest: Boolean(replyToLatest) } : {})
+    });
+
+    res.json({ ok: true, schedule: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 tmaRouter.delete('/groups/:chatId/schedules/:id', requireTmaAuth('schedules'), (req: AuthenticatedTmaRequest, res) => {
   try {
     const chatId = req.tmaChatId!;
@@ -1206,6 +1249,31 @@ tmaRouter.post('/groups/:chatId/automations', requireTmaAuth('schedules'), (req:
     };
     db.addAutomation(chatId, newAuto);
     res.json({ ok: true, automation: newAuto });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.put('/groups/:chatId/automations/:id', requireTmaAuth('schedules'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const autoId = req.params.id;
+    const { trigger, action, parameters, enabled } = req.body;
+
+    const existingAutomations = db.getAutomations(chatId);
+    const existing = existingAutomations.find((a: any) => a.id === autoId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Automation rule not found in this group' });
+    }
+
+    const updated = db.updateAutomation(chatId, autoId, {
+      ...(trigger !== undefined ? { trigger } : {}),
+      ...(action !== undefined ? { action } : {}),
+      ...(parameters !== undefined ? { parameters } : {}),
+      ...(enabled !== undefined ? { enabled: Boolean(enabled) } : {})
+    });
+
+    res.json({ ok: true, automation: updated });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -490,6 +490,83 @@ async function runTmaTestSuite() {
   });
   assert(automationsAdminDeny.status === 403 && automationsAdminDeny.body?.code === 'FORBIDDEN_FEATURE', 'TMA-40L: GET /automations restricted from GROUP_ADMIN');
 
+  // Automation CRUD & Duplicate Prevention (TMA-40L1..L4)
+  const autoCreateReq = await simulateRequest('POST', `/api/tma/groups/${groupABC}/automations`, {
+    'x-tma-session': ownerToken
+  }, {
+    trigger: 'spam_detected',
+    action: 'delete_message',
+    parameters: 'threshold=3',
+    enabled: true
+  });
+  assert(autoCreateReq.status === 200 && autoCreateReq.body?.automation?.id, 'TMA-40L1: POST /automations creates rule for Owner');
+  const createdAutoId = autoCreateReq.body.automation.id;
+
+  const autoEditReq = await simulateRequest('PUT', `/api/tma/groups/${groupABC}/automations/${createdAutoId}`, {
+    'x-tma-session': ownerToken
+  }, {
+    trigger: 'spam_detected',
+    action: 'mute_user',
+    parameters: 'duration=300',
+    enabled: true
+  });
+  assert(autoEditReq.status === 200 && autoEditReq.body?.automation?.action === 'mute_user', 'TMA-40L2: PUT /automations/:id updates rule in-place');
+  assert(autoEditReq.body?.automation?.id === createdAutoId, 'TMA-40L3: PUT /automations/:id preserves rule ID');
+
+  const autoListAfterEdit = await simulateRequest('GET', `/api/tma/groups/${groupABC}/automations`, {
+    'x-tma-session': ownerToken
+  });
+  const matchingRules = (autoListAfterEdit.body?.automations || []).filter((a: any) => a.id === createdAutoId);
+  assert(matchingRules.length === 1, 'TMA-40L4: PUT /automations/:id does not create duplicate rule');
+
+  const autoAdminEditDeny = await simulateRequest('PUT', `/api/tma/groups/${groupABC}/automations/${createdAutoId}`, {
+    'x-tma-session': adminToken
+  }, { action: 'ban_user' });
+  assert(autoAdminEditDeny.status === 403 && autoAdminEditDeny.body?.code === 'FORBIDDEN_FEATURE', 'TMA-40L5: PUT /automations/:id restricted from GROUP_ADMIN (RBAC)');
+
+  // Clean up test automation
+  await simulateRequest('DELETE', `/api/tma/groups/${groupABC}/automations/${createdAutoId}`, {
+    'x-tma-session': ownerToken
+  });
+
+  // Schedule CRUD & Duplicate Prevention (TMA-40L6..L10)
+  const schedCreateReq = await simulateRequest('POST', `/api/tma/groups/${groupABC}/schedules`, {
+    'x-tma-session': ownerToken
+  }, {
+    name: 'Weekly Notice',
+    message: 'Weekly community review',
+    scheduleType: 'interval',
+    intervalStr: '1h'
+  });
+  assert(schedCreateReq.status === 200 && schedCreateReq.body?.schedule?.id, 'TMA-40L6: POST /schedules creates schedule for Owner');
+  const createdSchedId = schedCreateReq.body.schedule.id;
+
+  const schedEditReq = await simulateRequest('PUT', `/api/tma/groups/${groupABC}/schedules/${createdSchedId}`, {
+    'x-tma-session': ownerToken
+  }, {
+    name: 'Weekly Notice (Updated)',
+    message: 'Updated message content',
+    intervalStr: '2h'
+  });
+  assert(schedEditReq.status === 200 && schedEditReq.body?.schedule?.name === 'Weekly Notice (Updated)', 'TMA-40L7: PUT /schedules/:id updates schedule in-place');
+  assert(schedEditReq.body?.schedule?.id === createdSchedId, 'TMA-40L8: PUT /schedules/:id preserves schedule ID');
+
+  const schedListAfterEdit = await simulateRequest('GET', `/api/tma/groups/${groupABC}/schedules`, {
+    'x-tma-session': ownerToken
+  });
+  const matchingScheds = (schedListAfterEdit.body?.schedules || []).filter((s: any) => s.id === createdSchedId);
+  assert(matchingScheds.length === 1, 'TMA-40L9: PUT /schedules/:id does not create duplicate schedule');
+
+  const schedAdminEditDeny = await simulateRequest('PUT', `/api/tma/groups/${groupABC}/schedules/${createdSchedId}`, {
+    'x-tma-session': adminToken
+  }, { name: 'Unauthorized Change' });
+  assert(schedAdminEditDeny.status === 403 && schedAdminEditDeny.body?.code === 'FORBIDDEN_FEATURE', 'TMA-40L10: PUT /schedules/:id restricted from GROUP_ADMIN (RBAC)');
+
+  // Clean up test schedule
+  await simulateRequest('DELETE', `/api/tma/groups/${groupABC}/schedules/${createdSchedId}`, {
+    'x-tma-session': ownerToken
+  });
+
   // 19. Members (members feature permitted for Owner, restricted for GROUP_ADMIN)
   const membersOwnerReq = await simulateRequest('GET', `/api/tma/groups/${groupABC}/members`, {
     'x-tma-session': ownerToken

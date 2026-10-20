@@ -366,7 +366,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   }, [privateChatsProp, localPrivateChats]);
 
   // Recipient Type Dropdown State: 'groups' | 'private_chats' | 'both'
-  const [recipientType, setRecipientType] = useState<'groups' | 'private_chats' | 'both'>('groups');
+  const [recipientType, setRecipientType] = useState<'groups' | 'private_chats' | 'both' | 'private_recipients'>('groups');
 
   // Search filter query
   const [recipientSearchQuery, setRecipientSearchQuery] = useState<string>('');
@@ -429,9 +429,37 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   }, [effectivePrivateChats, recipientSearchQuery]);
 
   // Mode helpers
+  // Post Library and Private Recipients Registry states
+  const [showPostPickerModal, setShowPostPickerModal] = useState<boolean>(false);
+  const [savedPostsList, setSavedPostsList] = useState<any[]>([]);
+  const [postPickerSearch, setPostPickerSearch] = useState<string>('');
+  const [postPickerLoading, setPostPickerLoading] = useState<boolean>(false);
+  const [showSaveToLibraryModal, setShowSaveToLibraryModal] = useState<boolean>(false);
+  const [saveToLibTitle, setSaveToLibTitle] = useState<string>('');
+  const [isSavingToLib, setIsSavingToLib] = useState<boolean>(false);
+  const [registryRecipients, setRegistryRecipients] = useState<any[]>([]);
+
+  // Load registry recipients when private_recipients mode is selected
+  useEffect(() => {
+    if (recipientType === 'private_recipients') {
+      fetch('/api/dashboard/private-recipients?status=active', {
+        headers: getAuthHeaders(),
+        credentials: 'same-origin'
+      })
+        .then(res => res.ok ? res.json() : { recipients: [] })
+        .then(data => {
+          if (Array.isArray(data.recipients)) {
+            setRegistryRecipients(data.recipients);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [recipientType]);
+
   const isGroupsMode = recipientType === 'groups';
   const isPrivateMode = recipientType === 'private_chats';
   const isBothMode = recipientType === 'both';
+  const isRegistryMode = recipientType === 'private_recipients';
 
   // Visible selected count in current mode
   const visibleSelectedCount = useMemo(() => {
