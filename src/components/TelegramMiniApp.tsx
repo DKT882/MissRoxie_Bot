@@ -159,6 +159,18 @@ export const TelegramMiniApp: React.FC = () => {
   const [newBtnUrl, setNewBtnUrl] = useState<string>('');
   const [postSending, setPostSending] = useState<boolean>(false);
 
+  // Copy Schedule Code Modal
+  const [copyScheduleModal, setCopyScheduleModal] = useState<{
+    isOpen: boolean;
+    schedule: any;
+    command: string;
+    jsonConfig: any;
+    copiedField: 'command' | 'json' | null;
+  } | null>(null);
+
+  // Schedule saving loading state
+  const [scheduleSaving, setScheduleSaving] = useState<boolean>(false);
+
   // New Schedule Form Modal
   const [showScheduleModal, setShowScheduleModal] = useState<boolean>(false);
   const [scheduleForm, setScheduleForm] = useState<{
@@ -594,6 +606,8 @@ export const TelegramMiniApp: React.FC = () => {
       }
     } catch (err: any) {
       showNotification(err.message, 'error');
+    } finally {
+      setScheduleSaving(false);
     }
   };
 
@@ -811,6 +825,102 @@ export const TelegramMiniApp: React.FC = () => {
     setPostButtons(postButtons.filter((_, i) => i !== index));
   };
   // Schedule & Automation Edit Openers (Feature 2 Parity)
+  const copyTextToClipboard = async (text: string): Promise<boolean> => {
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {}
+    }
+    try {
+      const el = document.createElement('textarea');
+      el.value = text;
+      el.setAttribute('readonly', '');
+      el.style.position = 'fixed';
+      el.style.left = '-9999px';
+      document.body.appendChild(el);
+      el.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(el);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleDuplicateSchedule = (s: any) => {
+    setEditingSchedule(null); // Draft mode
+    setScheduleForm({
+      name: `${s.name || 'Schedule'} (Copy)`,
+      message: s.message || s.messageText || '',
+      scheduleType: s.scheduleType || (s.cronExpression ? 'daily' : 'interval'),
+      intervalStr: s.intervalFormatted || s.intervalStr || '1h',
+      nextRunDate: s.nextRun ? s.nextRun.split('T')[0] : new Date().toISOString().split('T')[0],
+      nextRunTime: s.nextRun && s.nextRun.includes('T') ? s.nextRun.split('T')[1].slice(0, 5) : '12:00',
+      pinAfterSend: Boolean(s.pinAfterSend),
+      replyToLatest: Boolean(s.replyToLatest)
+    });
+    showNotification('Schedule duplicated into draft. Review and click "Create Schedule" to save.', 'success');
+    setShowScheduleModal(true);
+  };
+
+  const handleOpenNewSchedule = () => {
+    setEditingSchedule(null);
+    setScheduleForm({
+      name: '',
+      message: '',
+      scheduleType: 'interval',
+      intervalStr: '1h',
+      nextRunDate: new Date().toISOString().split('T')[0],
+      nextRunTime: '12:00',
+      pinAfterSend: false,
+      replyToLatest: false
+    });
+    setShowScheduleModal(true);
+  };
+
+  const handleCopyScheduleCode = async (s: any) => {
+    try {
+      let command = '';
+      let jsonConfig: any = {};
+      const res = await tmaFetch(`/api/tma/groups/${chatId}/schedules/${s.id}/code`);
+      if (res.ok) {
+        const data = await res.json();
+        command = data.command;
+        jsonConfig = data.jsonConfig;
+      } else {
+        const interval = s.intervalFormatted || s.intervalStr || '1h';
+        const delTag = s.autoDeletePrevious ? ' delOn' : '';
+        const pinTag = s.pinAfterSend ? ' pin' : '';
+        const replyTag = s.replyToLatest ? ' replyOn' : '';
+        const message = s.message || s.messageText || '';
+        command = `/schedule ${interval}${delTag}${pinTag}${replyTag} ${message}`.trim();
+        jsonConfig = {
+          name: s.name || 'Schedule',
+          scheduleType: s.scheduleType || 'interval',
+          interval,
+          message,
+          contentType: s.contentType || 'text',
+          pinAfterSend: Boolean(s.pinAfterSend),
+          replyToLatest: Boolean(s.replyToLatest),
+          autoDeletePrevious: Boolean(s.autoDeletePrevious),
+          targetChatId: '<REPLACE_WITH_DESTINATION_CHAT_ID>'
+        };
+        if (s.mediaFileId) jsonConfig.mediaFileId = s.mediaFileId;
+        if (s.timezone) jsonConfig.timezone = s.timezone;
+      }
+      setCopyScheduleModal({
+        isOpen: true,
+        schedule: s,
+        command,
+        jsonConfig,
+        copiedField: null
+      });
+    } catch {
+      showNotification('Failed to generate schedule code', 'error');
+    }
+  };
+
   const handleOpenEditSchedule = (s: any) => {
     setEditingSchedule(s);
     setScheduleForm({
@@ -1080,10 +1190,12 @@ export const TelegramMiniApp: React.FC = () => {
 
   // Handlers for Schedules
   const handleCreateSchedule = async () => {
+    if (scheduleSaving) return;
     if (!chatId || !scheduleForm.name.trim() || !scheduleForm.message.trim()) {
       showNotification('Schedule name and message are required', 'error');
       return;
     }
+    setScheduleSaving(true);
     try {
       const isEdit = Boolean(editingSchedule && editingSchedule.id);
       const url = isEdit
@@ -2864,7 +2976,7 @@ export const TelegramMiniApp: React.FC = () => {
                       <Clock className="w-4 h-4 text-cyan-400" /> Scheduled Messages ({schedulesData.length})
                     </h3>
                     <button
-                      onClick={() => setShowScheduleModal(true)}
+                      onClick={handleOpenNewSchedule}
                       className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" /> New Schedule
@@ -2889,18 +3001,39 @@ export const TelegramMiniApp: React.FC = () => {
                             </span>
                           </div>
 
-                          <div className="flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-800/80 pt-1.5">
+                          <div className="flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-800/80 pt-1.5 flex-wrap gap-2">
                             <span>Interval: {s.intervalFormatted || 'Custom'}</span>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              <button
+                                onClick={() => handleCopyScheduleCode(s)}
+                                className="px-2 py-1 bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-800/60 rounded-lg flex items-center gap-1 cursor-pointer"
+                                title="Copy Schedule Code"
+                              >
+                                <Copy className="w-3 h-3" /> Copy Code
+                              </button>
+                              <button
+                                onClick={() => handleOpenEditSchedule(s)}
+                                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg flex items-center gap-1 cursor-pointer"
+                                title="Edit Schedule"
+                              >
+                                <Edit2 className="w-3 h-3" /> Edit
+                              </button>
+                              <button
+                                onClick={() => handleDuplicateSchedule(s)}
+                                className="px-2 py-1 bg-purple-950/60 hover:bg-purple-900/60 text-purple-300 border border-purple-800/60 rounded-lg flex items-center gap-1 cursor-pointer"
+                                title="Duplicate Schedule (as draft)"
+                              >
+                                <Layers className="w-3 h-3" /> Duplicate
+                              </button>
                               <button
                                 onClick={() => handleToggleSchedule(s.id, s.enabled !== false)}
-                                className="px-2 py-1 bg-slate-800 text-cyan-300 rounded-lg"
+                                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg cursor-pointer"
                               >
                                 {s.enabled !== false ? 'Pause' : 'Enable'}
                               </button>
                               <button
                                 onClick={() => handleDeleteSchedule(s.id, s.name || s.id)}
-                                className="px-2 py-1 bg-rose-500/10 text-rose-400 rounded-lg"
+                                className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg cursor-pointer"
                               >
                                 Delete
                               </button>
@@ -3462,7 +3595,7 @@ export const TelegramMiniApp: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex flex-wrap items-center gap-4 pt-1">
                 <label className="flex items-center gap-1.5 cursor-pointer">
                   <input
                     type="checkbox"
@@ -3471,6 +3604,15 @@ export const TelegramMiniApp: React.FC = () => {
                     className="w-4 h-4 accent-cyan-500 rounded"
                   />
                   <span className="text-slate-300">Pin after sending</span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={scheduleForm.replyToLatest}
+                    onChange={e => setScheduleForm({ ...scheduleForm, replyToLatest: e.target.checked })}
+                    className="w-4 h-4 accent-cyan-500 rounded"
+                  />
+                  <span className="text-slate-300">Reply to latest</span>
                 </label>
               </div>
             </div>
@@ -3484,9 +3626,123 @@ export const TelegramMiniApp: React.FC = () => {
               </button>
               <button
                 onClick={handleCreateSchedule}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold cursor-pointer"
+                disabled={scheduleSaving}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
               >
-                {editingSchedule ? 'Save Changes' : 'Create Schedule'}
+                {scheduleSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                {scheduleSaving ? 'Saving...' : editingSchedule ? 'Save Changes' : 'Create Schedule'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Copy Schedule Code Modal */}
+      {copyScheduleModal?.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Copy className="w-4 h-4 text-cyan-400" /> Copy Schedule Code
+                </h3>
+                <p className="text-[11px] text-slate-400 truncate max-w-xs">
+                  {copyScheduleModal.schedule.name || copyScheduleModal.schedule.id}
+                </p>
+              </div>
+              <button
+                onClick={() => setCopyScheduleModal(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-slate-300 font-semibold">Ready-to-use Command</span>
+                  <button
+                    onClick={async () => {
+                      const ok = await copyTextToClipboard(copyScheduleModal.command);
+                      if (ok) {
+                        setCopyScheduleModal({ ...copyScheduleModal, copiedField: 'command' });
+                        showNotification('Command copied to clipboard!', 'success');
+                      } else {
+                        showNotification('Clipboard access unavailable. Please select and copy text manually.', 'error');
+                      }
+                    }}
+                    className="text-cyan-400 hover:text-cyan-300 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    {copyScheduleModal.copiedField === 'command' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    {copyScheduleModal.copiedField === 'command' ? 'Copied!' : 'Copy Command'}
+                  </button>
+                </div>
+                <div
+                  onClick={async () => {
+                    const ok = await copyTextToClipboard(copyScheduleModal.command);
+                    if (ok) {
+                      setCopyScheduleModal({ ...copyScheduleModal, copiedField: 'command' });
+                      showNotification('Command copied to clipboard!', 'success');
+                    }
+                  }}
+                  className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl font-mono text-[11px] text-cyan-300 break-all select-all cursor-pointer hover:border-cyan-500/50"
+                  title="Click to copy"
+                >
+                  {copyScheduleModal.command}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-slate-300 font-semibold">Reusable JSON Configuration</span>
+                  <button
+                    onClick={async () => {
+                      const ok = await copyTextToClipboard(JSON.stringify(copyScheduleModal.jsonConfig, null, 2));
+                      if (ok) {
+                        setCopyScheduleModal({ ...copyScheduleModal, copiedField: 'json' });
+                        showNotification('JSON config copied to clipboard!', 'success');
+                      } else {
+                        showNotification('Clipboard access unavailable. Please select and copy text manually.', 'error');
+                      }
+                    }}
+                    className="text-cyan-400 hover:text-cyan-300 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    {copyScheduleModal.copiedField === 'json' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    {copyScheduleModal.copiedField === 'json' ? 'Copied!' : 'Copy JSON'}
+                  </button>
+                </div>
+                <pre
+                  onClick={async () => {
+                    const ok = await copyTextToClipboard(JSON.stringify(copyScheduleModal.jsonConfig, null, 2));
+                    if (ok) {
+                      setCopyScheduleModal({ ...copyScheduleModal, copiedField: 'json' });
+                      showNotification('JSON config copied to clipboard!', 'success');
+                    }
+                  }}
+                  className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl font-mono text-[10px] text-slate-300 max-h-36 overflow-y-auto cursor-pointer hover:border-cyan-500/50"
+                  title="Click to copy"
+                >
+                  {JSON.stringify(copyScheduleModal.jsonConfig, null, 2)}
+                </pre>
+              </div>
+
+              <div className="p-2.5 bg-cyan-950/40 border border-cyan-800/40 rounded-xl text-[11px] text-cyan-200/90 space-y-1">
+                <div className="font-semibold text-cyan-300">ℹ️ Reusability & Format Guidance:</div>
+                <ul className="list-disc pl-4 space-y-0.5 text-cyan-300/80 text-[10px]">
+                  <li><b>Ready Command:</b> Best for instant chat execution. Note: Bot command syntax cannot represent complex settings like custom inline URL buttons.</li>
+                  <li><b>JSON Configuration:</b> Complete canonical representation containing all supported options (buttons, pin, reply, auto-delete). Replace <code>&lt;REPLACE_WITH_DESTINATION_CHAT_ID&gt;</code> before importing.</li>
+                  <li><b>Zero Duplicates:</b> Copying code is strictly read-only and never creates, activates, pauses, or modifies any schedules.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={() => setCopyScheduleModal(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Close
               </button>
             </div>
           </div>

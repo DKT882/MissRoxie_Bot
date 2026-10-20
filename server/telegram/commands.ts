@@ -2,7 +2,7 @@ import { telegramApi } from './api.js';
 import { TelegramMiddleware, CommandContext, RoleRank, ActorResolution } from './middleware.js';
 import { db } from '../db/storage.js';
 import { ModerationService, parseDuration, parseModerationArgs } from './moderation.js';
-import { messageScheduler } from './scheduler.js';
+import { messageScheduler, generateScheduleExportCode } from './scheduler.js';
 import { PostBuilderManager } from './postBuilder.js';
 import { PostSender } from './postSender.js';
 import { WelcomeDmFallbackService } from './welcomeDmFallback.js';
@@ -465,7 +465,7 @@ export class CommandHandler {
     '/protection', '/roxie', '/roxiemode', '/roxiereaction', '/reaction',
     '/lust', '/lustmod', '/lustmode',
     '/clearmemory',
-    '/say', '/announce', '/schedule', '/listschedules', '/deleteschedule',
+    '/say', '/announce', '/schedule', '/listschedules', '/deleteschedule', '/copyschedule', '/schedulecode', '/copysched',
     '/post', '/buildpost',
     '/exportconfig', '/importconfig', '/status',
     '/addstickerpack', '/addbulkstickers', '/addbulksticker', '/addsticker', '/addgif', '/liststickers', '/listgifs', '/removesticker', '/removegif', '/clearstickers', '/cleargifs',
@@ -4766,15 +4766,73 @@ export class CommandHandler {
         return (
           `<b>${idx + 1}. [<code>${s.id}</code>] Every ${s.intervalFormatted}${delTag}${pinTag}${replyTag}${btnTag}</b>\n` +
           `<i>"${escapeHtml(s.message.length > 50 ? s.message.slice(0, 47) + '...' : s.message)}"</i>\n` +
-          `Next: ${new Date(s.nextRun).toLocaleTimeString()} (Runs: ${s.runsCount})\n`
+          `Next: ${new Date(s.nextRun).toLocaleTimeString()} (Runs: ${s.runsCount})\n` +
+          `📋 Copy: <code>/copyschedule ${s.id}</code>\n`
         );
       })
       .join('\n');
 
+    const copyButtons: any[][] = schedules.slice(0, 5).map(s => ([
+      { text: `📋 Copy ${s.name || s.id}`, callback_data: `sched_copy:${s.id}` }
+    ]));
+
     await telegramApi.sendMessage(
       ctx.chatId,
-      `📅 <b>Active Scheduled Messages (${schedules.length}):</b>\n\n${list}\n<i>Delete with <code>/deleteSchedule &lt;id&gt;</code></i>`
+      `📅 <b>Active Scheduled Messages (${schedules.length}):</b>\n\n${list}\n<i>Copy code: <code>/copyschedule &lt;id&gt;</code> | Delete: <code>/deleteSchedule &lt;id&gt;</code></i>`,
+      {
+        parse_mode: 'HTML',
+        reply_markup: copyButtons.length > 0 ? { inline_keyboard: copyButtons } : undefined
+      }
     );
+  }
+
+  private static async handleCopySchedule(ctx: CommandContext) {
+    if (!(await TelegramMiddleware.requireGroup(ctx))) return;
+    if (!(await TelegramMiddleware.requireAdmin(ctx)).allowed) return;
+
+    if (ctx.args.length === 0) {
+      const groupScheds = db.getGroupSchedules(ctx.chatId);
+      if (groupScheds.length === 0) {
+        await telegramApi.sendMessage(ctx.chatId, '📅 No scheduled messages found in this group.');
+        return;
+      }
+      const idsHelp = groupScheds.map(s => `• <code>${s.id}</code> - "${escapeHtml(s.name || s.message.slice(0, 30))}"`).join('\n');
+      await telegramApi.sendMessage(
+        ctx.chatId,
+        `📋 <b>Usage:</b> <code>/copyschedule &lt;id&gt;</code>\n\n<b>Available Schedules:</b>\n${idsHelp}`
+      );
+      return;
+    }
+
+    const scheduleId = ctx.args[0].trim();
+    const groupScheds = db.getGroupSchedules(ctx.chatId);
+    let sched = groupScheds.find(s => s.id.toLowerCase() === scheduleId.toLowerCase());
+    if (!sched) {
+      sched = db.getScheduleById(scheduleId);
+      if (sched && Number(sched.chatId) !== Number(ctx.chatId)) {
+        sched = undefined; // Enforce cross-group isolation
+      }
+    }
+
+    if (!sched) {
+      await telegramApi.sendMessage(ctx.chatId, `⚠️ Schedule ID <code>${escapeHtml(scheduleId)}</code> not found in this group.`);
+      return;
+    }
+
+    const exportData = generateScheduleExportCode(sched);
+    const text =
+      `📋 <b>Schedule Configuration Code</b>\n\n` +
+      `<b>Name:</b> <i>${escapeHtml(sched.name || sched.id)}</i>\n` +
+      `<b>Interval:</b> <code>${escapeHtml(sched.intervalFormatted || '1h')}</code>\n\n` +
+      `<b>Ready-to-use Command (Tap to copy):</b>\n` +
+      `<code>${escapeHtml(exportData.command)}</code>\n\n` +
+      `<b>Reusable JSON Config:</b>\n` +
+      `<pre><code class="language-json">${escapeHtml(JSON.stringify(exportData.jsonConfig, null, 2))}</code></pre>\n\n` +
+      `<i>💡 Tap the command above to copy it directly. To reuse in another group, send this command in that group, or change <code>targetChatId</code> in the JSON.</i>`;
+
+    await telegramApi.sendMessage(ctx.chatId, text, {
+      parse_mode: 'HTML'
+    });
   }
 
   private static async handleDeleteSchedule(ctx: CommandContext) {

@@ -603,6 +603,13 @@ export default function App() {
   const [schedulesFilterChatId, setSchedulesFilterChatId] = useState<number | 'all'>('all');
   const [showCreateScheduleModal, setShowCreateScheduleModal] = useState<boolean>(false);
   const [editingSchedule, setEditingSchedule] = useState<any | null>(null);
+  const [copyScheduleModal, setCopyScheduleModal] = useState<{
+    isOpen: boolean;
+    schedule: any;
+    command: string;
+    jsonConfig: any;
+    copiedField: 'command' | 'json' | null;
+  } | null>(null);
   const [scheduleFormError, setScheduleFormError] = useState<string | null>(null);
   const [scheduleNotification, setScheduleNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [newScheduleForm, setNewScheduleForm] = useState<{
@@ -2177,6 +2184,123 @@ export default function App() {
   };
 
   // Schedule and Automation Action Handlers
+  const copyTextToClipboard = async (text: string): Promise<boolean> => {
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {}
+    }
+    try {
+      const el = document.createElement('textarea');
+      el.value = text;
+      el.setAttribute('readonly', '');
+      el.style.position = 'fixed';
+      el.style.left = '-9999px';
+      document.body.appendChild(el);
+      el.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(el);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleDuplicateSchedule = (s: any) => {
+    setEditingSchedule(null);
+    setScheduleFormError(null);
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    let defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    let defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    if (s.nextRun) {
+      try {
+        const d = new Date(s.nextRun);
+        if (!isNaN(d.getTime())) {
+          defaultDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+          defaultTime = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+      } catch {}
+    }
+    setNewScheduleForm({
+      chatId: s.chatId,
+      name: `${s.name || 'Schedule'} (Copy)`,
+      message: s.message || s.messageText || '',
+      scheduleType: s.scheduleType || 'interval',
+      intervalStr: s.intervalFormatted || '1h',
+      nextRunDate: defaultDate,
+      nextRunTime: defaultTime,
+      timezone: s.timezone || 'UTC',
+      contentType: s.contentType || 'text',
+      mediaFileId: s.mediaFileId || '',
+      replyToMessageId: s.replyToMessageId ? String(s.replyToMessageId) : '',
+      enabled: false, // Strictly created in paused/draft state to prevent unexpected activation
+      pinAfterSend: Boolean(s.pinAfterSend),
+      replyToLatest: Boolean(s.replyToLatest),
+      autoDeletePrevious: Boolean(s.autoDeletePrevious),
+      triggerKeyword: s.triggerKeyword || '',
+      inlineKeyboard: Array.isArray(s.inlineKeyboard)
+        ? s.inlineKeyboard.map((row: any[]) =>
+            Array.isArray(row)
+              ? row.map(btn => ({
+                  text: btn.text || '',
+                  url: btn.url || '',
+                  style: btn.style && ['primary', 'success', 'danger'].includes(btn.style) ? btn.style : undefined
+                }))
+              : []
+          )
+        : []
+    });
+    setScheduleNotification({
+      type: 'success',
+      message: 'Schedule duplicated into draft form (paused). Review and save.'
+    });
+    setShowCreateScheduleModal(true);
+  };
+
+  const handleCopyScheduleCode = async (s: any) => {
+    try {
+      let command = '';
+      let jsonConfig: any = {};
+      const res = await deduplicatedFetch(`/api/dashboard/schedules/${s.id}/code`);
+      if (res.ok) {
+        const data = await res.json();
+        command = data.command;
+        jsonConfig = data.jsonConfig;
+      } else {
+        const interval = s.intervalFormatted || s.intervalStr || '1h';
+        const delTag = s.autoDeletePrevious ? ' delOn' : '';
+        const pinTag = s.pinAfterSend ? ' pin' : '';
+        const replyTag = s.replyToLatest ? ' replyOn' : '';
+        const message = s.message || s.messageText || '';
+        command = `/schedule ${interval}${delTag}${pinTag}${replyTag} ${message}`.trim();
+        jsonConfig = {
+          name: s.name || 'Schedule',
+          scheduleType: s.scheduleType || 'interval',
+          interval,
+          message,
+          contentType: s.contentType || 'text',
+          pinAfterSend: Boolean(s.pinAfterSend),
+          replyToLatest: Boolean(s.replyToLatest),
+          autoDeletePrevious: Boolean(s.autoDeletePrevious),
+          targetChatId: '<REPLACE_WITH_DESTINATION_CHAT_ID>',
+          ...(s.mediaFileId ? { mediaFileId: s.mediaFileId } : {}),
+          ...(s.timezone ? { timezone: s.timezone } : {})
+        };
+      }
+      setCopyScheduleModal({
+        isOpen: true,
+        schedule: s,
+        command,
+        jsonConfig,
+        copiedField: null
+      });
+    } catch {
+      setScheduleNotification({ type: 'error', message: 'Failed to generate schedule code.' });
+    }
+  };
+
   const handleSaveSchedule = async () => {
     if (schedulesLoading) return;
     setScheduleFormError(null);
@@ -5746,7 +5870,7 @@ export default function App() {
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex flex-wrap items-center gap-2 shrink-0">
                               <button
                                 onClick={() => handleToggleSchedule(s.id, s.enabled !== false)}
                                 className={`px-2.5 py-1 rounded-lg font-semibold text-xs border ${
@@ -5756,6 +5880,20 @@ export default function App() {
                                 }`}
                               >
                                 {s.enabled !== false ? 'Pause' : 'Enable'}
+                              </button>
+                              <button
+                                onClick={() => handleCopyScheduleCode(s)}
+                                className={`px-2.5 py-1 rounded-lg ${themeInnerCardBg} border ${themeBorder} text-cyan-300 hover:text-white flex items-center gap-1`}
+                                title="Copy Schedule Code"
+                              >
+                                <Copy className="w-3.5 h-3.5" /> Copy Code
+                              </button>
+                              <button
+                                onClick={() => handleDuplicateSchedule(s)}
+                                className={`px-2.5 py-1 rounded-lg ${themeInnerCardBg} border ${themeBorder} text-purple-400 hover:text-white flex items-center gap-1`}
+                                title="Duplicate Schedule (as draft)"
+                              >
+                                <Layers className="w-3.5 h-3.5" /> Duplicate
                               </button>
                               <button
                                 onClick={() => {
@@ -6378,7 +6516,7 @@ export default function App() {
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex flex-wrap items-center gap-2 shrink-0">
                               <button
                                 onClick={() => handleToggleSchedule(s.id, s.enabled !== false)}
                                 className={`px-3 py-1.5 rounded-xl font-semibold text-xs border transition-colors ${
@@ -6388,6 +6526,20 @@ export default function App() {
                                 }`}
                               >
                                 {s.enabled !== false ? 'Pause' : 'Enable'}
+                              </button>
+                              <button
+                                onClick={() => handleCopyScheduleCode(s)}
+                                className={`px-3 py-1.5 rounded-xl ${themeInnerCardBg} border ${themeBorder} text-cyan-300 hover:text-white flex items-center gap-1 transition-colors`}
+                                title="Copy Schedule Code"
+                              >
+                                <Copy className="w-3.5 h-3.5" /> Copy Code
+                              </button>
+                              <button
+                                onClick={() => handleDuplicateSchedule(s)}
+                                className={`px-3 py-1.5 rounded-xl ${themeInnerCardBg} border ${themeBorder} text-purple-400 hover:text-white flex items-center gap-1 transition-colors`}
+                                title="Duplicate Schedule (as draft)"
+                              >
+                                <Layers className="w-3.5 h-3.5" /> Duplicate
                               </button>
                               <button
                                 onClick={() => {
@@ -8279,6 +8431,118 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Copy Schedule Code Modal */}
+      {copyScheduleModal?.isOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${themeCardBg} border ${themeBorder} rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl`}>
+            <div className={`flex items-center justify-between border-b ${themeBorder} pb-3`}>
+              <div>
+                <h3 className="text-base font-bold flex items-center gap-2">
+                  <Copy className="w-5 h-5 text-cyan-500" /> Copy Schedule Code
+                </h3>
+                <p className={`text-xs ${themeMutedText}`}>
+                  {copyScheduleModal.schedule.name || copyScheduleModal.schedule.id}
+                </p>
+              </div>
+              <button
+                onClick={() => setCopyScheduleModal(null)}
+                className={`p-1 rounded-lg hover:bg-stone-800 ${themeMutedText} hover:text-white transition-colors`}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-stone-200">Ready-to-use Bot Command</span>
+                  <button
+                    onClick={async () => {
+                      const ok = await copyTextToClipboard(copyScheduleModal.command);
+                      if (ok) {
+                        setCopyScheduleModal({ ...copyScheduleModal, copiedField: 'command' });
+                        setScheduleNotification({ type: 'success', message: 'Schedule command copied to clipboard!' });
+                      } else {
+                        setScheduleNotification({ type: 'error', message: 'Clipboard access unavailable. Please select and copy text manually.' });
+                      }
+                    }}
+                    className="text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    {copyScheduleModal.copiedField === 'command' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copyScheduleModal.copiedField === 'command' ? 'Copied!' : 'Copy Command'}
+                  </button>
+                </div>
+                <div
+                  onClick={async () => {
+                    const ok = await copyTextToClipboard(copyScheduleModal.command);
+                    if (ok) {
+                      setCopyScheduleModal({ ...copyScheduleModal, copiedField: 'command' });
+                      setScheduleNotification({ type: 'success', message: 'Schedule command copied to clipboard!' });
+                    }
+                  }}
+                  className={`p-3 rounded-xl font-mono text-xs text-cyan-300 break-all select-all cursor-pointer border ${themeBorder} ${themeInnerCardBg} hover:border-cyan-500/50`}
+                  title="Click to copy"
+                >
+                  {copyScheduleModal.command}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-stone-200">Complete JSON Configuration</span>
+                  <button
+                    onClick={async () => {
+                      const ok = await copyTextToClipboard(JSON.stringify(copyScheduleModal.jsonConfig, null, 2));
+                      if (ok) {
+                        setCopyScheduleModal({ ...copyScheduleModal, copiedField: 'json' });
+                        setScheduleNotification({ type: 'success', message: 'Schedule JSON configuration copied to clipboard!' });
+                      } else {
+                        setScheduleNotification({ type: 'error', message: 'Clipboard access unavailable. Please select and copy text manually.' });
+                      }
+                    }}
+                    className="text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    {copyScheduleModal.copiedField === 'json' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copyScheduleModal.copiedField === 'json' ? 'Copied!' : 'Copy JSON'}
+                  </button>
+                </div>
+                <pre
+                  onClick={async () => {
+                    const ok = await copyTextToClipboard(JSON.stringify(copyScheduleModal.jsonConfig, null, 2));
+                    if (ok) {
+                      setCopyScheduleModal({ ...copyScheduleModal, copiedField: 'json' });
+                      setScheduleNotification({ type: 'success', message: 'Schedule JSON configuration copied to clipboard!' });
+                    }
+                  }}
+                  className={`p-3 rounded-xl font-mono text-[11px] text-stone-300 max-h-48 overflow-y-auto cursor-pointer border ${themeBorder} ${themeInnerCardBg} hover:border-cyan-500/50`}
+                  title="Click to copy"
+                >
+                  {JSON.stringify(copyScheduleModal.jsonConfig, null, 2)}
+                </pre>
+              </div>
+
+              <div className="p-3 bg-cyan-950/40 border border-cyan-800/40 rounded-xl text-xs text-cyan-200/90 space-y-1.5">
+                <div className="font-semibold text-cyan-300">ℹ️ Schedule Reusability & Format Guidance:</div>
+                <ul className="list-disc pl-4 space-y-1 text-cyan-300/80 text-[11px]">
+                  <li><b>Ready Command:</b> Convenient for quick chat execution. <i>Note:</i> Telegram bot command format cannot represent rich features like custom inline URL buttons.</li>
+                  <li><b>JSON Configuration:</b> Complete canonical representation containing all supported schedule options (buttons, pin, reply, auto-delete, media). Replace <code>&lt;REPLACE_WITH_DESTINATION_CHAT_ID&gt;</code> before destination import.</li>
+                  <li><b>Zero Duplicates:</b> Copying code is strictly read-only and never creates, activates, pauses, or modifies any schedules.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-stone-800">
+              <button
+                onClick={() => setCopyScheduleModal(null)}
+                className="px-4 py-2 bg-stone-800 hover:bg-stone-700 text-white rounded-xl text-xs font-semibold transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

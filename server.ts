@@ -22,7 +22,7 @@ import { PostResolverService } from './server/telegram/postResolver.js';
 import { parseScheduleTime } from './server/telegram/postBuilder.js';
 import { mediaUploadStore } from './server/telegram/mediaUploadStore.js';
 import { ModerationService } from './server/telegram/moderation.js';
-import { messageScheduler, normalizeTriggerKeyword } from './server/telegram/scheduler.js';
+import { messageScheduler, normalizeTriggerKeyword, generateScheduleExportCode } from './server/telegram/scheduler.js';
 import { mentionAllService } from './server/telegram/mentionAllService.js';
 import { mtprotoParticipantService } from './server/telegram/mtprotoParticipantService.js';
 
@@ -3162,6 +3162,21 @@ export async function startServer() {
       res.json({ schedules });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/dashboard/schedules/:id/code', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      const id = req.params.id;
+      const sched = db.getScheduleById(id);
+      if (!sched) {
+        return res.status(404).json({ error: 'Schedule not found' });
+      }
+      const exportData = generateScheduleExportCode(sched);
+      res.json({ ok: true, schedule: sched, ...exportData });
+    } catch (err: any) {
+      res.status(err.status || 500).json({ error: err.message });
     }
   });
 

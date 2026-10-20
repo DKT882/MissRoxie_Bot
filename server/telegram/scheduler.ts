@@ -174,6 +174,51 @@ export function findMatchingSchedule(
   return matches[0].schedule;
 }
 
+export interface ScheduleExportCode {
+  command: string;
+  jsonConfig: Record<string, any>;
+  summary: string;
+}
+
+export function generateScheduleExportCode(s: any): ScheduleExportCode {
+  let interval = s.intervalFormatted || s.intervalStr;
+  if (!interval && s.intervalMs) {
+    const hours = Math.floor(s.intervalMs / 3600000);
+    const minutes = Math.floor((s.intervalMs % 3600000) / 60000);
+    if (hours > 0 && minutes === 0) interval = hours + 'h';
+    else if (hours === 0 && minutes > 0) interval = minutes + 'm';
+    else if (hours > 0 && minutes > 0) interval = hours + 'h ' + minutes + 'm';
+  }
+  if (!interval) interval = '1h';
+  const delTag = s.autoDeletePrevious ? ' delOn' : '';
+  const pinTag = s.pinAfterSend ? ' pin' : '';
+  const replyTag = s.replyToLatest ? ' replyOn' : '';
+  const message = s.message || s.messageText || '';
+  const command = `/schedule ${interval}${delTag}${pinTag}${replyTag} ${message}`.trim();
+
+  const jsonConfig: Record<string, any> = {
+    name: s.name || 'Schedule',
+    scheduleType: s.scheduleType || 'interval',
+    interval,
+    message,
+    contentType: s.contentType || 'text',
+    pinAfterSend: Boolean(s.pinAfterSend),
+    replyToLatest: Boolean(s.replyToLatest),
+    autoDeletePrevious: Boolean(s.autoDeletePrevious),
+    targetChatId: '<REPLACE_WITH_DESTINATION_CHAT_ID>'
+  };
+  if (s.mediaFileId) {
+    jsonConfig.mediaFileId = s.mediaFileId;
+  }
+  if (s.timezone) {
+    jsonConfig.timezone = s.timezone;
+  }
+
+  const summary = `Schedule "${s.name || s.id}" (${interval})`;
+
+  return { command, jsonConfig, summary };
+}
+
 export class MessageScheduler {
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;

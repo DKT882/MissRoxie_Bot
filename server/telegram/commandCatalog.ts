@@ -1428,6 +1428,20 @@ export const COMMAND_CATALOG: CommandCatalogItem[] = [
     scopes: ['group', 'admin']
   },
   {
+    command: '/copyschedule',
+    category: 'Scheduler',
+    description: 'Export and copy a ready-to-use command and configuration code for an existing schedule.',
+    syntax: '/copyschedule <scheduleId>',
+    example: '/copyschedule SCHED-1234',
+    permission: 'Admin',
+    targetType: 'Text',
+    isPublic: false,
+    modifiesState: false,
+    auditLogged: false,
+    aliases: ['/schedulecode', '/copysched'],
+    scopes: ['group', 'admin']
+  },
+  {
     command: '/deleteschedule',
     category: 'Scheduler',
     description: 'Delete scheduled job by ID.',

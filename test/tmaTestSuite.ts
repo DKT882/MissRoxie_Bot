@@ -562,6 +562,57 @@ async function runTmaTestSuite() {
   }, { name: 'Unauthorized Change' });
   assert(schedAdminEditDeny.status === 403 && schedAdminEditDeny.body?.code === 'FORBIDDEN_FEATURE', 'TMA-40L10: PUT /schedules/:id restricted from GROUP_ADMIN (RBAC)');
 
+  // Copy Schedule Code Endpoint (Owner permitted, cross-group isolated, read-only)
+  const schedCodeReq = await simulateRequest('GET', `/api/tma/groups/${groupABC}/schedules/${createdSchedId}/code`, {
+    'x-tma-session': ownerToken
+  });
+  assert(schedCodeReq.status === 200 && schedCodeReq.body?.ok === true, 'TMA-40L11: GET /schedules/:id/code returns 200 for Owner');
+  assert(typeof schedCodeReq.body?.command === 'string' && schedCodeReq.body.command.startsWith('/schedule 2h Updated message content'), 'TMA-40L12: GET /schedules/:id/code returns ready-to-use bot command');
+  assert(schedCodeReq.body?.jsonConfig?.targetChatId === '<REPLACE_WITH_DESTINATION_CHAT_ID>', 'TMA-40L13: GET /schedules/:id/code marks destination chatId guidance in JSON');
+
+  // Verify schedule copying does not create duplicate schedules
+  const schedListAfterCopy = await simulateRequest('GET', `/api/tma/groups/${groupABC}/schedules`, {
+    'x-tma-session': ownerToken
+  });
+  const matchingSchedsAfterCopy = (schedListAfterCopy.body?.schedules || []).filter((s: any) => s.id === createdSchedId);
+  assert(matchingSchedsAfterCopy.length === 1, 'TMA-40L14: Copying schedule code creates zero duplicates');
+
+  // Verify cross-group isolation on schedule code
+  const schedCrossGroupCode = await simulateRequest('GET', `/api/tma/groups/${groupBCD}/schedules/${createdSchedId}/code`, {
+    'x-tma-session': ownerToken
+  });
+  assert(schedCrossGroupCode.status === 403 || schedCrossGroupCode.status === 404, 'TMA-40L15: Schedule code export enforces cross-group isolation');
+
+  // Verify RBAC restriction on schedule code export
+  const schedAdminCodeDeny = await simulateRequest('GET', `/api/tma/groups/${groupABC}/schedules/${createdSchedId}/code`, {
+    'x-tma-session': adminToken
+  });
+  assert(schedAdminCodeDeny.status === 403 && schedAdminCodeDeny.body?.code === 'FORBIDDEN_FEATURE', 'TMA-40L16: GET /schedules/:id/code restricted from GROUP_ADMIN (RBAC)');
+
+  // TMA Schedule Duplication (Safe Draft Creation)
+  const schedDuplicateReq = await simulateRequest('POST', `/api/tma/groups/${groupABC}/schedules`, {
+    'x-tma-session': ownerToken
+  }, {
+    name: 'Weekly Notice (Copy)',
+    message: 'Updated message content',
+    scheduleType: 'interval',
+    intervalStr: '2h'
+  });
+  assert(schedDuplicateReq.status === 200 && schedDuplicateReq.body?.schedule?.id, 'TMA-40L17: POST /schedules creates duplicated schedule under new distinct ID');
+  const duplicatedId = schedDuplicateReq.body.schedule.id;
+  assert(duplicatedId !== createdSchedId, 'TMA-40L18: Duplicated schedule has different ID than original');
+
+  // TMA Schedule Toggle (Pause/Resume)
+  const schedToggleReq = await simulateRequest('POST', `/api/tma/groups/${groupABC}/schedules/${createdSchedId}/toggle`, {
+    'x-tma-session': ownerToken
+  }, { enabled: false });
+  assert(schedToggleReq.status === 200 && schedToggleReq.body?.schedule?.enabled === false, 'TMA-40L19: POST /schedules/:id/toggle pauses schedule');
+
+  // Clean up duplicated schedule
+  await simulateRequest('DELETE', `/api/tma/groups/${groupABC}/schedules/${duplicatedId}`, {
+    'x-tma-session': ownerToken
+  });
+
   // Clean up test schedule
   await simulateRequest('DELETE', `/api/tma/groups/${groupABC}/schedules/${createdSchedId}`, {
     'x-tma-session': ownerToken

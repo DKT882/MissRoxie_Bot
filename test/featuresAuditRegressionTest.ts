@@ -2,6 +2,7 @@ import { db } from '../server/db/storage.js';
 import { PostResolverService, PostResolutionError } from '../server/telegram/postResolver.js';
 import { PostPayload, SavedPost } from '../server/telegram/types.js';
 import { isFeatureAllowedForRole } from '../server/tma/tmaAuth.js';
+import { generateScheduleExportCode } from '../server/telegram/scheduler.js';
 
 let passed = 0;
 let failed = 0;
@@ -172,6 +173,36 @@ async function runFeaturesAuditRegressionTest() {
   assert(updatedSched?.name === 'Evening Greeting', 'F2-02: Schedule name updated via storage update');
   assert(updatedSched?.message === 'Good evening group!', 'F2-03: Schedule message updated');
   assert(updatedSched?.intervalFormatted === '4h', 'F2-04: Schedule interval updated');
+
+  // Test 11B: Schedule Copying & Code Generation
+  const schedCountBefore = db.getGroupSchedules(testChatId).length;
+  const exported = generateScheduleExportCode(updatedSched);
+  assert(exported.command === '/schedule 4h Good evening group!', 'F2-04A: Exported schedule command correctly formatted');
+  assert(exported.jsonConfig?.name === 'Evening Greeting', 'F2-04B: Exported JSON config includes name');
+  assert(exported.jsonConfig?.message === 'Good evening group!', 'F2-04C: Exported JSON config includes message');
+  assert(exported.jsonConfig?.targetChatId === '<REPLACE_WITH_DESTINATION_CHAT_ID>', 'F2-04D: Target chat guidance clearly marked for destination replacement');
+  assert(db.getGroupSchedules(testChatId).length === schedCountBefore, 'F2-04E: Schedule copying is strictly read-only and creates no duplicates');
+
+  // Test 11C: Schedule Editing Preserves ID and Prevents Duplicates
+  assert(updatedSched?.id === createdSched.id, 'F2-04F: Schedule edit preserves schedule ID');
+  const groupSchedsAfterEdit = db.getGroupSchedules(testChatId).filter(s => s.id === createdSched.id);
+  assert(groupSchedsAfterEdit.length === 1, 'F2-04G: Schedule edit mutates record in-place without duplicate');
+
+  // Test 11D: Safe Schedule Duplication
+  const duplicateSched = db.addSchedule({
+    chatId: testChatId,
+    name: `${updatedSched.name} (Copy)`,
+    message: updatedSched.message,
+    scheduleType: updatedSched.scheduleType,
+    intervalFormatted: updatedSched.intervalFormatted,
+    enabled: false // strictly created in disabled/draft state to prevent accidental execution
+  });
+  assert(Boolean(duplicateSched && duplicateSched.id), 'F2-04H: Duplicate schedule created with unique ID');
+  assert(duplicateSched.id !== updatedSched.id, 'F2-04I: Duplicate schedule receives distinct ID from source');
+  assert(duplicateSched.enabled === false, 'F2-04J: Duplicate schedule initialized in disabled/draft state');
+  assert(duplicateSched.name === 'Evening Greeting (Copy)', 'F2-04K: Duplicate schedule name assigned (Copy) suffix');
+  assert(duplicateSched.message === updatedSched.message, 'F2-04L: Duplicate schedule preserves message content');
+  db.deleteSchedule(duplicateSched.id);
 
   // Test 12: Automation Rule Editing API
   const testAutoRule = {

@@ -4,7 +4,7 @@ import { telegramApi } from '../telegram/api.js';
 import { TelegramMiddleware } from '../telegram/middleware.js';
 import { mentionAllService } from '../telegram/mentionAllService.js';
 import { PostSender, sanitizeInlineButtons, validateMediaReference } from '../telegram/postSender.js';
-import { messageScheduler } from '../telegram/scheduler.js';
+import { messageScheduler, generateScheduleExportCode } from '../telegram/scheduler.js';
 import { COMMAND_CATALOG } from '../telegram/commandCatalog.js';
 import { PostPayload, PostContentType, SavedPost } from '../telegram/types.js';
 import { parseScheduleTime } from '../telegram/postBuilder.js';
@@ -1181,6 +1181,7 @@ tmaRouter.put('/groups/:chatId/schedules/:id', requireTmaAuth('schedules'), (req
       scheduleType: scheduleType || existing.scheduleType,
       ...(nextRun ? { nextRun } : {}),
       ...(intervalMs ? { intervalMs } : {}),
+      ...(intervalStr ? { intervalFormatted: intervalStr } : {}),
       ...(contentType ? { contentType } : {}),
       ...(mediaFileId !== undefined ? { mediaFileId } : {}),
       ...(pinAfterSend !== undefined ? { pinAfterSend: Boolean(pinAfterSend) } : {}),
@@ -1205,6 +1206,23 @@ tmaRouter.delete('/groups/:chatId/schedules/:id', requireTmaAuth('schedules'), (
 
     const success = db.deleteSchedule(id);
     res.json({ ok: success });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.get('/groups/:chatId/schedules/:id/code', requireTmaAuth('schedules'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const id = req.params.id;
+    const schedule = db.getScheduleById(id);
+
+    if (!schedule || Number(schedule.chatId) !== Number(chatId)) {
+      return res.status(404).json({ error: 'Schedule not found for this group' });
+    }
+
+    const exportData = generateScheduleExportCode(schedule);
+    res.json({ ok: true, schedule, ...exportData });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
