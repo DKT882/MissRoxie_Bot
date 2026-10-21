@@ -11,33 +11,42 @@ export class PostResolutionError extends Error {
 }
 
 export class PostResolverService {
-  public static readonly POST_ID_REGEX = /\{\{post:(POST-[A-Z0-9_-]+)\}\}/gi;
-  public static readonly EXACT_POST_REGEX = /^\{\{post:(POST-[A-Z0-9_-]+)\}\}$/i;
+  public static readonly POST_ID_REGEX = /\{\{(item|post|schedule|template):([A-Za-z0-9_-]+)\}\}/gi;
+  public static readonly EXACT_POST_REGEX = /^\s*\{\{(item|post|schedule|template):([A-Za-z0-9_-]+)\}\}\s*$/i;
 
   /**
-   * Checks whether a text contains one or more {{post:POST-XXXXX}} references.
+   * Checks whether a text contains one or more reference placeholders.
    */
   public static containsPostReference(text?: string): boolean {
     if (!text || typeof text !== 'string') return false;
-    return /\{\{post:POST-[A-Z0-9_-]+\}\}/i.test(text);
+    return /\{\{(item|post|schedule|template):[A-Za-z0-9_-]+\}\}/i.test(text);
   }
 
   /**
-   * Extracts all post IDs referenced in a string.
+   * Extracts all referenced items in a string, returned as { type: string; id: string }.
+   */
+  public static extractReferences(text?: string): Array<{ type: string; id: string }> {
+    if (!text || typeof text !== 'string') return [];
+    const refs: Array<{ type: string; id: string }> = [];
+    const matches = text.matchAll(/\{\{(item|post|schedule|template):([A-Za-z0-9_-]+)\}\}/gi);
+    for (const match of matches) {
+      if (match[1] && match[2]) {
+        refs.push({ type: match[1].toLowerCase(), id: match[2].toUpperCase() });
+      }
+    }
+    return refs;
+  }
+
+  /**
+   * Backward compatibility: Extracts post IDs referenced in a string.
    */
   public static extractPostIds(text?: string): string[] {
-    if (!text || typeof text !== 'string') return [];
-    const ids: string[] = [];
-    const matches = text.matchAll(/\{\{post:(POST-[A-Z0-9_-]+)\}\}/gi);
-    for (const match of matches) {
-      if (match[1]) ids.push(match[1].toUpperCase());
-    }
-    return ids;
+    return this.extractReferences(text).map(r => r.id);
   }
 
   /**
    * Resolves a message text or post reference into a complete PostPayload.
-   * If input is exactly {{post:POST-XXXXX}}, adopts the full post content, media, buttons, and settings.
+   * If input is exactly {{item:ID}}, adopts the full post content, media, buttons, and settings.
    * If embedded within other text, replaces the placeholders with the saved post's text.
    */
   public static resolveMessage(
@@ -47,6 +56,8 @@ export class PostResolverService {
       chatTitle?: string;
       chatId?: number;
       enforceMediaType?: (type: string) => boolean;
+      visitedIds?: Set<string>;
+      depth?: number;
     }
   ): PostPayload {
     if (!rawText) {
@@ -57,44 +68,73 @@ export class PostResolverService {
     const exactMatch = trimmed.match(this.EXACT_POST_REGEX);
 
     if (exactMatch) {
-      const postId = exactMatch[1].toUpperCase();
-      const post = db.getSavedPost(postId);
-      if (!post) {
-        throw new PostResolutionError(`Saved post "${postId}" not found in library.`, postId);
+      const typeTag = exactMatch[1].toLowerCase();
+      const itemId = exactMatch[2].toUpperCase();
+      const item = db.getContentItem(itemId, options?.chatId ? { chatId: options.chatId } : undefined);
+      if (!item) {
+        throw new PostResolutionError(`Content item "${itemId}" not found in library.`, itemId);
       }
 
-      if (options?.enforceMediaType && !options.enforceMediaType(post.contentType)) {
+      if (typeTag !== 'item') {
+        const isTemplateMatch = typeTag === 'template' && (item.type === 'broadcast' || item.type === 'inline_button');
+        if (!isTemplateMatch && item.type !== typeTag) {
+          throw new PostResolutionError(`Referenced item "${itemId}" is a ${item.type}, but was referenced as ${typeTag}.`, itemId);
+        }
+      }
+
+      if (options?.enforceMediaType && !options.enforceMediaType(item.contentType)) {
         throw new PostResolutionError(
-          `Post "${postId}" uses content type "${post.contentType}", which is not supported in this feature.`,
-          postId
+          `Item "${itemId}" uses content type "${item.contentType}", which is not supported in this feature.`,
+          itemId
         );
       }
 
       return {
-        contentType: post.contentType,
-        text: post.text,
-        mediaFileId: post.mediaFileId,
-        mediaUploadId: post.mediaUploadId,
-        buttons: post.buttons ? JSON.parse(JSON.stringify(post.buttons)) : undefined,
-        protectContent: post.protectContent,
-        pinAfterSend: post.pinAfterSend,
-        replyToLatest: post.replyToLatest,
-        autoDeletePrevious: post.autoDeletePrevious
+        contentType: item.contentType,
+        text: item.text,
+        mediaFileId: item.mediaFileId,
+        mediaUploadId: item.mediaUploadId,
+        buttons: item.buttons ? JSON.parse(JSON.stringify(item.buttons)) : undefined,
+        protectContent: item.options?.protectContent,
+        pinAfterSend: item.options?.pinAfterSend,
+        replyToLatest: item.options?.replyToLatest,
+        autoDeletePrevious: item.options?.autoDeletePrevious
       };
     }
 
-    // Embedded post references: replace placeholders in text
+    // Embedded references: replace placeholders in text (cycle & depth safe)
     if (this.containsPostReference(rawText)) {
-      let resolvedText = rawText;
-      const ids = this.extractPostIds(rawText);
+      const depth = options?.depth || 0;
+      if (depth > 3) {
+        return { contentType: 'text', text: rawText };
+      }
 
-      for (const id of ids) {
-        const post = db.getSavedPost(id);
-        if (!post) {
-          throw new PostResolutionError(`Referenced saved post "${id}" not found in library.`, id);
+      const visited = options?.visitedIds ? new Set(options.visitedIds) : new Set<string>();
+      let resolvedText = rawText;
+      const refs = this.extractReferences(rawText);
+
+      for (const ref of refs) {
+        if (visited.has(ref.id)) {
+          continue; // Prevent infinite cycle
         }
-        const replacement = post.text || '';
-        resolvedText = resolvedText.replace(new RegExp(`\\{\\{post:${id}\\}\\}`, 'gi'), replacement);
+        visited.add(ref.id);
+
+        const item = db.getContentItem(ref.id, options?.chatId ? { chatId: options.chatId } : undefined);
+        if (!item) {
+          throw new PostResolutionError(`Referenced item "${ref.id}" not found in library.`, ref.id);
+        }
+
+        let replacement = item.text || '';
+        if (this.containsPostReference(replacement)) {
+          const nested = this.resolveMessage(replacement, {
+            ...options,
+            visitedIds: visited,
+            depth: depth + 1
+          });
+          replacement = nested.text || '';
+        }
+
+        resolvedText = resolvedText.replace(new RegExp(`\\{\\{(${ref.type}|item):${ref.id}\\}\\}`, 'gi'), replacement);
       }
 
       return {
@@ -128,40 +168,38 @@ export class PostResolverService {
     const exactMatch = trimmed.match(this.EXACT_POST_REGEX);
 
     if (exactMatch) {
-      const postId = exactMatch[1].toUpperCase();
-      const post = db.getSavedPost(postId);
-      if (!post) {
-        throw new PostResolutionError(`Saved post "${postId}" not found in library.`, postId);
+      const typeTag = exactMatch[1].toLowerCase();
+      const itemId = exactMatch[2].toUpperCase();
+      const item = db.getContentItem(itemId, options?.chatId ? { chatId: options.chatId } : undefined);
+      if (!item) {
+        throw new PostResolutionError(`Content item "${itemId}" not found in library.`, itemId);
+      }
+
+      if (typeTag !== 'item') {
+        const isTemplateMatch = typeTag === 'template' && (item.type === 'broadcast' || item.type === 'inline_button');
+        if (!isTemplateMatch && item.type !== typeTag) {
+          throw new PostResolutionError(`Referenced item "${itemId}" is a ${item.type}, but was referenced as ${typeTag}.`, itemId);
+        }
       }
 
       return {
-        contentType: payload.contentType && payload.contentType !== 'text' ? payload.contentType : post.contentType,
-        text: post.text,
-        mediaFileId: payload.mediaFileId || post.mediaFileId,
-        mediaUploadId: payload.mediaUploadId || post.mediaUploadId,
-        buttons: payload.buttons && payload.buttons.length > 0 ? payload.buttons : post.buttons,
-        protectContent: payload.protectContent !== undefined ? payload.protectContent : post.protectContent,
-        pinAfterSend: payload.pinAfterSend !== undefined ? payload.pinAfterSend : post.pinAfterSend,
-        replyToLatest: payload.replyToLatest !== undefined ? payload.replyToLatest : post.replyToLatest,
+        contentType: payload.contentType && payload.contentType !== 'text' ? payload.contentType : item.contentType,
+        text: item.text,
+        mediaFileId: payload.mediaFileId || item.mediaFileId,
+        mediaUploadId: payload.mediaUploadId || item.mediaUploadId,
+        buttons: payload.buttons && payload.buttons.length > 0 ? payload.buttons : item.buttons,
+        protectContent: payload.protectContent !== undefined ? payload.protectContent : item.options?.protectContent,
+        pinAfterSend: payload.pinAfterSend !== undefined ? payload.pinAfterSend : item.options?.pinAfterSend,
+        replyToLatest: payload.replyToLatest !== undefined ? payload.replyToLatest : item.options?.replyToLatest,
         replyToMessageId: payload.replyToMessageId,
-        autoDeletePrevious: payload.autoDeletePrevious !== undefined ? payload.autoDeletePrevious : post.autoDeletePrevious
+        autoDeletePrevious: payload.autoDeletePrevious !== undefined ? payload.autoDeletePrevious : item.options?.autoDeletePrevious
       };
     }
 
-    // Embedded in text
-    let resolvedText = payload.text;
-    const ids = this.extractPostIds(payload.text);
-    for (const id of ids) {
-      const post = db.getSavedPost(id);
-      if (!post) {
-        throw new PostResolutionError(`Referenced saved post "${id}" not found in library.`, id);
-      }
-      resolvedText = resolvedText.replace(new RegExp(`\\{\\{post:${id}\\}\\}`, 'gi'), post.text || '');
-    }
-
+    const resolved = this.resolveMessage(payload.text, options);
     return {
       ...payload,
-      text: resolvedText
+      text: resolved.text
     };
   }
 }

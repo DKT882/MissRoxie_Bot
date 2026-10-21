@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { SavedPost, PrivateRecipientRecord, PostContentType, ScheduledPostButton, GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoEngineConfig, AutoEngineMode, AutoEnginePreset, AutoEngineChannelConfig, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig, AUTO_ENGINE_PRESETS, WelcomeDmConfig } from '../telegram/types.js';
+import { SavedPost, PrivateRecipientRecord, PostContentType, ScheduledPostButton, GroupSettings, WarningRecord, StickerFreeUser, ContentType, ContentPermissionRecord, ScheduledMessage, ModerationLog, CachedMember, TrackedChatMessage, TempActionRecord, NoteRecord, ApprovedUserRecord, CaptchaSession, AutoEngineConfig, AutoEngineMode, AutoEnginePreset, AutoEngineChannelConfig, AutoResponseConfig, AutoStickerConfig, GroupStickerPackConfig, AUTO_ENGINE_PRESETS, WelcomeDmConfig, UnifiedContentItem, ContentItemType, ContentTemplate } from '../telegram/types.js';
 import { getDefaultStickersStats } from '../telegram/defaultStickers.js';
 import { logDebug } from '../observability/logger.js';
 import { mongoManager } from './mongodb.js';
@@ -204,6 +204,7 @@ interface DatabaseSchema {
   groupMembers: Record<string, CachedMember>; // `${chatId}_${userId}` -> CachedMember
   customRoles: Record<string, 'MODERATOR' | 'EXCEPTION_ADMIN' | 'NONE'>; // `${chatId}_${userId}` -> Custom bot role
   savedPosts?: Record<string, SavedPost>;
+  contentTemplates?: Record<string, ContentTemplate>;
   privateRecipients?: Record<string, PrivateRecipientRecord>;
   mediaLibrary?: MediaLibraryRecord;
   groupMediaLibraries?: Record<string, MediaLibraryRecord>; // `${chatId}` -> MediaLibraryRecord
@@ -608,7 +609,8 @@ export class StorageManager {
     userMemories: {},
     groupConversationMemories: {},
     groupMemories: {},
-    userLustLevels: {}
+    userLustLevels: {},
+    contentTemplates: {}
   };
   private raidStates: Record<number, RaidStateRecord> = {};
   private lastSettingsTimestamps: Map<number, number> = new Map();
@@ -1733,6 +1735,7 @@ export class StorageManager {
         knownUsers: this.data.knownUsers || {},
         knownUsersById: this.data.knownUsersById || {},
         savedPosts: this.data.savedPosts || {},
+        contentTemplates: this.data.contentTemplates || {},
         privateRecipients: this.data.privateRecipients || {},
         updatedAt: new Date().toISOString()
       };
@@ -1768,6 +1771,7 @@ export class StorageManager {
         if (parsed.knownUsers) this.data.knownUsers = { ...this.data.knownUsers, ...parsed.knownUsers };
         if (parsed.knownUsersById) this.data.knownUsersById = { ...this.data.knownUsersById, ...parsed.knownUsersById };
         if (parsed.savedPosts) this.data.savedPosts = { ...(this.data.savedPosts || {}), ...parsed.savedPosts };
+        if (parsed.contentTemplates) this.data.contentTemplates = { ...(this.data.contentTemplates || {}), ...parsed.contentTemplates };
         if (parsed.privateRecipients) this.data.privateRecipients = { ...(this.data.privateRecipients || {}), ...parsed.privateRecipients };
       }
     } catch (err: any) {
@@ -6879,8 +6883,8 @@ export class StorageManager {
     pinAfterSend?: boolean;
     replyToLatest?: boolean;
     autoDeletePrevious?: boolean;
-    createdBy: {
-      userId: number;
+    createdBy?: {
+      userId?: number;
       username?: string;
       role?: string;
     };
@@ -6913,7 +6917,7 @@ export class StorageManager {
       pinAfterSend: Boolean(postInput.pinAfterSend),
       replyToLatest: Boolean(postInput.replyToLatest),
       autoDeletePrevious: Boolean(postInput.autoDeletePrevious),
-      createdBy: postInput.createdBy,
+      createdBy: postInput.createdBy ? { userId: postInput.createdBy.userId ?? 0, username: postInput.createdBy.username, role: postInput.createdBy.role } : { userId: 0, username: 'system', role: 'admin' },
       createdAt: now,
       updatedAt: now,
       tags: postInput.tags || [],
@@ -7111,6 +7115,339 @@ export class StorageManager {
       optedOut: all.filter(r => r.status === 'opted_out').length,
       failed: all.filter(r => r.status === 'failed').length
     };
+  }
+
+
+  // ==========================================
+  // UNIFIED CONTENT REGISTRY
+  // ==========================================
+  public generateTemplateId(type: 'broadcast' | 'inline_button' = 'broadcast'): string {
+    const prefix = type === 'inline_button' ? 'BTN' : 'TMPL';
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    if (!this.data.contentTemplates) this.data.contentTemplates = {};
+    for (let attempts = 0; attempts < 1000; attempts++) {
+      let code = '';
+      for (let i = 0; i < 5; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const candidate = `${prefix}-${code}`;
+      if (!this.data.contentTemplates[candidate]) {
+        return candidate;
+      }
+    }
+    return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
+  }
+
+  public getContentItem(id: string, context?: { chatId?: number; userId?: number; role?: string }): UnifiedContentItem | undefined {
+    if (!id || typeof id !== 'string') return undefined;
+    const cleanId = id.trim();
+    if (!cleanId) return undefined;
+    const upperId = cleanId.toUpperCase();
+
+    // 1. Saved Post check (IDs start with POST- or match saved post key)
+    if (this.data.savedPosts) {
+      const post = this.data.savedPosts[upperId] || this.data.savedPosts[cleanId] ||
+        Object.values(this.data.savedPosts).find(p => p.id.toUpperCase() === upperId);
+      if (post) {
+        return {
+          id: post.id,
+          type: 'post',
+          title: post.title,
+          contentType: post.contentType,
+          text: post.text,
+          mediaFileId: post.mediaFileId,
+          mediaUploadId: post.mediaUploadId,
+          buttons: post.buttons ? JSON.parse(JSON.stringify(post.buttons)) : undefined,
+          options: {
+            pinAfterSend: post.pinAfterSend,
+            replyToLatest: post.replyToLatest,
+            protectContent: post.protectContent,
+            autoDeletePrevious: post.autoDeletePrevious
+          },
+          createdBy: post.createdBy,
+          createdAt: post.createdAt,
+          updatedAt: post.updatedAt,
+          tags: post.tags,
+          metadata: post.metadata
+        };
+      }
+    }
+
+    // 2. Schedule check (matches by schedule ID)
+    if (Array.isArray(this.data.schedules)) {
+      const sched = this.data.schedules.find(s => s.id && s.id.toUpperCase() === upperId);
+      if (sched) {
+        // Enforce group isolation if context specifies chatId and user is not global admin/owner
+        if (context?.chatId && Number(sched.chatId) !== Number(context.chatId)) {
+          const role = context.role?.toUpperCase();
+          if (role !== 'OWNER' && role !== 'EXCEPTION_ADMIN' && role !== 'GROUP_OWNER') {
+            return undefined; // unauthorized cross-group schedule access
+          }
+        }
+        const title = sched.name || (sched.message ? (sched.message.length > 30 ? sched.message.slice(0, 30) + '...' : sched.message) : `Schedule ${sched.id}`);
+        return {
+          id: sched.id,
+          type: 'schedule',
+          title,
+          contentType: (sched.contentType as PostContentType) || 'text',
+          text: sched.message || sched.messageText || '',
+          mediaFileId: sched.mediaFileId,
+          buttons: sched.inlineKeyboard ? JSON.parse(JSON.stringify(sched.inlineKeyboard)) : undefined,
+          options: {
+            pinAfterSend: Boolean(sched.pinAfterSend),
+            replyToLatest: Boolean(sched.replyToLatest),
+            autoDeletePrevious: Boolean(sched.autoDeletePrevious)
+          },
+          scheduleConfig: {
+            scheduleType: sched.scheduleType,
+            intervalStr: sched.intervalFormatted || (sched.intervalMs ? (sched.intervalMs >= 3600000 ? `${Math.round(sched.intervalMs / 3600000)}h` : `${Math.round(sched.intervalMs / 60000)}m`) : undefined),
+            intervalMs: sched.intervalMs,
+            timezone: sched.timezone,
+            cron: sched.cron
+          },
+          sourceGroupId: sched.chatId,
+          createdBy: sched.adminId ? { userId: sched.adminId, username: sched.adminUsername } : undefined,
+          createdAt: sched.createdAt || new Date().toISOString()
+        };
+      }
+    }
+
+    // 3. Content Templates check
+    if (this.data.contentTemplates) {
+      const tmpl = this.data.contentTemplates[upperId] || this.data.contentTemplates[cleanId] ||
+        Object.values(this.data.contentTemplates).find(t => t.id.toUpperCase() === upperId);
+      if (tmpl) {
+        if (tmpl.sourceGroupId && context?.chatId && Number(tmpl.sourceGroupId) !== Number(context.chatId)) {
+          const role = context.role?.toUpperCase();
+          if (role !== 'OWNER' && role !== 'EXCEPTION_ADMIN' && role !== 'GROUP_OWNER') {
+            return undefined;
+          }
+        }
+        return {
+          id: tmpl.id,
+          type: tmpl.type,
+          title: tmpl.title,
+          contentType: tmpl.contentType,
+          text: tmpl.text,
+          mediaFileId: tmpl.mediaFileId,
+          mediaUploadId: tmpl.mediaUploadId,
+          buttons: tmpl.buttons ? JSON.parse(JSON.stringify(tmpl.buttons)) : undefined,
+          options: tmpl.options ? JSON.parse(JSON.stringify(tmpl.options)) : undefined,
+          sourceGroupId: tmpl.sourceGroupId,
+          createdBy: tmpl.createdBy,
+          createdAt: tmpl.createdAt,
+          updatedAt: tmpl.updatedAt,
+          tags: tmpl.tags,
+          metadata: tmpl.metadata
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  public getContentItems(filter?: {
+    type?: string;
+    search?: string;
+    chatId?: number;
+    creatorId?: number;
+    limit?: number;
+  }): UnifiedContentItem[] {
+    const items: UnifiedContentItem[] = [];
+
+    // Include Saved Posts
+    if (!filter?.type || filter.type === 'all' || filter.type === 'post') {
+      const posts = this.getSavedPosts({
+        search: filter?.search,
+        creatorId: filter?.creatorId
+      });
+      for (const p of posts) {
+        items.push({
+          id: p.id,
+          type: 'post',
+          title: p.title,
+          contentType: p.contentType,
+          text: p.text,
+          mediaFileId: p.mediaFileId,
+          mediaUploadId: p.mediaUploadId,
+          buttons: p.buttons ? JSON.parse(JSON.stringify(p.buttons)) : undefined,
+          options: {
+            pinAfterSend: p.pinAfterSend,
+            replyToLatest: p.replyToLatest,
+            protectContent: p.protectContent,
+            autoDeletePrevious: p.autoDeletePrevious
+          },
+          createdBy: p.createdBy,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+          tags: p.tags,
+          metadata: p.metadata
+        });
+      }
+    }
+
+    // Include Schedules
+    if (!filter?.type || filter.type === 'all' || filter.type === 'schedule') {
+      let schedules = filter?.chatId ? this.getGroupSchedules(filter.chatId) : [...(this.data.schedules || [])];
+      if (filter?.search && filter.search.trim()) {
+        const q = filter.search.toLowerCase().trim();
+        schedules = schedules.filter(s =>
+          (s.id && s.id.toLowerCase().includes(q)) ||
+          (s.name && s.name.toLowerCase().includes(q)) ||
+          (s.message && s.message.toLowerCase().includes(q))
+        );
+      }
+      for (const s of schedules) {
+        const title = s.name || (s.message ? (s.message.length > 30 ? s.message.slice(0, 30) + '...' : s.message) : `Schedule ${s.id}`);
+        items.push({
+          id: s.id,
+          type: 'schedule',
+          title,
+          contentType: (s.contentType as PostContentType) || 'text',
+          text: s.message || s.messageText || '',
+          mediaFileId: s.mediaFileId,
+          buttons: s.inlineKeyboard ? JSON.parse(JSON.stringify(s.inlineKeyboard)) : undefined,
+          options: {
+            pinAfterSend: Boolean(s.pinAfterSend),
+            replyToLatest: Boolean(s.replyToLatest),
+            autoDeletePrevious: Boolean(s.autoDeletePrevious)
+          },
+          scheduleConfig: {
+            scheduleType: s.scheduleType,
+            intervalStr: s.intervalFormatted,
+            intervalMs: s.intervalMs,
+            timezone: s.timezone,
+            cron: s.cron
+          },
+          sourceGroupId: s.chatId,
+          createdBy: s.adminId ? { userId: s.adminId, username: s.adminUsername } : undefined,
+          createdAt: s.createdAt || new Date().toISOString()
+        });
+      }
+    }
+
+    // Include Content Templates
+    if (!filter?.type || filter.type === 'all' || filter.type === 'broadcast' || filter.type === 'inline_button') {
+      if (!this.data.contentTemplates) this.data.contentTemplates = {};
+      let templates = Object.values(this.data.contentTemplates);
+      if (filter?.type && filter.type !== 'all') {
+        templates = templates.filter(t => t.type === filter.type);
+      }
+      if (filter?.chatId) {
+        templates = templates.filter(t => !t.sourceGroupId || Number(t.sourceGroupId) === Number(filter.chatId));
+      }
+      if (filter?.search && filter.search.trim()) {
+        const q = filter.search.toLowerCase().trim();
+        templates = templates.filter(t =>
+          t.id.toLowerCase().includes(q) ||
+          t.title.toLowerCase().includes(q) ||
+          (t.text && t.text.toLowerCase().includes(q))
+        );
+      }
+      for (const t of templates) {
+        items.push({
+          id: t.id,
+          type: t.type,
+          title: t.title,
+          contentType: t.contentType,
+          text: t.text,
+          mediaFileId: t.mediaFileId,
+          mediaUploadId: t.mediaUploadId,
+          buttons: t.buttons ? JSON.parse(JSON.stringify(t.buttons)) : undefined,
+          options: t.options ? JSON.parse(JSON.stringify(t.options)) : undefined,
+          sourceGroupId: t.sourceGroupId,
+          createdBy: t.createdBy,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+          tags: t.tags,
+          metadata: t.metadata
+        });
+      }
+    }
+
+    // Sort by updatedAt/createdAt descending
+    items.sort((a, b) => {
+      const timeA = new Date(a.updatedAt || a.createdAt).getTime();
+      const timeB = new Date(b.updatedAt || b.createdAt).getTime();
+      return timeB - timeA;
+    });
+
+    if (filter?.limit && filter.limit > 0) {
+      return items.slice(0, filter.limit);
+    }
+    return items;
+  }
+
+  public saveContentTemplate(input: {
+    id?: string;
+    type: 'broadcast' | 'inline_button';
+    title: string;
+    contentType?: PostContentType;
+    text?: string;
+    mediaFileId?: string;
+    mediaUploadId?: string;
+    buttons?: ScheduledPostButton[][];
+    options?: {
+      pinAfterSend?: boolean;
+      replyToLatest?: boolean;
+      protectContent?: boolean;
+      autoDeletePrevious?: boolean;
+    };
+    sourceGroupId?: number;
+    createdBy?: {
+      userId?: number;
+      username?: string;
+      role?: string;
+    };
+    tags?: string[];
+    metadata?: Record<string, any>;
+  }): ContentTemplate {
+    if (!this.data.contentTemplates) this.data.contentTemplates = {};
+    const now = new Date().toISOString();
+    let id = input.id?.trim().toUpperCase();
+    if (!id) {
+      id = this.generateTemplateId(input.type);
+    } else {
+      if (this.data.contentTemplates[id]) {
+        throw new Error(`Template with ID "${id}" already exists.`);
+      }
+    }
+
+    const template: ContentTemplate = {
+      id,
+      type: input.type,
+      title: input.title?.trim() || `${input.type === 'inline_button' ? 'Button' : 'Broadcast'} Template ${id}`,
+      contentType: input.contentType || 'text',
+      text: input.text,
+      mediaFileId: input.mediaFileId,
+      mediaUploadId: input.mediaUploadId,
+      buttons: input.buttons,
+      options: input.options,
+      sourceGroupId: input.sourceGroupId,
+      createdBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now,
+      tags: input.tags || [],
+      metadata: input.metadata || {}
+    };
+
+    this.data.contentTemplates[id] = template;
+    this.saveGlobalJsonSync();
+    this.persist();
+    return template;
+  }
+
+  public deleteContentTemplate(id: string): boolean {
+    if (!id) return false;
+    const cleanId = id.trim().toUpperCase();
+    if (this.data.contentTemplates && (this.data.contentTemplates[cleanId] || this.data.contentTemplates[id])) {
+      delete this.data.contentTemplates[cleanId];
+      delete this.data.contentTemplates[id];
+      this.saveGlobalJsonSync();
+      this.persist();
+      return true;
+    }
+    return false;
   }
 
 }

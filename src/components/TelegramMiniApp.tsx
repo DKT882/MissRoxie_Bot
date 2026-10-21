@@ -1268,59 +1268,59 @@ export const TelegramMiniApp: React.FC = () => {
     }
   };
 
-  const handleCopyScheduleFromIdSubmit = () => {
+  const handleCopyScheduleFromIdSubmit = async () => {
     const trimmedId = copyScheduleFromIdInput.trim().toUpperCase();
     if (!trimmedId) {
-      setCopyScheduleFromIdError('Please enter a schedule ID.');
+      setCopyScheduleFromIdError('Please enter a content or schedule ID.');
       return;
     }
-    const found = (schedulesData || []).find((s: any) => String(s.id).toUpperCase() === trimmedId);
-    if (!found) {
-      setCopyScheduleFromIdError(`Schedule with ID "${trimmedId}" not found in this group.`);
-      return;
+    try {
+      const res = await tmaFetch(`/api/tma/groups/${chatId}/content-items/${encodeURIComponent(trimmedId)}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setCopyScheduleFromIdError(data.error || `Item with ID "${trimmedId}" not found or not accessible.`);
+        return;
+      }
+      const data = await res.json();
+      const found = data.item;
+      if (!found) {
+        setCopyScheduleFromIdError(`Item with ID "${trimmedId}" not found.`);
+        return;
+      }
+
+      let defaultDate = new Date().toISOString().split('T')[0];
+      let defaultTime = '12:00';
+
+      let safeIntervalStr = '1h';
+      if (found.scheduleConfig?.intervalStr && found.scheduleConfig.intervalStr !== 'Custom') {
+        safeIntervalStr = found.scheduleConfig.intervalStr;
+      } else if (found.scheduleConfig?.intervalMs && typeof found.scheduleConfig.intervalMs === 'number') {
+        safeIntervalStr = found.scheduleConfig.intervalMs >= 3600000 ? `${Math.round(found.scheduleConfig.intervalMs / 3600000)}h` : `${Math.round(found.scheduleConfig.intervalMs / 60000)}m`;
+      }
+
+      const baseName = found.title || found.id || 'Scheduled Broadcast';
+      const copyName = baseName.includes('(Copy)') ? baseName : `${baseName} (Copy)`;
+
+      setEditingSchedule(null);
+      setScheduleForm({
+        name: copyName,
+        message: found.text || '',
+        scheduleType: found.scheduleConfig?.scheduleType || 'interval',
+        intervalStr: safeIntervalStr,
+        nextRunDate: defaultDate,
+        nextRunTime: defaultTime,
+        pinAfterSend: Boolean(found.options?.pinAfterSend),
+        replyToLatest: Boolean(found.options?.replyToLatest)
+      });
+
+      setShowCopyScheduleFromIdModal(false);
+      setCopyScheduleFromIdInput('');
+      setCopyScheduleFromIdError(null);
+      setShowScheduleModal(true);
+      showNotification(`Loaded ${found.type.toUpperCase()}: ${found.title} into draft. Review and save.`, 'info');
+    } catch (err: any) {
+      setCopyScheduleFromIdError(err.message || 'Failed to load item');
     }
-
-    let defaultDate = new Date().toISOString().split('T')[0];
-    let defaultTime = '12:00';
-    if (found.nextRun) {
-      try {
-        const d = new Date(found.nextRun);
-        if (!isNaN(d.getTime())) {
-          defaultDate = d.toISOString().split('T')[0];
-          defaultTime = d.toISOString().split('T')[1].slice(0, 5);
-        }
-      } catch {}
-    }
-
-    let safeIntervalStr = '1h';
-    if (found.intervalFormatted && found.intervalFormatted !== 'Custom') {
-      safeIntervalStr = found.intervalFormatted;
-    } else if (found.intervalStr && found.intervalStr !== 'Custom') {
-      safeIntervalStr = found.intervalStr;
-    } else if (found.intervalMs && typeof found.intervalMs === 'number') {
-      safeIntervalStr = found.intervalMs >= 3600000 ? `${Math.round(found.intervalMs / 3600000)}h` : `${Math.round(found.intervalMs / 60000)}m`;
-    }
-
-    const baseName = found.name || found.id || 'Scheduled Broadcast';
-    const copyName = baseName.includes('(Copy)') ? baseName : `${baseName} (Copy)`;
-
-    setEditingSchedule(null);
-    setScheduleForm({
-      name: copyName,
-      message: found.message || found.messageText || '',
-      scheduleType: found.scheduleType || (found.cronExpression ? 'daily' : 'interval'),
-      intervalStr: safeIntervalStr,
-      nextRunDate: defaultDate,
-      nextRunTime: defaultTime,
-      pinAfterSend: Boolean(found.pinAfterSend),
-      replyToLatest: Boolean(found.replyToLatest)
-    });
-
-    setShowCopyScheduleFromIdModal(false);
-    setCopyScheduleFromIdInput('');
-    setCopyScheduleFromIdError(null);
-    setShowScheduleModal(true);
-    showNotification(`Loaded ${found.id} into draft as copy. Review and click Create Schedule to save.`, 'info');
   };
 
   const handleCopyAllStickerPackLinks = async () => {
@@ -1353,39 +1353,40 @@ export const TelegramMiniApp: React.FC = () => {
   const handleLoadPostFromIdSubmit = async () => {
     const trimmedId = loadPostFromIdInput.trim().toUpperCase();
     if (!trimmedId) {
-      setLoadPostFromIdError('Please enter a saved post ID (e.g. POST-XXXXX).');
+      setLoadPostFromIdError('Please enter a content ID (e.g. POST-XXXXX, schedule ID, or template ID).');
       return;
     }
 
-    let post = (savedPostsData || []).find((p: any) => String(p.id).toUpperCase() === trimmedId);
-    if (!post && chatId) {
-      try {
-        const res = await tmaFetch(`/api/tma/groups/${chatId}/posts/library?search=${encodeURIComponent(trimmedId)}`);
-        if (res.ok) {
-          const d = await res.json();
-          post = (d.posts || []).find((p: any) => String(p.id).toUpperCase() === trimmedId);
-        }
-      } catch {}
-    }
+    try {
+      const res = await tmaFetch(`/api/tma/groups/${chatId}/content-items/${encodeURIComponent(trimmedId)}`);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setLoadPostFromIdError(d.error || `Content item "${trimmedId}" not found or not accessible.`);
+        return;
+      }
+      const data = await res.json();
+      const item = data.item;
+      if (!item) {
+        setLoadPostFromIdError(`Content item "${trimmedId}" not found.`);
+        return;
+      }
 
-    if (!post) {
-      setLoadPostFromIdError(`Saved post "${trimmedId}" not found in library.`);
-      return;
-    }
+      if (item.contentType) setPostContentType(item.contentType);
+      if (item.text) setPostContent(item.text);
+      if (item.mediaFileId) setPostMediaId(item.mediaFileId);
+      if (Array.isArray(item.buttons)) {
+        setPostButtons(item.buttons.flat());
+      }
+      if (item.options?.protectContent !== undefined) setPostProtect(Boolean(item.options.protectContent));
+      if (item.options?.pinAfterSend !== undefined) setPostPin(Boolean(item.options.pinAfterSend));
 
-    if (post.contentType) setPostContentType(post.contentType);
-    if (post.text) setPostContent(post.text);
-    if (post.mediaFileId) setPostMediaId(post.mediaFileId);
-    if (Array.isArray(post.buttons)) {
-      setPostButtons(post.buttons.flat());
+      setShowLoadPostFromIdModal(false);
+      setLoadPostFromIdInput('');
+      setLoadPostFromIdError(null);
+      showNotification(`Loaded ${item.type.toUpperCase()}: ${item.title} into composer as draft`, 'success');
+    } catch (err: any) {
+      setLoadPostFromIdError(err.message || 'Failed to load content item');
     }
-    if (post.protectContent !== undefined) setPostProtect(Boolean(post.protectContent));
-    if (post.pinAfterSend !== undefined) setPostPin(Boolean(post.pinAfterSend));
-
-    setShowLoadPostFromIdModal(false);
-    setLoadPostFromIdInput('');
-    setLoadPostFromIdError(null);
-    showNotification(`Loaded saved post ${post.id} into composer as draft`, 'success');
   };
 
   const handleToggleSchedule = async (id: string, currentEnabled: boolean) => {
@@ -3199,7 +3200,7 @@ export const TelegramMiniApp: React.FC = () => {
                                 onClick={async () => {
                                   const ok = await copyTextToClipboard(s.id);
                                   if (ok) {
-                                    showNotification(`Schedule ID ${s.id} copied!`, 'success');
+                                    showNotification('Schedule ID copied', 'success');
                                   } else {
                                     showNotification('Failed to copy ID to clipboard', 'error');
                                   }
@@ -3222,13 +3223,6 @@ export const TelegramMiniApp: React.FC = () => {
                                 title="Edit Schedule"
                               >
                                 <Edit2 className="w-3 h-3" /> Edit
-                              </button>
-                              <button
-                                onClick={() => handleDuplicateSchedule(s)}
-                                className="px-2 py-1 bg-purple-950/60 hover:bg-purple-900/60 text-purple-300 border border-purple-800/60 rounded-lg flex items-center gap-1 cursor-pointer"
-                                title="Duplicate Schedule (as draft)"
-                              >
-                                <Layers className="w-3 h-3" /> Duplicate
                               </button>
                               <button
                                 onClick={() => handleToggleSchedule(s.id, s.enabled !== false)}

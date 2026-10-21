@@ -1170,7 +1170,7 @@ tmaRouter.put('/groups/:chatId/schedules/:id', requireTmaAuth('schedules'), (req
       if (!('error' in parsed)) {
         nextRun = parsed.nextRunIso;
         intervalMs = parsed.intervalMs;
-        intervalFormatted = parsed.intervalFormatted || intervalStr;
+        intervalFormatted = intervalStr || parsed.intervalFormatted;
       } else {
         const altParsed = messageScheduler.parseInterval(intervalStr);
         if (altParsed) {
@@ -1228,6 +1228,129 @@ tmaRouter.delete('/groups/:chatId/schedules/:id', requireTmaAuth('schedules'), (
 
     const success = db.deleteSchedule(id);
     res.json({ ok: success });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ==========================================
+// UNIFIED CONTENT REGISTRY & POST LIBRARY (TMA)
+// ==========================================
+tmaRouter.get('/groups/:chatId/content-items/:id', requireTmaAuth('rich_post'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const item = db.getContentItem(req.params.id, {
+      chatId,
+      userId: req.tmaUser?.id,
+      role: req.tmaRole
+    });
+
+    if (!item) {
+      return res.status(404).json({ error: `Content item "${req.params.id}" not found or not accessible.` });
+    }
+    res.json({ ok: true, item });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.get('/groups/:chatId/content-items', requireTmaAuth('rich_post'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const { type, search, limit } = req.query;
+    const items = db.getContentItems({
+      type: type ? String(type) : undefined,
+      search: search ? String(search) : undefined,
+      chatId,
+      limit: limit ? Number(limit) : undefined
+    });
+    res.json({ ok: true, items });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.post('/groups/:chatId/content-items', requireTmaAuth('rich_post'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const chatId = req.tmaChatId!;
+    const { type, title, contentType, text, mediaFileId, mediaUploadId, buttons, options, tags } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Title is required' });
+    }
+    const template = db.saveContentTemplate({
+      type: type === 'inline_button' ? 'inline_button' : 'broadcast',
+      title: title.trim(),
+      contentType,
+      text,
+      mediaFileId,
+      mediaUploadId,
+      buttons,
+      options,
+      sourceGroupId: chatId,
+      createdBy: {
+        userId: req.tmaUser?.id || 0,
+        username: req.tmaUser?.username,
+        role: req.tmaRole
+      },
+      tags
+    });
+    res.json({ ok: true, item: template });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Saved post library endpoints for TMA parity
+tmaRouter.get('/groups/:chatId/posts/library', requireTmaAuth('rich_post'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const { search, type } = req.query;
+    const posts = db.getSavedPosts({
+      search: search ? String(search) : undefined,
+      type: type ? String(type) : undefined
+    });
+    res.json({ ok: true, posts });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.post('/groups/:chatId/posts/library', requireTmaAuth('rich_post'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const { title, contentType, text, mediaFileId, mediaUploadId, buttons, protectContent, pinAfterSend, replyToLatest, tags } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Title is required' });
+    }
+    const post = db.saveSavedPost({
+      title: title.trim(),
+      contentType: contentType || 'text',
+      text,
+      mediaFileId,
+      mediaUploadId,
+      buttons,
+      protectContent: Boolean(protectContent),
+      pinAfterSend: Boolean(pinAfterSend),
+      replyToLatest: Boolean(replyToLatest),
+      createdBy: {
+        userId: req.tmaUser?.id || 0,
+        username: req.tmaUser?.username,
+        role: req.tmaRole
+      },
+      tags
+    });
+    res.json({ ok: true, post });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+tmaRouter.delete('/groups/:chatId/posts/library/:id', requireTmaAuth('rich_post'), (req: AuthenticatedTmaRequest, res) => {
+  try {
+    const ok = db.deleteSavedPost(req.params.id);
+    if (!ok) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+    res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -5,6 +5,7 @@ import {
   RefreshCw, 
   Bot, 
   Menu,
+  Code,
   Terminal, 
   Settings, 
   ListChecks, 
@@ -2211,56 +2212,58 @@ export default function App() {
     }
   };
 
-  const handleCopyScheduleFromIdSubmit = () => {
+  const handleCopyScheduleFromIdSubmit = async () => {
     const trimmedId = copyFromIdInput.trim().toUpperCase();
     if (!trimmedId) {
-      setCopyFromIdError('Please enter a schedule ID.');
+      setCopyFromIdError('Please enter a content or schedule ID.');
       return;
     }
-    const found = schedulesList.find((s: any) => String(s.id).toUpperCase() === trimmedId);
-    if (!found) {
-      setCopyFromIdError(`Schedule with ID "${trimmedId}" not found.`);
-      return;
+    try {
+      const res = await deduplicatedFetch(`/api/dashboard/content-items/${encodeURIComponent(trimmedId)}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setCopyFromIdError(data.error || `Item with ID "${trimmedId}" not found.`);
+        return;
+      }
+      const { item } = await res.json();
+      if (!item) {
+        setCopyFromIdError(`Item with ID "${trimmedId}" not found.`);
+        return;
+      }
+
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      let defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      let defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+      const baseName = item.title || item.id || 'Scheduled Broadcast';
+      const copyName = baseName.includes('(Copy)') ? baseName : `${baseName} (Copy)`;
+
+      setEditingSchedule(null);
+      setScheduleFormError(null);
+      setNewScheduleForm({
+        name: copyName,
+        message: item.text || '',
+        chatId: item.sourceGroupId || (groups[0]?.chatId || 0),
+        scheduleType: item.scheduleConfig?.scheduleType || 'interval',
+        intervalFormatted: item.scheduleConfig?.intervalStr || '1h',
+        nextRunDate: defaultDate,
+        nextRunTime: defaultTime,
+        pinAfterSend: Boolean(item.options?.pinAfterSend),
+        replyToLatest: Boolean(item.options?.replyToLatest),
+        autoDeletePrevious: Boolean(item.options?.autoDeletePrevious),
+        triggerKeyword: '',
+        inlineKeyboard: item.buttons || []
+      });
+
+      setShowCopyScheduleFromIdModal(false);
+      setCopyFromIdInput('');
+      setCopyFromIdError(null);
+      setShowCreateScheduleModal(true);
+      setScheduleNotification({ type: 'success', message: `Loaded draft from ${item.type.toUpperCase()}: "${item.title}"` }); setTimeout(() => setScheduleNotification(null), 4000);
+    } catch (err: any) {
+      setCopyFromIdError(err.message || 'Failed to load content item');
     }
-
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    let defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    let defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    if (found.nextRun) {
-      try {
-        const d = new Date(found.nextRun);
-        if (!isNaN(d.getTime())) {
-          defaultDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-          defaultTime = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        }
-      } catch {}
-    }
-
-    const baseName = found.name || found.id || 'Scheduled Broadcast';
-    const copyName = baseName.includes('(Copy)') ? baseName : `${baseName} (Copy)`;
-
-    setEditingSchedule(null);
-    setScheduleFormError(null);
-    setNewScheduleForm({
-      name: copyName,
-      message: found.message || found.messageText || '',
-      chatId: found.chatId || (groups[0]?.chatId || 0),
-      scheduleType: found.scheduleType || (found.cronExpression ? 'daily' : 'interval'),
-      intervalFormatted: found.intervalFormatted || '1h',
-      nextRunDate: defaultDate,
-      nextRunTime: defaultTime,
-      pinAfterSend: Boolean(found.pinAfterSend),
-      replyToLatest: Boolean(found.replyToLatest),
-      autoDeletePrevious: Boolean(found.autoDeletePrevious),
-      triggerKeyword: found.triggerKeyword || '',
-      inlineKeyboard: found.inlineKeyboard || []
-    });
-
-    setShowCopyScheduleFromIdModal(false);
-    setCopyFromIdInput('');
-    setCopyFromIdError(null);
-    setShowCreateScheduleModal(true);
   };
 
   const handleCopyAllStickerPackLinks = async () => {
@@ -5966,18 +5969,25 @@ export default function App() {
                                 {s.enabled !== false ? 'Pause' : 'Enable'}
                               </button>
                               <button
-                                onClick={() => handleCopyScheduleCode(s)}
+                                onClick={async () => {
+                                  const ok = await copyTextToClipboard(s.id);
+                                  if (ok) {
+                                    setScheduleNotification({ type: 'success', message: 'Schedule ID copied' }); setTimeout(() => setScheduleNotification(null), 3000);
+                                  } else {
+                                    setScheduleNotification({ type: 'error', message: 'Failed to copy ID to clipboard' }); setTimeout(() => setScheduleNotification(null), 3000);
+                                  }
+                                }}
                                 className={`px-2.5 py-1 rounded-lg ${themeInnerCardBg} border ${themeBorder} text-cyan-300 hover:text-white flex items-center gap-1`}
-                                title="Copy Schedule Code"
+                                title="Copy Schedule ID"
                               >
-                                <Copy className="w-3.5 h-3.5" /> Copy Code
+                                <Copy className="w-3.5 h-3.5" /> Copy ID
                               </button>
                               <button
-                                onClick={() => handleDuplicateSchedule(s)}
-                                className={`px-2.5 py-1 rounded-lg ${themeInnerCardBg} border ${themeBorder} text-purple-400 hover:text-white flex items-center gap-1`}
-                                title="Duplicate Schedule (as draft)"
+                                onClick={() => handleCopyScheduleCode(s)}
+                                className={`px-2.5 py-1 rounded-lg ${themeInnerCardBg} border ${themeBorder} text-slate-300 hover:text-white flex items-center gap-1`}
+                                title="Export Schedule Code & JSON"
                               >
-                                <Layers className="w-3.5 h-3.5" /> Duplicate
+                                <Code className="w-3.5 h-3.5" /> Code
                               </button>
                               <button
                                 onClick={() => {
@@ -6612,18 +6622,25 @@ export default function App() {
                                 {s.enabled !== false ? 'Pause' : 'Enable'}
                               </button>
                               <button
-                                onClick={() => handleCopyScheduleCode(s)}
+                                onClick={async () => {
+                                  const ok = await copyTextToClipboard(s.id);
+                                  if (ok) {
+                                    setScheduleNotification({ type: 'success', message: 'Schedule ID copied' }); setTimeout(() => setScheduleNotification(null), 3000);
+                                  } else {
+                                    setScheduleNotification({ type: 'error', message: 'Failed to copy ID to clipboard' }); setTimeout(() => setScheduleNotification(null), 3000);
+                                  }
+                                }}
                                 className={`px-3 py-1.5 rounded-xl ${themeInnerCardBg} border ${themeBorder} text-cyan-300 hover:text-white flex items-center gap-1 transition-colors`}
-                                title="Copy Schedule Code"
+                                title="Copy Schedule ID"
                               >
-                                <Copy className="w-3.5 h-3.5" /> Copy Code
+                                <Copy className="w-3.5 h-3.5" /> Copy ID
                               </button>
                               <button
-                                onClick={() => handleDuplicateSchedule(s)}
-                                className={`px-3 py-1.5 rounded-xl ${themeInnerCardBg} border ${themeBorder} text-purple-400 hover:text-white flex items-center gap-1 transition-colors`}
-                                title="Duplicate Schedule (as draft)"
+                                onClick={() => handleCopyScheduleCode(s)}
+                                className={`px-3 py-1.5 rounded-xl ${themeInnerCardBg} border ${themeBorder} text-slate-300 hover:text-white flex items-center gap-1 transition-colors`}
+                                title="Export Schedule Code & JSON"
                               >
-                                <Layers className="w-3.5 h-3.5" /> Duplicate
+                                <Code className="w-3.5 h-3.5" /> Code
                               </button>
                               <button
                                 onClick={() => {

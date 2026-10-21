@@ -29,7 +29,8 @@ import {
   Paperclip,
   Users,
   MessageSquare,
-  Search
+  Search,
+  Copy
 } from 'lucide-react';
 
 export type ComposerContentType = 'text' | 'photo' | 'video' | 'animation' | 'document';
@@ -434,6 +435,86 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   const [savedPostsList, setSavedPostsList] = useState<any[]>([]);
   const [postPickerSearch, setPostPickerSearch] = useState<string>('');
   const [postPickerLoading, setPostPickerLoading] = useState<boolean>(false);
+  const [showCopyFromIdModal, setShowCopyFromIdModal] = useState<boolean>(false);
+  const [copyFromIdInput, setCopyFromIdInput] = useState<string>('');
+  const [copyFromIdError, setCopyFromIdError] = useState<string | null>(null);
+  const [copyFromIdLoading, setCopyFromIdLoading] = useState<boolean>(false);
+
+  const handleCopyFromIdSubmit = async () => {
+    const trimmed = copyFromIdInput.trim().toUpperCase();
+    if (!trimmed) {
+      setCopyFromIdError('Please enter a content ID (schedule, post, or template).');
+      return;
+    }
+    setCopyFromIdLoading(true);
+    setCopyFromIdError(null);
+    try {
+      const res = await fetch(`/api/dashboard/content-items/${encodeURIComponent(trimmed)}`, {
+        headers: getAuthHeaders(),
+        credentials: 'same-origin'
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setCopyFromIdError(d.error || `Content item "${trimmed}" not found.`);
+        setCopyFromIdLoading(false);
+        return;
+      }
+      const { item } = await res.json();
+      if (!item) {
+        setCopyFromIdError(`Content item "${trimmed}" not found.`);
+        setCopyFromIdLoading(false);
+        return;
+      }
+
+      if (item.text) setText(item.text);
+
+      if (item.contentType === 'photo') setSelectedCompositionType('image');
+      else if (item.contentType === 'video') setSelectedCompositionType('video');
+      else if (item.contentType === 'document') setSelectedCompositionType('document');
+      else if (item.contentType === 'animation') setSelectedCompositionType('gif');
+
+      if (item.mediaFileId) {
+        setMediaAttachmentTab('url');
+        setMediaLinks([{
+          id: 'media_ref_' + Date.now(),
+          url: item.mediaFileId,
+          type: item.contentType || 'photo',
+          isValid: true,
+          validationMessage: 'Referenced from ' + item.id
+        }]);
+      }
+
+      if (Array.isArray(item.buttons) && item.buttons.length > 0) {
+        const mappedGrid: ComposerButton[][] = item.buttons.map((row: any[], rIdx: number) =>
+          row.map((btn: any, bIdx: number) => ({
+            id: `btn_${Date.now()}_${rIdx}_${bIdx}`,
+            label: btn.text || 'Button',
+            url: btn.url || '',
+            style: 'primary'
+          }))
+        );
+        setButtonGrid(mappedGrid);
+      }
+
+      if (item.options?.pinAfterSend !== undefined) setPinAfterSend(Boolean(item.options.pinAfterSend));
+      if (item.options?.replyToLatest !== undefined) setReplyToLatest(Boolean(item.options.replyToLatest));
+      if (item.options?.protectContent !== undefined) setProtectContent(Boolean(item.options.protectContent));
+
+      setShowCopyFromIdModal(false);
+      setCopyFromIdInput('');
+      setCopyFromIdError(null);
+      setNotification({
+        type: 'success',
+        title: 'Content Loaded',
+        message: `Successfully loaded draft from ${item.type.toUpperCase()}: "${item.title}". Source remains unchanged.`
+      });
+    } catch (err: any) {
+      setCopyFromIdError(err.message || 'Failed to load content item');
+    } finally {
+      setCopyFromIdLoading(false);
+    }
+  };
+
   const [showSaveToLibraryModal, setShowSaveToLibraryModal] = useState<boolean>(false);
   const [saveToLibTitle, setSaveToLibTitle] = useState<string>('');
   const [isSavingToLib, setIsSavingToLib] = useState<boolean>(false);
@@ -2571,6 +2652,73 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               >
                 <Check className="w-4 h-4" />
                 Replace & Switch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Copy From ID */}
+      {showCopyFromIdModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 max-w-sm w-full space-y-3.5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-stone-800 pb-2">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <Copy className="w-4 h-4 text-cyan-400" /> Copy From ID
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCopyFromIdModal(false);
+                  setCopyFromIdInput('');
+                  setCopyFromIdError(null);
+                }}
+                className="text-stone-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-stone-400 leading-relaxed">
+              Enter any content ID (schedule, saved post, or template) to prefill this composer with its text, media, buttons, and settings.
+            </p>
+            <div>
+              <label className="text-stone-300 font-semibold block mb-1 text-xs">Content ID</label>
+              <input
+                type="text"
+                placeholder="e.g. POST-7K2P9 or A76935"
+                value={copyFromIdInput}
+                onChange={e => {
+                  setCopyFromIdInput(e.target.value);
+                  if (copyFromIdError) setCopyFromIdError(null);
+                }}
+                className="w-full bg-stone-950 border border-stone-800 rounded-xl p-2.5 text-white font-mono text-xs uppercase focus:outline-none focus:border-cyan-500"
+              />
+              {copyFromIdError && (
+                <p className="text-rose-400 text-[11px] mt-1.5 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {copyFromIdError}
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCopyFromIdModal(false);
+                  setCopyFromIdInput('');
+                  setCopyFromIdError(null);
+                }}
+                className="px-3.5 py-2 bg-stone-800 text-stone-300 rounded-xl text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCopyFromIdSubmit}
+                disabled={!copyFromIdInput.trim() || copyFromIdLoading}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+              >
+                {copyFromIdLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
+                Load Draft
               </button>
             </div>
           </div>

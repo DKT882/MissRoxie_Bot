@@ -2883,6 +2883,94 @@ export async function startServer() {
     }
   });
 
+
+  // ==========================================
+  // UNIFIED CONTENT REGISTRY APIs
+  // ==========================================
+  app.get('/api/dashboard/content-items/:id', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+      const item = db.getContentItem(req.params.id);
+      if (!item) {
+        return res.status(404).json({ error: `Content item "${req.params.id}" not found.` });
+      }
+      res.json({ ok: true, item });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/dashboard/content-items', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'VIEWER');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+      const { type, search, chatId, limit } = req.query;
+      const items = db.getContentItems({
+        type: type ? String(type) : undefined,
+        search: search ? String(search) : undefined,
+        chatId: chatId ? Number(chatId) : undefined,
+        limit: limit ? Number(limit) : undefined
+      });
+      res.json({ ok: true, items });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/dashboard/content-items', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'MODERATOR');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+      const { type, title, contentType, text, mediaFileId, mediaUploadId, buttons, options, sourceGroupId, tags } = req.body;
+      if (!title || !title.trim()) {
+        return res.status(400).json({ error: 'Title is required' });
+      }
+      const tmpl = db.saveContentTemplate({
+        type: type === 'inline_button' ? 'inline_button' : 'broadcast',
+        title: title.trim(),
+        contentType,
+        text,
+        mediaFileId,
+        mediaUploadId,
+        buttons: sanitizeDashboardInlineKeyboard(buttons),
+        options,
+        sourceGroupId: sourceGroupId ? Number(sourceGroupId) : undefined,
+        createdBy: {
+          userId: 0,
+          username: auth.operatorUsername || 'operator',
+          role: 'MODERATOR'
+        },
+        tags
+      });
+      res.json({ ok: true, item: tmpl });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/dashboard/content-items/:id', (req, res) => {
+    try {
+      const auth = verifyOperatorAuth(req, 'ADMIN');
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+      const ok = db.deleteContentTemplate(req.params.id);
+      if (!ok) {
+        return res.status(404).json({ error: 'Template not found or cannot be deleted via this endpoint' });
+      }
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post('/api/dashboard/posts/library/:id/preview', async (req, res) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');

@@ -637,6 +637,69 @@ export interface RichMessageConfig {
 
 export type WelcomeDmConfig = RichMessageConfig;
 
+export type ContentItemType = 'post' | 'schedule' | 'broadcast' | 'inline_button';
+
+export interface UnifiedContentItem {
+  id: string; // e.g. "POST-7K2P9", "A76935", "TMPL-X4J92"
+  type: ContentItemType;
+  title: string;
+  contentType: PostContentType;
+  text?: string;
+  mediaFileId?: string;
+  mediaUploadId?: string;
+  buttons?: ScheduledPostButton[][];
+  options?: {
+    pinAfterSend?: boolean;
+    replyToLatest?: boolean;
+    protectContent?: boolean;
+    autoDeletePrevious?: boolean;
+  };
+  scheduleConfig?: {
+    scheduleType?: 'one_time' | 'daily' | 'weekly' | 'interval' | 'custom';
+    intervalStr?: string;
+    intervalMs?: number;
+    timezone?: string;
+    cron?: string;
+  };
+  sourceGroupId?: number;
+  createdBy?: {
+    userId?: number;
+    username?: string;
+    role?: string;
+  };
+  createdAt: string;
+  updatedAt?: string;
+  tags?: string[];
+  metadata?: Record<string, any>;
+}
+
+export interface ContentTemplate {
+  id: string;
+  type: 'broadcast' | 'inline_button';
+  title: string;
+  contentType: PostContentType;
+  text?: string;
+  mediaFileId?: string;
+  mediaUploadId?: string;
+  buttons?: ScheduledPostButton[][];
+  options?: {
+    pinAfterSend?: boolean;
+    replyToLatest?: boolean;
+    protectContent?: boolean;
+    autoDeletePrevious?: boolean;
+  };
+  sourceGroupId?: number;
+  createdBy?: {
+    userId?: number;
+    username?: string;
+    role?: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+  tags?: string[];
+  metadata?: Record<string, any>;
+}
+
 export interface SavedPost {
   id: string; // e.g. "POST-7K2P9"
   title: string;
