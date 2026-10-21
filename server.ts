@@ -3353,6 +3353,20 @@ export async function startServer() {
           if (parsed) {
             intervalMs = parsed.ms;
             intervalFormatted = parsed.formatted;
+          } else {
+            const timeParsed = parseScheduleTime(intervalFormatted);
+            if (!('error' in timeParsed)) {
+              intervalMs = timeParsed.intervalMs;
+              intervalFormatted = timeParsed.intervalFormatted || intervalFormatted;
+            } else if (
+              (intervalFormatted === existing.intervalFormatted || intervalFormatted === (existing as any).intervalStr || intervalFormatted === 'Custom') &&
+              existing.intervalMs
+            ) {
+              intervalMs = existing.intervalMs;
+              intervalFormatted = existing.intervalFormatted;
+            } else {
+              return res.status(400).json({ error: 'Invalid schedule interval format. Try format like: 30m, 2h, 4 hours, or 1d.' });
+            }
           }
         }
 
@@ -3363,6 +3377,9 @@ export async function startServer() {
           if (!('nextRun' in updates) && existing.intervalMs !== intervalMs) {
             updates.nextRun = new Date(Date.now() + intervalMs).toISOString();
           }
+        } else {
+          delete updates.intervalFormatted;
+          delete updates.intervalStr;
         }
       }
       if (updates.pinAfterSend !== undefined) {

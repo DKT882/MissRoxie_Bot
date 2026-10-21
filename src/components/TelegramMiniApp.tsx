@@ -36,7 +36,8 @@ import {
   Search,
   Bookmark,
   Copy,
-  Edit2
+  Edit2,
+  Code
 } from 'lucide-react';
 
 export type MiniAppFeature =
@@ -173,6 +174,13 @@ export const TelegramMiniApp: React.FC = () => {
 
   // New Schedule Form Modal
   const [showScheduleModal, setShowScheduleModal] = useState<boolean>(false);
+  const [showCopyScheduleFromIdModal, setShowCopyScheduleFromIdModal] = useState<boolean>(false);
+  const [copyScheduleFromIdInput, setCopyScheduleFromIdInput] = useState<string>('');
+  const [copyScheduleFromIdError, setCopyScheduleFromIdError] = useState<string | null>(null);
+
+  const [showLoadPostFromIdModal, setShowLoadPostFromIdModal] = useState<boolean>(false);
+  const [loadPostFromIdInput, setLoadPostFromIdInput] = useState<string>('');
+  const [loadPostFromIdError, setLoadPostFromIdError] = useState<string | null>(null);
   const [scheduleForm, setScheduleForm] = useState<{
     name: string;
     message: string;
@@ -922,14 +930,35 @@ export const TelegramMiniApp: React.FC = () => {
   };
 
   const handleOpenEditSchedule = (s: any) => {
+    let defaultDate = new Date().toISOString().split('T')[0];
+    let defaultTime = '12:00';
+    if (s.nextRun) {
+      try {
+        const d = new Date(s.nextRun);
+        if (!isNaN(d.getTime())) {
+          defaultDate = d.toISOString().split('T')[0];
+          defaultTime = d.toISOString().split('T')[1].slice(0, 5);
+        }
+      } catch {}
+    }
+
+    let safeIntervalStr = '1h';
+    if (s.intervalFormatted && s.intervalFormatted !== 'Custom') {
+      safeIntervalStr = s.intervalFormatted;
+    } else if (s.intervalStr && s.intervalStr !== 'Custom') {
+      safeIntervalStr = s.intervalStr;
+    } else if (s.intervalMs && typeof s.intervalMs === 'number') {
+      safeIntervalStr = s.intervalMs >= 3600000 ? `${Math.round(s.intervalMs / 3600000)}h` : `${Math.round(s.intervalMs / 60000)}m`;
+    }
+
     setEditingSchedule(s);
     setScheduleForm({
-      name: s.name || '',
+      name: s.name || s.id || 'Scheduled Broadcast',
       message: s.message || s.messageText || '',
       scheduleType: s.scheduleType || (s.cronExpression ? 'daily' : 'interval'),
-      intervalStr: s.intervalFormatted || s.intervalStr || '1h',
-      nextRunDate: s.nextRun ? s.nextRun.split('T')[0] : new Date().toISOString().split('T')[0],
-      nextRunTime: s.nextRun && s.nextRun.includes('T') ? s.nextRun.split('T')[1].slice(0, 5) : '12:00',
+      intervalStr: safeIntervalStr,
+      nextRunDate: defaultDate,
+      nextRunTime: defaultTime,
       pinAfterSend: Boolean(s.pinAfterSend),
       replyToLatest: Boolean(s.replyToLatest)
     });
@@ -1191,10 +1220,13 @@ export const TelegramMiniApp: React.FC = () => {
   // Handlers for Schedules
   const handleCreateSchedule = async () => {
     if (scheduleSaving) return;
-    if (!chatId || !scheduleForm.name.trim() || !scheduleForm.message.trim()) {
-      showNotification('Schedule name and message are required', 'error');
+    const trimmedMessage = scheduleForm.message.trim();
+    if (!chatId || !trimmedMessage) {
+      showNotification('Schedule message is required', 'error');
       return;
     }
+    const finalName = scheduleForm.name.trim() || (editingSchedule ? (editingSchedule.name || editingSchedule.id) : trimmedMessage.slice(0, 30));
+
     setScheduleSaving(true);
     try {
       const isEdit = Boolean(editingSchedule && editingSchedule.id);
@@ -1205,7 +1237,10 @@ export const TelegramMiniApp: React.FC = () => {
 
       const res = await tmaFetch(url, {
         method,
-        body: JSON.stringify(scheduleForm)
+        body: JSON.stringify({
+          ...scheduleForm,
+          name: finalName
+        })
       });
       const data = await res.json();
       if (res.ok && data.ok) {
@@ -1228,7 +1263,129 @@ export const TelegramMiniApp: React.FC = () => {
       }
     } catch (err: any) {
       showNotification(err.message, 'error');
+    } finally {
+      setScheduleSaving(false);
     }
+  };
+
+  const handleCopyScheduleFromIdSubmit = () => {
+    const trimmedId = copyScheduleFromIdInput.trim().toUpperCase();
+    if (!trimmedId) {
+      setCopyScheduleFromIdError('Please enter a schedule ID.');
+      return;
+    }
+    const found = (schedulesData || []).find((s: any) => String(s.id).toUpperCase() === trimmedId);
+    if (!found) {
+      setCopyScheduleFromIdError(`Schedule with ID "${trimmedId}" not found in this group.`);
+      return;
+    }
+
+    let defaultDate = new Date().toISOString().split('T')[0];
+    let defaultTime = '12:00';
+    if (found.nextRun) {
+      try {
+        const d = new Date(found.nextRun);
+        if (!isNaN(d.getTime())) {
+          defaultDate = d.toISOString().split('T')[0];
+          defaultTime = d.toISOString().split('T')[1].slice(0, 5);
+        }
+      } catch {}
+    }
+
+    let safeIntervalStr = '1h';
+    if (found.intervalFormatted && found.intervalFormatted !== 'Custom') {
+      safeIntervalStr = found.intervalFormatted;
+    } else if (found.intervalStr && found.intervalStr !== 'Custom') {
+      safeIntervalStr = found.intervalStr;
+    } else if (found.intervalMs && typeof found.intervalMs === 'number') {
+      safeIntervalStr = found.intervalMs >= 3600000 ? `${Math.round(found.intervalMs / 3600000)}h` : `${Math.round(found.intervalMs / 60000)}m`;
+    }
+
+    const baseName = found.name || found.id || 'Scheduled Broadcast';
+    const copyName = baseName.includes('(Copy)') ? baseName : `${baseName} (Copy)`;
+
+    setEditingSchedule(null);
+    setScheduleForm({
+      name: copyName,
+      message: found.message || found.messageText || '',
+      scheduleType: found.scheduleType || (found.cronExpression ? 'daily' : 'interval'),
+      intervalStr: safeIntervalStr,
+      nextRunDate: defaultDate,
+      nextRunTime: defaultTime,
+      pinAfterSend: Boolean(found.pinAfterSend),
+      replyToLatest: Boolean(found.replyToLatest)
+    });
+
+    setShowCopyScheduleFromIdModal(false);
+    setCopyScheduleFromIdInput('');
+    setCopyScheduleFromIdError(null);
+    setShowScheduleModal(true);
+    showNotification(`Loaded ${found.id} into draft as copy. Review and click Create Schedule to save.`, 'info');
+  };
+
+  const handleCopyAllStickerPackLinks = async () => {
+    const packs = stickersData?.packs || [];
+    if (!packs.length) {
+      showNotification('No sticker packs configured for this group', 'info');
+      return;
+    }
+    const links = packs
+      .map((p: any) => {
+        const name = p.name || p.title;
+        if (!name) return null;
+        return name.startsWith('http') ? name : `https://t.me/addstickers/${name}`;
+      })
+      .filter(Boolean);
+
+    if (!links.length) {
+      showNotification('No sticker packs configured for this group', 'info');
+      return;
+    }
+
+    const ok = await copyTextToClipboard(links.join('\n'));
+    if (ok) {
+      showNotification(`Copied ${links.length} sticker pack link(s) to clipboard`, 'success');
+    } else {
+      showNotification('Failed to copy sticker pack links to clipboard', 'error');
+    }
+  };
+
+  const handleLoadPostFromIdSubmit = async () => {
+    const trimmedId = loadPostFromIdInput.trim().toUpperCase();
+    if (!trimmedId) {
+      setLoadPostFromIdError('Please enter a saved post ID (e.g. POST-XXXXX).');
+      return;
+    }
+
+    let post = (savedPostsData || []).find((p: any) => String(p.id).toUpperCase() === trimmedId);
+    if (!post && chatId) {
+      try {
+        const res = await tmaFetch(`/api/tma/groups/${chatId}/posts/library?search=${encodeURIComponent(trimmedId)}`);
+        if (res.ok) {
+          const d = await res.json();
+          post = (d.posts || []).find((p: any) => String(p.id).toUpperCase() === trimmedId);
+        }
+      } catch {}
+    }
+
+    if (!post) {
+      setLoadPostFromIdError(`Saved post "${trimmedId}" not found in library.`);
+      return;
+    }
+
+    if (post.contentType) setPostContentType(post.contentType);
+    if (post.text) setPostContent(post.text);
+    if (post.mediaFileId) setPostMediaId(post.mediaFileId);
+    if (Array.isArray(post.buttons)) {
+      setPostButtons(post.buttons.flat());
+    }
+    if (post.protectContent !== undefined) setPostProtect(Boolean(post.protectContent));
+    if (post.pinAfterSend !== undefined) setPostPin(Boolean(post.pinAfterSend));
+
+    setShowLoadPostFromIdModal(false);
+    setLoadPostFromIdInput('');
+    setLoadPostFromIdError(null);
+    showNotification(`Loaded saved post ${post.id} into composer as draft`, 'success');
   };
 
   const handleToggleSchedule = async (id: string, currentEnabled: boolean) => {
@@ -2370,21 +2527,33 @@ export const TelegramMiniApp: React.FC = () => {
                   </div>
 
                   {/* Post Library Integration (Feature 1 & 2) */}
-                  <div className="flex gap-2 pt-1 border-t border-slate-800">
+                  <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-800">
                     <button
                       type="button"
                       onClick={handleOpenPostLibrary}
-                      className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      className="py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
                     >
-                      <Bookmark className="w-3.5 h-3.5" /> Post Library
+                      <Bookmark className="w-3.5 h-3.5" /> Library
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoadPostFromIdInput('');
+                        setLoadPostFromIdError(null);
+                        setShowLoadPostFromIdModal(true);
+                      }}
+                      className="py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
+                      title="Load saved post by ID"
+                    >
+                      <Copy className="w-3.5 h-3.5" /> From ID
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowSavePostModal(true)}
                       disabled={!postContent.trim()}
-                      className="flex-1 py-2 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-40"
+                      className="py-2 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer disabled:opacity-40"
                     >
-                      <Copy className="w-3.5 h-3.5" /> Save to Library
+                      <Save className="w-3.5 h-3.5" /> Save
                     </button>
                   </div>
 
@@ -2560,16 +2729,25 @@ export const TelegramMiniApp: React.FC = () => {
             {/* TAB: STICKERS */}
             {activeTab === 'stickers' && (
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2 flex-wrap gap-2">
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
                     <Smile className="w-4 h-4 text-amber-400" /> Group Sticker Pack Management
                   </h3>
-                  <button
-                    onClick={() => setShowStickerModal(true)}
-                    className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Add Pack
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={handleCopyAllStickerPackLinks}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                      title="Copy All Sticker Pack Links"
+                    >
+                      <Copy className="w-3.5 h-3.5" /> Copy All Links
+                    </button>
+                    <button
+                      onClick={() => setShowStickerModal(true)}
+                      className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Pack
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-3 text-xs">
@@ -2971,16 +3149,29 @@ export const TelegramMiniApp: React.FC = () => {
               <div className="space-y-4">
                 {/* Scheduled Messages */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2 flex-wrap gap-2">
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
                       <Clock className="w-4 h-4 text-cyan-400" /> Scheduled Messages ({schedulesData.length})
                     </h3>
-                    <button
-                      onClick={handleOpenNewSchedule}
-                      className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> New Schedule
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          setCopyScheduleFromIdInput('');
+                          setCopyScheduleFromIdError(null);
+                          setShowCopyScheduleFromIdModal(true);
+                        }}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                        title="Copy configuration from an existing schedule ID"
+                      >
+                        <Copy className="w-3.5 h-3.5" /> Copy From ID
+                      </button>
+                      <button
+                        onClick={handleOpenNewSchedule}
+                        className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> New Schedule
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-2 text-xs">
@@ -3005,11 +3196,25 @@ export const TelegramMiniApp: React.FC = () => {
                             <span>Interval: {s.intervalFormatted || 'Custom'}</span>
                             <div className="flex items-center gap-1.5 flex-wrap justify-end">
                               <button
-                                onClick={() => handleCopyScheduleCode(s)}
+                                onClick={async () => {
+                                  const ok = await copyTextToClipboard(s.id);
+                                  if (ok) {
+                                    showNotification(`Schedule ID ${s.id} copied!`, 'success');
+                                  } else {
+                                    showNotification('Failed to copy ID to clipboard', 'error');
+                                  }
+                                }}
                                 className="px-2 py-1 bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-800/60 rounded-lg flex items-center gap-1 cursor-pointer"
-                                title="Copy Schedule Code"
+                                title="Copy Schedule ID"
                               >
-                                <Copy className="w-3 h-3" /> Copy Code
+                                <Copy className="w-3 h-3" /> Copy ID
+                              </button>
+                              <button
+                                onClick={() => handleCopyScheduleCode(s)}
+                                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center gap-1 cursor-pointer"
+                                title="Export Schedule Code & JSON"
+                              >
+                                <Code className="w-3 h-3" /> Code
                               </button>
                               <button
                                 onClick={() => handleOpenEditSchedule(s)}
@@ -3637,6 +3842,138 @@ export const TelegramMiniApp: React.FC = () => {
         </div>
       )}
 
+      {/* Copy Schedule From ID Modal */}
+      {showCopyScheduleFromIdModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full space-y-3.5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Copy className="w-4 h-4 text-cyan-400" /> Copy Schedule From ID
+              </h3>
+              <button
+                onClick={() => {
+                  setShowCopyScheduleFromIdModal(false);
+                  setCopyScheduleFromIdInput('');
+                  setCopyScheduleFromIdError(null);
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Enter an existing schedule ID to duplicate its configuration as a draft. The original schedule remains untouched, and a new ID will be created when saved.
+            </p>
+
+            <div>
+              <label className="text-slate-300 text-xs block mb-1 font-semibold">Schedule ID</label>
+              <input
+                type="text"
+                placeholder="e.g. A76935"
+                value={copyScheduleFromIdInput}
+                onChange={e => {
+                  setCopyScheduleFromIdInput(e.target.value);
+                  if (copyScheduleFromIdError) setCopyScheduleFromIdError(null);
+                }}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono text-xs uppercase"
+              />
+              {copyScheduleFromIdError && (
+                <p className="text-rose-400 text-[11px] mt-1.5 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {copyScheduleFromIdError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                onClick={() => {
+                  setShowCopyScheduleFromIdModal(false);
+                  setCopyScheduleFromIdInput('');
+                  setCopyScheduleFromIdError(null);
+                }}
+                className="px-3.5 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCopyScheduleFromIdSubmit}
+                disabled={!copyScheduleFromIdInput.trim()}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" /> Duplicate to Draft
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Load Post From ID Modal */}
+      {showLoadPostFromIdModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full space-y-3.5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Copy className="w-4 h-4 text-cyan-400" /> Load Saved Post From ID
+              </h3>
+              <button
+                onClick={() => {
+                  setShowLoadPostFromIdModal(false);
+                  setLoadPostFromIdInput('');
+                  setLoadPostFromIdError(null);
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Enter a saved post ID (e.g. <code>POST-XXXXX</code>) to load its content, buttons, and settings directly into the composer.
+            </p>
+
+            <div>
+              <label className="text-slate-300 text-xs block mb-1 font-semibold">Post ID</label>
+              <input
+                type="text"
+                placeholder="e.g. POST-12345"
+                value={loadPostFromIdInput}
+                onChange={e => {
+                  setLoadPostFromIdInput(e.target.value);
+                  if (loadPostFromIdError) setLoadPostFromIdError(null);
+                }}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono text-xs uppercase"
+              />
+              {loadPostFromIdError && (
+                <p className="text-rose-400 text-[11px] mt-1.5 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {loadPostFromIdError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                onClick={() => {
+                  setShowLoadPostFromIdModal(false);
+                  setLoadPostFromIdInput('');
+                  setLoadPostFromIdError(null);
+                }}
+                className="px-3.5 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLoadPostFromIdSubmit}
+                disabled={!loadPostFromIdInput.trim()}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" /> Load into Composer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Copy Schedule Code Modal */}
       {copyScheduleModal?.isOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
@@ -4021,18 +4358,32 @@ export const TelegramMiniApp: React.FC = () => {
                       </p>
                     )}
 
-                    <div className="flex items-center gap-2 pt-1 border-t border-slate-800/80">
+                    <div className="flex items-center gap-1.5 pt-1 border-t border-slate-800/80">
+                      <button
+                        onClick={async () => {
+                          const ok = await copyTextToClipboard(p.id);
+                          if (ok) {
+                            showNotification(`Post ID ${p.id} copied!`, 'success');
+                          } else {
+                            showNotification('Failed to copy ID to clipboard', 'error');
+                          }
+                        }}
+                        className="flex-1 py-1 bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-800/60 rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 cursor-pointer"
+                        title="Copy Post ID"
+                      >
+                        <Copy className="w-3 h-3" /> Copy ID
+                      </button>
                       <button
                         onClick={() => handleInsertPostReference(p.id)}
                         className="flex-1 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 rounded-lg text-[10px] font-semibold cursor-pointer"
                       >
-                        Insert ID
+                        Insert
                       </button>
                       <button
                         onClick={() => handleLoadPostIntoComposer(p)}
                         className="flex-1 py-1 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg text-[10px] font-semibold cursor-pointer"
                       >
-                        Load Post
+                        Load
                       </button>
                     </div>
                   </div>

@@ -602,6 +602,10 @@ export default function App() {
   const [schedulesLoading, setSchedulesLoading] = useState<boolean>(false);
   const [schedulesFilterChatId, setSchedulesFilterChatId] = useState<number | 'all'>('all');
   const [showCreateScheduleModal, setShowCreateScheduleModal] = useState<boolean>(false);
+  const [showCopyScheduleFromIdModal, setShowCopyScheduleFromIdModal] = useState<boolean>(false);
+  const [copyFromIdInput, setCopyFromIdInput] = useState<string>('');
+  const [copyFromIdError, setCopyFromIdError] = useState<string | null>(null);
+  const [copiedScheduleId, setCopiedScheduleId] = useState<string | null>(null);
   const [editingSchedule, setEditingSchedule] = useState<any | null>(null);
   const [copyScheduleModal, setCopyScheduleModal] = useState<{
     isOpen: boolean;
@@ -2204,6 +2208,86 @@ export default function App() {
       return ok;
     } catch {
       return false;
+    }
+  };
+
+  const handleCopyScheduleFromIdSubmit = () => {
+    const trimmedId = copyFromIdInput.trim().toUpperCase();
+    if (!trimmedId) {
+      setCopyFromIdError('Please enter a schedule ID.');
+      return;
+    }
+    const found = schedulesList.find((s: any) => String(s.id).toUpperCase() === trimmedId);
+    if (!found) {
+      setCopyFromIdError(`Schedule with ID "${trimmedId}" not found.`);
+      return;
+    }
+
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    let defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    let defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    if (found.nextRun) {
+      try {
+        const d = new Date(found.nextRun);
+        if (!isNaN(d.getTime())) {
+          defaultDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+          defaultTime = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+      } catch {}
+    }
+
+    const baseName = found.name || found.id || 'Scheduled Broadcast';
+    const copyName = baseName.includes('(Copy)') ? baseName : `${baseName} (Copy)`;
+
+    setEditingSchedule(null);
+    setScheduleFormError(null);
+    setNewScheduleForm({
+      name: copyName,
+      message: found.message || found.messageText || '',
+      chatId: found.chatId || (groups[0]?.chatId || 0),
+      scheduleType: found.scheduleType || (found.cronExpression ? 'daily' : 'interval'),
+      intervalFormatted: found.intervalFormatted || '1h',
+      nextRunDate: defaultDate,
+      nextRunTime: defaultTime,
+      pinAfterSend: Boolean(found.pinAfterSend),
+      replyToLatest: Boolean(found.replyToLatest),
+      autoDeletePrevious: Boolean(found.autoDeletePrevious),
+      triggerKeyword: found.triggerKeyword || '',
+      inlineKeyboard: found.inlineKeyboard || []
+    });
+
+    setShowCopyScheduleFromIdModal(false);
+    setCopyFromIdInput('');
+    setCopyFromIdError(null);
+    setShowCreateScheduleModal(true);
+  };
+
+  const handleCopyAllStickerPackLinks = async () => {
+    const packs = groupStickersData?.packs || [];
+    if (!packs.length) {
+      alert('No sticker packs configured for this group');
+      return;
+    }
+    const links = packs
+      .map((p: any) => {
+        const name = p.name || p.title;
+        if (!name) return null;
+        return name.startsWith('http') ? name : `https://t.me/addstickers/${name}`;
+      })
+      .filter(Boolean);
+
+    if (!links.length) {
+      alert('No sticker packs configured for this group');
+      return;
+    }
+
+    const textToCopy = links.join('\n');
+    const ok = await copyTextToClipboard(textToCopy);
+    if (ok) {
+      alert(`Copied ${links.length} sticker pack link(s) to clipboard`);
+    } else {
+      alert('Failed to copy sticker pack links to clipboard');
     }
   };
 
@@ -7221,6 +7305,395 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* TAB: POST LIBRARY (Feature 1 & Parity) */}
+          {activeNav === 'post-library' && !activeGroupDetailId && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4">
+                <div>
+                  <h2 className="text-lg font-bold flex items-center gap-2">
+                    <Bookmark className="w-5 h-5 text-blue-500" /> Saved Post Library
+                  </h2>
+                  <p className={`text-xs ${themeMutedText}`}>
+                    Persistent, reusable posts with media and inline button layouts. Use references like <code className="text-cyan-400 font-mono">{"{{post:POST-XXXXX}}"}</code> in broadcasts and schedules.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setEditingSavedPost(null);
+                    setPostForm({
+                      title: '',
+                      contentType: 'text',
+                      text: '',
+                      mediaFileId: '',
+                      buttonsJson: '',
+                      protectContent: false,
+                      pinAfterSend: false,
+                      replyToLatest: false,
+                      autoDeletePrevious: false
+                    });
+                    setShowCreatePostModal(true);
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <Plus className="w-4 h-4" /> Create Saved Post
+                </button>
+              </div>
+
+              {/* Filters */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative flex-1 min-w-[200px]">
+                  <input
+                    type="text"
+                    value={postSearch}
+                    onChange={(e) => {
+                      setPostSearch(e.target.value);
+                      fetchSavedPosts(e.target.value, postTypeFilter);
+                    }}
+                    placeholder="Search posts by title, text, or ID..."
+                    className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 pl-9 text-xs focus:outline-none`}
+                  />
+                  <Search className="w-3.5 h-3.5 text-stone-500 absolute left-3 top-2.5" />
+                </div>
+                <select
+                  value={postTypeFilter}
+                  onChange={(e) => {
+                    setPostTypeFilter(e.target.value);
+                    fetchSavedPosts(postSearch, e.target.value);
+                  }}
+                  className={`${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                >
+                  <option value="all">All Content Types</option>
+                  <option value="text">Text Only</option>
+                  <option value="photo">Photos</option>
+                  <option value="video">Videos</option>
+                  <option value="document">Documents</option>
+                  <option value="sticker">Stickers</option>
+                </select>
+                <button
+                  onClick={() => fetchSavedPosts()}
+                  disabled={savedPostsLoading}
+                  className={`p-2 rounded-xl ${themeInnerCardBg} border ${themeBorder} text-stone-400 hover:text-white transition-colors`}
+                  title="Refresh Posts"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${savedPostsLoading ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+
+              {/* Saved Posts Grid */}
+              {savedPostsList.length === 0 ? (
+                <div className={`${themeInnerCardBg} border ${themeBorder} rounded-2xl p-12 text-center space-y-3`}>
+                  <Bookmark className="w-12 h-12 text-stone-500 mx-auto opacity-30" />
+                  <p className="text-sm font-semibold text-stone-300">No saved posts found</p>
+                  <p className={`text-xs ${themeMutedText} max-w-sm mx-auto`}>
+                    Create reusable template posts to quickly send announcements or incorporate into recurring schedules.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {savedPostsList.map((p: any) => (
+                    <div key={p.id} className={`${themeInnerCardBg} border ${themeBorder} rounded-2xl p-4 space-y-3 flex flex-col justify-between`}>
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <h3 className="font-bold text-sm truncate max-w-[200px]">{p.title}</h3>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="font-mono text-cyan-400 font-bold text-xs">{p.id}</span>
+                              <span className="px-1.5 py-0.5 rounded bg-stone-800 text-[10px] text-stone-300 font-semibold uppercase">{p.contentType}</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteSavedPost(p.id, p.title || p.id)}
+                            className="text-stone-500 hover:text-rose-400 p-1"
+                            title="Delete Saved Post"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {p.text && (
+                          <p className={`text-xs ${themeMutedText} line-clamp-3 leading-relaxed bg-stone-900/40 p-2 rounded-xl border border-stone-800/60 font-sans`}>
+                            {p.text}
+                          </p>
+                        )}
+
+                        <div className="flex flex-wrap gap-2 text-[10px] text-stone-400">
+                          {p.buttons && Array.isArray(p.buttons) && p.buttons.length > 0 && (
+                            <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-mono font-medium">
+                              {p.buttons.flat().length} Button(s)
+                            </span>
+                          )}
+                          {p.protectContent && (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 font-medium">Protected</span>
+                          )}
+                          {p.pinAfterSend && (
+                            <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 font-medium">Pin</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-2 border-t border-stone-800/80">
+                        <button
+                          onClick={() => handleCopyPostId(p.id)}
+                          className={`flex-1 py-1.5 ${themeCardBg} hover:opacity-80 border ${themeBorder} text-cyan-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition-colors`}
+                          title="Copy Post ID"
+                        >
+                          {copiedPostId === p.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          {copiedPostId === p.id ? 'Copied ID!' : 'Copy ID'}
+                        </button>
+                        <button
+                          onClick={() => handleDuplicateSavedPost(p.id)}
+                          className={`px-3 py-1.5 ${themeCardBg} hover:opacity-80 border ${themeBorder} text-purple-400 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition-colors`}
+                          title="Duplicate Post"
+                        >
+                          <Layers className="w-3.5 h-3.5" /> Duplicate
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingSavedPost(p);
+                            setPostForm({
+                              title: p.title || '',
+                              contentType: p.contentType || 'text',
+                              text: p.text || p.content || '',
+                              mediaFileId: p.mediaFileId || '',
+                              buttonsJson: p.buttons ? JSON.stringify(p.buttons, null, 2) : '',
+                              protectContent: Boolean(p.protectContent),
+                              pinAfterSend: Boolean(p.pinAfterSend),
+                              replyToLatest: Boolean(p.replyToLatest),
+                              autoDeletePrevious: Boolean(p.autoDeletePrevious)
+                            });
+                            setShowEditPostModal(true);
+                          }}
+                          className={`px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition-colors`}
+                          title="Edit Post"
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB: PRIVATE RECIPIENTS (Feature 5 & Parity) */}
+          {activeNav === 'private-recipients' && !activeGroupDetailId && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4">
+                <div>
+                  <h2 className="text-lg font-bold flex items-center gap-2">
+                    <UserCheck className="w-5 h-5 text-blue-500" /> Direct Message (DM) Recipients Registry
+                  </h2>
+                  <p className={`text-xs ${themeMutedText}`}>
+                    Permitted metadata registry for users who opted in or initiated private chats with the bot. Broadcasts respect block/opt-out status.
+                  </p>
+                </div>
+                <button
+                  onClick={() => fetchPrivateRecipients()}
+                  disabled={privateRecipientsLoading}
+                  className={`p-2 rounded-xl ${themeInnerCardBg} border ${themeBorder} text-stone-400 hover:text-white transition-colors`}
+                  title="Refresh Recipients"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${privateRecipientsLoading ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+
+              {/* Stats Summary Cards */}
+              {privateRecipientsStats && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-3.5`}>
+                    <p className={`text-[11px] font-bold uppercase tracking-wider ${themeMutedText}`}>Total Registered</p>
+                    <p className="text-xl font-bold font-mono mt-1 text-white">{privateRecipientsStats.total || 0}</p>
+                  </div>
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-3.5`}>
+                    <p className={`text-[11px] font-bold uppercase tracking-wider ${themeMutedText}`}>Active Subscribers</p>
+                    <p className="text-xl font-bold font-mono mt-1 text-emerald-400">{privateRecipientsStats.active || 0}</p>
+                  </div>
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-3.5`}>
+                    <p className={`text-[11px] font-bold uppercase tracking-wider ${themeMutedText}`}>Blocked / Inactive</p>
+                    <p className="text-xl font-bold font-mono mt-1 text-rose-400">{privateRecipientsStats.blocked || 0}</p>
+                  </div>
+                  <div className={`${themeInnerCardBg} border ${themeBorder} rounded-xl p-3.5`}>
+                    <p className={`text-[11px] font-bold uppercase tracking-wider ${themeMutedText}`}>Opted Out</p>
+                    <p className="text-xl font-bold font-mono mt-1 text-amber-400">{privateRecipientsStats.optedOut || 0}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Filter controls */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative flex-1 min-w-[200px]">
+                  <input
+                    type="text"
+                    value={recipientSearch}
+                    onChange={(e) => {
+                      setRecipientSearch(e.target.value);
+                      fetchPrivateRecipients(recipientFilterStatus, e.target.value);
+                    }}
+                    placeholder="Search by username, name, or Telegram ID..."
+                    className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 pl-9 text-xs focus:outline-none`}
+                  />
+                  <Search className="w-3.5 h-3.5 text-stone-500 absolute left-3 top-2.5" />
+                </div>
+                <select
+                  value={recipientFilterStatus}
+                  onChange={(e) => {
+                    setRecipientFilterStatus(e.target.value);
+                    fetchPrivateRecipients(e.target.value, recipientSearch);
+                  }}
+                  className={`${themeInnerCardBg} border ${themeBorder} rounded-xl px-3 py-2 text-xs focus:outline-none`}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="active">Active Only</option>
+                  <option value="blocked">Blocked</option>
+                  <option value="opted_out">Opted Out</option>
+                </select>
+              </div>
+
+              {/* Recipients Table */}
+              {privateRecipientsList.length === 0 ? (
+                <div className={`${themeInnerCardBg} border ${themeBorder} rounded-2xl p-12 text-center space-y-3`}>
+                  <UserCheck className="w-12 h-12 text-stone-500 mx-auto opacity-30" />
+                  <p className="text-sm font-semibold text-stone-300">No private recipients found</p>
+                  <p className={`text-xs ${themeMutedText} max-w-sm mx-auto`}>
+                    Recipients are automatically added when users start a direct chat with the bot or opt into notifications.
+                  </p>
+                </div>
+              ) : (
+                <div className={`${themeInnerCardBg} border ${themeBorder} rounded-2xl overflow-hidden`}>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-stone-900/60 text-stone-400 uppercase text-[10px] font-bold border-b border-stone-800">
+                        <tr>
+                          <th className="p-3.5">User</th>
+                          <th className="p-3.5">Telegram ID</th>
+                          <th className="p-3.5">Opt-in Date</th>
+                          <th className="p-3.5">Status</th>
+                          <th className="p-3.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-800">
+                        {privateRecipientsList.map((r: any) => (
+                          <tr key={r.chatId} className="hover:bg-stone-800/30 transition-colors">
+                            <td className="p-3.5">
+                              <div className="font-semibold text-white">
+                                {r.firstName || 'User'} {r.lastName || ''}
+                              </div>
+                              {r.username && <div className="text-[11px] text-blue-400 font-mono">@{r.username}</div>}
+                            </td>
+                            <td className="p-3.5 font-mono text-stone-300">{r.chatId}</td>
+                            <td className="p-3.5 text-stone-400">
+                              {r.optedInAt ? new Date(r.optedInAt).toLocaleDateString() : '—'}
+                            </td>
+                            <td className="p-3.5">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                r.status === 'active'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                  : r.status === 'blocked'
+                                  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              }`}>
+                                {r.status}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-right space-x-1.5">
+                              <button
+                                onClick={() => handleToggleRecipientOptOut(r.chatId, r.status)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold ${
+                                  r.status === 'opted_out'
+                                    ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400'
+                                    : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400'
+                                }`}
+                              >
+                                {r.status === 'opted_out' ? 'Re-activate' : 'Opt Out'}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRecipient(r.chatId)}
+                                className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg text-[11px] font-semibold"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+        {/* Copy Schedule From ID Modal */}
+        {showCopyScheduleFromIdModal && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className={`${themeCardBg} border rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl`}>
+              <div className="flex items-center justify-between border-b border-stone-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Copy className="w-5 h-5 text-cyan-400" />
+                  <h3 className="text-base font-bold text-white">Copy Schedule From ID</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCopyScheduleFromIdModal(false);
+                    setCopyFromIdInput('');
+                    setCopyFromIdError(null);
+                  }}
+                  className="text-stone-400 hover:text-white p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className={`text-xs ${themeMutedText} leading-relaxed`}>
+                Enter an existing schedule ID to duplicate its timing and content as a draft. The original schedule remains untouched, and saving generates a new ID.
+              </p>
+
+              <div>
+                <label className="text-stone-300 font-semibold block mb-1.5 text-xs">Schedule ID</label>
+                <input
+                  type="text"
+                  placeholder="e.g. A76935"
+                  value={copyFromIdInput}
+                  onChange={(e) => {
+                    setCopyFromIdInput(e.target.value);
+                    if (copyFromIdError) setCopyFromIdError(null);
+                  }}
+                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-2.5 text-white font-mono text-xs uppercase focus:outline-none`}
+                />
+                {copyFromIdError && (
+                  <p className="text-rose-400 text-[11px] mt-1.5 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {copyFromIdError}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCopyScheduleFromIdModal(false);
+                    setCopyFromIdInput('');
+                    setCopyFromIdError(null);
+                  }}
+                  className="px-4 py-2 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-xl text-xs font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyScheduleFromIdSubmit}
+                  disabled={!copyFromIdInput.trim()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                >
+                  <Copy className="w-3.5 h-3.5" /> Duplicate to Draft
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Create / Edit Saved Post Modal (Feature 1) */}
         {(showCreatePostModal || showEditPostModal) && (

@@ -1163,16 +1163,38 @@ tmaRouter.put('/groups/:chatId/schedules/:id', requireTmaAuth('schedules'), (req
     const { name, message, scheduleType, intervalStr, nextRunDate, nextRunTime, timezone, contentType, mediaFileId, pinAfterSend, replyToLatest } = req.body;
     let nextRun: string | undefined = undefined;
     let intervalMs: number | undefined = undefined;
+    let intervalFormatted: string | undefined = undefined;
 
     if (intervalStr && (scheduleType === 'interval' || !scheduleType)) {
       const parsed = parseScheduleTime(intervalStr);
-      if ('error' in parsed) {
-        return res.status(400).json({ error: parsed.error });
+      if (!('error' in parsed)) {
+        nextRun = parsed.nextRunIso;
+        intervalMs = parsed.intervalMs;
+        intervalFormatted = parsed.intervalFormatted || intervalStr;
+      } else {
+        const altParsed = messageScheduler.parseInterval(intervalStr);
+        if (altParsed) {
+          intervalMs = altParsed.ms;
+          intervalFormatted = altParsed.formatted;
+          nextRun = new Date(Date.now() + altParsed.ms).toISOString();
+        } else if (
+          (intervalStr === existing.intervalFormatted || intervalStr === (existing as any).intervalStr || intervalStr === 'Custom') &&
+          existing.intervalMs
+        ) {
+          intervalMs = existing.intervalMs;
+          intervalFormatted = existing.intervalFormatted;
+        } else {
+          return res.status(400).json({
+            error: 'Invalid schedule interval format. Try format like: 30m, 2h, 4 hours, or 1d.'
+          });
+        }
       }
-      nextRun = parsed.nextRunIso;
-      intervalMs = parsed.intervalMs;
     } else if (nextRunDate && nextRunTime) {
-      nextRun = new Date(`${nextRunDate}T${nextRunTime}:00.000Z`).toISOString();
+      const parsedDate = new Date(`${nextRunDate}T${nextRunTime}:00.000Z`);
+      if (isNaN(parsedDate.getTime())) {
+        return res.status(400).json({ error: 'Invalid schedule date or time format.' });
+      }
+      nextRun = parsedDate.toISOString();
     }
 
     const updated = db.updateSchedule(id, {
@@ -1181,7 +1203,7 @@ tmaRouter.put('/groups/:chatId/schedules/:id', requireTmaAuth('schedules'), (req
       scheduleType: scheduleType || existing.scheduleType,
       ...(nextRun ? { nextRun } : {}),
       ...(intervalMs ? { intervalMs } : {}),
-      ...(intervalStr ? { intervalFormatted: intervalStr } : {}),
+      ...(intervalFormatted ? { intervalFormatted } : {}),
       ...(contentType ? { contentType } : {}),
       ...(mediaFileId !== undefined ? { mediaFileId } : {}),
       ...(pinAfterSend !== undefined ? { pinAfterSend: Boolean(pinAfterSend) } : {}),
