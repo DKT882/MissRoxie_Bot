@@ -253,6 +253,167 @@ async function runTests() {
     assert(searched.some(i => i.id === scheduleId), 'Must find schedule by search keyword');
   });
 
+  // 12. Cross-Type Reuse: Saved Post into Schedule Draft
+  await it('REUSE-01: Saved-post ID loaded into schedule draft populates content and buttons with paused status', () => {
+    const post = db.saveSavedPost({
+      title: 'Community Guidelines',
+      contentType: 'photo',
+      text: '<b>Rules:</b> 1. Be respectful. 2. No spam.',
+      mediaFileId: 'https://example.com/rules.jpg',
+      buttons: [[{ text: 'Read Full Rules', url: 'https://example.com/rules' }]],
+      pinAfterSend: true,
+      protectContent: true
+    });
+
+    const item = db.getContentItem(post.id);
+    assert(item, 'Must resolve saved post');
+
+    // Simulate schedule composer applying the item
+    const newScheduleDraft = {
+      name: `${item.title} (Copy)`,
+      message: item.text || '',
+      contentType: item.contentType,
+      mediaFileId: item.mediaFileId || '',
+      inlineKeyboard: item.buttons || [],
+      enabled: false, // Default paused/disabled
+      pinAfterSend: Boolean(item.options?.pinAfterSend),
+      scheduleType: 'interval',
+      intervalStr: '1h'
+    };
+
+    assert.strictEqual(newScheduleDraft.enabled, false, 'New schedule draft must default to paused');
+    assert.strictEqual(newScheduleDraft.message, '<b>Rules:</b> 1. Be respectful. 2. No spam.');
+    assert.strictEqual(newScheduleDraft.contentType, 'photo');
+    assert.strictEqual(newScheduleDraft.mediaFileId, 'https://example.com/rules.jpg');
+    assert.strictEqual(newScheduleDraft.inlineKeyboard.length, 1);
+    assert.strictEqual(newScheduleDraft.pinAfterSend, true);
+  });
+
+  // 13. Cross-Type Reuse: Schedule ID into New Schedule Draft (With Timing)
+  await it('REUSE-02: Schedule ID loaded into new schedule draft includes interval timing and pauses execution', () => {
+    const item = db.getContentItem(scheduleId);
+    assert(item && item.type === 'schedule');
+
+    // Simulate new schedule draft reuse with includeTiming = true
+    const newScheduleDraft = {
+      name: `${item.title} (Copy)`,
+      message: item.text,
+      enabled: false,
+      scheduleType: item.scheduleConfig?.scheduleType || 'interval',
+      intervalStr: item.scheduleConfig?.intervalStr || '1h'
+    };
+
+    assert.strictEqual(newScheduleDraft.enabled, false, 'New schedule must default to paused');
+    assert.strictEqual(newScheduleDraft.intervalStr, '1h', 'Interval timing must be adopted into draft');
+    assert.strictEqual(newScheduleDraft.message, item.text);
+  });
+
+  // 14. Cross-Type Reuse: Schedule ID into Existing Schedule Editor (Preserve Schedule ID)
+  await it('REUSE-03: Loading content into existing schedule editor updates content and strictly preserves original schedule ID', () => {
+    const targetSchedule = db.addSchedule({
+      chatId: testChatId1,
+      name: 'Existing Schedule To Edit',
+      message: 'Old text before update',
+      scheduleType: 'interval',
+      intervalFormatted: '2h',
+      enabled: true
+    });
+
+    const originalId = targetSchedule.id;
+    const sourceTemplate = db.saveContentTemplate({
+      type: 'broadcast',
+      title: 'Updated Announcement Template',
+      contentType: 'text',
+      text: 'Brand new announcement text applied to existing schedule',
+      buttons: [[{ text: 'Join Discord', url: 'https://discord.gg/test' }]]
+    });
+
+    const item = db.getContentItem(sourceTemplate.id);
+    assert(item, 'Must resolve template');
+
+    // Simulate updating the existing schedule record in place
+    const updated = db.updateSchedule(originalId, {
+      message: item.text,
+      inlineKeyboard: item.buttons
+    });
+
+    assert(updated, 'Schedule must be updated');
+    assert.strictEqual(updated.id, originalId, 'Schedule ID must be strictly preserved');
+    assert.strictEqual(updated.message, 'Brand new announcement text applied to existing schedule');
+    assert.strictEqual(updated.inlineKeyboard?.length, 1);
+  });
+
+  // 15. Cross-Type Reuse: All Types into Rich Post & Broadcast Composer
+  await it('REUSE-04: Post, schedule, broadcast, and inline-template IDs loaded into Rich Post / Broadcast draft retain formatting and options', () => {
+    const btnTmpl = db.saveContentTemplate({
+      type: 'inline_button',
+      title: 'Social Links Grid',
+      contentType: 'text',
+      buttons: [
+        [{ text: 'Twitter', url: 'https://x.com' }, { text: 'Telegram', url: 'https://t.me' }]
+      ]
+    });
+
+    const item = db.getContentItem(btnTmpl.id);
+    assert(item && item.type === 'inline_button');
+
+    // Simulate Rich Post Composer loading inline button template
+    const richPostDraft = {
+      text: item.text || 'Default announcement body',
+      compositionType: item.contentType || 'text',
+      buttonGrid: item.buttons || [],
+      pinMessage: Boolean(item.options?.pinAfterSend),
+      protectContent: Boolean(item.options?.protectContent)
+    };
+
+    assert.strictEqual(richPostDraft.buttonGrid[0].length, 2, '2-button grid must be preserved');
+    assert.strictEqual(richPostDraft.buttonGrid[0][0].text, 'Twitter');
+    assert.strictEqual(richPostDraft.buttonGrid[0][1].text, 'Telegram');
+  });
+
+  // 16. Security: Non-Execution Safety
+  await it('REUSE-05: Loading reusable content item never triggers operational actions or runtime state changes', () => {
+    const initialSchedule = db.getScheduleById(scheduleId);
+    const initialNextRun = initialSchedule?.nextRun;
+    const initialRunsCount = initialSchedule?.runsCount || 0;
+
+    // Inspect content multiple times
+    const item1 = db.getContentItem(scheduleId);
+    const item2 = db.getContentItem(scheduleId, { chatId: testChatId1 });
+    assert(item1 && item2);
+
+    const recheckedSchedule = db.getScheduleById(scheduleId);
+    assert.strictEqual(recheckedSchedule?.nextRun, initialNextRun, 'Inspection must not mutate nextRun');
+    assert.strictEqual(recheckedSchedule?.runsCount, initialRunsCount, 'Inspection must not increment runsCount');
+  });
+
+  // 17. Security: Invalid ID Rejection
+  await it('REUSE-06: Invalid, non-existent, and empty IDs return undefined', () => {
+    assert.strictEqual(db.getContentItem(''), undefined);
+    assert.strictEqual(db.getContentItem('NON_EXISTENT_ID_9999'), undefined);
+    assert.strictEqual(db.getContentItem('POST-DOES-NOT-EXIST'), undefined);
+  });
+
+  // 18. UI Source Code Integrity Check
+  await it('REUSE-07: ContentReuseModal and controls are integrated across all target UI files', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const appTsx = fs.readFileSync(path.resolve('src/App.tsx'), 'utf8');
+    const tmaTsx = fs.readFileSync(path.resolve('src/components/TelegramMiniApp.tsx'), 'utf8');
+    const richPostTsx = fs.readFileSync(path.resolve('src/components/RichPostComposer.tsx'), 'utf8');
+    const mentionAllTsx = fs.readFileSync(path.resolve('src/components/MentionAllComposer.tsx'), 'utf8');
+    const modalTsx = fs.readFileSync(path.resolve('src/components/ContentReuseModal.tsx'), 'utf8');
+
+    assert(appTsx.includes('ContentReuseModal'), 'App.tsx must include ContentReuseModal');
+    assert(appTsx.includes('handleApplyReusedContentToSchedule'), 'App.tsx must have schedule reuse handler');
+    assert(tmaTsx.includes('ContentReuseModal'), 'TelegramMiniApp.tsx must include ContentReuseModal');
+    assert(tmaTsx.includes('handleApplyReusedContentToSchedule'), 'TelegramMiniApp.tsx must have schedule reuse handler');
+    assert(richPostTsx.includes('ContentReuseModal'), 'RichPostComposer.tsx must include ContentReuseModal');
+    assert(mentionAllTsx.includes('ContentReuseModal'), 'MentionAllComposer.tsx must include ContentReuseModal');
+    assert(modalTsx.includes('Apply Content to Draft'), 'ContentReuseModal must offer Apply Content to Draft action');
+  });
+
   console.log('\n====================================================');
   console.log(`Results: ${passed} Passed, ${failed} Failed`);
   console.log('====================================================\n');

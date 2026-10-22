@@ -597,6 +597,25 @@ export async function executeSendMessageWorkflow(
     return responsePayload;
   }
 
+// Readiness state tracking
+let isAppReady = false;
+let initializationPromise: Promise<void> | null = null;
+
+export function getApplicationReadiness() {
+  const finalGroups = db.getAllGroupSettings();
+  const activeCount = Object.keys(finalGroups).filter(k => Number(k) < 0).length;
+  return {
+    status: isAppReady ? 'READY' : 'INITIALIZING',
+    ready: isAppReady,
+    storage: (db as any).lastSaveSuccessful !== false ? 'HEALTHY' : 'ERROR',
+    activeGroupsCount: activeCount,
+    botIdentity: db.getCurrentBotId() ? 'AUTHENTICATED' : (process.env.TELEGRAM_BOT_TOKEN ? 'PENDING' : 'UNCONFIGURED'),
+    mongo: mongoManager.getStatus().isConnected ? 'CONNECTED' : (process.env.MONGODB_URI ? 'PENDING' : 'NOT_CONFIGURED'),
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString()
+  };
+}
+
 export async function startServer() {
   console.log('[Roxie Startup] Initializing Express application...');
   const app = express();
@@ -604,7 +623,7 @@ export async function startServer() {
   console.log(`[Roxie Startup] Target port resolved: ${PORT}`);
 
   try {
-    const startupResult = DisasterRecoveryService.startupRecovery();
+    const startupResult = DisasterRecoveryService.startupRecovery(db);
     console.log('[Roxie Startup] Storage & recovery check complete:', startupResult.status);
   } catch (recErr: any) {
     console.warn('[Roxie Startup] Recovery notice:', recErr.message);
@@ -632,20 +651,50 @@ export async function startServer() {
   app.use(phase8Router);
   app.use('/api/tma', tmaRouter);
 
-  // Health check route as requested
+  // Fast Liveness Probe: Responds immediately once the HTTP port is listening
   app.get('/health', (req, res) => {
     console.log('The server is running on this port');
     res.json({ status: 'healthy', port: PORT });
   });
 
-  // Health check
+  // Explicit Readiness Check: Accurately reports whether background hydration & initialization have completed
+  app.get(['/ready', '/api/ready'], (req, res) => {
+    const readiness = getApplicationReadiness();
+    if (readiness.ready) {
+      return res.status(200).json(readiness);
+    }
+    return res.status(503).json(readiness);
+  });
+
+  // Health check & diagnostics
   app.get('/api/health', (req, res) => {
     try {
       const health = HealthDiagnosticsService.getSystemHealth();
-      res.json(health);
+      res.json({
+        ...health,
+        ready: isAppReady
+      });
     } catch (err: any) {
       res.status(500).json({ status: 'ERROR', error: err.message });
     }
+  });
+
+  // Early Request Protection Middleware:
+  // If API requests arrive while background initialization is in flight, wait briefly (capped at 4s)
+  // so requests observe fully hydrated groups/identities rather than returning premature empty sets.
+  app.use('/api', async (req, res, next) => {
+    if (initializationPromise && !isAppReady) {
+      const isExempt = req.path === '/health' || req.path === '/ready' || req.path.startsWith('/ready') || req.path.startsWith('/auth/');
+      if (!isExempt) {
+        try {
+          await Promise.race([
+            initializationPromise,
+            new Promise(resolve => setTimeout(resolve, 4000))
+          ]);
+        } catch {}
+      }
+    }
+    next();
   });
 
   // Dashboard API Performance Tracing Middleware
@@ -4368,61 +4417,69 @@ export async function startServer() {
     }
   }
 
-  // 1. Authenticate / Verify Telegram Bot Identity first if token is available
-  if (process.env.TELEGRAM_BOT_TOKEN?.trim()) {
-    try {
-      console.log('[Roxie Telegram] Verifying Telegram bot identity on startup...');
-      const conn = await telegramBot.testConnection(3);
-      if (conn.success && conn.bot) {
-        db.setBotIdentity(conn.bot);
-        console.log(`[Roxie Telegram] Bot authenticated: @${conn.bot.username || conn.bot.first_name} (ID: ${conn.bot.id})`);
-      }
-    } catch (botErr: any) {
-      console.warn('[Roxie Telegram] Initial bot identity check notice:', botErr?.message);
-    }
-  }
-
-  // 2. Connect to MongoDB Atlas if configured
-  if (process.env.MONGODB_URI?.trim()) {
-    try {
-      console.log('[Roxie Database] Connecting to MongoDB Atlas...');
-      const dbInstance = await mongoManager.connect();
-      if (dbInstance) {
-        await MongoStorageService.ensureIndexes();
-      }
-    } catch (mongoErr: any) {
-      console.warn('[Roxie Database] MongoDB Atlas initial connection failed (continuing with local storage):', mongoErr?.message);
-    }
-  }
-
-  // 3. Hydrate groups from MongoDB Atlas (authoritative persistent store - strictly read-only)
-  if (mongoManager.getStatus().isConnected) {
-    try {
-      const currentBotId = db.getCurrentBotId() ?? undefined;
-      console.log(`[Roxie Database] Hydrating group data from MongoDB Atlas (scoped to botId=${currentBotId ?? 'ALL'})...`);
-      await db.hydrateGroupsFromMongo(currentBotId);
-    } catch (hydrateErr: any) {
-      console.error('[Roxie Database] MongoDB Atlas hydration failed:', hydrateErr?.message);
-    }
-  }
-
-  // 4. Verify final group state established
+  // 1. Verify final group state established in local storage
   const finalGroups = db.getAllGroupSettings();
   const finalGroupCount = Object.keys(finalGroups).filter(k => Number(k) < 0).length;
   console.log(`[Roxie Startup] Final group state established: ${finalGroupCount} active group(s) in storage.`);
 
-  // 5. Start HTTP server
+  // 2. Start HTTP server immediately so Render port detection & health checks bind without network delay
   console.log(`[Roxie Server] Starting HTTP server on port ${PORT}...`);
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Roxie Server] Listening on port ${PORT}`);
   });
 
-  // 6. Automatically initiate bot polling and AutoEngine in background AFTER HTTP server is listening
-  if (process.env.TELEGRAM_BOT_TOKEN?.trim()) {
-    console.log('[Roxie Telegram] Initializing Telegram bot subsystem...');
-    telegramBot.startPolling().catch((err) => {
-      console.error('[Roxie Telegram] Failed to start Telegram bot polling:', err.message);
-    });
+  // 3. Initiate external network services (Telegram bot identity, MongoDB Atlas, and bot polling) asynchronously in background
+  if (!initializationPromise) {
+    initializationPromise = (async () => {
+      try {
+        if (process.env.TELEGRAM_BOT_TOKEN?.trim()) {
+          try {
+            console.log('[Roxie Telegram] Verifying Telegram bot identity in background...');
+            const conn = await telegramBot.testConnection(3);
+            if (conn.success && conn.bot) {
+              db.setBotIdentity(conn.bot);
+              console.log(`[Roxie Telegram] Bot authenticated: @${conn.bot.username || conn.bot.first_name} (ID: ${conn.bot.id})`);
+            }
+          } catch (botErr: any) {
+            console.warn('[Roxie Telegram] Initial bot identity check notice:', botErr?.message);
+          }
+        }
+
+        if (process.env.MONGODB_URI?.trim()) {
+          try {
+            console.log('[Roxie Database] Connecting to MongoDB Atlas...');
+            const dbInstance = await mongoManager.connect();
+            if (dbInstance) {
+              await MongoStorageService.ensureIndexes();
+            }
+          } catch (mongoErr: any) {
+            console.warn('[Roxie Database] MongoDB Atlas initial connection failed (continuing with local storage):', mongoErr?.message);
+          }
+        }
+
+        if (mongoManager.getStatus().isConnected) {
+          try {
+            const currentBotId = db.getCurrentBotId() ?? undefined;
+            console.log(`[Roxie Database] Hydrating group data from MongoDB Atlas (scoped to botId=${currentBotId ?? 'ALL'})...`);
+            await db.hydrateGroupsFromMongo(currentBotId);
+          } catch (hydrateErr: any) {
+            console.error('[Roxie Database] MongoDB Atlas hydration failed:', hydrateErr?.message);
+          }
+        }
+
+        if (process.env.TELEGRAM_BOT_TOKEN?.trim()) {
+          console.log('[Roxie Telegram] Initializing Telegram bot subsystem...');
+          telegramBot.startPolling().catch((err) => {
+            console.error('[Roxie Telegram] Failed to start Telegram bot polling:', err.message);
+          });
+        }
+      } catch (err: any) {
+        console.error('[Roxie Startup] Background service initialization error:', err);
+      } finally {
+        isAppReady = true;
+        console.log('[Roxie Startup] Application background initialization completed. System status: READY.');
+      }
+    })();
   }
 
   const handleShutdown = async (signal: string) => {

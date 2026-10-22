@@ -19,6 +19,7 @@ import {
   Lock,
   Layers
 } from 'lucide-react';
+import { ContentReuseModal, ContentReuseButton, UnifiedContentItem } from './ContentReuseModal';
 
 export interface GroupItem {
   chatId?: number | string;
@@ -266,6 +267,49 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
 
   const [opStatus, setOpStatus] = useState<OperationStatus | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+  const [showReuseModal, setShowReuseModal] = useState<boolean>(false);
+
+  const fetchDashboardContentItem = async (id: string): Promise<UnifiedContentItem> => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('roxie_session_id') : null;
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['x-session-id'] = token;
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(`/api/dashboard/content-items/${encodeURIComponent(id)}`, {
+      headers,
+      credentials: 'same-origin'
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Content item "${id}" not found.`);
+    }
+    const data = await res.json();
+    return data.item;
+  };
+
+  const handleApplyReusedContent = (item: UnifiedContentItem) => {
+    if (item.text) setAnnouncementText(item.text);
+    if (item.mediaFileId) {
+      setMediaSource('url');
+      setMediaFileId(item.mediaFileId);
+    }
+    if (item.mediaUploadId) {
+      setMediaSource('upload');
+      setMediaUploadId(item.mediaUploadId);
+    }
+    if (item.contentType === 'photo' && format === 'text') {
+      setFormat('photo_single');
+    } else if (item.contentType === 'video' && format === 'text') {
+      setFormat('video_single');
+    } else if (item.contentType === 'document' && format === 'text') {
+      setFormat('doc_single');
+    }
+    setFeedback({
+      type: 'success',
+      text: `Loaded content from ${item.type.toUpperCase()}: "${item.title || item.id}"`
+    });
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -954,14 +998,21 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
               <span className={`text-[11px] font-normal ${themeMutedText}`}> (Optional)</span>
             )}
           </label>
-          <span
-            className={`text-[11px] font-mono ${
-              isOverLimit ? 'text-rose-400 font-bold' : themeMutedText
-            }`}
-          >
-            {currentChars} / {maxChars} characters
-            {currentConfig.requiresMedia && ' (Safe caption headroom)'}
-          </span>
+          <div className="flex items-center gap-2">
+            <ContentReuseButton
+              onClick={() => setShowReuseModal(true)}
+              label="Reuse Content by ID"
+              variant="compact"
+            />
+            <span
+              className={`text-[11px] font-mono ${
+                isOverLimit ? 'text-rose-400 font-bold' : themeMutedText
+              }`}
+            >
+              {currentChars} / {maxChars} characters
+              {currentConfig.requiresMedia && ' (Safe caption headroom)'}
+            </span>
+          </div>
         </div>
 
         <textarea
@@ -997,6 +1048,17 @@ export const MentionAllComposer: React.FC<MentionAllComposerProps> = ({
           </p>
         </div>
       </div>
+
+      {/* Unified Content Reuse Modal */}
+      <ContentReuseModal
+        isOpen={showReuseModal}
+        onClose={() => setShowReuseModal(false)}
+        targetContext="mention_all"
+        fetchItem={fetchDashboardContentItem}
+        onApply={handleApplyReusedContent}
+        theme={theme}
+        title="Reuse Content for Mention All Broadcast"
+      />
     </div>
   );
 };

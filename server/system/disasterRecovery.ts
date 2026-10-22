@@ -22,10 +22,19 @@ export interface BackupMetadata {
 }
 
 export class DisasterRecoveryService {
-  public static startupRecovery(): { status: string; message: string; groupsLoaded: number } {
+  public static startupRecovery(dbInstance?: any): { status: string; message: string; groupsLoaded: number } {
     try {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+
+      // Fast-path: If db has already initialized and loaded groups in memory, avoid re-reading 7.6MB JSON from disk
+      if (dbInstance && typeof dbInstance.getAllGroupSettings === 'function') {
+        const groups = dbInstance.getAllGroupSettings();
+        const groupCount = Object.keys(groups || {}).length;
+        if (groupCount > 0) {
+          return { status: 'HEALTHY', message: 'Primary storage loaded successfully', groupsLoaded: groupCount };
+        }
       }
 
       if (fs.existsSync(DB_FILE)) {

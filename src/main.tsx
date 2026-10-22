@@ -1,7 +1,5 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
-import TelegramMiniApp from './components/TelegramMiniApp.tsx';
+import React, { StrictMode, Suspense, lazy } from 'react';
+import { createRoot } from 'react-dom/client';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import './index.css';
 
@@ -27,14 +25,40 @@ const isMiniAppMode = (): boolean => {
   return false;
 };
 
+// Resilient dynamic import helper with automatic retry for network glitches or post-deployment chunk hash transitions
+const lazyWithRetry = (importFn: () => Promise<any>) =>
+  lazy(async () => {
+    try {
+      return await importFn();
+    } catch (err: any) {
+      console.warn('[Dynamic Import] Initial chunk fetch failed, retrying once...', err?.message);
+      await new Promise(r => setTimeout(r, 300));
+      return await importFn();
+    }
+  });
+
+// Code-split entry points to eliminate loading the 9,200-line desktop dashboard inside Telegram Mini App
+const App = lazyWithRetry(() => import('./App.tsx'));
+const TelegramMiniApp = lazyWithRetry(() => import('./components/TelegramMiniApp.tsx'));
+
+const FallbackLoader = () => (
+  <div className="min-h-screen bg-slate-950 text-slate-400 flex items-center justify-center font-sans text-xs">
+    <div className="flex items-center gap-2.5">
+      <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+      <span className="font-semibold text-slate-300">Loading Miss Roxie...</span>
+    </div>
+  </div>
+);
+
 const rootElement = document.getElementById('root');
 if (rootElement) {
   createRoot(rootElement).render(
     <StrictMode>
       <ErrorBoundary>
-        {isMiniAppMode() ? <TelegramMiniApp /> : <App />}
+        <Suspense fallback={<FallbackLoader />}>
+          {isMiniAppMode() ? <TelegramMiniApp /> : <App />}
+        </Suspense>
       </ErrorBoundary>
     </StrictMode>,
   );
 }
-

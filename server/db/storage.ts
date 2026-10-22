@@ -2581,16 +2581,45 @@ export class StorageManager {
 
   public getConnectedGroups(botId?: number, includeInactive = false): Array<any> {
     const scopedSettings = this.getAllGroupSettings(botId);
+
+    // Performance optimization: Pre-index schedule counts and log action stats in single O(S + L) passes
+    // rather than running 303 nested filters (cleanOldLogs + array scans) on every call.
+    this.cleanOldLogs();
+    const schedules = this.data.schedules || [];
+    const schedulesCountByChat = new Map<number, number>();
+    for (const s of schedules) {
+      const cid = Number(s.chatId);
+      if (cid) {
+        schedulesCountByChat.set(cid, (schedulesCountByChat.get(cid) || 0) + 1);
+      }
+    }
+
+    const logs = this.data.logs || [];
+    const logCountsByChat = new Map<number, { bans: number; kicks: number; mutes: number; reports: number }>();
+    for (const l of logs) {
+      const cid = Number(l.chatId);
+      if (!cid) continue;
+      let counts = logCountsByChat.get(cid);
+      if (!counts) {
+        counts = { bans: 0, kicks: 0, mutes: 0, reports: 0 };
+        logCountsByChat.set(cid, counts);
+      }
+      if (l.action === 'ban' || l.action === 'auto_ban') counts.bans++;
+      else if (l.action === 'kick') counts.kicks++;
+      else if (l.action === 'mute') counts.mutes++;
+      else if (l.action === 'report') counts.reports++;
+    }
+
     return Object.entries(scopedSettings)
       .filter(([chatIdStr]) => Number(chatIdStr) < 0)
       .map(([chatIdStr, s]: [string, any]) => {
         const chatId = Number(chatIdStr);
-        const groupLogs = this.getGroupLogs(chatId, 100);
-        const bans = groupLogs.filter(l => l.action === 'ban' || l.action === 'auto_ban').length;
-        const kicks = groupLogs.filter(l => l.action === 'kick').length;
-        const mutes = groupLogs.filter(l => l.action === 'mute').length;
-        const reports = groupLogs.filter(l => l.action === 'report').length;
-        const schedules = this.getGroupSchedules(chatId).length;
+        const counts = logCountsByChat.get(chatId);
+        const bans = counts?.bans || 0;
+        const kicks = counts?.kicks || 0;
+        const mutes = counts?.mutes || 0;
+        const reports = counts?.reports || 0;
+        const schedules = schedulesCountByChat.get(chatId) || 0;
 
         const isLeft = Boolean(s.botLeft);
         const isUnavailable = Boolean(s.unavailable);
@@ -7192,7 +7221,7 @@ export class StorageManager {
           contentType: (sched.contentType as PostContentType) || 'text',
           text: sched.message || sched.messageText || '',
           mediaFileId: sched.mediaFileId,
-          buttons: sched.inlineKeyboard ? JSON.parse(JSON.stringify(sched.inlineKeyboard)) : undefined,
+          buttons: sched.inlineKeyboard ? sched.inlineKeyboard.map(row => row.map(btn => ({ ...btn }))) : undefined,
           options: {
             pinAfterSend: Boolean(sched.pinAfterSend),
             replyToLatest: Boolean(sched.replyToLatest),
@@ -7231,8 +7260,8 @@ export class StorageManager {
           text: tmpl.text,
           mediaFileId: tmpl.mediaFileId,
           mediaUploadId: tmpl.mediaUploadId,
-          buttons: tmpl.buttons ? JSON.parse(JSON.stringify(tmpl.buttons)) : undefined,
-          options: tmpl.options ? JSON.parse(JSON.stringify(tmpl.options)) : undefined,
+          buttons: tmpl.buttons ? tmpl.buttons.map(row => row.map(btn => ({ ...btn }))) : undefined,
+          options: tmpl.options ? { ...tmpl.options } : undefined,
           sourceGroupId: tmpl.sourceGroupId,
           createdBy: tmpl.createdBy,
           createdAt: tmpl.createdAt,
@@ -7270,7 +7299,7 @@ export class StorageManager {
           text: p.text,
           mediaFileId: p.mediaFileId,
           mediaUploadId: p.mediaUploadId,
-          buttons: p.buttons ? JSON.parse(JSON.stringify(p.buttons)) : undefined,
+          buttons: p.buttons ? p.buttons.map(row => row.map(btn => ({ ...btn }))) : undefined,
           options: {
             pinAfterSend: p.pinAfterSend,
             replyToLatest: p.replyToLatest,
@@ -7306,7 +7335,7 @@ export class StorageManager {
           contentType: (s.contentType as PostContentType) || 'text',
           text: s.message || s.messageText || '',
           mediaFileId: s.mediaFileId,
-          buttons: s.inlineKeyboard ? JSON.parse(JSON.stringify(s.inlineKeyboard)) : undefined,
+          buttons: s.inlineKeyboard ? s.inlineKeyboard.map(row => row.map(btn => ({ ...btn }))) : undefined,
           options: {
             pinAfterSend: Boolean(s.pinAfterSend),
             replyToLatest: Boolean(s.replyToLatest),
@@ -7353,8 +7382,8 @@ export class StorageManager {
           text: t.text,
           mediaFileId: t.mediaFileId,
           mediaUploadId: t.mediaUploadId,
-          buttons: t.buttons ? JSON.parse(JSON.stringify(t.buttons)) : undefined,
-          options: t.options ? JSON.parse(JSON.stringify(t.options)) : undefined,
+          buttons: t.buttons ? t.buttons.map(row => row.map(btn => ({ ...btn }))) : undefined,
+          options: t.options ? { ...t.options } : undefined,
           sourceGroupId: t.sourceGroupId,
           createdBy: t.createdBy,
           createdAt: t.createdAt,

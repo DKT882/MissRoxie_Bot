@@ -39,6 +39,7 @@ import {
   Edit2,
   Code
 } from 'lucide-react';
+import { ContentReuseModal, ContentReuseButton, UnifiedContentItem } from './ContentReuseModal';
 
 export type MiniAppFeature =
   | 'overview'
@@ -181,6 +182,7 @@ export const TelegramMiniApp: React.FC = () => {
   const [showLoadPostFromIdModal, setShowLoadPostFromIdModal] = useState<boolean>(false);
   const [loadPostFromIdInput, setLoadPostFromIdInput] = useState<string>('');
   const [loadPostFromIdError, setLoadPostFromIdError] = useState<string | null>(null);
+  const [showMentionAllReuseModal, setShowMentionAllReuseModal] = useState<boolean>(false);
   const [scheduleForm, setScheduleForm] = useState<{
     name: string;
     message: string;
@@ -1268,6 +1270,70 @@ export const TelegramMiniApp: React.FC = () => {
     }
   };
 
+  const fetchTmaContentItem = async (id: string): Promise<UnifiedContentItem> => {
+    const res = await tmaFetch(`/api/tma/groups/${chatId}/content-items/${encodeURIComponent(id)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Content item "${id}" not found or inaccessible in this group.`);
+    }
+    const data = await res.json();
+    return data.item;
+  };
+
+  const handleApplyReusedContentToSchedule = (item: UnifiedContentItem, options: { includeTiming?: boolean }) => {
+    if (editingSchedule) {
+      // PRESERVE EXISTING SCHEDULE RECORD AND ITS ID
+      setScheduleForm(prev => ({
+        ...prev,
+        message: item.text || '',
+        pinAfterSend: (item.options?.pinAfterSend !== undefined || item.options?.pinMessage !== undefined)
+          ? Boolean(item.options?.pinAfterSend || item.options?.pinMessage)
+          : prev.pinAfterSend,
+        replyToLatest: item.options?.replyToLatest !== undefined ? Boolean(item.options.replyToLatest) : prev.replyToLatest
+      }));
+      showNotification(`Applied content to schedule #${editingSchedule.id}. (Schedule ID preserved)`, 'success');
+    } else {
+      // NEW SCHEDULE DRAFT: CREATE DRAFT IN PAUSED STATE
+      const baseName = item.title || item.id || 'Scheduled Broadcast';
+      const draftName = baseName.includes('(Copy)') ? baseName : `${baseName} (Copy)`;
+      setEditingSchedule(null);
+      setScheduleForm(prev => ({
+        ...prev,
+        name: draftName,
+        message: item.text || '',
+        pinAfterSend: Boolean(item.options?.pinAfterSend || item.options?.pinMessage),
+        replyToLatest: Boolean(item.options?.replyToLatest),
+        scheduleType: (options.includeTiming && item.scheduleConfig?.scheduleType && ['interval', 'daily', 'weekly', 'one_time'].includes(item.scheduleConfig.scheduleType))
+          ? (item.scheduleConfig.scheduleType as any)
+          : prev.scheduleType,
+        intervalStr: (options.includeTiming && item.scheduleConfig?.intervalStr) ? item.scheduleConfig.intervalStr : prev.intervalStr
+      }));
+      setShowScheduleModal(true);
+      showNotification(`Loaded draft from ${item.type.toUpperCase()}: "${item.title || item.id}"`, 'info');
+    }
+  };
+
+  const handleApplyReusedContentToRichPost = (item: UnifiedContentItem) => {
+    setPostContent(item.text || '');
+    if (item.contentType && ['text', 'photo', 'video', 'document', 'sticker'].includes(item.contentType)) {
+      setPostContentType(item.contentType as any);
+    } else {
+      setPostContentType('text');
+    }
+    setPostMediaId(item.mediaFileId || '');
+    if (item.buttons && item.buttons.length > 0) {
+      setPostButtons(item.buttons.flat().map(b => ({ text: b.text, url: b.url })));
+    }
+    setPostPin(Boolean(item.options?.pinAfterSend || item.options?.pinMessage));
+    setPostProtect(Boolean(item.options?.protectContent));
+    showNotification(`Loaded content from ${item.type.toUpperCase()}: "${item.title || item.id}" into Rich Post`, 'success');
+  };
+
+  const handleApplyReusedContentToMentionAll = (item: UnifiedContentItem) => {
+    setMentionReason(item.text || '');
+    showNotification(`Loaded announcement text from ${item.type.toUpperCase()}: "${item.title || item.id}"`, 'success');
+  };
+
   const handleCopyScheduleFromIdSubmit = async () => {
     const trimmedId = copyScheduleFromIdInput.trim().toUpperCase();
     if (!trimmedId) {
@@ -1275,49 +1341,11 @@ export const TelegramMiniApp: React.FC = () => {
       return;
     }
     try {
-      const res = await tmaFetch(`/api/tma/groups/${chatId}/content-items/${encodeURIComponent(trimmedId)}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setCopyScheduleFromIdError(data.error || `Item with ID "${trimmedId}" not found or not accessible.`);
-        return;
-      }
-      const data = await res.json();
-      const found = data.item;
-      if (!found) {
-        setCopyScheduleFromIdError(`Item with ID "${trimmedId}" not found.`);
-        return;
-      }
-
-      let defaultDate = new Date().toISOString().split('T')[0];
-      let defaultTime = '12:00';
-
-      let safeIntervalStr = '1h';
-      if (found.scheduleConfig?.intervalStr && found.scheduleConfig.intervalStr !== 'Custom') {
-        safeIntervalStr = found.scheduleConfig.intervalStr;
-      } else if (found.scheduleConfig?.intervalMs && typeof found.scheduleConfig.intervalMs === 'number') {
-        safeIntervalStr = found.scheduleConfig.intervalMs >= 3600000 ? `${Math.round(found.scheduleConfig.intervalMs / 3600000)}h` : `${Math.round(found.scheduleConfig.intervalMs / 60000)}m`;
-      }
-
-      const baseName = found.title || found.id || 'Scheduled Broadcast';
-      const copyName = baseName.includes('(Copy)') ? baseName : `${baseName} (Copy)`;
-
-      setEditingSchedule(null);
-      setScheduleForm({
-        name: copyName,
-        message: found.text || '',
-        scheduleType: found.scheduleConfig?.scheduleType || 'interval',
-        intervalStr: safeIntervalStr,
-        nextRunDate: defaultDate,
-        nextRunTime: defaultTime,
-        pinAfterSend: Boolean(found.options?.pinAfterSend),
-        replyToLatest: Boolean(found.options?.replyToLatest)
-      });
-
+      const item = await fetchTmaContentItem(trimmedId);
+      handleApplyReusedContentToSchedule(item, { includeTiming: true });
       setShowCopyScheduleFromIdModal(false);
       setCopyScheduleFromIdInput('');
       setCopyScheduleFromIdError(null);
-      setShowScheduleModal(true);
-      showNotification(`Loaded ${found.type.toUpperCase()}: ${found.title} into draft. Review and save.`, 'info');
     } catch (err: any) {
       setCopyScheduleFromIdError(err.message || 'Failed to load item');
     }
@@ -2450,9 +2478,16 @@ export const TelegramMiniApp: React.FC = () => {
 
                   {/* Message / Caption */}
                   <div>
-                    <label className="text-slate-400 block mb-1">
-                      {postContentType === 'text' ? 'Message Content (Markdown supported)' : 'Caption (Optional)'}
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-slate-400 block">
+                        {postContentType === 'text' ? 'Message Content (Markdown supported)' : 'Caption (Optional)'}
+                      </label>
+                      <ContentReuseButton
+                        onClick={() => setShowLoadPostFromIdModal(true)}
+                        label="Reuse Content by ID"
+                        variant="compact"
+                      />
+                    </div>
                     <textarea
                       rows={4}
                       value={postContent}
@@ -2544,9 +2579,9 @@ export const TelegramMiniApp: React.FC = () => {
                         setShowLoadPostFromIdModal(true);
                       }}
                       className="py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
-                      title="Load saved post by ID"
+                      title="Reuse content by ID"
                     >
-                      <Copy className="w-3.5 h-3.5" /> From ID
+                      <Sparkles className="w-3.5 h-3.5" /> Reuse ID
                     </button>
                     <button
                       type="button"
@@ -2590,7 +2625,14 @@ export const TelegramMiniApp: React.FC = () => {
 
                 <div className="space-y-3 text-xs">
                   <div>
-                    <label className="text-slate-400 block mb-1">Broadcast Reason / Announcement</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-slate-400 block">Broadcast Reason / Announcement</label>
+                      <ContentReuseButton
+                        onClick={() => setShowMentionAllReuseModal(true)}
+                        label="Reuse Content by ID"
+                        variant="compact"
+                      />
+                    </div>
                     <input
                       type="text"
                       value={mentionReason}
@@ -3162,9 +3204,9 @@ export const TelegramMiniApp: React.FC = () => {
                           setShowCopyScheduleFromIdModal(true);
                         }}
                         className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                        title="Copy configuration from an existing schedule ID"
+                        title="Reuse content from an existing ID"
                       >
-                        <Copy className="w-3.5 h-3.5" /> Copy From ID
+                        <Sparkles className="w-3.5 h-3.5" /> Reuse by ID
                       </button>
                       <button
                         onClick={handleOpenNewSchedule}
@@ -3738,7 +3780,14 @@ export const TelegramMiniApp: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Message Text</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-400 block">Message Text</label>
+                  <ContentReuseButton
+                    onClick={() => setShowCopyScheduleFromIdModal(true)}
+                    label="Reuse Content by ID"
+                    variant="compact"
+                  />
+                </div>
                 <textarea
                   rows={3}
                   placeholder="Broadcast message..."
@@ -3836,137 +3885,37 @@ export const TelegramMiniApp: React.FC = () => {
         </div>
       )}
 
-      {/* Copy Schedule From ID Modal */}
-      {showCopyScheduleFromIdModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full space-y-3.5 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Copy className="w-4 h-4 text-cyan-400" /> Copy Schedule From ID
-              </h3>
-              <button
-                onClick={() => {
-                  setShowCopyScheduleFromIdModal(false);
-                  setCopyScheduleFromIdInput('');
-                  setCopyScheduleFromIdError(null);
-                }}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* Unified Content Reuse Modal for Schedules */}
+      <ContentReuseModal
+        isOpen={showCopyScheduleFromIdModal}
+        onClose={() => setShowCopyScheduleFromIdModal(false)}
+        targetContext="schedule"
+        isEditingExistingSchedule={Boolean(editingSchedule)}
+        currentScheduleId={editingSchedule?.id}
+        fetchItem={fetchTmaContentItem}
+        onApply={handleApplyReusedContentToSchedule}
+        title={editingSchedule ? `Reuse Content for Schedule #${editingSchedule.id}` : 'Reuse Existing Content for Schedule'}
+      />
 
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Enter an existing schedule ID to duplicate its configuration as a draft. The original schedule remains untouched, and a new ID will be created when saved.
-            </p>
+      {/* Unified Content Reuse Modal for Rich Post */}
+      <ContentReuseModal
+        isOpen={showLoadPostFromIdModal}
+        onClose={() => setShowLoadPostFromIdModal(false)}
+        targetContext="rich_post"
+        fetchItem={fetchTmaContentItem}
+        onApply={handleApplyReusedContentToRichPost}
+        title="Reuse Content for Rich Post"
+      />
 
-            <div>
-              <label className="text-slate-300 text-xs block mb-1 font-semibold">Schedule ID</label>
-              <input
-                type="text"
-                placeholder="e.g. A76935"
-                value={copyScheduleFromIdInput}
-                onChange={e => {
-                  setCopyScheduleFromIdInput(e.target.value);
-                  if (copyScheduleFromIdError) setCopyScheduleFromIdError(null);
-                }}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono text-xs uppercase"
-              />
-              {copyScheduleFromIdError && (
-                <p className="text-rose-400 text-[11px] mt-1.5 flex items-center gap-1">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {copyScheduleFromIdError}
-                </p>
-              )}
-            </div>
-
-            <div className="flex gap-2 justify-end pt-2">
-              <button
-                onClick={() => {
-                  setShowCopyScheduleFromIdModal(false);
-                  setCopyScheduleFromIdInput('');
-                  setCopyScheduleFromIdError(null);
-                }}
-                className="px-3.5 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCopyScheduleFromIdSubmit}
-                disabled={!copyScheduleFromIdInput.trim()}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" /> Duplicate to Draft
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Load Post From ID Modal */}
-      {showLoadPostFromIdModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full space-y-3.5 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Copy className="w-4 h-4 text-cyan-400" /> Load Saved Post From ID
-              </h3>
-              <button
-                onClick={() => {
-                  setShowLoadPostFromIdModal(false);
-                  setLoadPostFromIdInput('');
-                  setLoadPostFromIdError(null);
-                }}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Enter a saved post ID (e.g. <code>POST-XXXXX</code>) to load its content, buttons, and settings directly into the composer.
-            </p>
-
-            <div>
-              <label className="text-slate-300 text-xs block mb-1 font-semibold">Post ID</label>
-              <input
-                type="text"
-                placeholder="e.g. POST-12345"
-                value={loadPostFromIdInput}
-                onChange={e => {
-                  setLoadPostFromIdInput(e.target.value);
-                  if (loadPostFromIdError) setLoadPostFromIdError(null);
-                }}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono text-xs uppercase"
-              />
-              {loadPostFromIdError && (
-                <p className="text-rose-400 text-[11px] mt-1.5 flex items-center gap-1">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {loadPostFromIdError}
-                </p>
-              )}
-            </div>
-
-            <div className="flex gap-2 justify-end pt-2">
-              <button
-                onClick={() => {
-                  setShowLoadPostFromIdModal(false);
-                  setLoadPostFromIdInput('');
-                  setLoadPostFromIdError(null);
-                }}
-                className="px-3.5 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleLoadPostFromIdSubmit}
-                disabled={!loadPostFromIdInput.trim()}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" /> Load into Composer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Unified Content Reuse Modal for Mention All */}
+      <ContentReuseModal
+        isOpen={showMentionAllReuseModal}
+        onClose={() => setShowMentionAllReuseModal(false)}
+        targetContext="mention_all"
+        fetchItem={fetchTmaContentItem}
+        onApply={handleApplyReusedContentToMentionAll}
+        title="Reuse Content for Mention All Broadcast"
+      />
 
       {/* Copy Schedule Code Modal */}
       {copyScheduleModal?.isOpen && (

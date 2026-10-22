@@ -63,6 +63,7 @@ import {
 import { RichPostComposer, ComposerContentType, ComposerButton, PostButtonStyle } from './components/RichPostComposer';
 import { RichMessageEditor, RichMessageConfigData } from './components/RichMessageEditor';
 import { MentionAllComposer } from './components/MentionAllComposer';
+import { ContentReuseModal, ContentReuseButton, UnifiedContentItem } from './components/ContentReuseModal';
 
 const LIVE_TESTS = [
   { id: 'LIVE-01', title: 'Bot responds to /ping' },
@@ -1004,30 +1005,76 @@ export default function App() {
     } catch {}
   };
 
-  // Group Details On-Demand Data Fetcher
-  const fetchGroupDetailsData = useCallback(async (targetDetailId: number | string) => {
+  // Active target group ID ref to guard against race conditions when switching groups
+  const activeTargetIdRef = useRef<number | string | null>(null);
+  const lastFetchedGroupIdRef = useRef<number | string | null>(null);
+
+  // Group Details On-Demand Data Fetcher (fullReload: true for initial/manual load, false for lightweight 30s background sync)
+  const fetchGroupDetailsData = useCallback(async (targetDetailId: number | string, fullReload: boolean = true, activeTab?: string) => {
     try {
       const numChatId = Number(targetDetailId);
-      const [detailResult, modsResult, permsResult, groupStickersResult, abuseResult, membersResult, lustUsersResult, historyResult, autoResult] = await Promise.allSettled([
-        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}`),
-        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/moderators`),
-        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/permissions`),
-        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/stickers`),
-        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/abuse-words`),
-        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/members`),
-        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/lust/users`),
-        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/backup/history`),
-        deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/automations`)
-      ]);
+      const reqTargetIdStr = String(targetDetailId);
 
-      if (autoResult.status === 'fulfilled' && autoResult.value.ok) {
+      // Build targeted request set: always include core group details; if background sync, only include the active sub-tab
+      const requests: { key: string; promise: Promise<any> }[] = [
+        { key: 'details', promise: deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}`) }
+      ];
+
+      if (fullReload || activeTab === 'moderators') {
+        requests.push({ key: 'moderators', promise: deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/moderators`) });
+      }
+      if (fullReload || activeTab === 'permissions' || activeTab === 'telegram_permissions') {
+        requests.push({ key: 'permissions', promise: deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/permissions`) });
+      }
+      if (fullReload || activeTab === 'stickers') {
+        requests.push({ key: 'stickers', promise: deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/stickers`) });
+      }
+      if (fullReload || activeTab === 'abuse_words') {
+        requests.push({ key: 'abuse_words', promise: deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/abuse-words`) });
+      }
+      if (fullReload || activeTab === 'members') {
+        requests.push({ key: 'members', promise: deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/members`) });
+      }
+      if (fullReload || activeTab === 'lust') {
+        requests.push({ key: 'lust_users', promise: deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/lust/users`) });
+      }
+      if (fullReload || activeTab === 'backups' || activeTab === 'backup') {
+        requests.push({ key: 'backups', promise: deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/backup/history`) });
+      }
+      if (fullReload || activeTab === 'automations') {
+        requests.push({ key: 'automations', promise: deduplicatedFetch(`/api/dashboard/groups/${targetDetailId}/automations`) });
+      }
+
+      const results = await Promise.allSettled(requests.map(r => r.promise));
+
+      // Guard: If user navigated away from this group while requests were in flight, discard response
+      if (activeTargetIdRef.current !== null && String(activeTargetIdRef.current) !== reqTargetIdStr) {
+        return;
+      }
+
+      const resultMap: Record<string, PromiseSettledResult<any>> = {};
+      requests.forEach((req, idx) => {
+        resultMap[req.key] = results[idx];
+      });
+
+      const detailResult = resultMap['details'];
+      const modsResult = resultMap['moderators'];
+      const permsResult = resultMap['permissions'];
+      const groupStickersResult = resultMap['stickers'];
+      const abuseResult = resultMap['abuse_words'];
+      const membersResult = resultMap['members'];
+      const lustUsersResult = resultMap['lust_users'];
+      const historyResult = resultMap['backups'];
+      const autoResult = resultMap['automations'];
+
+      if (autoResult && autoResult.status === 'fulfilled' && autoResult.value.ok) {
         try {
           const aData = await autoResult.value.json();
           setGroupAutomationsList(aData.automations || []);
         } catch {}
       }
 
-      if (detailResult.status === 'fulfilled' && detailResult.value.ok) {
+      if (detailResult && detailResult.status === 'fulfilled' && detailResult.value.ok) {
         try {
           const dData = await detailResult.value.json();
           setGroupDetails(dData);
@@ -1035,7 +1082,7 @@ export default function App() {
             setSlowmodeInput(dData.settings.slowModeSeconds);
           }
         } catch {}
-      } else {
+      } else if (fullReload) {
         // If the group detail endpoint returned an error or is missing, synthesize a safe default object from existing groups
         setGroupDetails(prev => (prev && prev.chatId === numChatId) ? prev : {
           chatId: numChatId,
@@ -1059,38 +1106,38 @@ export default function App() {
         });
       }
 
-      if (modsResult.status === 'fulfilled' && modsResult.value.ok) {
+      if (modsResult && modsResult.status === 'fulfilled' && modsResult.value.ok) {
         try {
           setGroupModerators(await modsResult.value.json());
         } catch {}
       }
-      if (permsResult.status === 'fulfilled' && permsResult.value.ok) {
+      if (permsResult && permsResult.status === 'fulfilled' && permsResult.value.ok) {
         try {
           setGroupPermissionsData(await permsResult.value.json());
         } catch {}
       }
-      if (groupStickersResult.status === 'fulfilled' && groupStickersResult.value.ok) {
+      if (groupStickersResult && groupStickersResult.status === 'fulfilled' && groupStickersResult.value.ok) {
         try {
           setGroupStickersData(await groupStickersResult.value.json());
         } catch {}
       }
-      if (abuseResult.status === 'fulfilled' && abuseResult.value.ok) {
+      if (abuseResult && abuseResult.status === 'fulfilled' && abuseResult.value.ok) {
         try {
           const aData = await abuseResult.value.json();
           setGroupAbuseWords(aData.words || []);
         } catch {}
       }
-      if (membersResult.status === 'fulfilled' && membersResult.value.ok) {
+      if (membersResult && membersResult.status === 'fulfilled' && membersResult.value.ok) {
         try {
           setGroupMembersList(await membersResult.value.json());
         } catch {}
       }
-      if (lustUsersResult.status === 'fulfilled' && lustUsersResult.value.ok) {
+      if (lustUsersResult && lustUsersResult.status === 'fulfilled' && lustUsersResult.value.ok) {
         try {
           setGroupLustUsers(await lustUsersResult.value.json());
         } catch {}
       }
-      if (historyResult.status === 'fulfilled' && historyResult.value.ok) {
+      if (historyResult && historyResult.status === 'fulfilled' && historyResult.value.ok) {
         try {
           setBackupHistoryList(await historyResult.value.json());
         } catch {}
@@ -1100,37 +1147,51 @@ export default function App() {
     }
   }, []);
 
+  const hasLoadedStaticCatalog = useRef<boolean>(false);
+
   // Primary Data Fetcher (Global Summary Resources ONLY)
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (isManualRefresh: boolean = false) => {
     try {
-      const [overviewRes, groupsRes, cmdsRes, statusRes, healthRes, dmsRes, stickersRes, schedulesRes] = await Promise.all([
+      const shouldLoadCatalog = !hasLoadedStaticCatalog.current || isManualRefresh;
+      const fetches = [
         deduplicatedFetch('/api/dashboard/overview'),
         deduplicatedFetch('/api/dashboard/groups'),
-        deduplicatedFetch('/api/commands'),
         deduplicatedFetch('/api/telegram/status'),
         deduplicatedFetch('/api/health'),
         deduplicatedFetch('/api/dashboard/private-chats'),
-        deduplicatedFetch('/api/dashboard/stickers'),
         deduplicatedFetch('/api/dashboard/schedules')
-      ]);
+      ];
+
+      if (shouldLoadCatalog) {
+        fetches.push(
+          deduplicatedFetch('/api/commands'),
+          deduplicatedFetch('/api/dashboard/stickers'),
+          deduplicatedFetch('/api/dashboard/control-center/global')
+        );
+      }
+
+      const results = await Promise.all(fetches);
+      const [overviewRes, groupsRes, statusRes, healthRes, dmsRes, schedulesRes] = results;
 
       if (overviewRes.ok) setOverview(await overviewRes.json());
       if (groupsRes.ok) setGroups(await groupsRes.json());
-      if (cmdsRes.ok) setCommands(await cmdsRes.json());
       if (statusRes.ok) setTelegramStatus(await statusRes.json());
       if (healthRes.ok) setHealthData(await healthRes.json());
       if (dmsRes.ok) setPrivateChats(await dmsRes.json());
-      if (stickersRes.ok) setGlobalStickersData(await stickersRes.json());
       if (schedulesRes.ok) {
         const sData = await schedulesRes.json();
         setSchedulesList(sData.schedules || []);
       }
 
-      // Fetch global settings
-      try {
-        const gRes = await deduplicatedFetch('/api/dashboard/control-center/global');
-        if (gRes.ok) setGlobalSettings(await gRes.json());
-      } catch {}
+      if (shouldLoadCatalog) {
+        const cmdsRes = results[6];
+        const stickersRes = results[7];
+        const globalRes = results[8];
+        if (cmdsRes && cmdsRes.ok) setCommands(await cmdsRes.json());
+        if (stickersRes && stickersRes.ok) setGlobalStickersData(await stickersRes.json());
+        if (globalRes && globalRes.ok) setGlobalSettings(await globalRes.json());
+        hasLoadedStaticCatalog.current = true;
+      }
     } catch (err) {
       console.warn('Dashboard fetch error:', err);
     }
@@ -1138,18 +1199,18 @@ export default function App() {
 
   // Refresh current active view (both global and active group details if open)
   const refreshCurrentView = useCallback(() => {
-    fetchData();
+    fetchData(true);
     const targetDetailId = activeGroupDetailId || (selectedChatId !== 'all' ? selectedChatId : null);
     if (targetDetailId) {
-      fetchGroupDetailsData(targetDetailId);
+      fetchGroupDetailsData(targetDetailId, true);
     }
   }, [fetchData, fetchGroupDetailsData, activeGroupDetailId, selectedChatId]);
 
   // Global Dashboard Polling (15,000 ms)
   useEffect(() => {
     if (!session) return;
-    fetchData();
-    const interval = setInterval(fetchData, 15000);
+    fetchData(false);
+    const interval = setInterval(() => fetchData(false), 15000);
     return () => {
       clearInterval(interval);
       if (settingsDebounceTimerRef.current) {
@@ -1162,13 +1223,31 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     const targetDetailId = activeGroupDetailId || (selectedChatId !== 'all' ? selectedChatId : null);
+    activeTargetIdRef.current = targetDetailId;
+
     if (targetDetailId) {
-      fetchGroupDetailsData(targetDetailId);
+      // Immediate reset when navigating to a different group to prevent showing stale data from previously selected group
+      if (lastFetchedGroupIdRef.current !== targetDetailId) {
+        lastFetchedGroupIdRef.current = targetDetailId;
+        setGroupDetails(null);
+        setGroupModerators(null);
+        setGroupPermissionsData(null);
+        setGroupStickersData(null);
+        setGroupAbuseWords([]);
+        setGroupMembersList([]);
+        setGroupLustUsers([]);
+        setBackupHistoryList([]);
+        setGroupAutomationsList([]);
+      }
+
+      fetchGroupDetailsData(targetDetailId, true);
       const groupInterval = setInterval(() => {
-        fetchGroupDetailsData(targetDetailId);
+        fetchGroupDetailsData(targetDetailId, false, groupDetailTab);
       }, 30000);
       return () => clearInterval(groupInterval);
     } else {
+      activeTargetIdRef.current = null;
+      lastFetchedGroupIdRef.current = null;
       setGroupDetails(null);
       setGroupModerators(null);
       setGroupPermissionsData(null);
@@ -1179,7 +1258,7 @@ export default function App() {
       setBackupHistoryList([]);
       setGroupAutomationsList([]);
     }
-  }, [session, activeGroupDetailId, selectedChatId, fetchGroupDetailsData]);
+  }, [session, activeGroupDetailId, selectedChatId, groupDetailTab, fetchGroupDetailsData]);
 
   // Track last group chatId to only re-initialize configs when switching to a different group
   const lastWelcomeGoodbyeGroupChatIdRef = useRef<number | string | null>(null);
@@ -2212,6 +2291,76 @@ export default function App() {
     }
   };
 
+  const fetchDashboardContentItem = async (id: string): Promise<UnifiedContentItem> => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('roxie_session_id') : null;
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['x-session-id'] = token;
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await deduplicatedFetch(`/api/dashboard/content-items/${encodeURIComponent(id)}`, {
+      headers
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Content item "${id}" not found.`);
+    }
+    const data = await res.json();
+    return data.item;
+  };
+
+  const handleApplyReusedContentToSchedule = (item: UnifiedContentItem, options: { includeTiming?: boolean }) => {
+    if (editingSchedule) {
+      // PRESERVE EXISTING SCHEDULE RECORD AND ITS ID
+      setNewScheduleForm(prev => ({
+        ...prev,
+        message: item.text || '',
+        contentType: item.contentType || 'text',
+        mediaFileId: item.mediaFileId || '',
+        inlineKeyboard: item.buttons && item.buttons.length > 0
+          ? item.buttons.map(row => row.map(btn => ({ text: btn.text, url: btn.url, style: btn.style || 'primary' })))
+          : [],
+        pinAfterSend: (item.options?.pinAfterSend !== undefined || item.options?.pinMessage !== undefined)
+          ? Boolean(item.options?.pinAfterSend || item.options?.pinMessage)
+          : prev.pinAfterSend,
+        replyToLatest: item.options?.replyToLatest !== undefined ? Boolean(item.options.replyToLatest) : prev.replyToLatest,
+        autoDeletePrevious: item.options?.autoDeletePrevious !== undefined ? Boolean(item.options.autoDeletePrevious) : prev.autoDeletePrevious
+      }));
+      setScheduleNotification({
+        type: 'success',
+        message: `Applied content from ${item.type.toUpperCase()}: "${item.title || item.id}" to schedule #${editingSchedule.id}. (Schedule ID preserved)`
+      });
+    } else {
+      // NEW SCHEDULE DRAFT: CREATE DISABLED DRAFT WITH CONTENT (AND OPTIONAL TIMING)
+      const baseName = item.title || item.id || 'Scheduled Message';
+      const draftName = baseName.includes('(Copy)') ? baseName : `${baseName} (Copy)`;
+
+      setNewScheduleForm(prev => ({
+        ...prev,
+        name: draftName,
+        message: item.text || '',
+        contentType: item.contentType || 'text',
+        mediaFileId: item.mediaFileId || '',
+        inlineKeyboard: item.buttons && item.buttons.length > 0
+          ? item.buttons.map(row => row.map(btn => ({ text: btn.text, url: btn.url, style: btn.style || 'primary' })))
+          : [],
+        enabled: false, // Default to disabled/paused until explicitly enabled per user requirement!
+        pinAfterSend: Boolean(item.options?.pinAfterSend || item.options?.pinMessage),
+        replyToLatest: Boolean(item.options?.replyToLatest),
+        autoDeletePrevious: Boolean(item.options?.autoDeletePrevious),
+        scheduleType: (options.includeTiming && item.scheduleConfig?.scheduleType) ? item.scheduleConfig.scheduleType : prev.scheduleType,
+        intervalStr: (options.includeTiming && item.scheduleConfig?.intervalStr) ? item.scheduleConfig.intervalStr : prev.intervalStr,
+        timezone: (options.includeTiming && item.scheduleConfig?.timezone) ? item.scheduleConfig.timezone : prev.timezone
+      }));
+      setShowCreateScheduleModal(true);
+      setScheduleNotification({
+        type: 'success',
+        message: `Loaded draft from ${item.type.toUpperCase()}: "${item.title || item.id}" (Created in paused state)`
+      });
+    }
+    setTimeout(() => setScheduleNotification(null), 4000);
+  };
+
   const handleCopyScheduleFromIdSubmit = async () => {
     const trimmedId = copyFromIdInput.trim().toUpperCase();
     if (!trimmedId) {
@@ -2219,48 +2368,11 @@ export default function App() {
       return;
     }
     try {
-      const res = await deduplicatedFetch(`/api/dashboard/content-items/${encodeURIComponent(trimmedId)}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setCopyFromIdError(data.error || `Item with ID "${trimmedId}" not found.`);
-        return;
-      }
-      const { item } = await res.json();
-      if (!item) {
-        setCopyFromIdError(`Item with ID "${trimmedId}" not found.`);
-        return;
-      }
-
-      const now = new Date();
-      const pad = (n: number) => String(n).padStart(2, '0');
-      let defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-      let defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-
-      const baseName = item.title || item.id || 'Scheduled Broadcast';
-      const copyName = baseName.includes('(Copy)') ? baseName : `${baseName} (Copy)`;
-
-      setEditingSchedule(null);
-      setScheduleFormError(null);
-      setNewScheduleForm({
-        name: copyName,
-        message: item.text || '',
-        chatId: item.sourceGroupId || (groups[0]?.chatId || 0),
-        scheduleType: item.scheduleConfig?.scheduleType || 'interval',
-        intervalFormatted: item.scheduleConfig?.intervalStr || '1h',
-        nextRunDate: defaultDate,
-        nextRunTime: defaultTime,
-        pinAfterSend: Boolean(item.options?.pinAfterSend),
-        replyToLatest: Boolean(item.options?.replyToLatest),
-        autoDeletePrevious: Boolean(item.options?.autoDeletePrevious),
-        triggerKeyword: '',
-        inlineKeyboard: item.buttons || []
-      });
-
+      const item = await fetchDashboardContentItem(trimmedId);
+      handleApplyReusedContentToSchedule(item, { includeTiming: true });
       setShowCopyScheduleFromIdModal(false);
       setCopyFromIdInput('');
       setCopyFromIdError(null);
-      setShowCreateScheduleModal(true);
-      setScheduleNotification({ type: 'success', message: `Loaded draft from ${item.type.toUpperCase()}: "${item.title}"` }); setTimeout(() => setScheduleNotification(null), 4000);
     } catch (err: any) {
       setCopyFromIdError(err.message || 'Failed to load content item');
     }
@@ -5897,6 +6009,13 @@ export default function App() {
                       >
                         <Plus className="w-3.5 h-3.5" /> New Schedule
                       </button>
+                      <ContentReuseButton
+                        onClick={() => {
+                          setEditingSchedule(null);
+                          setShowCopyScheduleFromIdModal(true);
+                        }}
+                        label="Reuse by ID"
+                      />
                     </div>
 
                     {schedulesList.filter(s => s.chatId === activeGroupDetailId).length === 0 ? (
@@ -6507,6 +6626,13 @@ export default function App() {
                     >
                       <Plus className="w-3.5 h-3.5" /> New Schedule
                     </button>
+                    <ContentReuseButton
+                      onClick={() => {
+                        setEditingSchedule(null);
+                        setShowCopyScheduleFromIdModal(true);
+                      }}
+                      label="Reuse by ID"
+                    />
                     <button
                       onClick={() => fetchData()}
                       disabled={schedulesLoading}
@@ -7642,75 +7768,18 @@ export default function App() {
             </div>
           )}
 
-        {/* Copy Schedule From ID Modal */}
-        {showCopyScheduleFromIdModal && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className={`${themeCardBg} border rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl`}>
-              <div className="flex items-center justify-between border-b border-stone-800 pb-3">
-                <div className="flex items-center gap-2">
-                  <Copy className="w-5 h-5 text-cyan-400" />
-                  <h3 className="text-base font-bold text-white">Copy Schedule From ID</h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCopyScheduleFromIdModal(false);
-                    setCopyFromIdInput('');
-                    setCopyFromIdError(null);
-                  }}
-                  className="text-stone-400 hover:text-white p-1"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <p className={`text-xs ${themeMutedText} leading-relaxed`}>
-                Enter an existing schedule ID to duplicate its timing and content as a draft. The original schedule remains untouched, and saving generates a new ID.
-              </p>
-
-              <div>
-                <label className="text-stone-300 font-semibold block mb-1.5 text-xs">Schedule ID</label>
-                <input
-                  type="text"
-                  placeholder="e.g. A76935"
-                  value={copyFromIdInput}
-                  onChange={(e) => {
-                    setCopyFromIdInput(e.target.value);
-                    if (copyFromIdError) setCopyFromIdError(null);
-                  }}
-                  className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-2.5 text-white font-mono text-xs uppercase focus:outline-none`}
-                />
-                {copyFromIdError && (
-                  <p className="text-rose-400 text-[11px] mt-1.5 flex items-center gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {copyFromIdError}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex gap-2 justify-end pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCopyScheduleFromIdModal(false);
-                    setCopyFromIdInput('');
-                    setCopyFromIdError(null);
-                  }}
-                  className="px-4 py-2 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-xl text-xs font-semibold"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCopyScheduleFromIdSubmit}
-                  disabled={!copyFromIdInput.trim()}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
-                >
-                  <Copy className="w-3.5 h-3.5" /> Duplicate to Draft
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Unified Content Reuse Modal for Schedules */}
+        <ContentReuseModal
+          isOpen={showCopyScheduleFromIdModal}
+          onClose={() => setShowCopyScheduleFromIdModal(false)}
+          targetContext="schedule"
+          isEditingExistingSchedule={Boolean(editingSchedule)}
+          currentScheduleId={editingSchedule?.id}
+          fetchItem={fetchDashboardContentItem}
+          onApply={handleApplyReusedContentToSchedule}
+          theme={theme}
+          title={editingSchedule ? `Reuse Content for Schedule #${editingSchedule.id}` : 'Reuse Existing Content for Schedule'}
+        />
 
         {/* Create / Edit Saved Post Modal (Feature 1) */}
         {(showCreatePostModal || showEditPostModal) && (
@@ -8571,7 +8640,13 @@ export default function App() {
 
               {/* Message Content */}
               <div className="space-y-1.5">
-                <label className="font-semibold block">Message Content (HTML supported)</label>
+                <div className="flex items-center justify-between">
+                  <label className="font-semibold block">Message Content (HTML supported)</label>
+                  <ContentReuseButton
+                    onClick={() => setShowCopyScheduleFromIdModal(true)}
+                    label="Reuse Existing Content by ID"
+                  />
+                </div>
                 <textarea
                   rows={4}
                   required
