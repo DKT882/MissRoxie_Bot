@@ -73,7 +73,7 @@ phase8Router.get('/api/system/health', requireAuth('VIEWER'), (req, res) => {
       heapTotal: Math.round(memory.heapTotal / 1024 / 1024)
     },
     counters: {
-      activeGroups: Object.keys((db as any).data?.settings || {}).length,
+      activeGroups: typeof db.getConnectedGroupCount === 'function' ? db.getConnectedGroupCount() : Object.keys((db as any).data?.settings || {}).length,
       activeOperators: authManager.getOperators().length,
       activeSubscribers: eventStreamManager.getConnectedCount()
     },

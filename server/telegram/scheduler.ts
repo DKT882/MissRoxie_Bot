@@ -286,6 +286,174 @@ export class MessageScheduler {
     return 'TRANSIENT_FAILURE';
   }
 
+  public static classifyExecutionError(err: any): {
+    category: 'DEAD_CHAT' | 'PERMISSION_DENIED' | 'RATE_LIMITED' | 'TRANSIENT';
+    isPermanentPermission: boolean;
+    isDeadChat: boolean;
+    retryAfterMs?: number;
+    cleanMessage: string;
+  } {
+    const rawMsg = err?.message || String(err || '');
+    const desc = rawMsg.toLowerCase();
+
+    // 1. Terminal dead chat conditions: chat deleted, bot kicked/not a member, peer invalid
+    if (
+      desc.includes('chat not found') ||
+      desc.includes('chat was deleted') ||
+      desc.includes('peer_id_invalid') ||
+      desc.includes('bot was kicked') ||
+      desc.includes('bot is not a member') ||
+      desc.includes('group chat was deactivated') ||
+      desc.includes('bot was removed')
+    ) {
+      return {
+        category: 'DEAD_CHAT',
+        isPermanentPermission: false,
+        isDeadChat: true,
+        cleanMessage: rawMsg
+      };
+    }
+
+    // 2. Permission / Admin / Restriction conditions:
+    // Bot is in group or user in private chat, but bot lacks permissions to send message/media/pin
+    if (
+      desc.includes('not enough rights') ||
+      desc.includes('chat_admin_required') ||
+      desc.includes('need administrator rights') ||
+      desc.includes('not an administrator') ||
+      desc.includes('bot is not an admin') ||
+      desc.includes('have no rights') ||
+      desc.includes('rights are not sufficient') ||
+      desc.includes('user is restricted') ||
+      desc.includes('bot is restricted') ||
+      desc.includes('bot_chats_disabled') ||
+      desc.includes('forbidden: bot was blocked by the user') ||
+      desc.includes("can't send messages to the chat") ||
+      desc.includes("cannot send messages to the chat") ||
+      desc.includes('rights to send text messages')
+    ) {
+      return {
+        category: 'PERMISSION_DENIED',
+        isPermanentPermission: true,
+        isDeadChat: false,
+        cleanMessage: rawMsg
+      };
+    }
+
+    // 3. Rate limiting (429 / retry after)
+    const structuredRetry = typeof err?.parameters?.retry_after === 'number'
+      ? err.parameters.retry_after
+      : (typeof err?.response?.parameters?.retry_after === 'number'
+          ? err.response.parameters.retry_after
+          : (typeof err?.retry_after === 'number' ? err.retry_after : undefined));
+    const is429 = err?.error_code === 429 || err?.response?.error_code === 429;
+
+    if (desc.includes('retry after') || desc.includes('429') || desc.includes('too many requests') || structuredRetry !== undefined || is429) {
+      const match = desc.match(/retry\s+after\s+(\d+)/i);
+      const retrySec = structuredRetry !== undefined ? structuredRetry : (match ? parseInt(match[1], 10) : 30);
+      return {
+        category: 'RATE_LIMITED',
+        isPermanentPermission: false,
+        isDeadChat: false,
+        retryAfterMs: Math.max(5000, (retrySec + 5) * 1000),
+        cleanMessage: rawMsg
+      };
+    }
+
+    // 4. Default: Transient network / API error
+    return {
+      category: 'TRANSIENT',
+      isPermanentPermission: false,
+      isDeadChat: false,
+      cleanMessage: rawMsg
+    };
+  }
+
+  public static calculateFailureNextRun(
+    schedule: ScheduledMessage,
+    classified: { category: string; isPermanentPermission: boolean; isDeadChat: boolean; retryAfterMs?: number },
+    now: number = Date.now()
+  ): string {
+    const currentFailures = (schedule.consecutiveFailures || 0) + 1;
+    const isRecurring = ((schedule.intervalMs && schedule.intervalMs > 0) || schedule.scheduleType === 'daily' || schedule.scheduleType === 'weekly') && schedule.scheduleType !== 'one_time';
+    const baseIntervalMs = schedule.intervalMs && schedule.intervalMs > 0
+      ? schedule.intervalMs
+      : (schedule.scheduleType === 'daily' ? 86400000 : (schedule.scheduleType === 'weekly' ? 604800000 : 0));
+
+    if (classified.isDeadChat) {
+      return '';
+    }
+
+    if (classified.isPermanentPermission) {
+      // Progressive backoff for permission errors:
+      // Attempt 1: max(baseInterval, 5 minutes)
+      // Attempt 2: max(baseInterval, 15 minutes)
+      // Attempt 3: max(baseInterval, 30 minutes)
+      // Attempt 4+: max(baseInterval, 60 minutes)
+      let backoffMs = 5 * 60 * 1000;
+      if (currentFailures === 2) backoffMs = 15 * 60 * 1000;
+      else if (currentFailures === 3) backoffMs = 30 * 60 * 1000;
+      else if (currentFailures >= 4) backoffMs = 60 * 60 * 1000;
+
+      const delayMs = Math.max(baseIntervalMs, backoffMs);
+      if (isRecurring) {
+        return new Date(now + delayMs).toISOString();
+      }
+      // For one-time schedules: allow up to 5 backoff attempts before halting auto-retries,
+      // preserving schedule content, enabled flag, and state in place for manual recovery.
+      if (currentFailures <= 5) {
+        return new Date(now + backoffMs).toISOString();
+      }
+      return '';
+    }
+
+    if (classified.category === 'RATE_LIMITED') {
+      const retryDelay = classified.retryAfterMs || 30000;
+      if (isRecurring) {
+        return new Date(now + Math.max(baseIntervalMs, retryDelay)).toISOString();
+      }
+      return currentFailures <= 5 ? new Date(now + retryDelay).toISOString() : '';
+    }
+
+    // Transient network or server failure: Exponential backoff
+    const transientBackoffMs = Math.min(300000, 30000 * Math.pow(2, Math.min(3, currentFailures - 1)));
+    if (isRecurring) {
+      return new Date(now + Math.max(baseIntervalMs, transientBackoffMs)).toISOString();
+    }
+    return currentFailures <= 5 ? new Date(now + transientBackoffMs).toISOString() : '';
+  }
+
+  private static failureDiagnosticsMap = new Map<string, { lastMessage: string; lastLoggedAt: number }>();
+
+  public static logFailureDiagnostic(scheduleId: string, chatId: number, errorMsg: string, isPermanentPermission: boolean): void {
+    const now = Date.now();
+    const existing = MessageScheduler.failureDiagnosticsMap.get(scheduleId);
+    const minIntervalMs = isPermanentPermission ? 15 * 60 * 1000 : 60 * 1000; // 15 mins for permission, 1 min for transient
+
+    if (existing && existing.lastMessage === errorMsg && (now - existing.lastLoggedAt) < minIntervalMs) {
+      return;
+    }
+
+    MessageScheduler.failureDiagnosticsMap.set(scheduleId, {
+      lastMessage: errorMsg,
+      lastLoggedAt: now
+    });
+
+    const prefix = isPermanentPermission ? '[SCHEDULER_PERMISSION_ERROR]' : '[SCHEDULER_EXECUTION_ERROR]';
+    console.error(`${prefix} Schedule ${scheduleId} (chat ${chatId}): ${errorMsg}`);
+
+    errorTracker.recordError({
+      source: 'SCHEDULER',
+      severity: isPermanentPermission ? 'WARN' : 'ERROR',
+      message: `Failed to execute schedule ${scheduleId}: ${errorMsg}`,
+      chatId
+    });
+  }
+
+  public static clearFailureDiagnostic(scheduleId: string): void {
+    MessageScheduler.failureDiagnosticsMap.delete(scheduleId);
+  }
+
   /**
    * Process all candidate message deletions for a schedule:
    * - Collects candidate IDs from pendingDeleteMessageIds and lastSentMessageId
@@ -633,6 +801,7 @@ export class MessageScheduler {
                 }
                 db.toggleSchedule(latest.id, false);
               }
+              MessageScheduler.clearFailureDiagnostic(freshSchedule.id);
             } else {
               const errMsg = sendRes?.error || (sendRes as any)?.description || 'Telegram send failed';
               throw new Error(errMsg);
@@ -650,23 +819,16 @@ export class MessageScheduler {
                 chatId: schedule.chatId
               });
             } else {
-              const isDeadChat = err.message?.includes('chat not found') || err.message?.includes('chat was deleted') || err.message?.includes('PEER_ID_INVALID') || err.message?.includes('bot was kicked') || err.message?.includes('bot is not a member');
-              if (isDeadChat) {
-                console.warn(`[SCHEDULER] Automatically removing obsolete schedule ${schedule.id} for nonexistent chat ${schedule.chatId}: ${err.message}`);
+              const classified = MessageScheduler.classifyExecutionError(err);
+              if (classified.isDeadChat) {
+                console.warn(`[SCHEDULER] Automatically removing obsolete schedule ${schedule.id} for nonexistent chat ${schedule.chatId}: ${classified.cleanMessage}`);
                 db.deleteSchedule(schedule.chatId, schedule.id);
               } else {
-                console.error(`Error executing schedule ${schedule.id}:`, err.message);
                 const latest = db.getScheduleById(schedule.id) || schedule;
-                const latestHasInterval = latest.intervalMs && latest.intervalMs > 0 && latest.scheduleType !== 'one_time';
-                const fallbackNextRun = latestHasInterval ? new Date(now + latest.intervalMs!).toISOString() : '';
-                db.updateScheduleNextRun(latest.id, fallbackNextRun, 'failure', err.message);
+                const fallbackNextRun = MessageScheduler.calculateFailureNextRun(latest, classified, now);
+                db.updateScheduleNextRun(latest.id, fallbackNextRun, 'failure', classified.cleanMessage);
+                MessageScheduler.logFailureDiagnostic(schedule.id, schedule.chatId, classified.cleanMessage, classified.isPermanentPermission);
               }
-              errorTracker.recordError({
-                source: 'SCHEDULER',
-                severity: 'ERROR',
-                message: `Failed to execute schedule ${schedule.id}: ${err.message}`,
-                chatId: schedule.chatId
-              });
             }
           } finally {
             this.executingScheduleIds.delete(schedule.id);
@@ -1065,3 +1227,6 @@ export class MessageScheduler {
 }
 
 export const messageScheduler = new MessageScheduler();
+
+export const classifyScheduleExecutionError = MessageScheduler.classifyExecutionError;
+export const calculateScheduleFailureNextRun = MessageScheduler.calculateFailureNextRun;

@@ -727,6 +727,8 @@ export interface PrivateRecipientRecord {
   chatId: number;
   username?: string;
   firstName?: string;
+  displayName?: string;
+  botId?: number;
   source: 'welcome_dm' | 'private_interaction' | 'deep_link';
   sourceGroupId?: number;
   status: 'active' | 'blocked' | 'opted_out' | 'failed';
@@ -768,6 +770,7 @@ export interface ScheduledMessage {
   lastRun?: string;
   lastStatus?: 'success' | 'failure' | 'pending';
   lastError?: string;
+  consecutiveFailures?: number;
   replyToMessageId?: number;
   replyToLatest?: boolean;
   autoDeletePrevious?: boolean;
@@ -778,6 +781,8 @@ export interface ScheduledMessage {
   mentionMode?: 'none' | 'random_member' | 'all_members';
   lastMentionedUserId?: number;
   triggerKeyword?: string;
+  postRef?: string;
+  savedPostId?: string;
   createdAt: string;
   runsCount: number;
 }

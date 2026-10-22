@@ -2559,9 +2559,18 @@ export async function startServer() {
         chatTitle = privChat?.name || `Private User ${numChatId}`;
       }
 
-      const payload = req.body?.payload || req.body;
+      let payload = req.body?.payload || req.body;
       if (!payload || typeof payload !== 'object') {
         return res.status(400).json({ error: 'Post payload is required.' });
+      }
+
+      // Resolve content references (post, schedule, template) if embedded in message text
+      if (typeof payload.text === 'string' && PostResolverService.containsPostReference(payload.text)) {
+        try {
+          payload = PostResolverService.resolvePayload(payload, { chatId: numChatId });
+        } catch (resErr: any) {
+          return res.status(400).json({ error: resErr.message });
+        }
       }
 
       const contentType: PostContentType = payload.contentType || 'text';
@@ -2703,9 +2712,23 @@ export async function startServer() {
       }
 
       const { payload, nextRun, timezone, name } = req.body;
-      const postPayload = payload || req.body;
+      let postPayload = payload || req.body;
       if (!postPayload || typeof postPayload !== 'object') {
         return res.status(400).json({ error: 'Post payload is required.' });
+      }
+
+      // Resolve content references (post, schedule, template) if embedded in message text
+      let referencedPostId: string | undefined = undefined;
+      if (typeof postPayload.text === 'string' && PostResolverService.containsPostReference(postPayload.text)) {
+        const exactMatch = postPayload.text.trim().match(PostResolverService.EXACT_POST_REGEX);
+        if (exactMatch) {
+          referencedPostId = exactMatch[2].toUpperCase();
+        }
+        try {
+          postPayload = PostResolverService.resolvePayload(postPayload, { chatId: numChatId });
+        } catch (resErr: any) {
+          return res.status(400).json({ error: resErr.message });
+        }
       }
 
       const contentType: PostContentType = postPayload.contentType || 'text';
@@ -2778,6 +2801,7 @@ export async function startServer() {
         timezone: timezone || 'UTC',
         contentType,
         mediaFileId: scheduledMediaId,
+        postRef: referencedPostId,
         replyToMessageId: postPayload.replyToMessageId ? Number(postPayload.replyToMessageId) : undefined,
         replyToLatest: Boolean(postPayload.replyToLatest),
         autoDeletePrevious: Boolean(postPayload.autoDeletePrevious),
@@ -2915,11 +2939,29 @@ export async function startServer() {
     }
   });
 
+  app.get('/api/dashboard/posts/library/:id/dependents', (req, res) => {
+    try {
+      const dependents = db.getSavedPostDependents(req.params.id);
+      res.json({ success: true, id: req.params.id, dependents });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.delete('/api/dashboard/posts/library/:id', (req, res) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');
       if (!auth.authorized) {
         return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const force = req.query.force === 'true' || req.body?.force === true;
+      const dependents = db.getSavedPostDependents(req.params.id);
+      if (dependents.length > 0 && !force) {
+        return res.status(409).json({
+          error: `Cannot delete saved post "${req.params.id}": actively referenced by ${dependents.length} schedule(s).`,
+          dependents
+        });
       }
 
       const deleted = db.deleteSavedPost(req.params.id);

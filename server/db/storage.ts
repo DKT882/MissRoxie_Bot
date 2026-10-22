@@ -776,12 +776,22 @@ export class StorageManager {
           }
         }
         if (this.data.privateConversations) {
-          for (const idStr of Object.keys(this.data.privateConversations)) {
+          for (const [idStr, conv] of Object.entries(this.data.privateConversations)) {
             const numId = Number(idStr);
             if (!isNaN(numId) && numId > 0) {
               const privateFile = path.join(this.privateDir, `${numId}.json`);
               if (!fs.existsSync(privateFile)) {
                 this.savePrivateJsonSync(numId);
+              }
+              // Idempotent migration: ensure private conversation users exist in privateRecipients registry
+              if (!this.data.privateRecipients) this.data.privateRecipients = {};
+              if (!this.data.privateRecipients[idStr]) {
+                this.savePrivateRecipient({
+                  chatId: numId,
+                  username: conv.username,
+                  firstName: conv.name,
+                  source: 'private_interaction'
+                });
               }
             }
           }
@@ -2572,7 +2582,7 @@ export class StorageManager {
     for (const [idStr, s] of Object.entries(this.data.settings)) {
       const numId = Number(idStr);
       if (isNaN(numId) || numId >= 0) continue;
-      if (targetBotId === undefined || s.botId === targetBotId || s.botId === undefined || s.botId === null) {
+      if (targetBotId === undefined || s.botId === targetBotId) {
         result[numId] = s;
       }
     }
@@ -2671,6 +2681,10 @@ export class StorageManager {
   public getConnectedGroupCount(botId?: number): number {
     const scopedSettings = this.getAllGroupSettings(botId);
     return Object.keys(scopedSettings).filter(k => Number(k) < 0).length;
+  }
+
+  public getConnectedGroupsCount(botId?: number): number {
+    return this.getConnectedGroupCount(botId);
   }
 
   public removeGroupFromDashboard(chatId: number | string, targetBotId?: number): boolean {
@@ -4886,6 +4900,10 @@ export class StorageManager {
     const s = this.data.schedules.find((x) => x.id.toUpperCase() === id.toUpperCase());
     if (!s) return null;
     s.enabled = enabled !== undefined ? enabled : !s.enabled;
+    if (s.enabled) {
+      s.consecutiveFailures = 0;
+      delete s.lastError;
+    }
     this.scheduleSave(s.chatId);
     this.syncGroupSchedulesToMongo(s.chatId);
     return s;
@@ -4901,10 +4919,23 @@ export class StorageManager {
   ): void {
     const s = this.data.schedules.find((x) => x.id.toUpperCase() === id.toUpperCase());
     if (s) {
+      const prevNextRun = s.nextRun;
+      const prevStatus = s.lastStatus;
+      const prevError = s.lastError;
+      const prevFailures = s.consecutiveFailures;
+
       s.nextRun = nextRun;
       s.lastRun = new Date().toISOString();
       s.lastStatus = status || 'success';
       if (error) s.lastError = error;
+
+      if (status === 'success') {
+        s.consecutiveFailures = 0;
+        delete s.lastError;
+      } else if (status === 'failure') {
+        s.consecutiveFailures = (s.consecutiveFailures || 0) + 1;
+      }
+
       if (lastSentMessageId !== undefined) {
         if (lastSentMessageId === null) {
           delete s.lastSentMessageId;
@@ -4920,8 +4951,13 @@ export class StorageManager {
         }
       }
       s.runsCount = (s.runsCount || 0) + 1;
-      this.scheduleSave(s.chatId);
-      this.syncGroupSchedulesToMongo(s.chatId);
+
+      // Persist whenever state has mutated (new nextRun, updated error/status, or incremented failures)
+      const isIdenticalState = prevNextRun === nextRun && prevStatus === s.lastStatus && prevError === s.lastError && prevFailures === s.consecutiveFailures;
+      if (!isIdenticalState) {
+        this.scheduleSave(s.chatId);
+        this.syncGroupSchedulesToMongo(s.chatId);
+      }
     }
   }
 
@@ -5941,6 +5977,17 @@ export class StorageManager {
     if (msg.name) record.name = msg.name;
     if (msg.language) record.language = msg.language;
     record.lastUpdated = now;
+
+    // Automatically upsert into persistent privateRecipients registry
+    const numChatId = Number(chatId);
+    if (!isNaN(numChatId) && numChatId > 0) {
+      this.savePrivateRecipient({
+        chatId: numChatId,
+        username: msg.username || record.username,
+        firstName: msg.name || record.name,
+        source: 'private_interaction'
+      });
+    }
 
     // Deduplication by messageId if present
     if (msg.messageId && record.messages.some(m => m.messageId === msg.messageId)) {
@@ -7000,6 +7047,49 @@ export class StorageManager {
     return duplicated;
   }
 
+  public getSavedPostDependents(postId: string): Array<{ id: string; chatId: number; title: string; type: 'schedule' | 'template' }> {
+    if (!postId) return [];
+    const cleanId = postId.trim().toUpperCase();
+    const dependents: Array<{ id: string; chatId: number; title: string; type: 'schedule' | 'template' }> = [];
+
+    // 1. Scan schedules
+    const schedules = this.getAllSchedules();
+    for (const s of schedules) {
+      const msg = (s.messageText || s.message || '').toUpperCase();
+      const hasRef =
+        msg.includes(`{{POST:${cleanId}}}`) ||
+        msg.includes(`{{ITEM:${cleanId}}}`) ||
+        (s as any).postRef?.toUpperCase() === cleanId ||
+        (s as any).savedPostId?.toUpperCase() === cleanId;
+
+      if (hasRef) {
+        dependents.push({
+          id: s.id,
+          chatId: s.chatId,
+          title: s.name || (s.messageText || s.message || `Schedule ${s.id}`).slice(0, 40),
+          type: 'schedule'
+        });
+      }
+    }
+
+    // 2. Scan broadcast and inline button templates
+    if (this.data.contentTemplates) {
+      for (const t of Object.values(this.data.contentTemplates)) {
+        const tText = (t.text || '').toUpperCase();
+        if (tText.includes(`{{POST:${cleanId}}}`) || tText.includes(`{{ITEM:${cleanId}}}`)) {
+          dependents.push({
+            id: t.id,
+            chatId: 0,
+            title: t.title || t.id,
+            type: 'template'
+          });
+        }
+      }
+    }
+
+    return dependents;
+  }
+
   public deleteSavedPost(id: string): boolean {
     if (!id) return false;
     const cleanId = id.trim().toUpperCase();
@@ -7020,19 +7110,26 @@ export class StorageManager {
     chatId: number;
     username?: string;
     firstName?: string;
+    displayName?: string;
     source?: 'welcome_dm' | 'private_interaction' | 'deep_link';
     sourceGroupId?: number;
     status?: 'active' | 'blocked' | 'opted_out' | 'failed';
+    botId?: number;
   }): PrivateRecipientRecord {
     if (!this.data.privateRecipients) this.data.privateRecipients = {};
     const key = String(data.chatId);
     const now = new Date().toISOString();
     const existing = this.data.privateRecipients[key];
+    const resolvedBotId = data.botId !== undefined ? data.botId : (this.currentBotId ?? undefined);
 
     if (existing) {
       existing.lastSeenAt = now;
       if (data.username !== undefined) existing.username = data.username;
       if (data.firstName !== undefined) existing.firstName = data.firstName;
+      if (data.displayName !== undefined) existing.displayName = data.displayName;
+      if (resolvedBotId !== undefined && existing.botId === undefined) {
+        existing.botId = resolvedBotId;
+      }
       if (data.status && existing.status !== 'blocked') {
         existing.status = data.status;
       }
@@ -7045,6 +7142,8 @@ export class StorageManager {
       chatId: data.chatId,
       username: data.username,
       firstName: data.firstName,
+      displayName: data.displayName,
+      botId: resolvedBotId,
       source: data.source || 'welcome_dm',
       sourceGroupId: data.sourceGroupId,
       status: data.status || 'active',

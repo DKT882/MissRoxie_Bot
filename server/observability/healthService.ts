@@ -12,7 +12,10 @@ export class HealthDiagnosticsService {
     const tgStatus = telegramBot.getStatus();
     const metrics = metricsTracker.getMetrics('current');
     const recentErrors = errorTracker.getErrors({ limit: 20 }).errors;
-    const activeGroupsCount = Object.keys((db as any).data?.settings || {}).length;
+    const activeGroupsCount = typeof db.getConnectedGroupCount === 'function'
+      ? db.getConnectedGroupCount()
+      : Object.keys((db as any).getAllGroupSettings ? (db as any).getAllGroupSettings() : {}).filter(k => Number(k) < 0).length;
+    const totalConfiguredGroupsCount = Object.keys((db as any).data?.settings || {}).length;
 
     const schedulerStatus = messageScheduler.getStatus();
     
@@ -128,6 +131,7 @@ export class HealthDiagnosticsService {
         storage: {
           connected: storageConnected,
           activeGroups: activeGroupsCount,
+          totalConfiguredGroups: totalConfiguredGroupsCount,
           status: (db as any).getStorageHealthStatus ? (db as any).getStorageHealthStatus() : 'LOCAL_FALLBACK',
           indicator: (db as any).getStorageHealthIndicator ? (db as any).getStorageHealthIndicator() : 'local_ephemeral',
           dataDirectory: (db as any).getSafeDataDirectoryDisplay ? (db as any).getSafeDataDirectoryDisplay() : 'data',
