@@ -294,7 +294,10 @@ export class MessageScheduler {
     cleanMessage: string;
   } {
     const rawMsg = err?.message || String(err || '');
-    const desc = rawMsg.toLowerCase();
+    const cleanMsg = rawMsg
+      .replace(/\b\d{8,11}:[a-zA-Z0-9_-]{35}\b/g, '[REDACTED_BOT_TOKEN]')
+      .replace(/bot\d+:[a-zA-Z0-9_-]+/gi, 'bot[REDACTED_BOT_TOKEN]');
+    const desc = cleanMsg.toLowerCase();
 
     // 1. Terminal dead chat conditions: chat deleted, bot kicked/not a member, peer invalid
     if (
@@ -310,7 +313,7 @@ export class MessageScheduler {
         category: 'DEAD_CHAT',
         isPermanentPermission: false,
         isDeadChat: true,
-        cleanMessage: rawMsg
+        cleanMessage: cleanMsg
       };
     }
 
@@ -336,7 +339,7 @@ export class MessageScheduler {
         category: 'PERMISSION_DENIED',
         isPermanentPermission: true,
         isDeadChat: false,
-        cleanMessage: rawMsg
+        cleanMessage: cleanMsg
       };
     }
 
@@ -356,7 +359,7 @@ export class MessageScheduler {
         isPermanentPermission: false,
         isDeadChat: false,
         retryAfterMs: Math.max(5000, (retrySec + 5) * 1000),
-        cleanMessage: rawMsg
+        cleanMessage: cleanMsg
       };
     }
 
@@ -365,7 +368,7 @@ export class MessageScheduler {
       category: 'TRANSIENT',
       isPermanentPermission: false,
       isDeadChat: false,
-      cleanMessage: rawMsg
+      cleanMessage: cleanMsg
     };
   }
 
@@ -772,19 +775,7 @@ export class MessageScheduler {
               isDelivered = true;
               const newSentMessageId = sendRes.messageId;
 
-              db.addLog({
-                chatId: freshSchedule.chatId,
-                chatTitle: freshSchedule.chatTitle,
-                adminUserId: freshSchedule.adminId,
-                adminUsername: freshSchedule.adminUsername,
-                action: 'schedule_sent',
-                details: `Executed scheduled broadcast [${freshSchedule.id}]: "${textContent.slice(0, 30)}..."`
-              });
-
-              this.executions++;
-              metricsTracker.increment('scheduler_runs');
-
-              // Calculate next run time and update lastSentMessageId and pendingDeleteMessageIds using latest state
+              // Immediately update schedule state to 'success' so post-delivery exceptions cannot leave it in failure state
               const latest = db.getScheduleById(freshSchedule.id) || freshSchedule;
               const latestHasInterval = ((latest.intervalMs && latest.intervalMs > 0) || latest.scheduleType === 'daily') && latest.scheduleType !== 'one_time';
               const latestIntervalMs = latest.intervalMs && latest.intervalMs > 0 ? latest.intervalMs : (latest.scheduleType === 'daily' ? 86400000 : 0);
@@ -802,6 +793,23 @@ export class MessageScheduler {
                 db.toggleSchedule(latest.id, false);
               }
               MessageScheduler.clearFailureDiagnostic(freshSchedule.id);
+
+              this.executions++;
+              metricsTracker.increment('scheduler_runs');
+
+              // Best-effort audit logging - failure to write log must never mark delivered message as failed
+              try {
+                db.addLog({
+                  chatId: freshSchedule.chatId,
+                  chatTitle: freshSchedule.chatTitle,
+                  adminUserId: freshSchedule.adminId,
+                  adminUsername: freshSchedule.adminUsername,
+                  action: 'schedule_sent',
+                  details: `Executed scheduled broadcast [${freshSchedule.id}]: "${textContent.slice(0, 30)}..."`
+                });
+              } catch (logErr: any) {
+                console.warn(`[SCHEDULER] Non-fatal log write failure for schedule ${freshSchedule.id}:`, logErr?.message || logErr);
+              }
             } else {
               const errMsg = sendRes?.error || (sendRes as any)?.description || 'Telegram send failed';
               throw new Error(errMsg);
@@ -810,7 +818,14 @@ export class MessageScheduler {
             this.failures++;
             metricsTracker.increment('scheduler_failures');
             if (isDelivered) {
-              // Message was already delivered! Do NOT revert nextRun or re-execute
+              // Message was already delivered! Ensure status remains success
+              const latest = db.getScheduleById(schedule.id);
+              if (latest && latest.lastStatus !== 'success') {
+                const latestHasInterval = ((latest.intervalMs && latest.intervalMs > 0) || latest.scheduleType === 'daily') && latest.scheduleType !== 'one_time';
+                const latestIntervalMs = latest.intervalMs && latest.intervalMs > 0 ? latest.intervalMs : (latest.scheduleType === 'daily' ? 86400000 : 0);
+                const nextDate = latestHasInterval ? new Date(now + latestIntervalMs).toISOString() : '';
+                db.updateScheduleNextRun(latest.id, nextDate, 'success');
+              }
               console.error(`[SCHEDULER] Post-delivery error for schedule ${schedule.id} (message was already delivered):`, err?.message || err);
               errorTracker.recordError({
                 source: 'SCHEDULER',

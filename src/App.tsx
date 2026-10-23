@@ -6438,6 +6438,14 @@ export default function App() {
                                     Last: {s.lastStatus}
                                   </span>
                                 )}
+                                {s.lastStatus === 'failure' && s.lastError && (
+                                  <span
+                                    className="text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20 max-w-sm truncate"
+                                    title={String(s.lastError).replace(/\b\d{8,11}:[a-zA-Z0-9_-]{35}\b/g, '[REDACTED]').replace(/bot\d+:[a-zA-Z0-9_-]+/gi, 'bot[REDACTED]')}
+                                  >
+                                    Error: {String(s.lastError).replace(/\b\d{8,11}:[a-zA-Z0-9_-]{35}\b/g, '[REDACTED]').replace(/bot\d+:[a-zA-Z0-9_-]+/gi, 'bot[REDACTED]')}
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -7424,6 +7432,14 @@ export default function App() {
                                 {s.lastStatus && (
                                   <span className={s.lastStatus === 'success' ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
                                     Status: {s.lastStatus}
+                                  </span>
+                                )}
+                                {s.lastStatus === 'failure' && s.lastError && (
+                                  <span
+                                    className="text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20 max-w-sm truncate"
+                                    title={String(s.lastError).replace(/\b\d{8,11}:[a-zA-Z0-9_-]{35}\b/g, '[REDACTED]').replace(/bot\d+:[a-zA-Z0-9_-]+/gi, 'bot[REDACTED]')}
+                                  >
+                                    Error: {String(s.lastError).replace(/\b\d{8,11}:[a-zA-Z0-9_-]{35}\b/g, '[REDACTED]').replace(/bot\d+:[a-zA-Z0-9_-]+/gi, 'bot[REDACTED]')}
                                   </span>
                                 )}
                               </div>
