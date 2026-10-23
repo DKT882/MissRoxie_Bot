@@ -509,6 +509,9 @@ export async function executeSendMessageWorkflow(
 
   if (!tgRes.ok) {
     const desc = tgRes.description || '';
+    if (numTargetId > 0) {
+      db.recordPrivateDeliveryResult(numTargetId, false, desc);
+    }
     const lower = desc.toLowerCase();
     if (lower.includes('message to be replied not found') || lower.includes('reply') || lower.includes('message not found')) {
       return {
@@ -561,6 +564,7 @@ export async function executeSendMessageWorkflow(
       timestamp: Date.now(),
       direction: 'out'
     });
+    db.recordPrivateDeliveryResult(numTargetId, true);
   }
 
   // 8. Record Audit Log
@@ -2267,7 +2271,10 @@ export async function startServer() {
 
       if (isPrivateBroadcast) {
         const candidateIds = Array.isArray(recipientIds) && recipientIds.length > 0
-          ? recipientIds.map(Number)
+          ? recipientIds.map(Number).filter(id => {
+              const rec = db.getPrivateRecipient(id);
+              return !rec || (rec.status !== 'opted_out' && rec.status !== 'blocked');
+            })
           : db.getPrivateRecipients({ status: 'active' }).map(r => r.chatId);
 
         // Deduplicate target IDs (Feature 5)

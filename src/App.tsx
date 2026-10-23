@@ -174,6 +174,7 @@ interface PrivateChatSummary {
   lastUpdated: number;
   messageCount: number;
   lastMessage?: string;
+  status?: string;
 }
 
 function StickerPreview({
@@ -283,6 +284,18 @@ export default function App() {
   const [postLoadIdError, setPostLoadIdError] = useState<string | null>(null);
   const [postButtonsMode, setPostButtonsMode] = useState<'visual' | 'json'>('visual');
   const [postFormButtons, setPostFormButtons] = useState<Array<Array<{ text: string; url: string; style?: 'primary' | 'success' | 'danger' }>>>([]);
+  const [newlyCreatedPostBanner, setNewlyCreatedPostBanner] = useState<{ id: string; title: string } | null>(null);
+  const [postLoadedMeta, setPostLoadedMeta] = useState<{ type: string; id: string; title: string } | null>(null);
+  const [postButtonsJsonError, setPostButtonsJsonError] = useState<string | null>(null);
+  const [postLoadLoading, setPostLoadLoading] = useState<boolean>(false);
+
+  // Scheduled Message Content Reuse & Loading by ID State
+  const [schedReuseIdInput, setSchedReuseIdInput] = useState<string>('');
+  const [schedReuseError, setSchedReuseError] = useState<string | null>(null);
+  const [schedReuseLoading, setSchedReuseLoading] = useState<boolean>(false);
+  const [schedReuseMode, setSchedReuseMode] = useState<'snapshot' | 'reference'>('snapshot');
+  const [schedLoadedMeta, setSchedLoadedMeta] = useState<{ type: string; id: string; title: string; mode: 'snapshot' | 'reference' } | null>(null);
+
   const [privateNavTab, setPrivateNavTab] = useState<'conversations' | 'recipients' | 'broadcast'>('conversations');
 
   // Feature 5: Private Chat Recipient Registry State
@@ -373,8 +386,10 @@ export default function App() {
       const data = await res.json();
       if (res.ok && data.post) {
         setShowCreatePostModal(false);
+        setNewlyCreatedPostBanner({ id: data.post.id, title: data.post.title || data.post.id });
         setPostForm({ title: '', contentType: 'text', text: '', mediaFileId: '', buttonsJson: '', pinAfterSend: false, protectContent: false });
         setPostFormButtons([]);
+        setPostLoadedMeta(null);
         fetchSavedPosts();
       } else {
         alert(data.error || 'Failed to create post');
@@ -387,14 +402,16 @@ export default function App() {
   const getCleanedPostButtons = () => {
     if (postButtonsMode === 'visual') {
       const cleaned = postFormButtons
-        .map(row => row.filter(b => b && b.text && b.text.trim().length > 0))
+        .map(row => (Array.isArray(row) ? row : []).filter(b => b && typeof b.text === 'string' && b.text.trim().length > 0))
         .filter(row => row.length > 0);
 
-      for (const row of cleaned) {
-        for (const btn of row) {
+      for (let r = 0; r < cleaned.length; r++) {
+        const row = cleaned[r];
+        for (let b = 0; b < row.length; b++) {
+          const btn = row[b];
           const u = (btn.url || '').trim();
           if (!u.startsWith('http://') && !u.startsWith('https://')) {
-            throw new Error(`Button "${btn.text}" has an invalid URL. Destination URLs must start with http:// or https://`);
+            throw new Error(`Row ${r + 1}, Button "${btn.text}": Destination URL must start with http:// or https://`);
           }
         }
       }
@@ -402,9 +419,32 @@ export default function App() {
     } else if (postForm.buttonsJson.trim()) {
       try {
         const parsed = JSON.parse(postForm.buttonsJson);
-        return Array.isArray(parsed) && parsed.length > 0 ? parsed : undefined;
-      } catch {
-        throw new Error('Invalid JSON format for inline buttons');
+        if (!Array.isArray(parsed)) throw new Error('Buttons JSON must be an array of button rows: [[{ "text": "...", "url": "..." }]]');
+        const validated: Array<Array<{ text: string; url: string; style?: 'primary' | 'success' | 'danger' }>> = [];
+        for (let r = 0; r < parsed.length; r++) {
+          const row = parsed[r];
+          if (!Array.isArray(row)) throw new Error(`Row ${r + 1} must be an array of buttons.`);
+          const validatedRow: Array<{ text: string; url: string; style?: 'primary' | 'success' | 'danger' }> = [];
+          for (let b = 0; b < row.length; b++) {
+            const btn = row[b];
+            if (!btn || typeof btn !== 'object') throw new Error(`Row ${r + 1}, Button ${b + 1} is invalid.`);
+            const text = String(btn.text || '').trim();
+            const url = String(btn.url || '').trim();
+            if (!text) throw new Error(`Row ${r + 1}, Button ${b + 1}: Label text cannot be empty.`);
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+              throw new Error(`Row ${r + 1}, Button "${text}": URL must start with http:// or https://`);
+            }
+            const item: { text: string; url: string; style?: 'primary' | 'success' | 'danger' } = { text, url };
+            if (btn.style && ['primary', 'success', 'danger'].includes(btn.style)) {
+              item.style = btn.style;
+            }
+            validatedRow.push(item);
+          }
+          if (validatedRow.length > 0) validated.push(validatedRow);
+        }
+        return validated.length > 0 ? validated : undefined;
+      } catch (err: any) {
+        throw new Error(err.message || 'Invalid JSON format for inline buttons');
       }
     }
     return undefined;
@@ -416,14 +456,26 @@ export default function App() {
       if (!m) {
         throw new Error(`Media URL or Telegram file_id is required for ${postForm.contentType} posts.`);
       }
-      if (!m.startsWith('http://') && !m.startsWith('https://') && m.length < 5) {
-        throw new Error('Invalid media reference. Please provide a public http:// or https:// URL or a valid Telegram file_id.');
+      if (m.startsWith('http://') || m.startsWith('https://')) {
+        try {
+          const parsed = new URL(m);
+          if (!parsed.hostname || !parsed.hostname.includes('.')) {
+            throw new Error('Media URL must contain a valid domain (e.g. https://example.com/media.jpg).');
+          }
+        } catch (e: any) {
+          throw new Error(e.message || 'Malformed media URL address.');
+        }
+      } else if (m.length < 5 || m.includes(' ') || m.includes('\\')) {
+        throw new Error('Invalid Telegram file_id format. File IDs cannot contain spaces or invalid characters.');
       }
     }
   };
 
   const handleOpenCreatePost = () => {
     setEditingSavedPost(null);
+    setPostLoadedMeta(null);
+    setPostButtonsJsonError(null);
+    setPostLoadLoading(false);
     setPostForm({
       title: '',
       contentType: 'text',
@@ -434,6 +486,7 @@ export default function App() {
       protectContent: false
     });
     setPostFormButtons([]);
+    setPostButtonsMode('visual');
     setPostEditorTab('edit');
     setPostLoadIdInput('');
     setPostLoadIdError(null);
@@ -442,8 +495,12 @@ export default function App() {
 
   const handleOpenEditSavedPost = (p: any) => {
     setEditingSavedPost(p);
+    setPostLoadedMeta(null);
+    setPostButtonsJsonError(null);
+    setPostLoadLoading(false);
     const btns = Array.isArray(p.buttons) ? p.buttons : [];
     setPostFormButtons(btns);
+    setPostButtonsMode('visual');
     setPostForm({
       title: p.title || '',
       contentType: p.contentType || 'text',
@@ -460,12 +517,12 @@ export default function App() {
   };
 
   const handleAddPostButtonRow = () => {
-    setPostFormButtons(prev => [...prev, [{ text: '', url: '', style: 'primary' }]]);
+    setPostFormButtons(prev => [...prev, [{ text: '', url: '', style: undefined }]]);
   };
   const handleAddPostButtonToRow = (rowIndex: number) => {
     setPostFormButtons(prev => {
       const copy = [...prev];
-      copy[rowIndex] = [...copy[rowIndex], { text: '', url: '', style: 'primary' }];
+      copy[rowIndex] = [...copy[rowIndex], { text: '', url: '', style: undefined }];
       return copy;
     });
   };
@@ -479,12 +536,70 @@ export default function App() {
   const handleRemovePostButtonRow = (rowIndex: number) => {
     setPostFormButtons(prev => prev.filter((_, i) => i !== rowIndex));
   };
-  const handleUpdatePostButton = (rowIndex: number, btnIndex: number, field: 'text' | 'url' | 'style', val: string) => {
+  const handleUpdatePostButton = (rowIndex: number, btnIndex: number, field: 'text' | 'url' | 'style', val: any) => {
     setPostFormButtons(prev => {
       const copy = [...prev];
-      copy[rowIndex] = copy[rowIndex].map((btn, i) => i === btnIndex ? { ...btn, [field]: val } : btn);
+      copy[rowIndex] = copy[rowIndex].map((btn, i) => i === btnIndex ? { ...btn, [field]: val ? val : undefined } : btn);
       return copy;
     });
+  };
+
+  const handleSwitchPostButtonsMode = (newMode: 'visual' | 'json') => {
+    if (newMode === 'json') {
+      setPostButtonsJsonError(null);
+      setPostForm(prev => ({
+        ...prev,
+        buttonsJson: postFormButtons.length > 0 ? JSON.stringify(postFormButtons, null, 2) : ''
+      }));
+      setPostButtonsMode('json');
+    } else {
+      const rawJson = (postForm.buttonsJson || '').trim();
+      if (!rawJson) {
+        setPostFormButtons([]);
+        setPostButtonsJsonError(null);
+        setPostButtonsMode('visual');
+        return;
+      }
+      try {
+        const parsed = JSON.parse(rawJson);
+        if (!Array.isArray(parsed)) {
+          throw new Error('Buttons must be an array of rows: [[{ "text": "...", "url": "..." }]]');
+        }
+        const validated: Array<Array<{ text: string; url: string; style?: 'primary' | 'success' | 'danger' }>> = [];
+        for (let r = 0; r < parsed.length; r++) {
+          const row = parsed[r];
+          if (!Array.isArray(row)) {
+            throw new Error(`Row ${r + 1} must be an array of button objects.`);
+          }
+          const validatedRow: Array<{ text: string; url: string; style?: 'primary' | 'success' | 'danger' }> = [];
+          for (let b = 0; b < row.length; b++) {
+            const btn = row[b];
+            if (!btn || typeof btn !== 'object') {
+              throw new Error(`Row ${r + 1}, Button ${b + 1} is invalid.`);
+            }
+            const text = String(btn.text || '').trim();
+            const url = String(btn.url || '').trim();
+            if (!text) {
+              throw new Error(`Row ${r + 1}, Button ${b + 1}: Label text cannot be empty.`);
+            }
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+              throw new Error(`Row ${r + 1}, Button "${text}": URL must start with http:// or https://`);
+            }
+            const item: { text: string; url: string; style?: 'primary' | 'success' | 'danger' } = { text, url };
+            if (btn.style && ['primary', 'success', 'danger'].includes(btn.style)) {
+              item.style = btn.style;
+            }
+            validatedRow.push(item);
+          }
+          if (validatedRow.length > 0) validated.push(validatedRow);
+        }
+        setPostFormButtons(validated);
+        setPostButtonsJsonError(null);
+        setPostButtonsMode('visual');
+      } catch (err: any) {
+        setPostButtonsJsonError(err.message || 'Malformed JSON format for inline buttons.');
+      }
+    }
   };
 
   const handleLoadPostById = async () => {
@@ -498,8 +613,9 @@ export default function App() {
     const match = raw.match(/\{\{(?:item|post|schedule|template):([A-Za-z0-9_-]+)\}\}/i);
     if (match) searchId = match[1];
 
+    setPostLoadLoading(true);
     try {
-      const res = await fetch(`/api/dashboard/content-items/${encodeURIComponent(searchId)}`);
+      const res = await deduplicatedFetch(`/api/dashboard/content-items/${encodeURIComponent(searchId)}`);
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         throw new Error(d.error || `Content item "${searchId}" not found.`);
@@ -507,6 +623,11 @@ export default function App() {
       const data = await res.json();
       const item = data.item;
       if (item) {
+        setPostLoadedMeta({
+          type: item.type,
+          id: item.id,
+          title: item.title || item.id
+        });
         setPostForm(prev => ({
           ...prev,
           title: item.title ? (editingSavedPost ? prev.title : `${item.title} (Loaded)`) : prev.title,
@@ -516,14 +637,18 @@ export default function App() {
           pinAfterSend: Boolean(item.options?.pinAfterSend),
           protectContent: Boolean(item.options?.protectContent)
         }));
-        if (Array.isArray(item.buttons) && item.buttons.length > 0) {
-          setPostFormButtons(item.buttons);
-          setPostForm(prev => ({ ...prev, buttonsJson: JSON.stringify(item.buttons, null, 2) }));
-        }
+        const loadedBtns = Array.isArray(item.buttons) ? item.buttons : [];
+        setPostFormButtons(loadedBtns);
+        setPostForm(prev => ({
+          ...prev,
+          buttonsJson: loadedBtns.length > 0 ? JSON.stringify(loadedBtns, null, 2) : ''
+        }));
         setPostLoadIdInput('');
       }
     } catch (err: any) {
       setPostLoadIdError(err.message || 'Failed to load content item.');
+    } finally {
+      setPostLoadLoading(false);
     }
   };
 
@@ -551,6 +676,7 @@ export default function App() {
       if (res.ok && data.post) {
         setShowEditPostModal(false);
         setEditingSavedPost(null);
+        setPostLoadedMeta(null);
         fetchSavedPosts();
       } else {
         alert(data.error || 'Failed to update post');
@@ -899,6 +1025,7 @@ export default function App() {
   const [commands, setCommands] = useState<CommandItem[]>([]);
   const [privateChats, setPrivateChats] = useState<PrivateChatSummary[]>([]);
   const [activePrivateChatId, setActivePrivateChatId] = useState<number | string | null>(null);
+  const [conversationSearch, setConversationSearch] = useState<string>('');
   const [privateChatMessages, setPrivateChatMessages] = useState<any[]>([]);
   const [privateReplyText, setPrivateReplyText] = useState<string>('');
   const [sendingPrivateReply, setSendingPrivateReply] = useState<boolean>(false);
@@ -2318,10 +2445,17 @@ export default function App() {
       });
       if (res.ok) {
         setPrivateReplyText('');
+        try {
+          const pRes = await deduplicatedFetch(`/api/dashboard/private-chats/${activePrivateChatId}/messages`);
+          if (pRes.ok) {
+            const pData = await pRes.json();
+            setPrivateChatMessages(pData.messages || []);
+          }
+        } catch {}
         fetchData();
       } else {
-        const err = await res.json();
-        alert(`❌ Send failed: ${err.error}`);
+        const err = await res.json().catch(() => ({}));
+        alert(`❌ Send failed: ${err.error || 'Telegram rejected delivery'}`);
       }
     } catch (err: any) {
       alert(`❌ Error: ${err.message}`);
@@ -2534,6 +2668,79 @@ export default function App() {
       setCopyFromIdError(null);
     } catch (err: any) {
       setCopyFromIdError(err.message || 'Failed to load content item');
+    }
+  };
+
+  const handleLoadScheduleContentById = async () => {
+    const raw = schedReuseIdInput.trim();
+    if (!raw) {
+      setSchedReuseError('Please enter a content ID or reference (e.g. POST-XXXXX or {{post:...}}).');
+      return;
+    }
+    setSchedReuseError(null);
+    let searchId = raw;
+    const match = raw.match(/\{\{(?:item|post|schedule|template):([A-Za-z0-9_-]+)\}\}/i);
+    if (match) searchId = match[1];
+
+    setSchedReuseLoading(true);
+    try {
+      const res = await deduplicatedFetch(`/api/dashboard/content-items/${encodeURIComponent(searchId)}`);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || `Content item "${searchId}" not found.`);
+      }
+      const data = await res.json();
+      const item: UnifiedContentItem = data.item;
+      if (!item) throw new Error(`Content item "${searchId}" not found.`);
+
+      setSchedLoadedMeta({
+        type: item.type,
+        id: item.id,
+        title: item.title || item.id,
+        mode: schedReuseMode
+      });
+
+      const loadedButtons = Array.isArray(item.buttons)
+        ? item.buttons.map(row => (Array.isArray(row) ? row : []).map(btn => ({
+            text: btn.text || '',
+            url: btn.url || '',
+            style: (btn.style && ['primary', 'success', 'danger'].includes(btn.style)) ? btn.style : undefined
+          })))
+        : [];
+
+      if (schedReuseMode === 'reference') {
+        const refTag = `{{${item.type === 'schedule' ? 'schedule' : item.type === 'post' ? 'post' : 'item'}:${item.id}}}`;
+        setNewScheduleForm(prev => ({
+          ...prev,
+          message: refTag,
+          contentType: item.contentType || 'text',
+          mediaFileId: item.mediaFileId || '',
+          inlineKeyboard: loadedButtons,
+          pinAfterSend: (item.options?.pinAfterSend !== undefined || item.options?.pinMessage !== undefined)
+            ? Boolean(item.options?.pinAfterSend || item.options?.pinMessage)
+            : prev.pinAfterSend,
+          replyToLatest: item.options?.replyToLatest !== undefined ? Boolean(item.options.replyToLatest) : prev.replyToLatest,
+          autoDeletePrevious: item.options?.autoDeletePrevious !== undefined ? Boolean(item.options.autoDeletePrevious) : prev.autoDeletePrevious
+        }));
+      } else {
+        setNewScheduleForm(prev => ({
+          ...prev,
+          message: item.text || '',
+          contentType: item.contentType || 'text',
+          mediaFileId: item.mediaFileId || '',
+          inlineKeyboard: loadedButtons,
+          pinAfterSend: (item.options?.pinAfterSend !== undefined || item.options?.pinMessage !== undefined)
+            ? Boolean(item.options?.pinAfterSend || item.options?.pinMessage)
+            : prev.pinAfterSend,
+          replyToLatest: item.options?.replyToLatest !== undefined ? Boolean(item.options.replyToLatest) : prev.replyToLatest,
+          autoDeletePrevious: item.options?.autoDeletePrevious !== undefined ? Boolean(item.options.autoDeletePrevious) : prev.autoDeletePrevious
+        }));
+      }
+      setSchedReuseIdInput('');
+    } catch (err: any) {
+      setSchedReuseError(err.message || 'Failed to load content item.');
+    } finally {
+      setSchedReuseLoading(false);
     }
   };
 
@@ -6463,37 +6670,91 @@ export default function App() {
                   </h3>
                 </div>
 
+                {/* Contact Search Input */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+                  <input
+                    type="text"
+                    value={conversationSearch}
+                    onChange={(e) => setConversationSearch(e.target.value)}
+                    placeholder="Search name, @username, or ID..."
+                    className={`w-full pl-8 pr-7 py-1.5 text-xs rounded-xl border ${themeBorder} ${themeInnerCardBg} focus:outline-none focus:border-blue-500`}
+                  />
+                  {conversationSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setConversationSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-200 text-xs px-1"
+                      title="Clear search"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
                 <div className="overflow-y-auto flex-1 space-y-2 pr-1">
-                  {privateChats.map((chat) => {
-                    const isSelected = activePrivateChatId === chat.chatId;
-                    return (
-                      <div
-                        key={chat.chatId}
-                        onClick={() => setActivePrivateChatId(chat.chatId)}
-                        className={`p-3 rounded-xl border cursor-pointer transition-colors ${
-                          isSelected
-                            ? 'bg-blue-600/10 border-blue-500/30'
-                            : `${themeInnerCardBg} ${themeBorder} hover:opacity-80`
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold truncate max-w-[140px]">{chat.name}</span>
-                          <span className={`text-[10px] font-mono ${themeMutedText}`}>
-                            {new Date(chat.lastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
+                  {privateChats
+                    .filter(chat => {
+                      if (!conversationSearch.trim()) return true;
+                      const q = conversationSearch.toLowerCase().trim();
+                      const nameMatch = chat.name?.toLowerCase().includes(q);
+                      const usernameMatch = chat.username?.toLowerCase().includes(q);
+                      const idMatch = String(chat.chatId).includes(q) || String(chat.userId).includes(q);
+                      return Boolean(nameMatch || usernameMatch || idMatch);
+                    })
+                    .map((chat) => {
+                      const isSelected = String(activePrivateChatId) === String(chat.chatId);
+                      const hasMessages = chat.messageCount > 0;
+                      return (
+                        <div
+                          key={chat.chatId}
+                          onClick={() => setActivePrivateChatId(chat.chatId)}
+                          className={`p-3 rounded-xl border cursor-pointer transition-colors ${
+                            isSelected
+                              ? 'bg-blue-600/10 border-blue-500/30'
+                              : `${themeInnerCardBg} ${themeBorder} hover:opacity-80`
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold truncate max-w-[140px]">{chat.name}</span>
+                            <span className={`text-[10px] font-mono ${themeMutedText}`}>
+                              {chat.lastUpdated > 0
+                                ? new Date(chat.lastUpdated).toLocaleDateString([], { month: 'short', day: 'numeric' })
+                                : 'New'}
+                            </span>
+                          </div>
+                          <p className={`text-xs ${themeMutedText} truncate mt-1`}>
+                            {hasMessages ? (chat.lastMessage || 'Conversation active') : 'No messages yet'}
+                          </p>
+                          <div className="flex items-center gap-1.5 mt-1 text-[10px] flex-wrap">
+                            {chat.username && (
+                              <span className="px-1.5 py-0.2 rounded bg-stone-700/40 text-stone-300 font-mono">
+                                @{chat.username}
+                              </span>
+                            )}
+                            <span className="px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-500 font-medium">
+                              {chat.language || 'English'}
+                            </span>
+                            <span className={`font-mono ${themeMutedText}`}>ID: {chat.userId}</span>
+                            {chat.status && chat.status !== 'active' && (
+                              <span className={`px-1.5 py-0.2 rounded font-medium ${
+                                chat.status === 'blocked' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400'
+                              }`}>
+                                {chat.status}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <p className={`text-xs ${themeMutedText} truncate mt-1`}>{chat.lastMessage || 'Conversation active'}</p>
-                        <div className="flex items-center gap-2 mt-1 text-[10px]">
-                          <span className="px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-500 font-medium">
-                            {chat.language || 'English'}
-                          </span>
-                          <span className={`font-mono ${themeMutedText}`}>ID: {chat.userId}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                   {privateChats.length === 0 && (
-                    <p className={`text-xs ${themeMutedText} text-center py-12`}>No private conversations recorded yet.</p>
+                    <p className={`text-xs ${themeMutedText} text-center py-12`}>No private contacts recorded yet.</p>
+                  )}
+                  {privateChats.length > 0 && conversationSearch && privateChats.filter(chat => {
+                    const q = conversationSearch.toLowerCase().trim();
+                    return chat.name?.toLowerCase().includes(q) || chat.username?.toLowerCase().includes(q) || String(chat.chatId).includes(q) || String(chat.userId).includes(q);
+                  }).length === 0 && (
+                    <p className={`text-xs ${themeMutedText} text-center py-12`}>No contacts match "{conversationSearch}".</p>
                   )}
                 </div>
               </div>
@@ -6517,14 +6778,25 @@ export default function App() {
                         </button>
 
                         <div className="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
-                          {privateChats.find(c => c.chatId === activePrivateChatId)?.name?.slice(0, 1) || 'U'}
+                          {privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.name?.slice(0, 1) || 'U'}
                         </div>
                         <div className="min-w-0">
-                          <h4 className="text-xs font-bold truncate">
-                            {privateChats.find(c => c.chatId === activePrivateChatId)?.name || `Chat ${activePrivateChatId}`}
-                          </h4>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-bold truncate">
+                              {privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.name || `Chat ${activePrivateChatId}`}
+                            </h4>
+                            {privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.status && privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.status !== 'active' && (
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${
+                                privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.status === 'blocked' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400'
+                              }`}>
+                                {privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.status}
+                              </span>
+                            )}
+                          </div>
                           <span className={`text-[10px] sm:text-[11px] font-mono ${themeMutedText} truncate block`}>
-                            Chat ID: {activePrivateChatId} • Detected Language: {privateChats.find(c => c.chatId === activePrivateChatId)?.language || 'English'}
+                            Telegram ID: {activePrivateChatId}
+                            {privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.username ? ` • @${privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.username}` : ''}
+                            {` • Language: ${privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.language || 'English'}`}
                           </span>
                         </div>
                       </div>
@@ -6558,6 +6830,20 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* Status Alert Banner */}
+                    {privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.status === 'blocked' && (
+                      <div className="px-4 py-2 bg-rose-500/10 border-b border-rose-500/20 text-rose-300 text-xs flex items-center gap-2 shrink-0">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        <span>This recipient is marked as <strong>blocked</strong> on Telegram. Direct delivery may fail.</span>
+                      </div>
+                    )}
+                    {privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.status === 'opted_out' && (
+                      <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-300 text-xs flex items-center gap-2 shrink-0">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>This user has <strong>opted out</strong> of automated broadcasts. Direct personalized messages can still be sent.</span>
+                      </div>
+                    )}
+
                     {privateChatSubTab === 'chat' ? (
                       <>
                         {/* Messages Scroll Area */}
@@ -6587,7 +6873,9 @@ export default function App() {
                             );
                           })}
                           {privateChatMessages.length === 0 && (
-                            <p className={`text-xs ${themeMutedText} text-center py-16`}>No messages in this conversation yet.</p>
+                            <p className={`text-xs ${themeMutedText} text-center py-16`}>
+                              No messages in this conversation yet. Send a personalized private message below.
+                            </p>
                           )}
                         </div>
 
@@ -6595,7 +6883,11 @@ export default function App() {
                         <form onSubmit={handleSendPrivateReply} className={`p-4 border-t ${themeBorder} flex items-center gap-2 shrink-0`}>
                           <input
                             type="text"
-                            placeholder="Type reply to user..."
+                            placeholder={
+                              privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.name
+                                ? `Type personalized message to ${privateChats.find(c => String(c.chatId) === String(activePrivateChatId))?.name}...`
+                                : "Type personalized message..."
+                            }
                             value={privateReplyText}
                             onChange={(e) => setPrivateReplyText(e.target.value)}
                             className={`flex-1 ${themeInnerCardBg} border ${themeBorder} rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-blue-500`}
@@ -6759,6 +7051,16 @@ export default function App() {
                               </span>
                             </td>
                             <td className="p-3.5 text-right space-x-1.5">
+                              <button
+                                onClick={() => {
+                                  setActivePrivateChatId(r.chatId);
+                                  setPrivateNavTab('conversations');
+                                }}
+                                className="px-2.5 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-lg text-[11px] font-semibold"
+                                title="Open private conversation"
+                              >
+                                Message
+                              </button>
                               <button
                                 onClick={() => handleToggleRecipientOptOut(r.chatId, r.status)}
                                 className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold ${
@@ -7852,26 +8154,72 @@ export default function App() {
                   </p>
                 </div>
                 <button
-                  onClick={() => {
-                    setEditingSavedPost(null);
-                    setPostForm({
-                      title: '',
-                      contentType: 'text',
-                      text: '',
-                      mediaFileId: '',
-                      buttonsJson: '',
-                      protectContent: false,
-                      pinAfterSend: false,
-                      replyToLatest: false,
-                      autoDeletePrevious: false
-                    });
-                    setShowCreatePostModal(true);
-                  }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+                  onClick={handleOpenCreatePost}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
                 >
                   <Plus className="w-4 h-4" /> Create Saved Post
                 </button>
               </div>
+
+              {/* Prominently displayed newly saved post banner */}
+              {newlyCreatedPostBanner && (
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/80 via-slate-900/90 to-cyan-950/80 border border-cyan-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xl">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white">Post Created Successfully!</span>
+                        <span className="text-[11px] text-stone-400 truncate max-w-[220px]">
+                          &quot;{newlyCreatedPostBanner.title}&quot;
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <span className="text-[11px] text-stone-300">Generated Post ID:</span>
+                        <span className="font-mono font-bold text-cyan-300 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-500/40 text-xs">
+                          {newlyCreatedPostBanner.id}
+                        </span>
+                        <span className="text-[11px] text-stone-400 font-mono">
+                          &#123;&#123;post:{newlyCreatedPostBanner.id}&#125;&#125;
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleCopyPostId(newlyCreatedPostBanner.id)}
+                      className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                      title="Copy Post ID"
+                    >
+                      {copiedPostId === newlyCreatedPostBanner.id ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedPostId === newlyCreatedPostBanner.id ? 'Copied ID!' : 'Copy ID'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(`{{post:${newlyCreatedPostBanner.id}}}`);
+                        setCopiedPostId(`ref_${newlyCreatedPostBanner.id}`);
+                        setTimeout(() => setCopiedPostId(null), 2500);
+                      }}
+                      className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Copy Dynamic Reference Syntax"
+                    >
+                      {copiedPostId === `ref_${newlyCreatedPostBanner.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedPostId === `ref_${newlyCreatedPostBanner.id}` ? 'Copied Ref!' : 'Copy Reference'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewlyCreatedPostBanner(null)}
+                      className="text-stone-400 hover:text-white p-1"
+                      title="Dismiss Banner"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Filters */}
               <div className="flex flex-wrap items-center gap-3">
@@ -7982,22 +8330,8 @@ export default function App() {
                           <Layers className="w-3.5 h-3.5" /> Duplicate
                         </button>
                         <button
-                          onClick={() => {
-                            setEditingSavedPost(p);
-                            setPostForm({
-                              title: p.title || '',
-                              contentType: p.contentType || 'text',
-                              text: p.text || p.content || '',
-                              mediaFileId: p.mediaFileId || '',
-                              buttonsJson: p.buttons ? JSON.stringify(p.buttons, null, 2) : '',
-                              protectContent: Boolean(p.protectContent),
-                              pinAfterSend: Boolean(p.pinAfterSend),
-                              replyToLatest: Boolean(p.replyToLatest),
-                              autoDeletePrevious: Boolean(p.autoDeletePrevious)
-                            });
-                            setShowEditPostModal(true);
-                          }}
-                          className={`px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition-colors`}
+                          onClick={() => handleOpenEditSavedPost(p)}
+                          className={`px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer`}
                           title="Edit Post"
                         >
                           Edit
@@ -8036,6 +8370,7 @@ export default function App() {
                   {showEditPostModal && editingSavedPost && (
                     <div className="flex items-center gap-1.5 ml-2 px-2.5 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 font-mono text-xs">
                       <span>{editingSavedPost.id}</span>
+                      <span className="text-[10px] text-cyan-400/80 font-sans font-medium">(Stable ID Preserved)</span>
                       <button
                         type="button"
                         onClick={() => handleCopyPostId(editingSavedPost.id)}
@@ -8077,12 +8412,34 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleLoadPostById}
-                    className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shrink-0 cursor-pointer"
+                    disabled={postLoadLoading || !postLoadIdInput.trim()}
+                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-semibold shrink-0 cursor-pointer flex items-center gap-1.5 transition-colors"
                   >
-                    Load Content
+                    {postLoadLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    <span>Load Content</span>
                   </button>
                 </div>
                 {postLoadIdError && <p className="text-[11px] text-red-400">{postLoadIdError}</p>}
+                {postLoadedMeta && (
+                  <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                      <span className="font-semibold">Loaded from {postLoadedMeta.type.toUpperCase()}:</span>
+                      <span className="font-mono bg-emerald-950 px-1.5 py-0.5 rounded text-[11px] font-bold text-white">
+                        {postLoadedMeta.id}
+                      </span>
+                      <span className="truncate text-stone-300">({postLoadedMeta.title})</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPostLoadedMeta(null)}
+                      className="text-stone-400 hover:text-white p-0.5 shrink-0"
+                      title="Dismiss indicator"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Editor Tabs: Edit vs Live Preview */}
@@ -8122,18 +8479,15 @@ export default function App() {
                     <span className="text-stone-400">Buttons:</span>
                     <button
                       type="button"
-                      onClick={() => setPostButtonsMode('visual')}
-                      className={`px-2 py-0.5 rounded-lg ${postButtonsMode === 'visual' ? 'bg-stone-700 text-white font-bold' : 'text-stone-500'}`}
+                      onClick={() => handleSwitchPostButtonsMode('visual')}
+                      className={`px-2 py-0.5 rounded-lg cursor-pointer ${postButtonsMode === 'visual' ? 'bg-blue-600 text-white font-bold' : 'text-stone-500 hover:text-stone-300'}`}
                     >
                       Visual
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        setPostButtonsMode('json');
-                        setPostForm(prev => ({ ...prev, buttonsJson: JSON.stringify(postFormButtons, null, 2) }));
-                      }}
-                      className={`px-2 py-0.5 rounded-lg ${postButtonsMode === 'json' ? 'bg-stone-700 text-white font-bold' : 'text-stone-500'}`}
+                      onClick={() => handleSwitchPostButtonsMode('json')}
+                      className={`px-2 py-0.5 rounded-lg cursor-pointer ${postButtonsMode === 'json' ? 'bg-blue-600 text-white font-bold' : 'text-stone-500 hover:text-stone-300'}`}
                     >
                       JSON
                     </button>
@@ -8253,48 +8607,80 @@ export default function App() {
                               </div>
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                {row.map((btn, bIdx) => (
-                                  <div key={bIdx} className="p-2 rounded-lg border border-stone-800 bg-stone-900/60 space-y-1.5 relative">
-                                    <div className="flex items-center justify-between">
-                                      <span className="text-[10px] text-stone-400 font-mono">Button #{bIdx + 1}</span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemovePostButton(rIdx, bIdx)}
-                                        className="text-stone-500 hover:text-red-400 p-0.5"
-                                        title="Remove Button"
+                                {row.map((btn, bIdx) => {
+                                  const isInvalidUrl = Boolean(btn.url && !/^https?:\/\/.+/i.test(btn.url.trim()));
+                                  return (
+                                    <div key={bIdx} className="p-2.5 rounded-lg border border-stone-800 bg-stone-900/60 space-y-2 relative">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] text-stone-400 font-mono">Button #{bIdx + 1}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemovePostButton(rIdx, bIdx)}
+                                          className="text-stone-500 hover:text-red-400 p-0.5"
+                                          title="Remove Button"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                      <input
+                                        type="text"
+                                        value={btn.text}
+                                        onChange={e => handleUpdatePostButton(rIdx, bIdx, 'text', e.target.value)}
+                                        placeholder="Label (e.g. Join Community)"
+                                        className={`w-full p-1.5 rounded-md text-xs ${themeInnerCardBg} border ${themeBorder} outline-none`}
+                                      />
+                                      <input
+                                        type="url"
+                                        value={btn.url}
+                                        onChange={e => handleUpdatePostButton(rIdx, bIdx, 'url', e.target.value)}
+                                        placeholder="https://t.me/..."
+                                        className={`w-full p-1.5 rounded-md text-[11px] font-mono ${themeInnerCardBg} border ${isInvalidUrl ? 'border-rose-500/60' : themeBorder} outline-none`}
+                                      />
+                                      {isInvalidUrl && (
+                                        <span className="text-[10px] text-rose-400 block pl-0.5">
+                                          URL must start with http:// or https://
+                                        </span>
+                                      )}
+                                      <select
+                                        value={btn.style || ''}
+                                        onChange={e => handleUpdatePostButton(rIdx, bIdx, 'style', e.target.value)}
+                                        className={`w-full p-1 rounded-md text-[11px] ${themeInnerCardBg} border ${themeBorder} outline-none text-stone-300 font-medium`}
                                       >
-                                        <X className="w-3 h-3" />
-                                      </button>
+                                        <option value="">Default Style</option>
+                                        <option value="primary">Primary 🔵</option>
+                                        <option value="success">Success 🟢</option>
+                                        <option value="danger">Danger 🔴</option>
+                                      </select>
                                     </div>
-                                    <input
-                                      type="text"
-                                      value={btn.text}
-                                      onChange={e => handleUpdatePostButton(rIdx, bIdx, 'text', e.target.value)}
-                                      placeholder="Label (e.g. Join Group)"
-                                      className={`w-full p-1.5 rounded-md text-xs ${themeInnerCardBg} border ${themeBorder} outline-none`}
-                                    />
-                                    <input
-                                      type="text"
-                                      value={btn.url}
-                                      onChange={e => handleUpdatePostButton(rIdx, bIdx, 'url', e.target.value)}
-                                      placeholder="https://t.me/..."
-                                      className={`w-full p-1.5 rounded-md text-[11px] font-mono ${themeInnerCardBg} border ${themeBorder} outline-none`}
-                                    />
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             </div>
                           ))
                         )}
                       </div>
                     ) : (
-                      <textarea
-                        rows={3}
-                        value={postForm.buttonsJson}
-                        onChange={e => setPostForm({ ...postForm, buttonsJson: e.target.value })}
-                        placeholder='[[{"text": "Visit Website", "url": "https://example.com"}]]'
-                        className={`w-full p-2 rounded-xl text-[11px] font-mono ${themeInnerCardBg} border ${themeBorder} outline-none resize-y`}
-                      />
+                      <div className="space-y-1.5">
+                        <textarea
+                          rows={4}
+                          value={postForm.buttonsJson}
+                          onChange={e => {
+                            setPostForm({ ...postForm, buttonsJson: e.target.value });
+                            setPostButtonsJsonError(null);
+                          }}
+                          placeholder='[[{"text": "Visit Website", "url": "https://example.com", "style": "primary"}]]'
+                          className={`w-full p-2.5 rounded-xl text-[11px] font-mono ${themeInnerCardBg} border ${postButtonsJsonError ? 'border-rose-500' : themeBorder} outline-none resize-y`}
+                        />
+                        {postButtonsJsonError && (
+                          <p className="text-[11px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{postButtonsJsonError}</span>
+                          </p>
+                        )}
+                        <p className={`text-[10px] ${themeMutedText}`}>
+                          JSON format: Array of rows, where each row is an array of button objects: <code>[[&#123;&quot;text&quot;: &quot;...&quot;, &quot;url&quot;: &quot;https://...&quot;&#125;]]</code>
+                        </p>
+                      </div>
                     )}
                   </div>
 
@@ -8374,19 +8760,29 @@ export default function App() {
                       <div className="space-y-1.5 pt-2">
                         {postFormButtons.map((row, rIdx) => (
                           <div key={rIdx} className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}>
-                            {row.map((btn, bIdx) => (
-                              <a
-                                key={bIdx}
-                                href={btn.url || '#'}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={e => e.preventDefault()}
-                                className="px-3 py-2 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-blue-300 text-[11px] font-semibold text-center truncate flex items-center justify-center gap-1 transition-colors"
-                              >
-                                <span>{btn.text || `Button ${bIdx + 1}`}</span>
-                                <ExternalLink className="w-3 h-3 opacity-60 shrink-0" />
-                              </a>
-                            ))}
+                            {row.map((btn, bIdx) => {
+                              let styleClass = 'bg-blue-600/15 border-blue-500/30 text-blue-300';
+                              if (btn.style === 'primary') {
+                                styleClass = 'bg-blue-600/40 border-blue-500/60 text-blue-100 font-bold';
+                              } else if (btn.style === 'success') {
+                                styleClass = 'bg-emerald-600/30 border-emerald-500/50 text-emerald-200 font-bold';
+                              } else if (btn.style === 'danger') {
+                                styleClass = 'bg-red-600/30 border-red-500/50 text-red-200 font-bold';
+                              }
+                              return (
+                                <a
+                                  key={bIdx}
+                                  href={btn.url || '#'}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={e => e.preventDefault()}
+                                  className={`px-3 py-2 rounded-xl border ${styleClass} text-[11px] text-center truncate flex items-center justify-center gap-1 transition-colors`}
+                                >
+                                  <span>{btn.text || `Button ${bIdx + 1}`}</span>
+                                  <ExternalLink className="w-3 h-3 opacity-60 shrink-0" />
+                                </a>
+                              );
+                            })}
                           </div>
                         ))}
                       </div>
@@ -9081,12 +9477,27 @@ export default function App() {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className={`${themeCardBg} border rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto`}>
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold flex items-center gap-2">
-                <Clock className="w-4 h-4 text-blue-500" />
-                {editingSchedule ? 'Edit Scheduled Message' : 'Create Scheduled Message'}
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-blue-500" />
+                  {editingSchedule ? 'Edit Scheduled Message' : 'Create Scheduled Message'}
+                </h3>
+                {editingSchedule && (
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-mono text-xs font-bold">
+                    <span>#{editingSchedule.id}</span>
+                    <span className="text-[10px] text-cyan-400/80 font-sans font-normal">(Preserved ID)</span>
+                  </div>
+                )}
+              </div>
               <button
-                onClick={() => { setShowCreateScheduleModal(false); setEditingSchedule(null); setScheduleFormError(null); }}
+                onClick={() => {
+                  setShowCreateScheduleModal(false);
+                  setEditingSchedule(null);
+                  setScheduleFormError(null);
+                  setSchedReuseIdInput('');
+                  setSchedReuseError(null);
+                  setSchedLoadedMeta(null);
+                }}
                 className={`p-1.5 rounded-lg ${themeInnerCardBg} border ${themeBorder} text-stone-400 hover:text-white`}
               >
                 <X className="w-4 h-4" />
@@ -9155,19 +9566,123 @@ export default function App() {
                 </p>
               </div>
 
+              {/* Load Content by ID / Reuse Existing Content Workflow */}
+              <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" /> Load Content by ID / Reuse Content
+                  </span>
+                  <span className={`text-[10px] ${themeMutedText}`}>
+                    Accepts POST-XXXXX, schedule ID, or template ID
+                  </span>
+                </div>
+
+                {/* Explicit Option: Snapshot vs Dynamic Reference */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-stone-900/50 p-2.5 rounded-xl border border-stone-800">
+                  <label className="flex items-start gap-2 cursor-pointer p-1 rounded-lg hover:bg-stone-800/40">
+                    <input
+                      type="radio"
+                      name="schedReuseModeChoice"
+                      value="snapshot"
+                      checked={schedReuseMode === 'snapshot'}
+                      onChange={() => setSchedReuseMode('snapshot')}
+                      className="accent-blue-500 mt-0.5"
+                    />
+                    <div>
+                      <span className={`block font-semibold ${schedReuseMode === 'snapshot' ? 'text-white' : 'text-stone-300'}`}>
+                        Copy content snapshot
+                      </span>
+                      <span className="text-[10px] text-stone-400 leading-tight block">
+                        Copies text, media &amp; buttons directly. Independent of future library changes.
+                      </span>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-2 cursor-pointer p-1 rounded-lg hover:bg-stone-800/40">
+                    <input
+                      type="radio"
+                      name="schedReuseModeChoice"
+                      value="reference"
+                      checked={schedReuseMode === 'reference'}
+                      onChange={() => setSchedReuseMode('reference')}
+                      className="accent-blue-500 mt-0.5"
+                    />
+                    <div>
+                      <span className={`block font-semibold ${schedReuseMode === 'reference' ? 'text-cyan-300' : 'text-stone-300'}`}>
+                        Retain dynamic reference
+                      </span>
+                      <span className="text-[10px] text-stone-400 leading-tight block">
+                        Uses &#123;&#123;post:ID&#125;&#125; syntax. Dispatches latest library updates automatically.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Input and Action */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={schedReuseIdInput}
+                    onChange={e => { setSchedReuseIdInput(e.target.value); setSchedReuseError(null); }}
+                    placeholder="Enter POST-XXXXX, schedule ID (e.g. UNE4AT), or {{post:...}}..."
+                    className={`flex-1 p-2 rounded-xl text-xs ${themeInnerCardBg} border ${themeBorder} outline-none font-mono`}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleLoadScheduleContentById}
+                    disabled={schedReuseLoading || !schedReuseIdInput.trim()}
+                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-semibold shrink-0 cursor-pointer flex items-center gap-1.5 transition-colors"
+                  >
+                    {schedReuseLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    <span>Load Content</span>
+                  </button>
+                </div>
+
+                {schedReuseError && (
+                  <p className="text-[11px] text-red-400 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    <span>{schedReuseError}</span>
+                  </p>
+                )}
+
+                {/* Confirmation badge when loaded */}
+                {schedLoadedMeta && (
+                  <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                      <span className="font-semibold">Loaded from {schedLoadedMeta.type.toUpperCase()}:</span>
+                      <span className="font-mono bg-emerald-950 px-1.5 py-0.5 rounded text-[11px] font-bold text-white">
+                        {schedLoadedMeta.id}
+                      </span>
+                      <span className="truncate text-stone-300">({schedLoadedMeta.title})</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-300">
+                        {schedLoadedMeta.mode === 'reference' ? 'Dynamic Reference' : 'Content Snapshot'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSchedLoadedMeta(null)}
+                      className="text-stone-400 hover:text-white p-0.5 shrink-0"
+                      title="Dismiss indicator"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* Message Content */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="font-semibold block">Message Content (HTML supported)</label>
                   <ContentReuseButton
                     onClick={() => setShowCopyScheduleFromIdModal(true)}
-                    label="Reuse Existing Content by ID"
+                    label="Browse Library / All Content"
                   />
                 </div>
                 <textarea
                   rows={4}
                   required
-                  placeholder="Enter message text to broadcast..."
+                  placeholder="Enter message text to broadcast or {{post:POST-XXXXX}} reference..."
                   value={newScheduleForm.message}
                   onChange={(e) => setNewScheduleForm({ ...newScheduleForm, message: e.target.value })}
                   className={`w-full ${themeInnerCardBg} border ${themeBorder} rounded-xl p-3 text-xs focus:outline-none focus:border-blue-500 font-sans`}
@@ -9498,7 +10013,14 @@ export default function App() {
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-800">
                 <button
                   type="button"
-                  onClick={() => { setShowCreateScheduleModal(false); setEditingSchedule(null); setScheduleFormError(null); }}
+                  onClick={() => {
+                    setShowCreateScheduleModal(false);
+                    setEditingSchedule(null);
+                    setScheduleFormError(null);
+                    setSchedReuseIdInput('');
+                    setSchedReuseError(null);
+                    setSchedLoadedMeta(null);
+                  }}
                   className={`px-4 py-2 ${themeInnerCardBg} border ${themeBorder} rounded-xl text-xs font-semibold`}
                 >
                   Cancel

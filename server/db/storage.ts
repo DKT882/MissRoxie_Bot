@@ -796,6 +796,31 @@ export class StorageManager {
             }
           }
         }
+        // Reverse synchronization: ensure all persistent privateRecipients exist in privateConversations
+        if (this.data.privateRecipients) {
+          if (!this.data.privateConversations) this.data.privateConversations = {};
+          for (const [idStr, recipient] of Object.entries(this.data.privateRecipients)) {
+            const numId = Number(idStr);
+            if (!isNaN(numId) && numId > 0 && !this.data.privateConversations[idStr]) {
+              const lastSeenTs = recipient.lastSeenAt ? new Date(recipient.lastSeenAt).getTime() : 0;
+              const firstSeenTs = recipient.firstSeenAt ? new Date(recipient.firstSeenAt).getTime() : 0;
+              const lastUpdated = !isNaN(lastSeenTs) && lastSeenTs > 0 ? lastSeenTs : (!isNaN(firstSeenTs) && firstSeenTs > 0 ? firstSeenTs : Date.now());
+              this.data.privateConversations[idStr] = {
+                chatId: numId,
+                userId: numId,
+                username: recipient.username,
+                name: recipient.displayName || recipient.firstName || (recipient.username ? `@${recipient.username}` : `User ${numId}`),
+                language: 'English',
+                lastUpdated,
+                messages: []
+              };
+              const privateFile = path.join(this.privateDir, `${numId}.json`);
+              if (!fs.existsSync(privateFile)) {
+                this.savePrivateJsonSync(numId);
+              }
+            }
+          }
+        }
         if (!fs.existsSync(this.globalFile)) {
           this.saveGlobalJsonSync();
         }
@@ -1637,6 +1662,10 @@ export class StorageManager {
 
     if (this.data.privateConversations) {
       for (const [key, conv] of Object.entries(this.data.privateConversations)) {
+        // Do NOT delete conversation if recipient is registered in privateRecipients
+        if (this.data.privateRecipients && this.data.privateRecipients[key]) {
+          continue;
+        }
         const lastMsgTimestamp = conv.messages && conv.messages.length > 0
           ? conv.messages[conv.messages.length - 1].timestamp
           : conv.lastUpdated;
@@ -5960,12 +5989,13 @@ export class StorageManager {
     const key = String(chatId);
     let record = this.data.privateConversations[key];
     const now = msg.timestamp || Date.now();
+    const recipient = this.data.privateRecipients ? this.data.privateRecipients[key] : undefined;
     if (!record) {
       record = {
         chatId,
         userId,
-        username: msg.username,
-        name: msg.name,
+        username: msg.username || recipient?.username,
+        name: msg.name || recipient?.displayName || recipient?.firstName,
         language: msg.language,
         lastUpdated: now,
         messages: []
@@ -6021,24 +6051,80 @@ export class StorageManager {
     lastUpdated: number;
     messageCount: number;
     lastMessage?: string;
+    status?: string;
   }> {
     this.cleanupInactivePrivateConversations();
-    if (!this.data.privateConversations) return [];
-    return Object.values(this.data.privateConversations)
-      .map(c => {
-        const lastMsg = c.messages[c.messages.length - 1];
-        return {
-          chatId: c.chatId,
-          userId: c.userId,
-          username: c.username,
-          name: c.name || (c.username ? `@${c.username}` : `User ${c.userId}`),
-          language: c.language || 'English',
-          lastUpdated: c.lastUpdated,
-          messageCount: c.messages.length,
-          lastMessage: lastMsg?.content || ''
-        };
-      })
-      .sort((a, b) => b.lastUpdated - a.lastUpdated);
+    if (!this.data.privateConversations) this.data.privateConversations = {};
+    if (!this.data.privateRecipients) this.data.privateRecipients = {};
+
+    const mergedMap = new Map<string, {
+      chatId: number | string;
+      userId: number;
+      username?: string;
+      name?: string;
+      language?: string;
+      lastUpdated: number;
+      messageCount: number;
+      lastMessage?: string;
+      status?: string;
+    }>();
+
+    // 1. Process all existing private conversations
+    for (const [key, conv] of Object.entries(this.data.privateConversations)) {
+      const numChatId = Number(conv.chatId);
+      const recipient = this.data.privateRecipients[key] || (!isNaN(numChatId) ? this.data.privateRecipients[String(numChatId)] : undefined);
+      const lastMsg = conv.messages && conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : undefined;
+
+      const username = conv.username || recipient?.username;
+      const displayName = conv.name || recipient?.displayName || recipient?.firstName || (username ? `@${username}` : `User ${conv.userId || conv.chatId}`);
+
+      mergedMap.set(String(conv.chatId), {
+        chatId: conv.chatId,
+        userId: conv.userId || Number(conv.chatId),
+        username,
+        name: displayName,
+        language: conv.language || 'English',
+        lastUpdated: conv.lastUpdated || (lastMsg?.timestamp ?? 0),
+        messageCount: conv.messages ? conv.messages.length : 0,
+        lastMessage: lastMsg?.content || '',
+        status: recipient?.status || 'active'
+      });
+    }
+
+    // 2. Merge all persistent private recipients (ensuring 0-message contacts appear)
+    for (const [key, recipient] of Object.entries(this.data.privateRecipients)) {
+      const canonicalKey = String(recipient.chatId);
+      const existing = mergedMap.get(canonicalKey) || mergedMap.get(key);
+
+      if (existing) {
+        if (!existing.username && recipient.username) existing.username = recipient.username;
+        if (recipient.displayName || recipient.firstName) {
+          if (existing.name?.startsWith('User ') || !existing.name) {
+            existing.name = recipient.displayName || recipient.firstName || (recipient.username ? `@${recipient.username}` : existing.name);
+          }
+        }
+        if (recipient.status) existing.status = recipient.status;
+      } else {
+        const lastSeen = recipient.lastSeenAt ? new Date(recipient.lastSeenAt).getTime() : 0;
+        const firstSeen = recipient.firstSeenAt ? new Date(recipient.firstSeenAt).getTime() : 0;
+        const ts = !isNaN(lastSeen) && lastSeen > 0 ? lastSeen : (!isNaN(firstSeen) && firstSeen > 0 ? firstSeen : 0);
+        const displayName = recipient.displayName || recipient.firstName || (recipient.username ? `@${recipient.username}` : `User ${recipient.chatId}`);
+
+        mergedMap.set(canonicalKey, {
+          chatId: recipient.chatId,
+          userId: recipient.chatId,
+          username: recipient.username,
+          name: displayName,
+          language: 'English',
+          lastUpdated: ts,
+          messageCount: 0,
+          lastMessage: '',
+          status: recipient.status || 'active'
+        });
+      }
+    }
+
+    return Array.from(mergedMap.values()).sort((a, b) => b.lastUpdated - a.lastUpdated);
   }
 
   public getPrivateChatMessages(chatId: number | string): PrivateConversationMessage[] {
@@ -7122,6 +7208,7 @@ export class StorageManager {
     const existing = this.data.privateRecipients[key];
     const resolvedBotId = data.botId !== undefined ? data.botId : (this.currentBotId ?? undefined);
 
+    let savedRecord: PrivateRecipientRecord;
     if (existing) {
       existing.lastSeenAt = now;
       if (data.username !== undefined) existing.username = data.username;
@@ -7133,29 +7220,51 @@ export class StorageManager {
       if (data.status && existing.status !== 'blocked') {
         existing.status = data.status;
       }
-      this.saveGlobalJsonSync();
-      this.persist();
-      return existing;
+      savedRecord = existing;
+    } else {
+      const record: PrivateRecipientRecord = {
+        chatId: data.chatId,
+        username: data.username,
+        firstName: data.firstName,
+        displayName: data.displayName,
+        botId: resolvedBotId,
+        source: data.source || 'welcome_dm',
+        sourceGroupId: data.sourceGroupId,
+        status: data.status || 'active',
+        firstSeenAt: now,
+        lastSeenAt: now,
+        deliveryCount: 0
+      };
+
+      this.data.privateRecipients[key] = record;
+      savedRecord = record;
     }
 
-    const record: PrivateRecipientRecord = {
-      chatId: data.chatId,
-      username: data.username,
-      firstName: data.firstName,
-      displayName: data.displayName,
-      botId: resolvedBotId,
-      source: data.source || 'welcome_dm',
-      sourceGroupId: data.sourceGroupId,
-      status: data.status || 'active',
-      firstSeenAt: now,
-      lastSeenAt: now,
-      deliveryCount: 0
-    };
+    // Synchronize recipient with privateConversations registry
+    if (!this.data.privateConversations) this.data.privateConversations = {};
+    if (!this.data.privateConversations[key]) {
+      this.data.privateConversations[key] = {
+        chatId: data.chatId,
+        userId: data.chatId,
+        username: data.username,
+        name: data.displayName || data.firstName || (data.username ? `@${data.username}` : `User ${data.chatId}`),
+        language: 'English',
+        lastUpdated: Date.now(),
+        messages: []
+      };
+      this.savePrivateJson(data.chatId);
+    } else {
+      if (data.username) {
+        this.data.privateConversations[key].username = data.username;
+      }
+      if (data.displayName || data.firstName) {
+        this.data.privateConversations[key].name = data.displayName || data.firstName;
+      }
+    }
 
-    this.data.privateRecipients[key] = record;
     this.saveGlobalJsonSync();
     this.persist();
-    return record;
+    return savedRecord;
   }
 
   public getPrivateRecipients(filter?: { status?: string; search?: string }): PrivateRecipientRecord[] {
