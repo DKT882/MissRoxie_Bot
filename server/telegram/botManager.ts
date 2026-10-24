@@ -740,6 +740,42 @@ export class TelegramBotManager {
       });
     }
 
+    // 1. Instant Bot-Add Protection: intercept and ban newly added unauthorized bots immediately
+    // Runs before user rate-limiting so rate limit saturation never bypasses bot-join protection
+    const bannedBotIds = new Set<number>();
+    if (message.new_chat_members && Array.isArray(message.new_chat_members)) {
+      const botMembers = message.new_chat_members.filter(m => m.is_bot);
+      if (botMembers.length > 0) {
+        const banResults = await Promise.all(
+          botMembers.map(async (botMember) => {
+            try {
+              const res = await ModerationService.handleBotAddProtection(chatId, {
+                chat: message.chat,
+                from: message.from,
+                date: message.date,
+                old_chat_member: { status: 'left', user: botMember },
+                new_chat_member: { status: 'member', user: botMember }
+              }, reqCtx);
+              return { botMember, res };
+            } catch (err: any) {
+              console.error(`[BotProtection] Error protecting against bot ${botMember.id} in chat ${chatId}:`, err?.message || err);
+              return { botMember, res: { handled: false, banned: false, error: err?.message || String(err) } };
+            }
+          })
+        );
+        let anyBanned = false;
+        for (const { botMember, res } of banResults) {
+          if (res.banned) {
+            bannedBotIds.add(botMember.id);
+            anyBanned = true;
+          }
+        }
+        if (anyBanned && message.message_id) {
+          telegramApi.deleteMessage(chatId, message.message_id).catch(() => {});
+        }
+      }
+    }
+
     // Global per-user rate limiter check (exempt Roxie self messages)
     if (chatId && userId && !ChatbotService.isRoxieSelfMessage(message, this.botUser)) {
       const rateCheck = await RateLimiterService.checkAndRecord(message, chatId, userId);
@@ -751,18 +787,21 @@ export class TelegramBotManager {
       db.cacheUser(message.reply_to_message.from, chatId);
     }
     if (message.new_chat_members && Array.isArray(message.new_chat_members)) {
-      for (const newMember of message.new_chat_members) {
-        db.cacheUser(newMember, chatId);
-        if (!newMember.is_bot) {
-          ModerationService.handleWelcomeDm(chatId, newMember, message.chat.title).catch(() => {});
-        }
+      // 2. Filter out bots before human join workflows (anti-raid, welcome DM, CAPTCHA)
+      const humanMembers = message.new_chat_members.filter(m => !m.is_bot && !bannedBotIds.has(m.id));
+      for (const humanMember of humanMembers) {
+        db.cacheUser(humanMember, chatId);
+        ModerationService.handleWelcomeDm(chatId, humanMember, message.chat.title).catch(() => {});
       }
-      const raidTriggered = await ModerationService.handleAntiRaid(chatId, message.new_chat_members, message.chat.title);
-      if (!raidTriggered) {
-        const me = await telegramApi.getMe().catch(() => null);
-        for (const newMember of message.new_chat_members) {
-          if (newMember.id !== me?.result?.id) {
-            await ModerationService.handleCaptchaOnJoin(chatId, newMember, message.chat.title);
+
+      if (humanMembers.length > 0) {
+        const raidTriggered = await ModerationService.handleAntiRaid(chatId, humanMembers, message.chat.title);
+        if (!raidTriggered) {
+          const botId = this.botUser?.id || db.getCurrentBotId();
+          for (const humanMember of humanMembers) {
+            if (humanMember.id !== botId) {
+              await ModerationService.handleCaptchaOnJoin(chatId, humanMember, message.chat.title);
+            }
           }
         }
       }
@@ -867,6 +906,24 @@ export class TelegramBotManager {
           user_id: message.from?.id,
           command
         }));
+
+        if (message.chat.id > 0 && message.from?.id) {
+          const fromUser = message.from;
+          const userDisplayName = [fromUser.first_name, fromUser.last_name].filter(Boolean).join(' ') ||
+            fromUser.username ||
+            `User ${fromUser.id}`;
+          db.addPrivateMessage(message.chat.id, fromUser.id, {
+            role: 'user',
+            content: message.text || message.caption || (command ? `/${command}` : 'Command'),
+            timestamp: message.date ? message.date * 1000 : Date.now(),
+            messageId: message.message_id,
+            mediaType: 'text',
+            direction: 'in',
+            username: fromUser.username,
+            name: userDisplayName,
+            language: fromUser.language_code || 'English'
+          });
+        }
 
         const handled = await CommandHandler.handleCommand(ctx);
         if (handled) {
@@ -1286,8 +1343,11 @@ export class TelegramBotManager {
     const newStatus = chatMemberUpdate.new_chat_member?.status;
     const user = chatMemberUpdate.new_chat_member?.user || chatMemberUpdate.from;
 
-    const me = await telegramApi.getMe().catch(() => null);
-    const botId = me?.result?.id || db.getCurrentBotId();
+    let botId = this.botUser?.id || db.getCurrentBotId();
+    if (!botId) {
+      const me = await telegramApi.getMe().catch(() => null);
+      botId = me?.result?.id;
+    }
 
     // Check if the affected member is the bot itself (Feature 4: Group Removal/Re-addition)
     if (botId && user && user.id === botId) {
@@ -1341,8 +1401,7 @@ export class TelegramBotManager {
 
     // Member joined via invite link, approved join request, or direct addition
     if (isNewMemberJoin && user) {
-      const me = await telegramApi.getMe().catch(() => null);
-      if (user.id !== me?.result?.id) {
+      if (user.id !== botId) {
         const approvalKey = `${chatId}:${user.id}`;
         const wasRecentlyAutoApproved = (Date.now() - (TelegramBotManager.recentJoinApprovalsCache.get(approvalKey) || 0)) < 60000;
 

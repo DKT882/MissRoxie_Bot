@@ -873,6 +873,9 @@ export async function startServer() {
   const handleGetGroupDetail = async (req: express.Request, res: express.Response) => {
     try {
       const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) {
+        return res.status(400).json({ error: 'Invalid chatId parameter' });
+      }
       const settings = db.getGroupSettings(chatId);
       const logs = db.getGroupLogs(chatId, 100);
       const schedules = db.getGroupSchedules(chatId);
@@ -1392,6 +1395,9 @@ export async function startServer() {
   const handleUpdateGroupSettings = (req: express.Request, res: express.Response) => {
     try {
       const chatId = Number(req.params.chatId);
+      if (isNaN(chatId)) {
+        return res.status(400).json({ error: 'Invalid chatId parameter' });
+      }
       const updates = req.body;
       if (updates && typeof updates === 'object') {
         if (updates.autoAcceptJoin !== undefined && updates.autoAcceptEnabled === undefined) {
@@ -4511,6 +4517,8 @@ export async function startServer() {
             const currentBotId = db.getCurrentBotId() ?? undefined;
             console.log(`[Roxie Database] Hydrating group data from MongoDB Atlas (scoped to botId=${currentBotId ?? 'ALL'})...`);
             await db.hydrateGroupsFromMongo(currentBotId);
+            console.log(`[Roxie Database] Hydrating private conversations & DM recipients from MongoDB Atlas (scoped to botId=${currentBotId ?? 'ALL'})...`);
+            await db.hydratePrivateDataFromMongo(currentBotId);
           } catch (hydrateErr: any) {
             console.error('[Roxie Database] MongoDB Atlas hydration failed:', hydrateErr?.message);
           }

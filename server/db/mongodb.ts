@@ -113,6 +113,16 @@ class MongoManager {
     return this.db.collection<T>('groups');
   }
 
+  public getPrivateRecipientsCollection<T = any>(): Collection<T> | null {
+    if (!this.db || !this.isConnected) return null;
+    return this.db.collection<T>('private_recipients');
+  }
+
+  public getPrivateChatsCollection<T = any>(): Collection<T> | null {
+    if (!this.db || !this.isConnected) return null;
+    return this.db.collection<T>('private_chats');
+  }
+
   public async close(): Promise<void> {
     if (this.client) {
       try {

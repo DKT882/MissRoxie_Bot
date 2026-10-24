@@ -1,5 +1,38 @@
 import { mongoManager } from './mongodb.js';
 
+export interface MongoPrivateRecipientDocument {
+  botId?: number;
+  chatId: string; // Stored as normalized string e.g. "12345678"
+  numChatId: number;
+  username?: string;
+  firstName?: string;
+  displayName?: string;
+  source?: 'welcome_dm' | 'private_interaction' | 'deep_link';
+  sourceGroupId?: number;
+  status: 'active' | 'blocked' | 'opted_out' | 'failed';
+  failureReason?: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  lastDeliveredAt?: string;
+  deliveryCount?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface MongoPrivateChatDocument {
+  botId?: number;
+  chatId: string;
+  numChatId: number;
+  userId: number;
+  username?: string;
+  name?: string;
+  language?: string;
+  lastUpdated: number;
+  messages: any[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface MongoGroupDocument {
   botId?: number;
   botUsername?: string | null;
@@ -100,6 +133,42 @@ export class MongoStorageService {
       }
 
       await collection.createIndex({ numChatId: 1 }).catch(() => {});
+
+      // Ensure indexes on private_recipients collection
+      try {
+        const recipientsCol = mongoManager.getPrivateRecipientsCollection<MongoPrivateRecipientDocument>();
+        if (recipientsCol) {
+          const recIndexes = await recipientsCol.indexes().catch(() => []);
+          const hasRecCompound = recIndexes.some(
+            idx => idx.key && idx.key.botId === 1 && idx.key.chatId === 1 && idx.unique === true
+          );
+          if (!hasRecCompound) {
+            await recipientsCol.createIndex({ botId: 1, chatId: 1 }, { unique: true, name: 'botId_1_chatId_1' }).catch(() => {});
+          }
+          await recipientsCol.createIndex({ chatId: 1 }, { name: 'chatId_1' }).catch(() => {});
+          await recipientsCol.createIndex({ numChatId: 1 }, { name: 'numChatId_1' }).catch(() => {});
+        }
+      } catch (recIdxErr: any) {
+        console.warn(`[MongoStorage] Private recipients index warning: ${recIdxErr?.message}`);
+      }
+
+      // Ensure indexes on private_chats collection
+      try {
+        const chatsCol = mongoManager.getPrivateChatsCollection<MongoPrivateChatDocument>();
+        if (chatsCol) {
+          const chatIndexes = await chatsCol.indexes().catch(() => []);
+          const hasChatCompound = chatIndexes.some(
+            idx => idx.key && idx.key.botId === 1 && idx.key.chatId === 1 && idx.unique === true
+          );
+          if (!hasChatCompound) {
+            await chatsCol.createIndex({ botId: 1, chatId: 1 }, { unique: true, name: 'botId_1_chatId_1' }).catch(() => {});
+          }
+          await chatsCol.createIndex({ chatId: 1 }, { name: 'chatId_1' }).catch(() => {});
+          await chatsCol.createIndex({ numChatId: 1 }, { name: 'numChatId_1' }).catch(() => {});
+        }
+      } catch (chatIdxErr: any) {
+        console.warn(`[MongoStorage] Private chats index warning: ${chatIdxErr?.message}`);
+      }
 
       this.indexEnsured = true;
       return true;
@@ -612,6 +681,156 @@ export class MongoStorageService {
     } catch (err: any) {
       console.error(`[MongoStorage] Failed to purge non-authoritative groups from MongoDB Atlas: ${err?.message}`);
       return 0;
+    }
+  }
+
+  public static async savePrivateRecipient(recipientData: any, targetBotId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getPrivateRecipientsCollection<MongoPrivateRecipientDocument>();
+      if (!collection) return false;
+
+      const rawChatId = recipientData.chatId;
+      if (!rawChatId) return false;
+
+      const normChatId = String(rawChatId);
+      const numChatId = Number(rawChatId);
+      const botId = targetBotId !== undefined ? targetBotId : recipientData.botId;
+      const now = new Date();
+
+      const doc: Partial<MongoPrivateRecipientDocument> = {
+        botId,
+        chatId: normChatId,
+        numChatId,
+        username: recipientData.username,
+        firstName: recipientData.firstName,
+        displayName: recipientData.displayName,
+        source: recipientData.source || 'private_interaction',
+        sourceGroupId: recipientData.sourceGroupId,
+        status: recipientData.status || 'active',
+        failureReason: recipientData.failureReason,
+        firstSeenAt: recipientData.firstSeenAt || now.toISOString(),
+        lastSeenAt: recipientData.lastSeenAt || now.toISOString(),
+        lastDeliveredAt: recipientData.lastDeliveredAt,
+        deliveryCount: recipientData.deliveryCount ?? 0,
+        updatedAt: now
+      };
+
+      const filter: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (botId !== undefined && botId !== null) {
+        filter.botId = botId;
+      }
+
+      await collection.updateOne(
+        filter,
+        {
+          $set: doc,
+          $setOnInsert: { createdAt: now }
+        },
+        { upsert: true }
+      );
+      return true;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to save private recipient ${recipientData?.chatId}: ${err?.message}`);
+      return false;
+    }
+  }
+
+  public static async getAllPrivateRecipients(botId?: number): Promise<MongoPrivateRecipientDocument[]> {
+    try {
+      const collection = mongoManager.getPrivateRecipientsCollection<MongoPrivateRecipientDocument>();
+      if (!collection) return [];
+
+      const query: any = botId !== undefined && botId !== null ? { botId } : {};
+      return await collection.find(query).toArray();
+    } catch (err: any) {
+      console.warn(`[MongoStorage] Failed to get all private recipients: ${err?.message}`);
+      return [];
+    }
+  }
+
+  public static async deletePrivateRecipient(chatId: string | number, botId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getPrivateRecipientsCollection<MongoPrivateRecipientDocument>();
+      if (!collection) return false;
+
+      const normChatId = String(chatId);
+      const numChatId = Number(chatId);
+
+      const query: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (botId !== undefined && botId !== null) {
+        query.botId = botId;
+      }
+
+      const result = await collection.deleteOne(query);
+      return result.deletedCount > 0;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to delete private recipient ${chatId}: ${err?.message}`);
+      return false;
+    }
+  }
+
+  public static async savePrivateChat(chatData: any, targetBotId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getPrivateChatsCollection<MongoPrivateChatDocument>();
+      if (!collection) return false;
+
+      const rawChatId = chatData.chatId || chatData.userId;
+      if (!rawChatId) return false;
+
+      const normChatId = String(rawChatId);
+      const numChatId = Number(rawChatId);
+      const botId = targetBotId !== undefined ? targetBotId : chatData.botId;
+      const now = new Date();
+
+      const doc: Partial<MongoPrivateChatDocument> = {
+        botId,
+        chatId: normChatId,
+        numChatId,
+        userId: Number(chatData.userId || numChatId),
+        username: chatData.username,
+        name: chatData.name,
+        language: chatData.language,
+        lastUpdated: chatData.lastUpdated || Date.now(),
+        messages: (chatData.messages || []).slice(-100),
+        updatedAt: now
+      };
+
+      const filter: any = {
+        $or: [{ chatId: normChatId }, { numChatId }]
+      };
+      if (botId !== undefined && botId !== null) {
+        filter.botId = botId;
+      }
+
+      await collection.updateOne(
+        filter,
+        {
+          $set: doc,
+          $setOnInsert: { createdAt: now }
+        },
+        { upsert: true }
+      );
+      return true;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to save private chat ${chatData?.chatId}: ${err?.message}`);
+      return false;
+    }
+  }
+
+  public static async getAllPrivateChats(botId?: number): Promise<MongoPrivateChatDocument[]> {
+    try {
+      const collection = mongoManager.getPrivateChatsCollection<MongoPrivateChatDocument>();
+      if (!collection) return [];
+
+      const query: any = botId !== undefined && botId !== null ? { botId } : {};
+      return await collection.find(query).toArray();
+    } catch (err: any) {
+      console.warn(`[MongoStorage] Failed to get all private chats: ${err?.message}`);
+      return [];
     }
   }
 }

@@ -691,7 +691,8 @@ export class StorageManager {
             groupConversationMemories,
             groupMemories: groupConversationMemories,
             userLustLevels: parsed.userLustLevels || {},
-            privateConversations: parsed.privateConversations || {}
+            privateConversations: parsed.privateConversations || {},
+            privateRecipients: parsed.privateRecipients || {}
           };
         }
       }
@@ -1171,6 +1172,7 @@ export class StorageManager {
       automations: [],
       rules: '',
       lastAllTimestamp: 0,
+      botProtection: true,
       protectionEnabled: true,
       protectionFloodCount: 5,
       protectionFloodWindow: 5,
@@ -1502,6 +1504,147 @@ export class StorageManager {
     return { hydratedCount, syncedToMongoCount, errorsCount };
   }
 
+  public async hydratePrivateDataFromMongo(botIdToHydrate?: number): Promise<{ hydratedRecipientsCount: number; hydratedChatsCount: number; errorsCount: number }> {
+    if (!mongoManager.getStatus().isConnected) {
+      return { hydratedRecipientsCount: 0, hydratedChatsCount: 0, errorsCount: 0 };
+    }
+
+    let hydratedRecipientsCount = 0;
+    let hydratedChatsCount = 0;
+    let errorsCount = 0;
+
+    const targetBotId = botIdToHydrate !== undefined ? botIdToHydrate : (this.currentBotId !== null ? this.currentBotId : undefined);
+
+    try {
+      if (!this.data.privateRecipients) this.data.privateRecipients = {};
+      if (!this.data.privateConversations) this.data.privateConversations = {};
+
+      // 1. Hydrate Private Recipients from MongoDB
+      const mongoRecipients = await MongoStorageService.getAllPrivateRecipients(targetBotId);
+      console.log(`[Storage] Found ${mongoRecipients.length} private recipient(s) in MongoDB Atlas for botId=${targetBotId ?? 'ALL'}.`);
+
+      for (const doc of mongoRecipients) {
+        try {
+          const rawChatId = doc.chatId || doc.numChatId;
+          const numChatId = Number(rawChatId);
+          if (isNaN(numChatId) || numChatId <= 0) continue;
+          const key = String(numChatId);
+
+          const existing = this.data.privateRecipients[key];
+          if (!existing) {
+            this.data.privateRecipients[key] = {
+              chatId: numChatId,
+              username: doc.username,
+              firstName: doc.firstName,
+              displayName: doc.displayName,
+              botId: doc.botId,
+              source: doc.source || 'private_interaction',
+              sourceGroupId: doc.sourceGroupId,
+              status: doc.status || 'active',
+              firstSeenAt: doc.firstSeenAt,
+              lastSeenAt: doc.lastSeenAt,
+              lastDeliveredAt: doc.lastDeliveredAt,
+              deliveryCount: doc.deliveryCount || 0,
+              failureReason: doc.failureReason
+            };
+            hydratedRecipientsCount++;
+          } else {
+            if (doc.username && !existing.username) existing.username = doc.username;
+            if (doc.displayName && !existing.displayName) existing.displayName = doc.displayName;
+            if (doc.firstName && !existing.firstName) existing.firstName = doc.firstName;
+            if (doc.status && existing.status !== 'blocked') existing.status = doc.status;
+            if (doc.lastSeenAt && (!existing.lastSeenAt || new Date(doc.lastSeenAt).getTime() > new Date(existing.lastSeenAt).getTime())) {
+              existing.lastSeenAt = doc.lastSeenAt;
+            }
+          }
+        } catch (rErr: any) {
+          console.error(`[Storage] Failed to hydrate private recipient ${doc?.chatId} from MongoDB:`, rErr?.message);
+          errorsCount++;
+        }
+      }
+
+      // 2. Hydrate Private Chats from MongoDB
+      const mongoChats = await MongoStorageService.getAllPrivateChats(targetBotId);
+      console.log(`[Storage] Found ${mongoChats.length} private chat(s) in MongoDB Atlas for botId=${targetBotId ?? 'ALL'}.`);
+
+      for (const doc of mongoChats) {
+        try {
+          const rawChatId = doc.chatId || doc.numChatId || doc.userId;
+          const numChatId = Number(rawChatId);
+          if (isNaN(numChatId) || numChatId <= 0) continue;
+          const key = String(numChatId);
+
+          const existing = this.data.privateConversations[key];
+          if (!existing) {
+            this.data.privateConversations[key] = {
+              chatId: numChatId,
+              userId: doc.userId || numChatId,
+              username: doc.username,
+              name: doc.name || (doc.username ? `@${doc.username}` : `User ${numChatId}`),
+              language: doc.language || 'English',
+              lastUpdated: doc.lastUpdated || Date.now(),
+              messages: Array.isArray(doc.messages) ? doc.messages : []
+            };
+            if (this.isDataDirWritable) {
+              this.savePrivateJsonSync(numChatId);
+            }
+            hydratedChatsCount++;
+          } else {
+            if (doc.username && !existing.username) existing.username = doc.username;
+            if (doc.name && !existing.name) existing.name = doc.name;
+            if (doc.lastUpdated && doc.lastUpdated > existing.lastUpdated) existing.lastUpdated = doc.lastUpdated;
+            if (Array.isArray(doc.messages) && doc.messages.length > 0) {
+              const existingMsgIds = new Set(existing.messages.map(m => m.messageId).filter(Boolean));
+              for (const m of doc.messages) {
+                if (!m.messageId || !existingMsgIds.has(m.messageId)) {
+                  existing.messages.push(m);
+                  if (m.messageId) existingMsgIds.add(m.messageId);
+                }
+              }
+              existing.messages.sort((a, b) => a.timestamp - b.timestamp);
+              while (existing.messages.length > MAX_PRIVATE_CHAT_MESSAGES) {
+                existing.messages.shift();
+              }
+            }
+            if (this.isDataDirWritable) {
+              this.savePrivateJsonSync(numChatId);
+            }
+          }
+        } catch (cErr: any) {
+          console.error(`[Storage] Failed to hydrate private chat ${doc?.chatId} from MongoDB:`, cErr?.message);
+          errorsCount++;
+        }
+      }
+
+      // Synchronize recipients with privateConversations registry
+      for (const [key, recipient] of Object.entries(this.data.privateRecipients)) {
+        const numId = Number(key);
+        if (!isNaN(numId) && numId > 0 && !this.data.privateConversations[key]) {
+          this.data.privateConversations[key] = {
+            chatId: numId,
+            userId: numId,
+            username: recipient.username,
+            name: recipient.displayName || recipient.firstName || (recipient.username ? `@${recipient.username}` : `User ${numId}`),
+            language: 'English',
+            lastUpdated: recipient.lastSeenAt ? new Date(recipient.lastSeenAt).getTime() : Date.now(),
+            messages: []
+          };
+          if (this.isDataDirWritable) {
+            this.savePrivateJsonSync(numId);
+          }
+        }
+      }
+
+      this.saveGlobalJsonSync();
+      console.log(`[Storage] MongoDB private data hydration completed: ${hydratedRecipientsCount} recipients, ${hydratedChatsCount} chats loaded into RAM.`);
+    } catch (err: any) {
+      console.error('[Storage] Error during MongoDB private data hydration:', err?.message);
+      errorsCount++;
+    }
+
+    return { hydratedRecipientsCount, hydratedChatsCount, errorsCount };
+  }
+
   public scheduleSave(chatId?: number | string) {
     this.lastSaveSuccessful = true;
     if (chatId !== undefined && chatId !== null) {
@@ -1603,6 +1746,12 @@ export class StorageManager {
         type: 'private',
         elapsedMs: writeElapsed
       });
+
+      if (mongoManager.getStatus().isConnected) {
+        MongoStorageService.savePrivateChat(safeData, this.currentBotId ?? undefined).catch((mErr) => {
+          console.warn(`[Storage] Background sync of private chat ${chatId} to MongoDB failed:`, mErr?.message);
+        });
+      }
     } catch (err: any) {
       this.logStorageErrorOnce(`save private chat ${chatId} JSON`, err.message);
     }
@@ -1655,42 +1804,10 @@ export class StorageManager {
     }
   }
 
-  public cleanupInactivePrivateConversations(thresholdDays: number = PRIVATE_CHAT_INACTIVITY_DAYS): number {
-    const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000;
-    const now = Date.now();
-    let cleanedCount = 0;
-
-    if (this.data.privateConversations) {
-      for (const [key, conv] of Object.entries(this.data.privateConversations)) {
-        // Do NOT delete conversation if recipient is registered in privateRecipients
-        if (this.data.privateRecipients && this.data.privateRecipients[key]) {
-          continue;
-        }
-        const lastMsgTimestamp = conv.messages && conv.messages.length > 0
-          ? conv.messages[conv.messages.length - 1].timestamp
-          : conv.lastUpdated;
-        const lastActivity = lastMsgTimestamp || conv.lastUpdated || 0;
-
-        if (lastActivity > 0 && (now - lastActivity >= thresholdMs)) {
-          delete this.data.privateConversations[key];
-          cleanedCount++;
-
-          try {
-            const targetFile = path.join(this.privateDir, `${key}.json`);
-            if (fs.existsSync(targetFile)) {
-              fs.unlinkSync(targetFile);
-            }
-            const bakFile = path.join(this.privateBackupDir, `${key}.json.bak`);
-            if (fs.existsSync(bakFile)) {
-              fs.unlinkSync(bakFile);
-            }
-          } catch (err: any) {
-            console.error(`[Storage] Error deleting inactive private chat file for ${key}:`, err.message);
-          }
-        }
-      }
-    }
-    return cleanedCount;
+  public cleanupInactivePrivateConversations(_thresholdDays: number = PRIVATE_CHAT_INACTIVITY_DAYS): number {
+    // Keep recipient & private conversation list available persistently.
+    // Do not delete active or inactive recipients merely due to age or inactivity.
+    return 0;
   }
 
   public loadAllPrivateJsons(): { loadedCount: number; errorsCount: number } {
@@ -1732,19 +1849,6 @@ export class StorageManager {
 
           if (parsed && (parsed.chatId || parsed.userId)) {
             const chatId = String(parsed.chatId || parsed.userId || file.replace('.json', ''));
-            const now = Date.now();
-            const lastUpdated = parsed.lastUpdated || (Array.isArray(parsed.messages) && parsed.messages.length > 0 ? parsed.messages[parsed.messages.length - 1].timestamp : 0);
-            if (lastUpdated && (now - lastUpdated >= PRIVATE_CHAT_INACTIVITY_MS)) {
-              // Inactivity >= 5 days: purge private chat JSON file & backup
-              try {
-                if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-                const chatIdStr = file.replace('.json', '');
-                const bakFile = path.join(this.privateBackupDir, `${chatIdStr}.json.bak`);
-                if (fs.existsSync(bakFile)) fs.unlinkSync(bakFile);
-              } catch {}
-              continue;
-            }
-
             this.restorePrivateData(chatId, parsed);
             loadedCount++;
           }
@@ -2291,6 +2395,9 @@ export class StorageManager {
   }
 
   public getGroupSettings(chatId: number, chatTitle?: string): GroupSettings {
+    if (!Number.isFinite(chatId)) {
+      chatId = 0;
+    }
     if (!this.data.settings[chatId]) {
       this.data.settings[chatId] = {
         chatId,
@@ -2352,6 +2459,7 @@ export class StorageManager {
         automations: [],
         rules: '',
         lastAllTimestamp: 0,
+        botProtection: true,
         protectionEnabled: true,
         protectionFloodCount: 5,
         protectionFloodWindow: 5,
@@ -2824,6 +2932,9 @@ export class StorageManager {
   }
 
   public updateGroupSettings(chatId: number, updates: Partial<GroupSettings>): GroupSettings {
+    if (!Number.isFinite(chatId)) {
+      return this.getGroupSettings(0);
+    }
     const current = this.getGroupSettings(chatId);
 
     // Normalize legacy/alias field autoAcceptJoin -> autoAcceptEnabled and coerce boolean strings
@@ -7264,6 +7375,11 @@ export class StorageManager {
 
     this.saveGlobalJsonSync();
     this.persist();
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.savePrivateRecipient(savedRecord, resolvedBotId).catch((mErr) => {
+        console.warn(`[Storage] Background sync of private recipient ${data.chatId} to MongoDB failed:`, mErr?.message);
+      });
+    }
     return savedRecord;
   }
 
@@ -7303,6 +7419,11 @@ export class StorageManager {
 
     this.saveGlobalJsonSync();
     this.persist();
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.savePrivateRecipient(recipient, recipient.botId ?? (this.currentBotId ?? undefined)).catch((mErr) => {
+        console.warn(`[Storage] Background sync of private recipient ${chatId} status to MongoDB failed:`, mErr?.message);
+      });
+    }
     return true;
   }
 
@@ -7328,6 +7449,11 @@ export class StorageManager {
     }
     this.saveGlobalJsonSync();
     this.persist();
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.savePrivateRecipient(recipient, recipient.botId ?? (this.currentBotId ?? undefined)).catch((mErr) => {
+        console.warn(`[Storage] Background sync of private recipient ${chatId} delivery to MongoDB failed:`, mErr?.message);
+      });
+    }
   }
 
   public deletePrivateRecipient(chatId: number): boolean {
@@ -7337,6 +7463,11 @@ export class StorageManager {
       delete this.data.privateRecipients[key];
       this.saveGlobalJsonSync();
       this.persist();
+      if (mongoManager.getStatus().isConnected) {
+        MongoStorageService.deletePrivateRecipient(chatId, this.currentBotId ?? undefined).catch((mErr) => {
+          console.warn(`[Storage] Background delete of private recipient ${chatId} from MongoDB failed:`, mErr?.message);
+        });
+      }
       return true;
     }
     return false;

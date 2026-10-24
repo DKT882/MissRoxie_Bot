@@ -1445,7 +1445,8 @@ export default function App() {
         deduplicatedFetch('/api/telegram/status'),
         deduplicatedFetch('/api/health'),
         deduplicatedFetch('/api/dashboard/private-chats'),
-        deduplicatedFetch('/api/dashboard/schedules')
+        deduplicatedFetch('/api/dashboard/schedules'),
+        deduplicatedFetch('/api/dashboard/private-recipients')
       ];
 
       if (shouldLoadCatalog) {
@@ -1457,7 +1458,7 @@ export default function App() {
       }
 
       const results = await Promise.all(fetches);
-      const [overviewRes, groupsRes, statusRes, healthRes, dmsRes, schedulesRes] = results;
+      const [overviewRes, groupsRes, statusRes, healthRes, dmsRes, schedulesRes, recipientsRes] = results;
 
       if (overviewRes.ok) setOverview(await overviewRes.json());
       if (groupsRes.ok) setGroups(await groupsRes.json());
@@ -1468,11 +1469,18 @@ export default function App() {
         const sData = await schedulesRes.json();
         setSchedulesList(sData.schedules || []);
       }
+      if (recipientsRes && recipientsRes.ok) {
+        const rData = await recipientsRes.json();
+        if (rData) {
+          if (Array.isArray(rData.recipients)) setPrivateRecipientsList(rData.recipients);
+          if (rData.stats) setPrivateRecipientsStats(rData.stats);
+        }
+      }
 
       if (shouldLoadCatalog) {
-        const cmdsRes = results[6];
-        const stickersRes = results[7];
-        const globalRes = results[8];
+        const cmdsRes = results[7];
+        const stickersRes = results[8];
+        const globalRes = results[9];
         if (cmdsRes && cmdsRes.ok) setCommands(await cmdsRes.json());
         if (stickersRes && stickersRes.ok) setGlobalStickersData(await stickersRes.json());
         if (globalRes && globalRes.ok) setGlobalSettings(await globalRes.json());
