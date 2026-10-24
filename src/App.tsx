@@ -1453,7 +1453,8 @@ export default function App() {
         fetches.push(
           deduplicatedFetch('/api/commands'),
           deduplicatedFetch('/api/dashboard/stickers'),
-          deduplicatedFetch('/api/dashboard/control-center/global')
+          deduplicatedFetch('/api/dashboard/control-center/global'),
+          deduplicatedFetch('/api/dashboard/posts/library')
         );
       }
 
@@ -1481,9 +1482,14 @@ export default function App() {
         const cmdsRes = results[7];
         const stickersRes = results[8];
         const globalRes = results[9];
+        const postsRes = results[10];
         if (cmdsRes && cmdsRes.ok) setCommands(await cmdsRes.json());
         if (stickersRes && stickersRes.ok) setGlobalStickersData(await stickersRes.json());
         if (globalRes && globalRes.ok) setGlobalSettings(await globalRes.json());
+        if (postsRes && postsRes.ok) {
+          const pData = await postsRes.json();
+          if (pData && Array.isArray(pData.posts)) setSavedPostsList(pData.posts);
+        }
         hasLoadedStaticCatalog.current = true;
       }
     } catch (err) {

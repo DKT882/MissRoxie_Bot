@@ -123,6 +123,11 @@ class MongoManager {
     return this.db.collection<T>('private_chats');
   }
 
+  public getSavedPostsCollection<T = any>(): Collection<T> | null {
+    if (!this.db || !this.isConnected) return null;
+    return this.db.collection<T>('saved_posts');
+  }
+
   public async close(): Promise<void> {
     if (this.client) {
       try {

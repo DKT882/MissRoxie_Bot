@@ -1315,13 +1315,13 @@ tmaRouter.get('/groups/:chatId/posts/library', requireTmaAuth('rich_post'), (req
   }
 });
 
-tmaRouter.post('/groups/:chatId/posts/library', requireTmaAuth('rich_post'), (req: AuthenticatedTmaRequest, res) => {
+tmaRouter.post('/groups/:chatId/posts/library', requireTmaAuth('rich_post'), async (req: AuthenticatedTmaRequest, res) => {
   try {
     const { title, contentType, text, mediaFileId, mediaUploadId, buttons, protectContent, pinAfterSend, replyToLatest, tags } = req.body;
     if (!title || !title.trim()) {
       return res.status(400).json({ error: 'Title is required' });
     }
-    const post = db.saveSavedPost({
+    const post = await db.saveSavedPostAsync({
       title: title.trim(),
       contentType: contentType || 'text',
       text,
@@ -1344,9 +1344,9 @@ tmaRouter.post('/groups/:chatId/posts/library', requireTmaAuth('rich_post'), (re
   }
 });
 
-tmaRouter.delete('/groups/:chatId/posts/library/:id', requireTmaAuth('rich_post'), (req: AuthenticatedTmaRequest, res) => {
+tmaRouter.delete('/groups/:chatId/posts/library/:id', requireTmaAuth('rich_post'), async (req: AuthenticatedTmaRequest, res) => {
   try {
-    const ok = db.deleteSavedPost(req.params.id);
+    const ok = await db.deleteSavedPostAsync(req.params.id);
     if (!ok) {
       return res.status(404).json({ error: 'Post not found' });
     }

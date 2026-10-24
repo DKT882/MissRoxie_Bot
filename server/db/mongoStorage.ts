@@ -33,6 +33,32 @@ export interface MongoPrivateChatDocument {
   updatedAt: Date;
 }
 
+export interface MongoSavedPostDocument {
+  botId?: number;
+  id: string; // Stored as normalized uppercase string e.g. "POST-7K2P9"
+  title: string;
+  contentType: string;
+  text?: string;
+  mediaFileId?: string;
+  mediaUploadId?: string;
+  buttons?: any[][];
+  protectContent?: boolean;
+  pinAfterSend?: boolean;
+  replyToLatest?: boolean;
+  autoDeletePrevious?: boolean;
+  createdBy?: {
+    userId: number;
+    username?: string;
+    role?: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+  tags?: string[];
+  metadata?: Record<string, any>;
+  createdDate: Date;
+  updatedDate: Date;
+}
+
 export interface MongoGroupDocument {
   botId?: number;
   botUsername?: string | null;
@@ -168,6 +194,23 @@ export class MongoStorageService {
         }
       } catch (chatIdxErr: any) {
         console.warn(`[MongoStorage] Private chats index warning: ${chatIdxErr?.message}`);
+      }
+
+      // Ensure indexes on saved_posts collection
+      try {
+        const postsCol = mongoManager.getSavedPostsCollection<MongoSavedPostDocument>();
+        if (postsCol) {
+          const postIndexes = await postsCol.indexes().catch(() => []);
+          const hasPostCompound = postIndexes.some(
+            idx => idx.key && idx.key.botId === 1 && idx.key.id === 1 && idx.unique === true
+          );
+          if (!hasPostCompound) {
+            await postsCol.createIndex({ botId: 1, id: 1 }, { unique: true, name: 'botId_1_id_1' }).catch(() => {});
+          }
+          await postsCol.createIndex({ id: 1 }, { name: 'id_1' }).catch(() => {});
+        }
+      } catch (postIdxErr: any) {
+        console.warn(`[MongoStorage] Saved posts index warning: ${postIdxErr?.message}`);
       }
 
       this.indexEnsured = true;
@@ -831,6 +874,109 @@ export class MongoStorageService {
     } catch (err: any) {
       console.warn(`[MongoStorage] Failed to get all private chats: ${err?.message}`);
       return [];
+    }
+  }
+
+  public static async saveSavedPost(postData: any, targetBotId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getSavedPostsCollection<MongoSavedPostDocument>();
+      if (!collection) return false;
+
+      const rawId = postData.id;
+      if (!rawId) return false;
+
+      const normId = String(rawId).trim().toUpperCase();
+      const botId = targetBotId !== undefined ? targetBotId : postData.botId;
+      const now = new Date();
+
+      const doc: Partial<MongoSavedPostDocument> = {
+        botId,
+        id: normId,
+        title: postData.title,
+        contentType: postData.contentType || 'text',
+        text: postData.text,
+        mediaFileId: postData.mediaFileId,
+        mediaUploadId: postData.mediaUploadId,
+        buttons: postData.buttons,
+        protectContent: Boolean(postData.protectContent),
+        pinAfterSend: Boolean(postData.pinAfterSend),
+        replyToLatest: Boolean(postData.replyToLatest),
+        autoDeletePrevious: Boolean(postData.autoDeletePrevious),
+        createdBy: postData.createdBy,
+        createdAt: postData.createdAt || now.toISOString(),
+        updatedAt: postData.updatedAt || now.toISOString(),
+        tags: postData.tags || [],
+        metadata: postData.metadata || {},
+        updatedDate: now
+      };
+
+      const filter: any = { id: normId };
+      if (botId !== undefined && botId !== null) {
+        filter.botId = botId;
+      }
+
+      await collection.updateOne(
+        filter,
+        {
+          $set: doc,
+          $setOnInsert: { createdDate: now }
+        },
+        { upsert: true }
+      );
+      return true;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to save saved post ${postData?.id}: ${err?.message}`);
+      return false;
+    }
+  }
+
+  public static async getSavedPost(id: string, botId?: number): Promise<MongoSavedPostDocument | null> {
+    try {
+      const collection = mongoManager.getSavedPostsCollection<MongoSavedPostDocument>();
+      if (!collection) return null;
+
+      const normId = String(id).trim().toUpperCase();
+      const query: any = { id: normId };
+      if (botId !== undefined && botId !== null) {
+        query.botId = botId;
+      }
+
+      return await collection.findOne(query);
+    } catch (err: any) {
+      console.warn(`[MongoStorage] Failed to get saved post ${id}: ${err?.message}`);
+      return null;
+    }
+  }
+
+  public static async getAllSavedPosts(botId?: number): Promise<MongoSavedPostDocument[]> {
+    try {
+      const collection = mongoManager.getSavedPostsCollection<MongoSavedPostDocument>();
+      if (!collection) return [];
+
+      const query: any = botId !== undefined && botId !== null ? { botId } : {};
+      return await collection.find(query).toArray();
+    } catch (err: any) {
+      console.warn(`[MongoStorage] Failed to get all saved posts: ${err?.message}`);
+      return [];
+    }
+  }
+
+  public static async deleteSavedPost(id: string, botId?: number): Promise<boolean> {
+    try {
+      const collection = mongoManager.getSavedPostsCollection<MongoSavedPostDocument>();
+      if (!collection) return false;
+
+      const normId = String(id).trim().toUpperCase();
+      const query: any = { id: normId };
+      if (botId !== undefined && botId !== null) {
+        query.botId = botId;
+      }
+
+      const result = await collection.deleteOne(query);
+      return result.deletedCount > 0;
+    } catch (err: any) {
+      console.error(`[MongoStorage] Failed to delete saved post ${id}: ${err?.message}`);
+      return false;
     }
   }
 }

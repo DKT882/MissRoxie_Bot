@@ -2852,8 +2852,11 @@ export async function startServer() {
   // ==========================================
   // POST LIBRARY APIs (FEATURE 1)
   // ==========================================
-  app.get('/api/dashboard/posts/library', (req, res) => {
+  app.get('/api/dashboard/posts/library', async (req, res) => {
     try {
+      if (mongoManager.getStatus().isConnected && db.countSavedPosts() === 0) {
+        await db.hydrateSavedPostsFromMongo(db.getCurrentBotId() ?? undefined);
+      }
       const { search, type, creatorId } = req.query;
       const posts = db.getSavedPosts({
         search: search ? String(search) : undefined,
@@ -2878,7 +2881,7 @@ export async function startServer() {
     }
   });
 
-  app.post('/api/dashboard/posts/library', (req, res) => {
+  app.post('/api/dashboard/posts/library', async (req, res) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');
       if (!auth.authorized) {
@@ -2890,7 +2893,7 @@ export async function startServer() {
         return res.status(400).json({ error: 'Title is required for saved post' });
       }
 
-      const post = db.saveSavedPost({
+      const post = await db.saveSavedPostAsync({
         title: title.trim(),
         contentType: contentType || 'text',
         text,
@@ -2914,14 +2917,14 @@ export async function startServer() {
     }
   });
 
-  app.put('/api/dashboard/posts/library/:id', (req, res) => {
+  app.put('/api/dashboard/posts/library/:id', async (req, res) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');
       if (!auth.authorized) {
         return res.status(auth.status).json({ error: auth.error });
       }
 
-      const updated = db.updateSavedPost(req.params.id, req.body);
+      const updated = await db.updateSavedPostAsync(req.params.id, req.body);
       if (!updated) {
         return res.status(404).json({ error: `Saved post "${req.params.id}" not found.` });
       }
@@ -2931,7 +2934,7 @@ export async function startServer() {
     }
   });
 
-  app.post('/api/dashboard/posts/library/:id/duplicate', (req, res) => {
+  app.post('/api/dashboard/posts/library/:id/duplicate', async (req, res) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');
       if (!auth.authorized) {
@@ -2945,6 +2948,9 @@ export async function startServer() {
       });
       if (!duplicated) {
         return res.status(404).json({ error: `Saved post "${req.params.id}" not found.` });
+      }
+      if (mongoManager.getStatus().isConnected) {
+        await MongoStorageService.saveSavedPost(duplicated, db.getCurrentBotId() ?? undefined);
       }
       res.json({ success: true, post: duplicated });
     } catch (err: any) {
@@ -2961,7 +2967,7 @@ export async function startServer() {
     }
   });
 
-  app.delete('/api/dashboard/posts/library/:id', (req, res) => {
+  app.delete('/api/dashboard/posts/library/:id', async (req, res) => {
     try {
       const auth = verifyOperatorAuth(req, 'MODERATOR');
       if (!auth.authorized) {
@@ -2977,7 +2983,7 @@ export async function startServer() {
         });
       }
 
-      const deleted = db.deleteSavedPost(req.params.id);
+      const deleted = await db.deleteSavedPostAsync(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: `Saved post "${req.params.id}" not found.` });
       }
@@ -4519,6 +4525,8 @@ export async function startServer() {
             await db.hydrateGroupsFromMongo(currentBotId);
             console.log(`[Roxie Database] Hydrating private conversations & DM recipients from MongoDB Atlas (scoped to botId=${currentBotId ?? 'ALL'})...`);
             await db.hydratePrivateDataFromMongo(currentBotId);
+            console.log(`[Roxie Database] Hydrating saved post library from MongoDB Atlas (scoped to botId=${currentBotId ?? 'ALL'})...`);
+            await db.hydrateSavedPostsFromMongo(currentBotId);
           } catch (hydrateErr: any) {
             console.error('[Roxie Database] MongoDB Atlas hydration failed:', hydrateErr?.message);
           }

@@ -692,7 +692,9 @@ export class StorageManager {
             groupMemories: groupConversationMemories,
             userLustLevels: parsed.userLustLevels || {},
             privateConversations: parsed.privateConversations || {},
-            privateRecipients: parsed.privateRecipients || {}
+            privateRecipients: parsed.privateRecipients || {},
+            savedPosts: parsed.savedPosts || {},
+            contentTemplates: parsed.contentTemplates || {}
           };
         }
       }
@@ -1643,6 +1645,95 @@ export class StorageManager {
     }
 
     return { hydratedRecipientsCount, hydratedChatsCount, errorsCount };
+  }
+
+  public async hydrateSavedPostsFromMongo(botIdToHydrate?: number): Promise<{ hydratedCount: number; errorsCount: number }> {
+    if (!mongoManager.getStatus().isConnected) {
+      return { hydratedCount: 0, errorsCount: 0 };
+    }
+
+    let hydratedCount = 0;
+    let errorsCount = 0;
+
+    const targetBotId = botIdToHydrate !== undefined ? botIdToHydrate : (this.currentBotId !== null ? this.currentBotId : undefined);
+
+    try {
+      if (!this.data.savedPosts) this.data.savedPosts = {};
+
+      const mongoPosts = await MongoStorageService.getAllSavedPosts(targetBotId);
+      console.log(`[Storage] Found ${mongoPosts.length} saved post(s) in MongoDB Atlas for botId=${targetBotId ?? 'ALL'}.`);
+
+      for (const doc of mongoPosts) {
+        try {
+          if (!doc.id) continue;
+          const key = String(doc.id).trim().toUpperCase();
+          const existing = this.data.savedPosts[key];
+          if (!existing) {
+            this.data.savedPosts[key] = {
+              id: key,
+              title: doc.title,
+              contentType: doc.contentType as PostContentType,
+              text: doc.text,
+              mediaFileId: doc.mediaFileId,
+              mediaUploadId: doc.mediaUploadId,
+              buttons: doc.buttons,
+              protectContent: doc.protectContent,
+              pinAfterSend: doc.pinAfterSend,
+              replyToLatest: doc.replyToLatest,
+              autoDeletePrevious: doc.autoDeletePrevious,
+              createdBy: doc.createdBy || { userId: 0, username: 'system', role: 'admin' },
+              createdAt: doc.createdAt,
+              updatedAt: doc.updatedAt,
+              tags: doc.tags || [],
+              metadata: doc.metadata || {}
+            };
+            hydratedCount++;
+          } else {
+            // Reconcile: merge preserving newer updatedAt timestamp
+            const docTs = doc.updatedAt ? new Date(doc.updatedAt).getTime() : 0;
+            const existingTs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+            if (docTs >= existingTs) {
+              this.data.savedPosts[key] = {
+                ...existing,
+                title: doc.title || existing.title,
+                contentType: (doc.contentType || existing.contentType) as PostContentType,
+                text: doc.text !== undefined ? doc.text : existing.text,
+                mediaFileId: doc.mediaFileId !== undefined ? doc.mediaFileId : existing.mediaFileId,
+                mediaUploadId: doc.mediaUploadId !== undefined ? doc.mediaUploadId : existing.mediaUploadId,
+                buttons: doc.buttons !== undefined ? doc.buttons : existing.buttons,
+                protectContent: doc.protectContent !== undefined ? doc.protectContent : existing.protectContent,
+                pinAfterSend: doc.pinAfterSend !== undefined ? doc.pinAfterSend : existing.pinAfterSend,
+                replyToLatest: doc.replyToLatest !== undefined ? doc.replyToLatest : existing.replyToLatest,
+                autoDeletePrevious: doc.autoDeletePrevious !== undefined ? doc.autoDeletePrevious : existing.autoDeletePrevious,
+                updatedAt: doc.updatedAt || existing.updatedAt,
+                tags: doc.tags || existing.tags || [],
+                metadata: { ...existing.metadata, ...doc.metadata }
+              };
+            }
+          }
+        } catch (pErr: any) {
+          console.error(`[Storage] Failed to hydrate saved post ${doc?.id} from MongoDB:`, pErr?.message);
+          errorsCount++;
+        }
+      }
+
+      // If local RAM has saved posts that are not yet in MongoDB, write them to MongoDB (safe initial backfill)
+      for (const [key, post] of Object.entries(this.data.savedPosts)) {
+        const inMongo = mongoPosts.some(mp => mp.id === key);
+        if (!inMongo) {
+          MongoStorageService.saveSavedPost(post, targetBotId).catch(() => {});
+        }
+      }
+
+      this.saveGlobalJsonSync();
+      this.persist();
+      console.log(`[Storage] MongoDB saved posts hydration completed: ${hydratedCount} hydrated, ${errorsCount} errors.`);
+    } catch (err: any) {
+      console.error('[Storage] Error during MongoDB saved posts hydration:', err?.message);
+      errorsCount++;
+    }
+
+    return { hydratedCount, errorsCount };
   }
 
   public scheduleSave(chatId?: number | string) {
@@ -7114,6 +7205,10 @@ export class StorageManager {
     return `POST-${Date.now().toString(36).toUpperCase()}`;
   }
 
+  public countSavedPosts(): number {
+    return this.data.savedPosts ? Object.keys(this.data.savedPosts).length : 0;
+  }
+
   public getSavedPosts(filter?: { search?: string; type?: string; creatorId?: number }): SavedPost[] {
     if (!this.data.savedPosts) this.data.savedPosts = {};
     let posts = Object.values(this.data.savedPosts);
@@ -7200,7 +7295,42 @@ export class StorageManager {
     this.data.savedPosts[id] = newPost;
     this.saveGlobalJsonSync();
     this.persist();
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.saveSavedPost(newPost, this.currentBotId ?? undefined).catch((mErr) => {
+        console.warn(`[Storage] Background sync of saved post ${id} to MongoDB failed:`, mErr?.message);
+      });
+    }
     return newPost;
+  }
+
+  public async saveSavedPostAsync(postInput: {
+    id?: string;
+    title: string;
+    contentType: PostContentType;
+    text?: string;
+    mediaFileId?: string;
+    mediaUploadId?: string;
+    buttons?: ScheduledPostButton[][];
+    protectContent?: boolean;
+    pinAfterSend?: boolean;
+    replyToLatest?: boolean;
+    autoDeletePrevious?: boolean;
+    createdBy?: {
+      userId?: number;
+      username?: string;
+      role?: string;
+    };
+    tags?: string[];
+    metadata?: Record<string, any>;
+  }): Promise<SavedPost> {
+    const post = this.saveSavedPost(postInput);
+    if (mongoManager.getStatus().isConnected) {
+      const ok = await MongoStorageService.saveSavedPost(post, this.currentBotId ?? undefined);
+      if (!ok) {
+        throw new Error(`Failed to persist saved post "${post.id}" to database`);
+      }
+    }
+    return post;
   }
 
   public updateSavedPost(id: string, updates: Partial<SavedPost>): SavedPost | null {
@@ -7220,6 +7350,22 @@ export class StorageManager {
     this.data.savedPosts[existing.id] = updated;
     this.saveGlobalJsonSync();
     this.persist();
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.saveSavedPost(updated, this.currentBotId ?? undefined).catch((mErr) => {
+        console.warn(`[Storage] Background sync of updated saved post ${existing.id} to MongoDB failed:`, mErr?.message);
+      });
+    }
+    return updated;
+  }
+
+  public async updateSavedPostAsync(id: string, updates: Partial<SavedPost>): Promise<SavedPost | null> {
+    const updated = this.updateSavedPost(id, updates);
+    if (updated && mongoManager.getStatus().isConnected) {
+      const ok = await MongoStorageService.saveSavedPost(updated, this.currentBotId ?? undefined);
+      if (!ok) {
+        throw new Error(`Failed to persist updated saved post "${id}" to database`);
+      }
+    }
     return updated;
   }
 
@@ -7241,6 +7387,11 @@ export class StorageManager {
     this.data.savedPosts[newId] = duplicated;
     this.saveGlobalJsonSync();
     this.persist();
+    if (mongoManager.getStatus().isConnected) {
+      MongoStorageService.saveSavedPost(duplicated, this.currentBotId ?? undefined).catch((mErr) => {
+        console.warn(`[Storage] Background sync of duplicated post ${newId} to MongoDB failed:`, mErr?.message);
+      });
+    }
     return duplicated;
   }
 
@@ -7295,9 +7446,23 @@ export class StorageManager {
       delete this.data.savedPosts[id];
       this.saveGlobalJsonSync();
       this.persist();
+      if (mongoManager.getStatus().isConnected) {
+        MongoStorageService.deleteSavedPost(cleanId, this.currentBotId ?? undefined).catch((mErr) => {
+          console.warn(`[Storage] Background delete of saved post ${cleanId} from MongoDB failed:`, mErr?.message);
+        });
+      }
       return true;
     }
     return false;
+  }
+
+  public async deleteSavedPostAsync(id: string): Promise<boolean> {
+    const ok = this.deleteSavedPost(id);
+    if (ok && mongoManager.getStatus().isConnected) {
+      const cleanId = id.trim().toUpperCase();
+      await MongoStorageService.deleteSavedPost(cleanId, this.currentBotId ?? undefined);
+    }
+    return ok;
   }
 
   // ==========================================
