@@ -1,5 +1,6 @@
 import { TelegramChatMember, TelegramUser, BotCommand, BotCommandScope } from './types.js';
 import { logDebug } from '../observability/logger.js';
+import { bandwidthTracker } from '../observability/bandwidthTracker.js';
 
 export const NON_IDEMPOTENT_TELEGRAM_METHODS = Object.freeze(new Set([
   'sendMessage',
@@ -201,6 +202,11 @@ export class TelegramApi {
         });
 
         const elapsedMs = Date.now() - startedAt;
+        try {
+          const outboundBytes = isFormData ? 1024 : (body ? Buffer.byteLength(JSON.stringify(body)) : 0);
+          const inboundBytes = Number(res.headers?.get('content-length') || 0);
+          bandwidthTracker.recordExternalCall('api.telegram.org', outboundBytes, inboundBytes);
+        } catch (_) {}
 
         let data: any;
         try {

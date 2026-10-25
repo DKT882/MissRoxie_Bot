@@ -1,4 +1,5 @@
 import { mongoManager } from './mongodb.js';
+import { bandwidthTracker } from '../observability/bandwidthTracker.js';
 
 export interface MongoPrivateRecipientDocument {
   botId?: number;
@@ -225,6 +226,7 @@ export class MongoStorageService {
     try {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
       if (!collection) return null;
+      bandwidthTracker.recordMongoOp('getGroup');
 
       const normChatId = String(chatId);
       const numChatId = Number(chatId);
@@ -248,6 +250,7 @@ export class MongoStorageService {
     try {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
       if (!collection) return false;
+      bandwidthTracker.recordMongoOp('saveGroup');
 
       await this.ensureIndexes();
 
@@ -616,6 +619,7 @@ export class MongoStorageService {
     try {
       const collection = mongoManager.getGroupsCollection<MongoGroupDocument>();
       if (!collection) return [];
+      bandwidthTracker.recordMongoOp('getAllGroups');
 
       const query: any = botId !== undefined && botId !== null ? { botId } : {};
       return await collection.find(query).toArray();

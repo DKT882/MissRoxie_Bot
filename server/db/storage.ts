@@ -2817,7 +2817,7 @@ export class StorageManager {
     return result;
   }
 
-  public getConnectedGroups(botId?: number, includeInactive = false): Array<any> {
+  public getConnectedGroups(botId?: number, includeInactive = false, full = false): Array<any> {
     const scopedSettings = this.getAllGroupSettings(botId);
 
     // Performance optimization: Pre-index schedule counts and log action stats in single O(S + L) passes
@@ -2894,7 +2894,28 @@ export class StorageManager {
             reports,
             schedules
           },
-          settings: s
+          settings: full ? s : {
+            chatId,
+            chatTitle: s.chatTitle,
+            linksProtection: Boolean(s.linksProtection),
+            stickerProtection: Boolean(s.stickerProtection),
+            mediaProtection: Boolean(s.mediaProtection),
+            protectionEnabled: Boolean(s.protectionEnabled),
+            chatbotEnabled: Boolean(s.chatbotEnabled),
+            reactionEnabled: Boolean(s.reactionEnabled),
+            lustMode: Boolean(s.lustMode),
+            botLeft: isLeft,
+            unavailable: isUnavailable,
+            warnLimit: s.warnLimit,
+            warnAction: s.warnAction,
+            welcomeEnabled: Boolean(s.welcomeEnabled),
+            goodbyeEnabled: Boolean(s.goodbyeEnabled),
+            autoAcceptEnabled: Boolean(s.autoAcceptEnabled),
+            reportsEnabled: Boolean(s.reportsEnabled),
+            floodEnabled: Boolean(s.floodEnabled),
+            raidEnabled: Boolean(s.raidEnabled),
+            captchaEnabled: Boolean(s.captchaEnabled)
+          }
         };
       })
       .filter((g: any) => {

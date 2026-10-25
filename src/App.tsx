@@ -1506,13 +1506,31 @@ export default function App() {
     }
   }, [fetchData, fetchGroupDetailsData, activeGroupDetailId, selectedChatId]);
 
-  // Global Dashboard Polling (15,000 ms)
+  // Global Dashboard Polling (60,000 ms, pauses when tab is hidden)
   useEffect(() => {
     if (!session) return;
     fetchData(false);
-    const interval = setInterval(() => fetchData(false), 15000);
+
+    const handleVisibility = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        fetchData(false);
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibility);
+    }
+
+    const interval = setInterval(() => {
+      if (typeof document === 'undefined' || !document.hidden) {
+        fetchData(false);
+      }
+    }, 60000);
+
     return () => {
       clearInterval(interval);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibility);
+      }
       if (settingsDebounceTimerRef.current) {
         clearTimeout(settingsDebounceTimerRef.current);
       }
@@ -1542,8 +1560,10 @@ export default function App() {
 
       fetchGroupDetailsData(targetDetailId, true);
       const groupInterval = setInterval(() => {
-        fetchGroupDetailsData(targetDetailId, false, groupDetailTab);
-      }, 30000);
+        if (typeof document === 'undefined' || !document.hidden) {
+          fetchGroupDetailsData(targetDetailId, false, groupDetailTab);
+        }
+      }, 60000);
       return () => clearInterval(groupInterval);
     } else {
       activeTargetIdRef.current = null;
@@ -1805,7 +1825,11 @@ export default function App() {
       } catch {}
     };
     fetchPrivateChat();
-    const pInterval = setInterval(fetchPrivateChat, 15000);
+    const pInterval = setInterval(() => {
+      if (typeof document === 'undefined' || !document.hidden) {
+        fetchPrivateChat();
+      }
+    }, 30000);
     return () => clearInterval(pInterval);
   }, [session, activePrivateChatId]);
 
@@ -7903,6 +7927,18 @@ export default function App() {
                   },
                   { name: 'Scheduler', status: healthData?.components?.scheduler?.status || 'HEALTHY', ok: true },
                   { name: 'AI Chatbot', status: healthData?.components?.ai?.status || 'HEALTHY', ok: true },
+                  {
+                    name: 'Bandwidth Optimization',
+                    status: healthData?.bandwidth ? '🟢 Active' : 'Active',
+                    ok: true,
+                    extra: healthData?.bandwidth && (
+                      <div className="text-[11px] font-mono space-y-0.5 opacity-80 pt-1 border-t border-dashed">
+                        <div>Outbound: {(healthData.bandwidth.totalOutboundBytes / 1024).toFixed(1)} KB</div>
+                        <div>Saved: {(healthData.bandwidth.compressionSavingsBytes / 1024).toFixed(1)} KB</div>
+                        <div>304 Hits: {healthData.bandwidth.total304Count}</div>
+                      </div>
+                    )
+                  },
                   {
                     name: 'Storage Persistence',
                     status: healthData?.components?.storage?.indicator === 'persistent' ? '🟢 Persistent' :

@@ -1,8 +1,10 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import zlib from 'zlib';
 import dotenv from 'dotenv';
 import { logPerformance } from './server/observability/logger.js';
+import { bandwidthTracker } from './server/observability/bandwidthTracker.js';
 import { telegramBot } from './server/telegram.js';
 import { db } from './server/db/storage.js';
 import { COMMAND_CATALOG } from './server/telegram/commandCatalog.js';
@@ -626,6 +628,67 @@ export async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
   console.log(`[Roxie Startup] Target port resolved: ${PORT}`);
 
+  // Outbound Bandwidth Optimization & Telemetry Middleware (gzip compression + byte metrics)
+  app.use((req, res, next) => {
+    const acceptEncoding = String(req.headers['accept-encoding'] || '');
+    const supportsGzip = acceptEncoding.includes('gzip');
+    const origWrite = res.write;
+    const origEnd = res.end;
+    let chunks: Buffer[] = [];
+
+    res.write = function (chunk: any, ...args: any[]) {
+      if (chunk) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return true;
+    };
+
+    res.end = function (chunk: any, ...args: any[]) {
+      if (chunk) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+
+      const is304 = res.statusCode === 304;
+      const is204 = res.statusCode === 204;
+      const isHead = req.method === 'HEAD';
+      const normPath = req.baseUrl ? req.baseUrl + req.path : (req.path || req.url || '/');
+
+      if (is304 || is204 || isHead) {
+        bandwidthTracker.recordHttpResponse(normPath, res.statusCode, 0, 0, is304, 0);
+        return (origEnd as any).call(this, ...args);
+      }
+
+      const rawBody = chunks.length > 0 ? Buffer.concat(chunks) : Buffer.alloc(0);
+      const rawBytes = rawBody.length;
+      const contentType = String(res.getHeader('content-type') || '');
+      const isCompressible = /json|text|javascript|css|xml|html/i.test(contentType);
+
+      if (supportsGzip && isCompressible && rawBytes >= 256 && !res.getHeader('content-encoding')) {
+        try {
+          const gzipped = zlib.gzipSync(rawBody);
+          res.setHeader('Content-Encoding', 'gzip');
+          res.setHeader('Content-Length', gzipped.length);
+          res.setHeader('Vary', 'Accept-Encoding');
+          const saved = Math.max(0, rawBytes - gzipped.length);
+          bandwidthTracker.recordHttpResponse(normPath, res.statusCode, gzipped.length, 0, false, saved);
+          return (origEnd as any).call(this, gzipped, ...args);
+        } catch (_) {
+          bandwidthTracker.recordHttpResponse(normPath, res.statusCode, rawBytes, 0, false, 0);
+          return (origEnd as any).call(this, rawBody, ...args);
+        }
+      } else {
+        bandwidthTracker.recordHttpResponse(normPath, res.statusCode, rawBytes, 0, false, 0);
+        if (rawBytes > 0) {
+          return (origEnd as any).call(this, rawBody, ...args);
+        } else {
+          return (origEnd as any).call(this, ...args);
+        }
+      }
+    };
+
+    next();
+  });
+
   try {
     const startupResult = DisasterRecoveryService.startupRecovery(db);
     console.log('[Roxie Startup] Storage & recovery check complete:', startupResult.status);
@@ -676,7 +739,8 @@ export async function startServer() {
       const health = HealthDiagnosticsService.getSystemHealth();
       res.json({
         ...health,
-        ready: isAppReady
+        ready: isAppReady,
+        bandwidth: bandwidthTracker.getSummary().totals
       });
     } catch (err: any) {
       res.status(500).json({ status: 'ERROR', error: err.message });
@@ -847,8 +911,8 @@ export async function startServer() {
         totalStickersCount,
         recentLogs,
         botStatus: telegramBot.getStatus(),
-        uptimeSeconds: Math.floor(process.uptime()),
-        serverTime: new Date().toISOString()
+        uptimeSeconds: Math.floor(process.uptime() / 60) * 60,
+        serverTime: new Date(Math.floor(Date.now() / 60000) * 60000).toISOString()
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -860,7 +924,8 @@ export async function startServer() {
   const handleGetGroups = (req: express.Request, res: express.Response) => {
     try {
       const includeInactive = req.query.include_inactive === 'true' || req.query.all === 'true';
-      const groups = db.getConnectedGroups(db.getCurrentBotId() ?? undefined, includeInactive);
+      const full = req.query.full === 'true';
+      const groups = db.getConnectedGroups(db.getCurrentBotId() ?? undefined, includeInactive, full);
       res.json(groups);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -868,6 +933,11 @@ export async function startServer() {
   };
   app.get('/api/groups', handleGetGroups);
   app.get('/api/dashboard/groups', handleGetGroups);
+
+  // Bandwidth telemetry inspection route
+  app.get('/api/dashboard/bandwidth-metrics', (req: express.Request, res: express.Response) => {
+    res.json(bandwidthTracker.getSummary());
+  });
 
   // 4. Get comprehensive details for a specific group
   const handleGetGroupDetail = async (req: express.Request, res: express.Response) => {
@@ -4438,6 +4508,10 @@ export async function startServer() {
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
           res.setHeader('Pragma', 'no-cache');
           res.setHeader('Expires', '0');
+        } else if (filePath.includes(path.sep + 'assets' + path.sep) || filePath.includes('/assets/')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        } else {
+          res.setHeader('Cache-Control', 'public, max-age=86400');
         }
       }
     }));
@@ -4572,6 +4646,7 @@ export async function startServer() {
 
   process.on('SIGTERM', () => handleShutdown('SIGTERM'));
   process.on('SIGINT', () => handleShutdown('SIGINT'));
+  return server;
 }
 
 process.on('uncaughtException', (err) => {
