@@ -47,7 +47,7 @@ export interface ComposerButton {
 
 export type MediaAttachmentType = 'image' | 'video' | 'gif' | 'audio' | 'document';
 
-export type CompositionType = 'image' | 'video' | 'gif' | 'audio' | 'document';
+export type CompositionType = 'text' | 'image' | 'video' | 'gif' | 'audio' | 'document';
 
 export interface CompositionOptionConfig {
   type: CompositionType;
@@ -63,6 +63,17 @@ export interface CompositionOptionConfig {
 
 export const COMPOSITION_OPTIONS: CompositionOptionConfig[] = [
   {
+    type: 'text',
+    label: 'Text Only',
+    shortLabel: 'Text',
+    icon: Type,
+    urlPlaceholder: '',
+    acceptFiles: '',
+    fileHint: '',
+    backendContentType: 'text',
+    description: 'Standard text broadcast with no media attachment.'
+  },
+  {
     type: 'image',
     label: 'Text + Image',
     shortLabel: 'Image',
@@ -71,7 +82,7 @@ export const COMPOSITION_OPTIONS: CompositionOptionConfig[] = [
     acceptFiles: 'image/jpeg,image/png,image/webp',
     fileHint: 'JPEG, PNG, WEBP (Max 10MB)',
     backendContentType: 'photo',
-    description: 'Photo broadcast with mandatory caption text.'
+    description: 'Photo broadcast with optional caption text.'
   },
   {
     type: 'video',
@@ -82,7 +93,7 @@ export const COMPOSITION_OPTIONS: CompositionOptionConfig[] = [
     acceptFiles: 'video/mp4,video/quicktime,video/x-matroska,video/webm',
     fileHint: 'MP4, MOV, MKV, WEBM (Max 50MB)',
     backendContentType: 'video',
-    description: 'Video broadcast with mandatory caption text.'
+    description: 'Video broadcast with optional caption text.'
   },
   {
     type: 'gif',
@@ -93,7 +104,7 @@ export const COMPOSITION_OPTIONS: CompositionOptionConfig[] = [
     acceptFiles: 'image/gif',
     fileHint: 'GIF animation (Max 15MB)',
     backendContentType: 'animation',
-    description: 'Looping GIF animation broadcast with mandatory caption text.'
+    description: 'Looping GIF animation broadcast with optional caption text.'
   },
   {
     type: 'audio',
@@ -104,7 +115,7 @@ export const COMPOSITION_OPTIONS: CompositionOptionConfig[] = [
     acceptFiles: 'audio/mpeg,audio/wav,audio/ogg,audio/m4a,audio/flac',
     fileHint: 'MP3, WAV, OGG, M4A, FLAC (Max 50MB)',
     backendContentType: 'document',
-    description: 'Audio document broadcast with mandatory caption text.'
+    description: 'Audio document broadcast with optional caption text.'
   },
   {
     type: 'document',
@@ -115,7 +126,7 @@ export const COMPOSITION_OPTIONS: CompositionOptionConfig[] = [
     acceptFiles: 'application/pdf,application/zip,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,*/*',
     fileHint: 'PDF, DOCX, ZIP, TXT, etc. (Max 50MB)',
     backendContentType: 'document',
-    description: 'Document / file broadcast with mandatory caption text.'
+    description: 'Document / file broadcast with optional caption text.'
   }
 ];
 
@@ -441,26 +452,40 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   const [copyFromIdError, setCopyFromIdError] = useState<string | null>(null);
   const [copyFromIdLoading, setCopyFromIdLoading] = useState<boolean>(false);
 
+  const [composerLoadIdInput, setComposerLoadIdInput] = useState<string>('');
+  const [composerLoadIdError, setComposerLoadIdError] = useState<string | null>(null);
+  const [composerLoadIdLoading, setComposerLoadIdLoading] = useState<boolean>(false);
+  const [composerLoadedMeta, setComposerLoadedMeta] = useState<{ type: string; id: string; title: string } | null>(null);
+
   const fetchDashboardContentItem = async (id: string): Promise<UnifiedContentItem> => {
-    const res = await fetch(`/api/dashboard/content-items/${encodeURIComponent(id)}`, {
+    let searchId = (id || '').trim();
+    const match = searchId.match(/\{\{(?:item|post|schedule|template):([A-Za-z0-9_-]+)\}\}/i);
+    if (match) searchId = match[1];
+
+    const res = await fetch(`/api/dashboard/content-items/${encodeURIComponent(searchId)}`, {
       headers: getAuthHeaders(),
       credentials: 'same-origin'
     });
     if (!res.ok) {
       const d = await res.json().catch(() => ({}));
-      throw new Error(d.error || `Content item "${id}" not found.`);
+      throw new Error(d.error || `Content item "${searchId}" not found.`);
     }
     const data = await res.json();
     return data.item;
   };
 
   const handleApplyReusedContent = (item: UnifiedContentItem) => {
-    if (item.text) setText(item.text);
+    if (item.text !== undefined) setText(item.text);
 
     if (item.contentType === 'photo') setSelectedCompositionType('image');
     else if (item.contentType === 'video') setSelectedCompositionType('video');
     else if (item.contentType === 'document') setSelectedCompositionType('document');
     else if (item.contentType === 'animation') setSelectedCompositionType('gif');
+    else if (item.contentType === 'text') {
+      setSelectedCompositionType('text');
+      setMediaLinks([]);
+      setUploadedMedia(null);
+    }
 
     if (item.mediaFileId) {
       setMediaAttachmentTab('url');
@@ -471,11 +496,15 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
         isValid: true,
         validationMessage: 'Referenced from ' + item.id
       }]);
+      setUploadedMedia(null);
+    } else if (item.contentType === 'text') {
+      setMediaLinks([]);
+      setUploadedMedia(null);
     }
 
     if (Array.isArray(item.buttons) && item.buttons.length > 0) {
       const mappedGrid: ComposerButton[][] = item.buttons.map((row: any[], rIdx: number) =>
-        row.map((btn: any, bIdx: number) => ({
+        (Array.isArray(row) ? row : []).map((btn: any, bIdx: number) => ({
           id: `btn_${Date.now()}_${rIdx}_${bIdx}`,
           text: btn.text || 'Button',
           url: btn.url || '',
@@ -483,6 +512,8 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
         }))
       );
       setButtonGrid(mappedGrid);
+    } else {
+      setButtonGrid([]);
     }
 
     if (item.options?.pinAfterSend !== undefined || item.options?.pinMessage !== undefined) {
@@ -494,6 +525,11 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setShowCopyFromIdModal(false);
     setCopyFromIdInput('');
     setCopyFromIdError(null);
+    setComposerLoadedMeta({
+      type: item.type,
+      id: item.id,
+      title: item.title || item.id
+    });
     setNotification({
       type: 'success',
       title: 'Content Loaded',
@@ -502,20 +538,39 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   };
 
   const handleCopyFromIdSubmit = async () => {
-    const trimmed = copyFromIdInput.trim().toUpperCase();
-    if (!trimmed) {
+    const raw = copyFromIdInput.trim();
+    if (!raw) {
       setCopyFromIdError('Please enter a content ID (schedule, post, or template).');
       return;
     }
     setCopyFromIdLoading(true);
     setCopyFromIdError(null);
     try {
-      const item = await fetchDashboardContentItem(trimmed);
+      const item = await fetchDashboardContentItem(raw);
       handleApplyReusedContent(item);
     } catch (err: any) {
       setCopyFromIdError(err.message || 'Failed to load content item');
     } finally {
       setCopyFromIdLoading(false);
+    }
+  };
+
+  const handleDirectLoadContentById = async () => {
+    const raw = composerLoadIdInput.trim();
+    if (!raw) {
+      setComposerLoadIdError('Please enter a content ID or reference (e.g. POST-XXXXX or {{post:...}}).');
+      return;
+    }
+    setComposerLoadIdError(null);
+    setComposerLoadIdLoading(true);
+    try {
+      const item = await fetchDashboardContentItem(raw);
+      handleApplyReusedContent(item);
+      setComposerLoadIdInput('');
+    } catch (err: any) {
+      setComposerLoadIdError(err.message || 'Failed to load content item');
+    } finally {
+      setComposerLoadIdLoading(false);
     }
   };
 
@@ -720,8 +775,8 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   // Post Content State
   const [text, setText] = useState<string>('');
 
-  // Selected Single-Media Composition Type (Default: 'image' -> Text + Image)
-  const [selectedCompositionType, setSelectedCompositionType] = useState<CompositionType>('image');
+  // Selected Single-Media Composition Type (Default: 'text' -> Text Only)
+  const [selectedCompositionType, setSelectedCompositionType] = useState<CompositionType>('text');
   const [pendingSwitchType, setPendingSwitchType] = useState<CompositionType | null>(null);
 
   // Active composition option config
@@ -788,18 +843,25 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
 
   // Primary URL media item & active attachment existence
   const primaryMedia = mediaLinks[0] || null;
-  const hasActiveAttachment = Boolean(uploadedMedia || primaryMedia);
+  const isMediaAttached = Boolean(uploadedMedia || primaryMedia?.url) && selectedCompositionType !== 'text';
+  const hasActiveAttachment = isMediaAttached;
 
   // Effective Content Type calculation: maps to Telegram backend types
   const contentType: ComposerContentType = useMemo(() => {
+    if (selectedCompositionType === 'text') {
+      return 'text';
+    }
     if (uploadedMedia) {
       return uploadedMedia.contentType;
     }
-    return activeOption.backendContentType;
-  }, [uploadedMedia, activeOption]);
+    if (primaryMedia?.url) {
+      return activeOption.backendContentType;
+    }
+    return 'text';
+  }, [selectedCompositionType, uploadedMedia, primaryMedia, activeOption]);
 
-  // Character Limit calculation: Telegram caption limit is strictly 1024 characters for all media posts
-  const maxChars = 1024;
+  // Character Limit calculation: 1024 characters for media captions, 4096 characters for text-only broadcasts
+  const maxChars = isMediaAttached ? 1024 : 4096;
   const isOverCharLimit = text.length > maxChars;
 
   // Reset session delivery records when core message content or media changes
@@ -917,6 +979,16 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
   // Composition Type Selection & Replacement Confirmation
   const handleSelectCompositionType = (targetType: CompositionType) => {
     if (targetType === selectedCompositionType) return;
+    if (targetType === 'text') {
+      // Switching to Text Only immediately clears any attached media
+      handleClearUploadedMedia();
+      setMediaLinks([]);
+      setNewMediaUrl('');
+      setNewMediaUrlError(null);
+      setSelectedCompositionType('text');
+      setPendingSwitchType(null);
+      return;
+    }
     if (hasActiveAttachment) {
       // Prompt user before replacing currently attached media
       setPendingSwitchType(targetType);
@@ -937,7 +1009,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setPendingSwitchType(null);
   };
 
-  // Validation Checks: enforces mandatory text + mandatory single media
+  // Validation Checks: enforces mandatory text + recipient selection; media is optional
   const validationErrors = useMemo(() => {
     const errors: string[] = [];
     if (!lockedDestination && totalSelectedRecipients === 0) {
@@ -947,26 +1019,22 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     if (!text.trim()) {
       errors.push('Message text / caption is required.');
     }
-    // Mandatory single media attachment validation
-    if (!uploadedMedia && mediaLinks.length === 0) {
-      errors.push(`A media attachment (${activeOption.shortLabel}) is required for ${activeOption.label} broadcasts.`);
-    }
     if (uploadStatus === 'uploading') {
       errors.push('Local file is currently uploading. Please wait for upload to complete.');
     }
-    if (mediaLinks.length > 0 && !uploadedMedia) {
+    if (selectedCompositionType !== 'text' && mediaLinks.length > 0 && !uploadedMedia) {
       const mediaVal = validateMediaReference(primaryMedia?.url);
       if (!mediaVal.valid) {
         errors.push(mediaVal.error || 'Please provide a valid media URL.');
       }
     }
     if (isOverCharLimit) {
-      errors.push(`Caption text exceeds Telegram limit of ${maxChars} characters (${text.length}/${maxChars}).`);
+      errors.push(`Message text exceeds Telegram limit of ${maxChars} characters (${text.length}/${maxChars}).`);
     }
     const btnErrors = validateButtonGrid(buttonGrid);
     errors.push(...btnErrors);
     return errors;
-  }, [lockedDestination, totalSelectedRecipients, text, uploadedMedia, mediaLinks, activeOption, uploadStatus, primaryMedia, isOverCharLimit, maxChars, buttonGrid]);
+  }, [lockedDestination, totalSelectedRecipients, text, selectedCompositionType, uploadedMedia, mediaLinks, uploadStatus, primaryMedia, isOverCharLimit, maxChars, buttonGrid]);
 
   const isFormValid = validationErrors.length === 0;
 
@@ -1052,7 +1120,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setButtonGrid([]);
   }, []);
 
-  // Reset Composer
+  // Reset Composer to Text Only (preserves selected recipients)
   const handleResetComposer = () => {
     setText('');
     setMediaLinks([]);
@@ -1067,18 +1135,18 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
     setNotification(null);
     setDeliveredRecipientIds(new Set());
     setConfirmDuplicateRetry(false);
-    setSelectedCompositionType('image');
+    setSelectedCompositionType('text');
     setPendingSwitchType(null);
   };
 
-  const isDirty = Boolean(text.trim() || mediaLinks.length > 0 || uploadedMedia || buttonGrid.length > 0);
+  const isDirty = Boolean(text.trim() || mediaLinks.length > 0 || uploadedMedia || buttonGrid.length > 0 || selectedCompositionType !== 'text');
 
   // Build Post Payload for Existing Backend
   const buildPostPayload = useCallback(() => {
     const formattedButtons = formatComposerButtons(buttonGrid);
 
-    // If local file uploaded, use mediaUploadId
-    if (uploadedMedia) {
+    // If local file uploaded and in media mode
+    if (selectedCompositionType !== 'text' && uploadedMedia) {
       return {
         contentType: uploadedMedia.contentType,
         text: text.trim() || undefined,
@@ -1091,18 +1159,31 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       };
     }
 
-    const mediaUrl = primaryMedia?.url?.trim() || undefined;
+    // If URL media provided and in media mode
+    if (selectedCompositionType !== 'text' && primaryMedia?.url?.trim()) {
+      return {
+        contentType: activeOption.backendContentType,
+        text: text.trim() || undefined,
+        mediaFileId: primaryMedia.url.trim(),
+        buttons: formattedButtons.length > 0 ? formattedButtons : undefined,
+        pinAfterSend,
+        replyToLatest,
+        protectContent
+      };
+    }
 
+    // Text-only broadcast (either Text Only selected or no media attached)
     return {
-      contentType,
+      contentType: 'text' as const,
       text: text.trim() || undefined,
-      mediaFileId: contentType !== 'text' ? mediaUrl : undefined,
+      mediaFileId: undefined,
+      mediaUploadId: undefined,
       buttons: formattedButtons.length > 0 ? formattedButtons : undefined,
       pinAfterSend,
       replyToLatest,
       protectContent
     };
-  }, [uploadedMedia, contentType, text, primaryMedia, buttonGrid, pinAfterSend, replyToLatest, protectContent]);
+  }, [selectedCompositionType, uploadedMedia, primaryMedia, activeOption, buttonGrid, text, pinAfterSend, replyToLatest, protectContent]);
 
   // Send Broadcast Action
   const handleConfirmSendBroadcast = async () => {
@@ -1356,7 +1437,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
           </div>
         </div>
         <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-semibold uppercase">
-          {activeOption.label}
+          {selectedCompositionType === 'text' || !isMediaAttached ? 'Text Only' : activeOption.label}
         </span>
       </div>
 
@@ -1386,7 +1467,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
           )}
 
           {/* Media Preview: Uploaded local media preview */}
-          {uploadedMedia && (
+          {isMediaAttached && uploadedMedia && (
             <div className="rounded-xl overflow-hidden bg-black/40 border border-stone-700/50 flex items-center justify-center min-h-[140px] max-h-[260px] relative">
               {uploadedMedia.contentType === 'photo' || uploadedMedia.contentType === 'animation' ? (
                 <img
@@ -1421,7 +1502,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
           )}
 
           {/* Media Preview: URL media preview */}
-          {!uploadedMedia && primaryMedia && (
+          {isMediaAttached && !uploadedMedia && primaryMedia && (
             <div className="rounded-xl overflow-hidden bg-black/40 border border-stone-700/50 flex items-center justify-center min-h-[140px] max-h-[260px] relative">
               {primaryMedia.type === 'image' || (primaryMedia.type === 'gif' && primaryMedia.url.toLowerCase().endsWith('.gif')) ? (
                 <SafeImagePreview
@@ -1464,16 +1545,13 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
             </div>
           )}
 
-          {/* Placeholder when no media is attached */}
-          {!uploadedMedia && !primaryMedia && (
-            <div className="rounded-xl p-4 bg-stone-900/60 border border-dashed border-stone-700/80 text-center space-y-1">
-              <div className="flex items-center justify-center gap-1.5 text-xs text-stone-300 font-semibold">
-                <activeOption.icon className="w-4 h-4 text-blue-400" />
-                <span>Waiting for {activeOption.shortLabel} attachment...</span>
+          {/* Optional helper hint when media model is chosen but no media is attached */}
+          {selectedCompositionType !== 'text' && !hasActiveAttachment && (
+            <div className="rounded-xl p-3 bg-stone-900/40 border border-dashed border-stone-700/60 text-center space-y-1">
+              <div className="flex items-center justify-center gap-1.5 text-xs text-stone-400 font-medium">
+                <activeOption.icon className="w-3.5 h-3.5 text-blue-400" />
+                <span>No {activeOption.shortLabel.toLowerCase()} attached (will broadcast as text-only)</span>
               </div>
-              <p className="text-[10px] text-stone-500">
-                Attach a media URL or upload a local file in the composer
-              </p>
             </div>
           )}
 
@@ -1553,16 +1631,16 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-bold flex items-center gap-2 text-stone-100">
+            <h2 className="text-xl font-bold flex items-center gap-2 text-stone-100" title="Rich Post Composer">
               <Radio className="w-5 h-5 text-blue-500" />
               Broadcast Post Composer
             </h2>
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
-              Unified Composer
+              Rich Post Composer
             </span>
           </div>
           <p className={`text-xs ${themeMutedText} mt-1`}>
-            Compose and broadcast rich posts across Telegram groups and private chats using Text + Single Media models (Image, Video, GIF, Audio, Document).
+            Compose and broadcast rich posts across Telegram groups and private chats using Text Only or Text + Single Media models (Image, Video, GIF, Audio, Document).
           </p>
         </div>
 
@@ -1674,6 +1752,70 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               </div>
             )}
 
+          {/* Quick Content Reuse by ID Header Panel */}
+          <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" /> Load Content by ID / Reuse Post
+              </span>
+              <span className={`text-[10px] ${themeMutedText}`}>
+                Accepts POST-XXXXX, schedule ID, or template ID
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={composerLoadIdInput}
+                onChange={e => { setComposerLoadIdInput(e.target.value); setComposerLoadIdError(null); }}
+                placeholder="Paste POST-XXXXX, schedule ID, or {{post:...}}..."
+                className={`flex-1 p-2 rounded-xl text-xs ${themeInnerCardBg} border ${themeBorder} outline-none font-mono`}
+              />
+              <button
+                type="button"
+                onClick={handleDirectLoadContentById}
+                disabled={composerLoadIdLoading || !composerLoadIdInput.trim()}
+                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-semibold shrink-0 cursor-pointer flex items-center gap-1.5 transition-colors"
+              >
+                {composerLoadIdLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                <span>Load Content</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCopyFromIdModal(true)}
+                className={`px-3 py-2 ${themeInnerCardBg} hover:opacity-80 border ${themeBorder} text-stone-300 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors`}
+                title="Browse all reusable content"
+              >
+                Browse All
+              </button>
+            </div>
+            {composerLoadIdError && (
+              <p className="text-[11px] text-red-400 flex items-center gap-1 font-medium">
+                <AlertTriangle className="w-3 h-3 shrink-0" />
+                <span>{composerLoadIdError}</span>
+              </p>
+            )}
+            {composerLoadedMeta && (
+              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 truncate">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                  <span className="font-semibold">Loaded from {composerLoadedMeta.type.toUpperCase()}:</span>
+                  <span className="font-mono bg-emerald-950 px-1.5 py-0.5 rounded text-[11px] font-bold text-white">
+                    {composerLoadedMeta.id}
+                  </span>
+                  <span className="truncate text-stone-300">({composerLoadedMeta.title})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setComposerLoadedMeta(null)}
+                  className="text-stone-400 hover:text-white p-0.5 shrink-0"
+                  title="Dismiss indicator"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Section 2: Post Content / Caption (Mandatory) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -1692,7 +1834,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                     isOverCharLimit ? 'text-red-400 font-bold' : themeMutedText
                   }`}
                 >
-                  {text.length} / {maxChars} chars (Caption Limit)
+                  {text.length} / {maxChars} chars ({isMediaAttached ? 'Caption Limit' : 'Telegram Text Limit'})
                 </span>
               </div>
             </div>
@@ -1701,25 +1843,29 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               rows={4}
               value={text}
               onChange={e => setText(e.target.value)}
-              placeholder={`Enter mandatory broadcast message text here... Delivered as caption with your attached ${activeOption.shortLabel.toLowerCase()}. Supports HTML formatting (<b>bold</b>, <i>italic</i>, <code>code</code>, etc.)`}
+              placeholder={
+                selectedCompositionType === 'text' || !isMediaAttached
+                  ? 'Enter broadcast message text here... Supports HTML formatting (<b>bold</b>, <i>italic</i>, <code>code</code>, etc.)'
+                  : `Enter broadcast message text here... Delivered as caption with your attached ${activeOption.shortLabel.toLowerCase()}. Supports HTML formatting.`
+              }
               className={`w-full p-3.5 rounded-xl text-xs border ${themeInputBg} outline-none resize-y font-sans`}
             />
           </div>
 
-          {/* Section 3: Media Selection & Attachment (Single Choice Enforced) */}
+          {/* Section 3: Media Selection & Attachment (Optional) */}
           <div className="space-y-4 p-4 rounded-xl border border-stone-800 bg-stone-950/40">
             <div className="space-y-1">
               <label className="text-xs font-bold uppercase tracking-wider text-stone-300 flex items-center gap-1.5">
                 <Paperclip className="w-3.5 h-3.5 text-blue-400" />
-                <span>3. Media Attachment (Select 1 Model)</span>
+                <span>3. Media Attachment (Optional)</span>
               </label>
               <p className="text-[11px] text-stone-400">
-                Choose a single media composition model. All broadcasts enforce mandatory text plus one media attachment.
+                Choose a composition model. Broadcaster defaults to Text Only. Attaching media is optional.
               </p>
             </div>
 
-            {/* 5-Choice Single-Choice Selector (Radio Cards) */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {/* 6-Choice Single-Choice Selector (Radio Cards) */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
               {COMPOSITION_OPTIONS.map(opt => {
                 const Icon = opt.icon;
                 const isSelected = selectedCompositionType === opt.type;
@@ -1728,7 +1874,7 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                     key={opt.type}
                     type="button"
                     onClick={() => handleSelectCompositionType(opt.type)}
-                    className={`p-2.5 rounded-xl text-left border transition-all flex flex-col justify-between gap-1.5 relative last:col-span-2 sm:last:col-span-1 min-h-[60px] ${
+                    className={`p-2.5 rounded-xl text-left border transition-all flex flex-col justify-between gap-1.5 relative min-h-[60px] ${
                       isSelected
                         ? 'bg-blue-600/15 border-blue-500 text-blue-300 ring-1 ring-blue-500/40 shadow-sm'
                         : `${themeInnerCardBg} ${themeBorder} text-stone-400 hover:text-stone-200 hover:border-stone-700`
@@ -1751,185 +1897,205 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               })}
             </div>
 
-            {/* Input Controls Scoped to Active Composition Type */}
-            <div className="pt-2 border-t border-stone-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-stone-200">
-                    Attach {activeOption.shortLabel}:
-                  </span>
-                  <span className="text-[10px] text-stone-500 font-mono">
-                    (Single media only)
-                  </span>
-                </div>
-
-                {/* Mode Selector: Media URL vs Upload File */}
-                <div className="flex items-center gap-1 p-0.5 rounded-lg bg-stone-900 border border-stone-800 text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => setMediaAttachmentTab('url')}
-                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
-                      mediaAttachmentTab === 'url'
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'text-stone-400 hover:text-stone-200'
-                    }`}
-                  >
-                    <Link2 className="w-3 h-3" />
-                    Media URL
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMediaAttachmentTab('upload')}
-                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
-                      mediaAttachmentTab === 'upload'
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'text-stone-400 hover:text-stone-200'
-                    }`}
-                  >
-                    <Upload className="w-3 h-3" />
-                    Upload File
-                  </button>
+            {selectedCompositionType === 'text' ? (
+              <div className="pt-2 border-t border-stone-800">
+                <div className="p-4 rounded-xl border border-blue-500/20 bg-blue-500/5 flex items-start gap-3">
+                  <Type className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-stone-200">Text-Only Broadcast Mode</p>
+                    <p className="text-[11px] text-stone-400 mt-0.5 leading-relaxed">
+                      This post will be transmitted as a standard Telegram text message without media attachments (limit up to 4,096 characters). Select any media option above to attach an image, video, GIF, audio, or document.
+                    </p>
+                  </div>
                 </div>
               </div>
-
-              {/* Mode A: Scoped URL Input */}
-              {mediaAttachmentTab === 'url' && (
-                <div className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 space-y-2.5 animate-in fade-in duration-150">
-                  <div className="flex items-center justify-between text-xs font-semibold text-stone-200">
-                    <span className="flex items-center gap-1.5">
-                      <Link2 className="w-3.5 h-3.5 text-blue-400" />
-                      Provide {activeOption.shortLabel} URL:
+            ) : (
+              <div className="pt-2 border-t border-stone-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-stone-200">
+                      Attach {activeOption.shortLabel}:
                     </span>
-                    <span className="text-[10px] text-stone-400">Direct HTTP / HTTPS link</span>
+                    <span className="text-[10px] text-stone-500 font-mono">
+                      (Optional single media)
+                    </span>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                    <div className="flex-1 relative">
-                      <input
-                        type="url"
-                        value={newMediaUrl}
-                        onChange={e => {
-                          setNewMediaUrl(e.target.value);
-                          if (newMediaUrlError) setNewMediaUrlError(null);
-                        }}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleAddMediaLink();
-                          }
-                        }}
-                        placeholder={activeOption.urlPlaceholder}
-                        className={`w-full px-3 py-2 rounded-xl text-xs border ${themeInputBg} outline-none font-mono`}
-                      />
-                    </div>
-
+                  {/* Mode Selector: Media URL vs Upload File */}
+                  <div className="flex items-center gap-1 p-0.5 rounded-lg bg-stone-900 border border-stone-800 text-[11px]">
                     <button
                       type="button"
-                      onClick={handleAddMediaLink}
-                      disabled={!newMediaUrl.trim()}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                      onClick={() => setMediaAttachmentTab('url')}
+                      className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
+                        mediaAttachmentTab === 'url'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-stone-400 hover:text-stone-200'
+                      }`}
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      {hasActiveAttachment ? 'Replace Link' : 'Attach Link'}
+                      <Link2 className="w-3 h-3" />
+                      Media URL
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMediaAttachmentTab('upload')}
+                      className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
+                        mediaAttachmentTab === 'upload'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-stone-400 hover:text-stone-200'
+                      }`}
+                    >
+                      <Upload className="w-3 h-3" />
+                      Upload File
                     </button>
                   </div>
-
-                  {newMediaUrlError && (
-                    <p className="text-[11px] text-red-400 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3 shrink-0" />
-                      {newMediaUrlError}
-                    </p>
-                  )}
-
-                  <p className="text-[10px] text-stone-400">
-                    {activeOption.type === 'audio'
-                      ? '🎵 Note: Audio URLs are dispatched via Telegram document delivery by existing bot backend.'
-                      : `Provide a direct public HTTP or HTTPS link to your ${activeOption.shortLabel.toLowerCase()} file.`}
-                  </p>
                 </div>
-              )}
 
-              {/* Mode B: Scoped File Upload */}
-              {mediaAttachmentTab === 'upload' && (
-                <div className="space-y-3 animate-in fade-in duration-150">
-                  <div className={`p-4 rounded-xl border ${uploadedMedia ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-stone-800 bg-stone-900/40'} space-y-3`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
-                        <Upload className="w-3.5 h-3.5 text-blue-400" />
-                        Select Local {activeOption.shortLabel} File:
+                {/* Mode A: Scoped URL Input */}
+                {mediaAttachmentTab === 'url' && (
+                  <div className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 space-y-2.5 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between text-xs font-semibold text-stone-200">
+                      <span className="flex items-center gap-1.5">
+                        <Link2 className="w-3.5 h-3.5 text-blue-400" />
+                        Provide {activeOption.shortLabel} URL:
                       </span>
-                      <span className="text-[10px] text-stone-400">
-                        {activeOption.fileHint}
-                      </span>
+                      <span className="text-[10px] text-stone-400">Direct HTTP / HTTPS link</span>
                     </div>
 
-                    {uploadStatus !== 'uploading' && (
-                      <div className="space-y-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <div className="flex-1 relative">
                         <input
-                          type="file"
-                          key={`file-input-${selectedCompositionType}`}
-                          id="broadcast-local-file-input"
-                          accept={activeOption.acceptFiles}
-                          onChange={handleLocalFileSelect}
-                          className="text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer text-stone-400"
+                          type="url"
+                          value={newMediaUrl}
+                          onChange={e => {
+                            setNewMediaUrl(e.target.value);
+                            if (newMediaUrlError) setNewMediaUrlError(null);
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddMediaLink();
+                            }
+                          }}
+                          placeholder={activeOption.urlPlaceholder}
+                          className={`w-full px-3 py-2 rounded-xl text-xs border ${themeInputBg} outline-none font-mono`}
                         />
-                        <p className="text-[11px] text-stone-400">
-                          ⚡ Selecting a local file will upload it to server memory and attach it as your single media item.
-                        </p>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAddMediaLink}
+                        disabled={!newMediaUrl.trim()}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        {hasActiveAttachment ? 'Replace Link' : 'Attach Link'}
+                      </button>
+                    </div>
+
+                    {newMediaUrlError && (
+                      <p className="text-[11px] text-red-400 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        {newMediaUrlError}
+                      </p>
                     )}
 
-                    {uploadStatus === 'uploading' && (
-                      <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs">
-                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                        <span>Uploading {activeOption.shortLabel} to Roxie media store...</span>
-                      </div>
-                    )}
+                    <p className="text-[10px] text-stone-400">
+                      {activeOption.type === 'audio'
+                        ? '🎵 Note: Audio URLs are dispatched via Telegram document delivery by existing bot backend.'
+                        : `Provide a direct public HTTP or HTTPS link to your ${activeOption.shortLabel.toLowerCase()} file.`}
+                    </p>
+                  </div>
+                )}
 
-                    {uploadStatus === 'error' && (
-                      <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs space-y-2">
-                        <div className="flex items-start gap-2">
-                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                          <p>{uploadError || 'File upload failed. Please try a different file.'}</p>
+                {/* Mode B: Scoped File Upload */}
+                {mediaAttachmentTab === 'upload' && (
+                  <div className="space-y-3 animate-in fade-in duration-150">
+                    <div className={`p-4 rounded-xl border ${uploadedMedia ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-stone-800 bg-stone-900/40'} space-y-3`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-stone-200 flex items-center gap-1.5">
+                          <Upload className="w-3.5 h-3.5 text-blue-400" />
+                          Select Local {activeOption.shortLabel} File:
+                        </span>
+                        <span className="text-[10px] text-stone-400">
+                          {activeOption.fileHint}
+                        </span>
+                      </div>
+
+                      {uploadStatus !== 'uploading' && (
+                        <div className="space-y-2">
+                          <input
+                            type="file"
+                            key={`file-input-${selectedCompositionType}`}
+                            id="broadcast-local-file-input"
+                            accept={activeOption.acceptFiles}
+                            onChange={handleLocalFileSelect}
+                            className="text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer text-stone-400"
+                          />
+                          <p className="text-[11px] text-stone-400">
+                            ⚡ Selecting a local file will upload it to server memory and attach it as your single media item.
+                          </p>
                         </div>
-                      </div>
+                      )}
+
+                      {uploadStatus === 'uploading' && (
+                        <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs">
+                          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                          <span>Uploading {activeOption.shortLabel} to Roxie media store...</span>
+                        </div>
+                      )}
+
+                      {uploadStatus === 'error' && (
+                        <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs space-y-2">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                            <p>{uploadError || 'File upload failed. Please try a different file.'}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Active Single Attachment Display */}
+                <div className="space-y-2 pt-2 border-t border-stone-800/80">
+                  <div className="flex items-center justify-between text-xs text-stone-400">
+                    <span className="font-semibold text-stone-300">
+                      Active Media Attachment ({hasActiveAttachment ? 1 : 0}/1)
+                    </span>
+                    {hasActiveAttachment && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMediaLinks([]);
+                          handleClearUploadedMedia();
+                        }}
+                        className="text-[11px] text-red-400 hover:underline flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        Remove Attachment
+                      </button>
                     )}
                   </div>
-                </div>
-              )}
 
-              {/* Active Single Attachment Display */}
-              <div className="space-y-2 pt-2 border-t border-stone-800/80">
-                <div className="flex items-center justify-between text-xs text-stone-400">
-                  <span className="font-semibold text-stone-300">
-                    Active Media Attachment ({hasActiveAttachment ? 1 : 0}/1)
-                  </span>
-                  {hasActiveAttachment && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMediaLinks([]);
-                        handleClearUploadedMedia();
-                      }}
-                      className="text-[11px] text-red-400 hover:underline flex items-center gap-1"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      Remove Attachment
-                    </button>
-                  )}
-                </div>
-
-                {!hasActiveAttachment ? (
-                  <div className={`p-4 rounded-xl border border-dashed border-stone-800 ${themeInnerCardBg} text-center space-y-1`}>
-                    <p className="text-xs text-amber-400/90 font-semibold flex items-center justify-center gap-1.5">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                      Media attachment required
-                    </p>
-                    <p className="text-[11px] text-stone-500">
-                      Use Media URL or Upload File above to attach 1 {activeOption.shortLabel.toLowerCase()} to complete your {activeOption.label} post.
-                    </p>
-                  </div>
-                ) : (
+                  {!hasActiveAttachment ? (
+                    <div className={`p-4 rounded-xl border border-dashed border-stone-800 ${themeInnerCardBg} text-center space-y-2`}>
+                      <p className="text-xs text-blue-300 font-semibold flex items-center justify-center gap-1.5">
+                        <activeOption.icon className="w-3.5 h-3.5 text-blue-400" />
+                        No {activeOption.shortLabel.toLowerCase()} attached yet
+                      </p>
+                      <p className="text-[11px] text-stone-400 max-w-md mx-auto">
+                        Use Media URL or Upload File above to attach a {activeOption.shortLabel.toLowerCase()}, or broadcast now as text-only.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCompositionType('text')}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 inline-flex items-center gap-1.5 transition-colors"
+                      >
+                        <Type className="w-3.5 h-3.5 text-blue-400" />
+                        Switch to Text Only
+                      </button>
+                    </div>
+                  ) : (
                   <div className="space-y-2">
                     {/* Render Uploaded File */}
                     {uploadedMedia && (
@@ -2059,7 +2225,8 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
                 )}
               </div>
             </div>
-          </div>
+          )}
+        </div>
 
           {/* Section 4: Delivery Options */}
           <div className="pt-1 flex flex-wrap items-center gap-4 text-xs">
@@ -2699,8 +2866,17 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               <div className="flex justify-between items-center pb-1.5 border-b border-stone-800">
                 <span className="text-stone-400">Broadcast Type:</span>
                 <span className="text-blue-400 font-bold flex items-center gap-1.5 font-sans">
-                  <activeOption.icon className="w-3.5 h-3.5" />
-                  {activeOption.label} Broadcast
+                  {selectedCompositionType === 'text' || !isMediaAttached ? (
+                    <>
+                      <Type className="w-3.5 h-3.5" />
+                      Text-Only Broadcast
+                    </>
+                  ) : (
+                    <>
+                      <activeOption.icon className="w-3.5 h-3.5" />
+                      {activeOption.label} Broadcast
+                    </>
+                  )}
                 </span>
               </div>
 
@@ -2731,21 +2907,27 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               {/* Attached Media Display */}
               <div className="space-y-1 pt-1 font-sans">
                 <span className="text-stone-400 text-[11px] font-mono">Attached Media:</span>
-                <div className="p-2 rounded-lg bg-stone-900/60 border border-stone-800 text-stone-200 text-xs flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 truncate">
-                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-blue-500/20 text-blue-400 border border-blue-500/30 shrink-0 font-mono">
-                      {uploadedMedia ? `LOCAL ${activeOption.shortLabel.toUpperCase()}` : `${activeOption.shortLabel.toUpperCase()} URL`}
-                    </span>
-                    <span className="truncate font-mono text-[11px]">
-                      {uploadedMedia ? uploadedMedia.filename : primaryMedia?.url}
-                    </span>
+                {isMediaAttached ? (
+                  <div className="p-2 rounded-lg bg-stone-900/60 border border-stone-800 text-stone-200 text-xs flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-blue-500/20 text-blue-400 border border-blue-500/30 shrink-0 font-mono">
+                        {uploadedMedia ? `LOCAL ${activeOption.shortLabel.toUpperCase()}` : `${activeOption.shortLabel.toUpperCase()} URL`}
+                      </span>
+                      <span className="truncate font-mono text-[11px]">
+                        {uploadedMedia ? uploadedMedia.filename : primaryMedia?.url}
+                      </span>
+                    </div>
+                    {uploadedMedia && (
+                      <span className="text-[10px] text-stone-400 font-mono shrink-0">
+                        {(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB
+                      </span>
+                    )}
                   </div>
-                  {uploadedMedia && (
-                    <span className="text-[10px] text-stone-400 font-mono shrink-0">
-                      {(uploadedMedia.size / (1024 * 1024)).toFixed(2)} MB
-                    </span>
-                  )}
-                </div>
+                ) : (
+                  <div className="p-2 rounded-lg bg-stone-900/40 border border-stone-800 text-stone-400 text-xs">
+                    None (Text-Only Broadcast)
+                  </div>
+                )}
               </div>
 
               {/* Duplicate Delivery Warning & Safe Retry Option */}
@@ -2888,14 +3070,23 @@ export const RichPostComposer: React.FC<RichPostComposerProps> = ({
               <div className="flex justify-between items-center pb-1 border-b border-stone-800">
                 <span className="text-stone-400">Broadcast Model:</span>
                 <span className="text-purple-400 font-bold flex items-center gap-1.5">
-                  <activeOption.icon className="w-3.5 h-3.5" />
-                  {activeOption.label}
+                  {selectedCompositionType === 'text' || !isMediaAttached ? (
+                    <>
+                      <Type className="w-3.5 h-3.5" />
+                      Text Only
+                    </>
+                  ) : (
+                    <>
+                      <activeOption.icon className="w-3.5 h-3.5" />
+                      {activeOption.label}
+                    </>
+                  )}
                 </span>
               </div>
               <div className="flex justify-between items-center text-[11px] text-stone-300">
                 <span className="text-stone-400">Attached Media:</span>
                 <span className="truncate max-w-[220px] font-mono">
-                  {uploadedMedia ? uploadedMedia.filename : primaryMedia?.url || 'None'}
+                  {isMediaAttached ? (uploadedMedia ? uploadedMedia.filename : primaryMedia?.url || 'None') : 'None (Text Only)'}
                 </span>
               </div>
             </div>
